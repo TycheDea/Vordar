@@ -1,0 +1,37 @@
+[workspace]
+members = [
+    "smirk/engine-core",
+    "smirk/engine-app",
+    "smirk/engine-renderer",
+    "smirk/engine-physics",
+    "smirk/engine-audio",
+    "smirk/engine-net",
+    "game/vordar-protocol",
+    "game/vordar-game",
+    "game/chapter-01",
+    "client/vordar-client",
+    "server/vordar-server",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Shared versions — all crates pull from here
+glam    = { version = "0.32", features = ["serde"] }
+hecs    = "0.11"
+serde   = { version = "1", features = ["derive"] }
+ron     = "0.12"
+log     = "0.4"
+winit   = "0.30"
+slotmap = "1.1.1"
+egui    = "0.34"   # engine-renderer draws with it; the game registers UiLayers callbacks
+
+# Networking (engine-net, protocol, server, client)
+tokio    = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }
+quinn    = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+rustls   = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rcgen    = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+postcard = { version = "1", features = ["use-std"] }
+
+# Persistence (server only). 0.40's libsqlite3-sys needs a newer rustc
+# (unstable cfg_select on 1.94) — bump when the toolchain moves.
+rusqlite = { version = "0.37", features = ["bundled"] }

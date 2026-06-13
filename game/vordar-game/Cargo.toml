@@ -1,0 +1,15 @@
+[package]
+name    = "vordar-game"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine-core    = { path = "../../smirk/engine-core" }
+engine-app     = { path = "../../smirk/engine-app", default-features = false }
+engine-physics = { path = "../../smirk/engine-physics" }
+glam           = { workspace = true }
+hecs           = { workspace = true }
+serde          = { workspace = true }
+ron            = { workspace = true }
+log            = { workspace = true }
+smallvec       = "1"

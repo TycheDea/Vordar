@@ -1,0 +1,11 @@
+[package]
+name    = "engine-audio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+log         = { workspace = true }
+
+# Verified against crates.io on 2026-03-22
+kira = "0.12"

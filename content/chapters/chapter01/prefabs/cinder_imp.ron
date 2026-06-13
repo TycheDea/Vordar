@@ -1,0 +1,21 @@
+// Cinder imp — aggressive ranged. A horned ember hovering on a ring of
+// fire; it spots you at 12, closes to 9, and lobs ember bolts every ~2 s.
+// Fragile (25 HP) — close the gap and it pops.
+(
+    components: {
+        "Transform":   (),
+        "Velocity":    (),
+        "ShapeGroup":  (shapes: [
+            (shape: Sphere,   offset: (0.0, 0.1, 0.0),    scale: (0.38, 0.38, 0.38), color: (0.95, 0.40, 0.05)),
+            (shape: Cylinder, offset: (0.0, -0.35, 0.0),  scale: (0.55, 0.06, 0.55), color: (1.0, 0.55, 0.10)),
+            (shape: Diamond,  offset: (0.18, 0.45, 0.0),  scale: (0.10, 0.22, 0.10), color: (0.30, 0.10, 0.05)),
+            (shape: Diamond,  offset: (-0.18, 0.45, 0.0), scale: (0.10, 0.22, 0.10), color: (0.30, 0.10, 0.05)),
+        ]),
+        "Hitbox":   (shape: Aabb(half_extents: (0.4, 0.5, 0.4))),
+        "Solid":    (),
+        "Health":   (current: 25, max: 25),
+        "Enemy":    (speed: 2.2, aggro_range: 12.0,
+                     attack: Ranged(prefab: "ember_bolt", speed: 10.0, damage: 8, cooldown: 1.8, range: 9.0)),
+        "XpReward": (amount: 8),
+    },
+)

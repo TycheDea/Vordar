@@ -1,0 +1,23 @@
+// Zone topology (Phase 7). The server runs one headless App per zone; the
+// zone order here fixes the port assignment (base port + index), so "start"
+// must come first — it's where fresh characters spawn and clients connect.
+//
+// Portal arrival points must sit clear of every portal in the destination
+// (validate_zones enforces radius + 2.0) so arriving can't bounce back.
+(
+    zones: [
+        (
+            name: "start",
+            chapter: Some("chapter01"),
+            portals: [
+                (pos: (22.0, 0.0, 0.0), radius: 2.0, target_zone: "east", target_pos: (-16.0, 0.0, 0.0)),
+            ],
+        ),
+        (
+            name: "east",
+            portals: [
+                (pos: (-22.0, 0.0, 0.0), radius: 2.0, target_zone: "start", target_pos: (16.0, 0.0, 0.0)),
+            ],
+        ),
+    ],
+)

@@ -1,0 +1,14 @@
+MODE: Debugger
+ESCALATION:
+Same root error persisted for 2 iterations.
+
+REQUEST:
+- Propose one alternative strategy and minimal patch.
+- Keep architecture unchanged unless explicitly noted.
+- Explain tradeoff in one sentence.
+
+OUTPUT FORMAT:
+CAUSE:
+FIX:
+ALTERNATIVE:
+WHY: (optional)

@@ -1,0 +1,10 @@
+// Shard bolt — a sliver of the sentinel's own crystal, fired point-first.
+// Faster and meaner than an ember: you provoked this.
+(
+    components: {
+        "Transform":   (scale: (0.18, 0.34, 0.18)),
+        "Velocity":    (),
+        "RenderShape": (shape: Diamond, color: (0.70, 0.50, 1.0)),
+        "Hitbox":      (shape: Sphere(radius: 0.2)),
+    },
+)

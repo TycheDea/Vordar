@@ -1,0 +1,31 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Cargo.lock is committed for binaries (smirk is a binary — keep it)
+# If you ever publish engine crates as libraries, add their Cargo.lock here
+
+# IntelliJ / RustRover
+.idea
+*.iws
+*.iml
+*.ipr
+
+# VS Code
+.vscode/
+
+# Environment / secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code / AI config + local design notes & task lists (kept local)
+.claude/
+
+# Runtime data — server SQLite character database (+ WAL/SHM sidecars)
+/vordar.db
+/vordar.db-shm
+/vordar.db-wal

@@ -1,0 +1,23 @@
+// Grunt ("razorling") — aggressive melee. A squat ember-red wedge that locks
+// on when you wander too close and simply runs you down. The yellow eye and
+// orange back-spikes read as "angry" even from the zoomed-out camera.
+(
+    components: {
+        "Transform":   (),
+        "Velocity":    (),
+        "ShapeGroup":  (shapes: [
+            (shape: Diamond, offset: (0.0, 0.1, 0.0),    scale: (0.55, 0.75, 0.55), color: (0.85, 0.15, 0.10)),
+            (shape: Cube,    offset: (0.0, -0.35, 0.0),  scale: (0.45, 0.3, 0.45),  color: (0.35, 0.05, 0.05)),
+            (shape: Diamond, offset: (0.32, 0.45, 0.0),  scale: (0.16, 0.3, 0.16),  color: (1.0, 0.45, 0.15)),
+            (shape: Diamond, offset: (-0.32, 0.45, 0.0), scale: (0.16, 0.3, 0.16),  color: (1.0, 0.45, 0.15)),
+            (shape: Sphere,  offset: (0.0, 0.2, 0.3),    scale: (0.12, 0.12, 0.12), color: (1.0, 0.9, 0.3)),
+        ]),
+        // 0.5 matches the visual size (Transform.scale 1.0 → half-size 0.5).
+        "Hitbox":        (shape: Aabb(half_extents: (0.5, 0.5, 0.5))),
+        "Solid":         (),
+        "Health":        (current: 30, max: 30),
+        "Enemy":         (speed: 2.5, aggro_range: 10.0),
+        "ContactDamage": (amount: 10),
+        "XpReward":      (amount: 5),
+    },
+)

@@ -1,0 +1,14 @@
+[package]
+name    = "chapter-01"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "chapter_01"
+
+[dependencies]
+engine-core = { path = "../../smirk/engine-core" }
+engine-app  = { path = "../../smirk/engine-app", default-features = false }
+vordar-game = { path = "../vordar-game" }
+serde       = { workspace = true }
+log         = { workspace = true }

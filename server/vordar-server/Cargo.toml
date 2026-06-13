@@ -1,0 +1,28 @@
+[package]
+name    = "vordar-server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "vordar_server"
+
+[[bin]]
+name = "vordar-server"
+path = "src/main.rs"
+
+[dependencies]
+engine-core     = { path = "../../smirk/engine-core" }
+engine-app      = { path = "../../smirk/engine-app", default-features = false }
+engine-physics  = { path = "../../smirk/engine-physics" }
+engine-net      = { path = "../../smirk/engine-net" }
+vordar-game     = { path = "../../game/vordar-game" }
+vordar-protocol = { path = "../../game/vordar-protocol" }
+chapter-01      = { path = "../../game/chapter-01" }
+glam            = { workspace = true }
+hecs            = { workspace = true }
+log             = { workspace = true }
+rusqlite        = { workspace = true }
+
+[dev-dependencies]
+# e2e asserts persisted state by reading the test database directly.
+rusqlite        = { workspace = true }

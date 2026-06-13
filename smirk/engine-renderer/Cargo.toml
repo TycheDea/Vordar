@@ -1,0 +1,24 @@
+[package]
+name    = "engine-renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+engine-app  = { path = "../engine-app" }
+glam        = { workspace = true }
+log         = { workspace = true }
+
+pollster = "0.4.0"
+# Verified against crates.io on 2026-03-22
+wgpu   = "29"
+winit  = { workspace = true }
+gilrs  = "0.11"
+bytemuck = "1.25.0"
+ddsfile  = "0.5"
+hecs = "0.11.0"
+rand = "0.10.0"
+egui = { workspace = true }
+egui-wgpu = "0.34"
+egui-winit = "0.34"
+

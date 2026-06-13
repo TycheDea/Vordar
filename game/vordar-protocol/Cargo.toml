@@ -1,0 +1,12 @@
+[package]
+name    = "vordar-protocol"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "vordar_protocol"
+
+[dependencies]
+serde    = { workspace = true }
+glam     = { workspace = true }
+postcard = { workspace = true }

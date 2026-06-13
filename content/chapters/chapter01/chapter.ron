@@ -1,0 +1,32 @@
+// Chapter 1 — First Field (Phase 7.5).
+//
+// The world is POPULATED, not streamed at the player: camps hold a fixed
+// headcount at fixed places and refill on a timer (CampSystem). Waves are
+// retired — the list stays for tooling but empty means WaveSpawnerSystem
+// never fires. Camp layout rules:
+//   - no camp's aggro bubble reaches the origin ring spawn (grunt aggro 10,
+//     imp aggro 12) — you choose when the fight starts;
+//   - the portal corridor along +X (portal at x=22) stays clear;
+//   - one grunt camp sits inside AOI 40 of the origin (e2e relies on grunts
+//     replicating near spawn).
+(
+    name: "Chapter 1 — First Field",
+    spawning: (
+        max_alive: 64,
+        waves: [],
+    ),
+    initial_spawns: [],
+    camps: [
+        // North-east meadow pack — the first fight most players pick.
+        (prefab: "grunt",      center: (12.0, 0.0, 10.0),   radius: 4.0, count: 4, respawn_seconds: 12.0),
+        // South-west pack, slightly bigger.
+        (prefab: "grunt",      center: (-14.0, 0.0, -10.0), radius: 5.0, count: 5, respawn_seconds: 12.0),
+        // Mossbacks graze north-west — harmless until poked.
+        (prefab: "mossback",   center: (-8.0, 0.0, 16.0),   radius: 4.0, count: 3, respawn_seconds: 20.0),
+        // Cinder imps haunt the south-east — they come to YOU.
+        (prefab: "cinder_imp", center: (14.0, 0.0, -16.0),  radius: 5.0, count: 4, respawn_seconds: 15.0),
+        // Sentinel circles: ancient, silent, vengeful.
+        (prefab: "sentinel",   center: (0.0, 0.0, -19.0),   radius: 3.0, count: 3, respawn_seconds: 25.0),
+        (prefab: "sentinel",   center: (17.0, 0.0, 13.0),   radius: 3.0, count: 2, respawn_seconds: 25.0),
+    ],
+)

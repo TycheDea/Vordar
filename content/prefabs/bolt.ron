@@ -1,0 +1,12 @@
+// Bolt — the player's arcane shot (left click). Cyan to match the wayfarer's
+// floating focus crystal: the crystal IS the weapon. No Solid: projectiles
+// never push or get pushed; flight state (Velocity, damage, ttl) is attached
+// in code at spawn.
+(
+    components: {
+        "Transform":   (scale: (0.28, 0.28, 0.28)),
+        "Velocity":    (),
+        "RenderShape": (shape: Sphere, color: (0.35, 0.95, 1.0)),
+        "Hitbox":      (shape: Sphere(radius: 0.25)),
+    },
+)

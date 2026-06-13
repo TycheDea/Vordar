@@ -1,0 +1,8 @@
+state:
+  task: "unset"
+  iteration: 0
+  repeated_error_count: 0
+  current_status: "failing"
+  last_error_code: ""
+decisions:
+  - D001: "placeholder decision"

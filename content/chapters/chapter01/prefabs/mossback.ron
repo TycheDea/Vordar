@@ -1,0 +1,21 @@
+// Mossback — passive melee tank. A moss-grown boulder-turtle that grazes
+// peacefully until something hurts it; then 80 HP of shell comes for you,
+// slowly, hitting like a landslide. aggro_range 0 = retaliates only.
+(
+    components: {
+        "Transform":   (),
+        "Velocity":    (),
+        "ShapeGroup":  (shapes: [
+            (shape: RoundedBox(corner_radius: 0.3), offset: (0.0, 0.0, 0.0),   scale: (0.95, 0.55, 1.15), color: (0.25, 0.50, 0.20)),
+            (shape: RoundedBox(corner_radius: 0.2), offset: (0.0, 0.35, -0.1), scale: (0.55, 0.3, 0.8),   color: (0.16, 0.34, 0.14)),
+            (shape: Sphere, offset: (0.0, -0.1, 0.75), scale: (0.28, 0.28, 0.28), color: (0.55, 0.65, 0.35)),
+            (shape: Cube,   offset: (0.0, -0.4, 0.0),  scale: (0.8, 0.2, 0.9),    color: (0.30, 0.26, 0.18)),
+        ]),
+        "Hitbox":        (shape: Aabb(half_extents: (0.6, 0.5, 0.7))),
+        "Solid":         (),
+        "Health":        (current: 80, max: 80),
+        "Enemy":         (speed: 1.6),
+        "ContactDamage": (amount: 15),
+        "XpReward":      (amount: 12),
+    },
+)

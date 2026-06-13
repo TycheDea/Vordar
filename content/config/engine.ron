@@ -1,0 +1,13 @@
+// Engine window configuration.
+// Loaded by App::configure("content/config/engine.ron").
+// resolution: Auto | Fixed(1280, 720)
+// mode:       Windowed | Borderless | Fullscreen
+// vsync:      true | false
+// max_fps:    None = monitor refresh rate, Some(60) = explicit cap
+(
+    title: "Vordar",
+    resolution: Auto,
+    mode: Windowed,
+    vsync: true,
+    max_fps: Some(360),
+)

@@ -1,0 +1,30 @@
+[package]
+name    = "vordar-client"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "vordar_client"
+
+[[bin]]
+name = "sandbox"
+path = "src/bin/sandbox.rs"
+
+[[bin]]
+name = "vordar"
+path = "src/bin/vordar.rs"
+
+[dependencies]
+engine-core     = { path = "../../smirk/engine-core" }
+engine-app      = { path = "../../smirk/engine-app" }
+engine-renderer = { path = "../../smirk/engine-renderer" }
+engine-physics  = { path = "../../smirk/engine-physics" }
+engine-net      = { path = "../../smirk/engine-net" }
+vordar-game     = { path = "../../game/vordar-game" }
+vordar-protocol = { path = "../../game/vordar-protocol" }
+chapter-01      = { path = "../../game/chapter-01" }
+glam            = { workspace = true }
+hecs            = { workspace = true }
+winit           = { workspace = true }
+log             = { workspace = true }
+egui            = { workspace = true }

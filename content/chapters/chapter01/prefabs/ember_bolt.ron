@@ -1,0 +1,10 @@
+// Ember bolt — the cinder imp's spit: a slow, fat, very visible orange
+// ember. Built to be sidestepped; getting hit is a choice.
+(
+    components: {
+        "Transform":   (scale: (0.24, 0.24, 0.24)),
+        "Velocity":    (),
+        "RenderShape": (shape: Sphere, color: (1.0, 0.45, 0.10)),
+        "Hitbox":      (shape: Sphere(radius: 0.2)),
+    },
+)

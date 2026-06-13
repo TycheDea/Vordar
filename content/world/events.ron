@@ -1,0 +1,27 @@
+// World events — evaluated against the world clock (DESIGN.md §4).
+// Loaded identically by the server (spawning authority) and clients (tint);
+// active-state agreement is pure clock math, nothing travels on the wire.
+//
+// day_seconds: one full day/night cycle (kept short for now so the cycle is
+// visible during play sessions; tune freely).
+(
+    day_seconds: 120.0,
+    events: [
+        (
+            name: "blood_moon",
+            start_seconds_of_day: 30.0,
+            duration_seconds: 20.0,
+            ambient: (0.7, 0.08, 0.08),
+            spawns: [
+                (prefab: "grunt", positions: [
+                    (12.0, 0.0, 0.0),
+                    (-12.0, 0.0, 0.0),
+                    (0.0, 0.0, 12.0),
+                    (0.0, 0.0, -12.0),
+                    (8.5, 0.0, 8.5),
+                    (-8.5, 0.0, -8.5),
+                ]),
+            ],
+        ),
+    ],
+)

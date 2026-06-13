@@ -1,0 +1,6 @@
+cursor_diff:
+  files_touched:
+    - "src/main.rs"
+  symbols_changed:
+    - "main"
+  behavioral_change: "replace with one-line behavior delta"

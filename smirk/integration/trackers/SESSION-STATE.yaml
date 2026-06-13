@@ -1,0 +1,6 @@
+state:
+  task: dummy task for testing sentinel integration dashboard
+  iteration: 0
+  repeated_error_count: 0
+  current_status: active
+  last_error_code: ''
