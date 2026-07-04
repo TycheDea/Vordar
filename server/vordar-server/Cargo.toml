@@ -6,6 +6,11 @@ edition = "2021"
 [lib]
 name = "vordar_server"
 
+[features]
+# Exposes net_plugin internals to vordar-benches (net_plugin::bench module).
+# Never enabled by normal builds.
+bench-internals = []
+
 [[bin]]
 name = "vordar-server"
 path = "src/main.rs"

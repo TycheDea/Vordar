@@ -1,12 +1,13 @@
 // Prefab system — data-driven entity definitions
 //
 // ComponentRegistry maps string names to loaders that deserialize a RON value
-// into an EntityBuilder. PrefabLibrary maps prefab ids to component maps kept
-// as raw RON text (full enum fidelity — re-parsed with the typed deserializer
-// at spawn time). Both are resources, populated by plugins at startup.
+// into a ready-to-apply CompiledComponent. PrefabLibrary maps prefab ids to
+// component maps kept as raw RON text (full enum fidelity — parsed with the
+// typed deserializer on first spawn) plus the compiled plan built from it.
+// Both are resources, populated by plugins at startup.
 //
-// Cost model: one HashMap lookup + one RON parse per component per *spawn* —
-// never on a per-frame path.
+// Cost model: RON parsing happens once per prefab (the first spawn compiles
+// the plan); every spawn after that is one clone per component.
 //
 // This is also the modding seam: anything addressable here by string
 // (component names, prefab ids) is reachable from data files today and from
@@ -19,6 +20,7 @@ use hecs::{Entity, EntityBuilder};
 use ron::value::RawValue;
 use smallvec::SmallVec;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -45,8 +47,12 @@ impl std::error::Error for PrefabError {}
 
 // ── ComponentRegistry ─────────────────────────────────────────────────────────
 
+/// One parsed component, ready to add to an EntityBuilder — the unit of a
+/// prefab's compiled spawn plan. Applying it is a clone, never a parse.
+pub type CompiledComponent = Box<dyn Fn(&mut EntityBuilder) + Send + Sync>;
+
 pub type ComponentLoader =
-    Box<dyn Fn(&RawValue, &mut EntityBuilder) -> Result<(), PrefabError> + Send + Sync>;
+    Box<dyn Fn(&RawValue) -> Result<CompiledComponent, PrefabError> + Send + Sync>;
 
 pub struct ComponentRegistry {
     loaders: HashMap<String, ComponentLoader>,
@@ -57,39 +63,41 @@ impl ComponentRegistry {
         Self { loaders: HashMap::new() }
     }
 
-    /// Register any Deserialize component under a name — the generic path used
-    /// by engine and game crates alike.
+    /// Register any Deserialize + Clone component under a name — the generic
+    /// path used by engine and game crates alike.
     pub fn register<T>(&mut self, name: &str)
     where
-        T: hecs::Component + serde::de::DeserializeOwned,
+        T: hecs::Component + serde::de::DeserializeOwned + Clone,
     {
         let component = name.to_owned();
-        self.register_with(name, move |raw, builder| {
+        self.register_with(name, move |raw| {
             let value: T = raw.into_rust().map_err(|error| PrefabError::Parse {
                 component: component.clone(),
                 error,
             })?;
-            builder.add(value);
-            Ok(())
+            Ok(Box::new(move |builder: &mut EntityBuilder| {
+                builder.add(value.clone());
+            }) as CompiledComponent)
         });
     }
 
-    /// Register a custom loader — may add multiple components (e.g. inject
-    /// engine bookkeeping alongside the declared one).
+    /// Register a custom loader — the compiled closure may add multiple
+    /// components (e.g. inject engine bookkeeping alongside the declared one).
     pub fn register_with(
         &mut self,
         name: &str,
-        f: impl Fn(&RawValue, &mut EntityBuilder) -> Result<(), PrefabError> + Send + Sync + 'static,
+        f: impl Fn(&RawValue) -> Result<CompiledComponent, PrefabError> + Send + Sync + 'static,
     ) {
         if self.loaders.insert(name.to_owned(), Box::new(f)).is_some() {
             log::warn!("component loader '{name}' was overwritten");
         }
     }
 
-    pub fn load(&self, name: &str, raw: &RawValue, builder: &mut EntityBuilder) -> Result<(), PrefabError> {
+    /// Parse a raw RON value into its ready-to-apply form.
+    pub fn compile(&self, name: &str, raw: &RawValue) -> Result<CompiledComponent, PrefabError> {
         let loader = self.loaders.get(name)
             .ok_or_else(|| PrefabError::UnknownComponent(name.to_owned()))?;
-        loader(raw, builder)
+        loader(raw)
     }
 
     pub fn len(&self) -> usize { self.loaders.len() }
@@ -104,8 +112,17 @@ pub struct PrefabDef {
     pub components: HashMap<String, Box<RawValue>>,
 }
 
+/// A definition plus its compiled spawn plan. The plan is built lazily on
+/// first spawn (OnceLock initializes through &self, so it works under the
+/// shared Resources borrow spawn_prefab holds) and never invalidated —
+/// insert() replaces the whole entry, and prefabs are not hot-reloaded.
+struct PrefabEntry {
+    def: PrefabDef,
+    plan: OnceLock<Vec<CompiledComponent>>,
+}
+
 pub struct PrefabLibrary {
-    prefabs: HashMap<String, PrefabDef>,
+    prefabs: HashMap<String, PrefabEntry>,
 }
 
 impl PrefabLibrary {
@@ -115,7 +132,8 @@ impl PrefabLibrary {
 
     pub fn insert(&mut self, id: impl Into<String>, def: PrefabDef) {
         let id = id.into();
-        if self.prefabs.insert(id.clone(), def).is_some() {
+        let entry = PrefabEntry { def, plan: OnceLock::new() };
+        if self.prefabs.insert(id.clone(), entry).is_some() {
             log::warn!("prefab '{id}' was overwritten");
         }
     }
@@ -149,7 +167,7 @@ impl PrefabLibrary {
     }
 
     pub fn get(&self, id: &str) -> Option<&PrefabDef> {
-        self.prefabs.get(id)
+        self.prefabs.get(id).map(|entry| &entry.def)
     }
 
     pub fn len(&self) -> usize { self.prefabs.len() }
@@ -172,9 +190,22 @@ pub fn spawn_prefab(id: &str, position: Vec3, ctx: &mut SpawnContext) -> Result<
     {
         let registry = ctx.resources.get::<ComponentRegistry>().ok_or(PrefabError::RegistryMissing)?;
         let library  = ctx.resources.get::<PrefabLibrary>().ok_or(PrefabError::RegistryMissing)?;
-        let def = library.get(id).ok_or_else(|| PrefabError::UnknownPrefab(id.to_owned()))?;
-        for (name, raw) in &def.components {
-            registry.load(name, raw, &mut builder)?;
+        let entry = library.prefabs.get(id).ok_or_else(|| PrefabError::UnknownPrefab(id.to_owned()))?;
+        let plan = match entry.plan.get() {
+            Some(plan) => plan,
+            None => {
+                // First spawn: parse the RON into the compiled plan. Errors
+                // are returned, not cached — a bad component re-reports on
+                // every attempt.
+                let mut compiled = Vec::with_capacity(entry.def.components.len());
+                for (name, raw) in &entry.def.components {
+                    compiled.push(registry.compile(name, raw)?);
+                }
+                entry.plan.get_or_init(|| compiled)
+            }
+        };
+        for component in plan {
+            component(&mut builder);
         }
     }
     builder.add(PrefabId(id.to_owned()));
@@ -211,23 +242,25 @@ pub fn queue_prefab_spawn(resources: &mut Resources, prefab: impl Into<String>, 
 ///   "Transform" also injects PreviousTransform (render interpolation)
 ///   "Hitbox"    also injects an empty CellOccupant (spatial grid)
 pub fn register_core_components(reg: &mut ComponentRegistry) {
-    reg.register_with("Transform", |raw, builder| {
+    reg.register_with("Transform", |raw| {
         let t: Transform = raw.into_rust().map_err(|error| PrefabError::Parse {
             component: "Transform".into(),
             error,
         })?;
-        builder.add(PreviousTransform { position: t.position });
-        builder.add(t);
-        Ok(())
+        Ok(Box::new(move |builder: &mut EntityBuilder| {
+            builder.add(PreviousTransform { position: t.position });
+            builder.add(t.clone());
+        }) as CompiledComponent)
     });
-    reg.register_with("Hitbox", |raw, builder| {
+    reg.register_with("Hitbox", |raw| {
         let h: Hitbox = raw.into_rust().map_err(|error| PrefabError::Parse {
             component: "Hitbox".into(),
             error,
         })?;
-        builder.add(h);
-        builder.add(CellOccupant { cells: SmallVec::new() });
-        Ok(())
+        Ok(Box::new(move |builder: &mut EntityBuilder| {
+            builder.add(h.clone());
+            builder.add(CellOccupant { cells: SmallVec::new() });
+        }) as CompiledComponent)
     });
     reg.register::<Velocity>("Velocity");
     reg.register::<Health>("Health");

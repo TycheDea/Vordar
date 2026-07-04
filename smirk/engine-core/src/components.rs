@@ -13,7 +13,7 @@ use smallvec::SmallVec;
 
 // ── Spatial ──────────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct Transform {
     pub position: Vec3,
@@ -37,7 +37,7 @@ impl Transform {
     }
 }
 
-#[derive(Default, serde::Deserialize)]
+#[derive(Clone, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct Velocity {
     pub linear: Vec3,  // units per second
@@ -64,7 +64,7 @@ pub struct GridCell {
 
 // ── Gameplay ─────────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Health {
     pub current: i32,
     pub max:     i32,
@@ -77,14 +77,14 @@ impl Health {
 
 // ── Collision ─────────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Hitbox {
     pub shape: CollisionShape,
 }
 
 /// Participates in physical separation — entities with this component are pushed
 /// apart when they overlap rather than passing through each other.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Solid;
 
 #[derive(Clone, serde::Deserialize)]
@@ -95,7 +95,7 @@ pub enum CollisionShape {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct RenderShape {
     pub shape: RenderShapeType,
     pub color: Vec3,
@@ -121,7 +121,7 @@ impl Default for RenderShapeType {
 }
 
 /// One element of a composed visual. Offset and scale are in the parent entity's local space.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct SubShape {
     pub shape:  RenderShapeType,
     pub offset: Vec3,
@@ -131,7 +131,7 @@ pub struct SubShape {
 
 /// Replaces `RenderShape` for multi-part entities. Attach instead of `RenderShape`.
 /// The renderer emits one `SdfInstance` per sub-shape each frame.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct ShapeGroup {
     pub shapes: Vec<SubShape>,
 }

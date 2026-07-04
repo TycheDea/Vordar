@@ -22,14 +22,16 @@ pub enum ServerEvent {
     Message { conn: ConnId, data: Vec<u8>, recv_micros: u64 },
 }
 
+/// Payloads travel as `Arc<Vec<u8>>` so a broadcast is one encode plus a
+/// refcount bump per connection instead of a full clone per connection.
 enum Outgoing {
-    To(ConnId, Vec<u8>),
-    All(Vec<u8>),
+    To(ConnId, Arc<Vec<u8>>),
+    All(Arc<Vec<u8>>),
     Kick(ConnId),
 }
 
 /// Per-connection writer queue + the quinn handle (for server-side close).
-type ConnMap = Arc<Mutex<HashMap<ConnId, (UnboundedSender<(u8, Vec<u8>)>, quinn::Connection)>>>;
+type ConnMap = Arc<Mutex<HashMap<ConnId, (UnboundedSender<(u8, Arc<Vec<u8>>)>, quinn::Connection)>>>;
 type RttMap = Arc<Mutex<HashMap<ConnId, u64>>>;
 
 pub struct NetServer {
@@ -85,11 +87,11 @@ impl NetServer {
     }
 
     pub fn send(&self, conn: ConnId, data: Vec<u8>) {
-        let _ = self.out.send(Outgoing::To(conn, data));
+        let _ = self.out.send(Outgoing::To(conn, Arc::new(data)));
     }
 
     pub fn broadcast(&self, data: Vec<u8>) {
-        let _ = self.out.send(Outgoing::All(data));
+        let _ = self.out.send(Outgoing::All(Arc::new(data)));
     }
 
     /// Close a connection from the server side (e.g. session takeover).
@@ -146,6 +148,7 @@ async fn server_main(
                     if let Some((tx, _)) = map.get(&id) { let _ = tx.send((TAG_APP, data)); }
                 }
                 Outgoing::All(data) => {
+                    // Arc clone: refcount bump, not a payload copy.
                     for (tx, _) in map.values() { let _ = tx.send((TAG_APP, data.clone())); }
                 }
                 Outgoing::Kick(id) => {
@@ -207,7 +210,7 @@ async fn handle_connection(
         .map_err(|e| NetError::Handshake(e.to_string()))?;
 
     // Register the writer queue, announce the connection.
-    let (write_tx, mut write_rx) = unbounded_channel::<(u8, Vec<u8>)>();
+    let (write_tx, mut write_rx) = unbounded_channel::<(u8, Arc<Vec<u8>>)>();
     conns.lock().unwrap().insert(id, (write_tx.clone(), connection.clone()));
     let _ = events.send(ServerEvent::Connected(id));
     log::info!("net: conn {id} from {}", connection.remote_address());
@@ -227,7 +230,7 @@ async fn handle_connection(
             Ok((TAG_CTRL, payload)) => {
                 if let Some(Ctrl::Ping { t_client }) = decode_ctrl(&payload) {
                     let pong = Ctrl::Pong { t_client, t_server: epoch.elapsed().as_micros() as u64 };
-                    let _ = write_tx.send((TAG_CTRL, encode_ctrl(&pong)));
+                    let _ = write_tx.send((TAG_CTRL, Arc::new(encode_ctrl(&pong))));
                 }
             }
             Ok((TAG_APP, data)) => {

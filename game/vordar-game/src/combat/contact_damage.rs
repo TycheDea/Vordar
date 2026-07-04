@@ -14,7 +14,7 @@ use hecs::Entity;
 
 /// Deals this much damage to whatever this entity touches.
 /// Entities without this component cannot deal contact damage.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct ContactDamage {
     pub amount: i32,
 }

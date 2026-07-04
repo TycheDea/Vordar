@@ -41,11 +41,11 @@ pub(crate) async fn read_frame(recv: &mut quinn::RecvStream) -> Result<(u8, Vec<
     if len == 0 || len > MAX_FRAME {
         return Err(NetError::Handshake(format!("bad frame length {len}")));
     }
-    let mut buf = vec![0u8; len];
+    let mut tag = [0u8; 1];
+    recv.read_exact(&mut tag).await.map_err(|_| NetError::Closed)?;
+    let mut buf = vec![0u8; len - 1];
     recv.read_exact(&mut buf).await.map_err(|_| NetError::Closed)?;
-    let tag = buf[0];
-    buf.remove(0);
-    Ok((tag, buf))
+    Ok((tag[0], buf))
 }
 
 pub(crate) fn encode_ctrl(msg: &Ctrl) -> Vec<u8> {

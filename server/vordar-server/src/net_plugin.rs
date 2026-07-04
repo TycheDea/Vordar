@@ -54,8 +54,14 @@ const MAX_SNAPSHOT_STATES: usize = 64;
 const NEAREST_GUARANTEED: usize = 32;
 /// Fixed server tick duration — each applied intent integrates exactly this.
 const TICK_DT: f32 = 1.0 / 60.0;
-/// Autosave every Nth PostUpdate run (10 Hz → ~30 s).
-const AUTOSAVE_TICKS: u64 = 300;
+/// PostUpdate runs at the sim rate; the 10 Hz systems below self-gate on it.
+const POST_HZ: f32 = 60.0;
+/// Snapshot stagger: each connection is served every STAGGER-th PostUpdate
+/// run (still SNAPSHOT_HZ per client) — the fan-out cost splits into STAGGER
+/// slices instead of landing on one tick.
+const STAGGER: u64 = (POST_HZ / SNAPSHOT_HZ) as u64;
+/// Autosave every Nth PostUpdate run (60 Hz → ~30 s).
+const AUTOSAVE_TICKS: u64 = 1800;
 
 pub struct NetServerPlugin {
     pub addr: SocketAddr,
@@ -95,14 +101,14 @@ pub fn install(
     app.insert_resource(NetServerState::new(server, db, db_owner, zone, directory, world_origin))
         // World time published every tick for world systems (events, day/night).
         .insert_resource(WorldTimeRes(0))
-        .set_phase_rate(Phase::PostUpdate, TickRate::Fixed(SNAPSHOT_HZ))
+        .set_phase_rate(Phase::PostUpdate, TickRate::Fixed(POST_HZ))
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         // Resolve before broadcasting so deaths reach the same snapshot wave.
-        .add_system(MechanicResolveSystem, Phase::PostUpdate, SystemOrder::before::<SnapshotBroadcastSystem>())
+        .add_system(MechanicResolveSystem::new(), Phase::PostUpdate, SystemOrder::before::<SnapshotBroadcastSystem>())
         // Transfer before broadcasting: a redirected player must not receive
         // one more snapshot after their Redirect.
-        .add_system(ZoneTransferSystem, Phase::PostUpdate, SystemOrder::before::<SnapshotBroadcastSystem>())
-        .add_system(SnapshotBroadcastSystem, Phase::PostUpdate, SystemOrder::Default)
+        .add_system(ZoneTransferSystem::new(), Phase::PostUpdate, SystemOrder::before::<SnapshotBroadcastSystem>())
+        .add_system(SnapshotBroadcastSystem::new(), Phase::PostUpdate, SystemOrder::Default)
         .add_system(AutosaveSystem { ticks: 0 }, Phase::PostUpdate, SystemOrder::Default);
 }
 
@@ -543,10 +549,24 @@ fn validate_intent(pc: &PlayerConn, seq: u32, t: u64, recv_micros: u64, rtt: u64
 /// ≤ T counts even though it arrived after T: favor-the-defender), NPCs at
 /// their current server-driven position. Damage flows through Health, so
 /// deaths take the existing HealthDepleted/despawn path.
-pub struct MechanicResolveSystem;
+pub struct MechanicResolveSystem {
+    ticks: u64,
+}
+
+impl MechanicResolveSystem {
+    pub fn new() -> Self {
+        Self { ticks: 0 }
+    }
+}
 
 impl System for MechanicResolveSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        // PostUpdate runs at POST_HZ; resolve keeps its 10 Hz cadence.
+        let due_now = self.ticks % STAGGER == 0;
+        self.ticks += 1;
+        if !due_now {
+            return;
+        }
         let now = resources.get::<NetServerState>().unwrap().server.now_micros();
 
         let due: Vec<(Entity, Mechanic, Vec3)> = world
@@ -629,10 +649,24 @@ fn rewound_position(current: Vec3, speed: f32, history: &VecDeque<(u64, Vec2)>, 
 /// the connection — kicking here could outrace the Redirect frame (the
 /// Phase 6 takeover lesson). The eventual Disconnected finds no PlayerConn,
 /// so no stale save can clobber the transfer save.
-pub struct ZoneTransferSystem;
+pub struct ZoneTransferSystem {
+    ticks: u64,
+}
+
+impl ZoneTransferSystem {
+    pub fn new() -> Self {
+        Self { ticks: 0 }
+    }
+}
 
 impl System for ZoneTransferSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        // PostUpdate runs at POST_HZ; transfers keep their 10 Hz cadence.
+        let due_now = self.ticks % STAGGER == 0;
+        self.ticks += 1;
+        if !due_now {
+            return;
+        }
         let transfers: Vec<ConnId> = {
             let state = resources.get::<NetServerState>().unwrap();
             if state.zone.portals.is_empty() {
@@ -696,20 +730,39 @@ fn select_states(entries: &[(u64, f32)], cursor: usize, max: usize, nearest: usi
     (selected, cursor + budget)
 }
 
-pub struct SnapshotBroadcastSystem;
+pub struct SnapshotBroadcastSystem {
+    /// Per-run scratch, reused across runs: grid candidates, the dedupe set,
+    /// and the id set swapped with each conn's `known` (no per-conn realloc).
+    aoi_scratch: Vec<Entity>,
+    seen: HashSet<Entity>,
+    current_ids: HashSet<u64>,
+}
+
+impl SnapshotBroadcastSystem {
+    pub fn new() -> Self {
+        Self { aoi_scratch: Vec::new(), seen: HashSet::new(), current_ids: HashSet::new() }
+    }
+}
 
 impl System for SnapshotBroadcastSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let conn_players: Vec<(ConnId, Entity)> = {
+        let (tick, conn_players): (u64, Vec<(ConnId, Entity)>) = {
             let state = resources.get_mut::<NetServerState>().unwrap();
             state.tick += 1;
-            // Periodic world-clock re-sync (every ~10 s at SNAPSHOT_HZ).
-            if state.tick % 100 == 0 {
+            // Periodic world-clock re-sync (every ~10 s at POST_HZ).
+            if state.tick % 600 == 0 {
                 let at_server_micros = state.server.now_micros();
                 let world_micros = state.world_at(at_server_micros);
                 state.server.broadcast(encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
             }
-            state.conns.iter().map(|(&conn, pc)| (conn, pc.entity)).collect()
+            // Stagger: only this tick's slice of connections is served — each
+            // conn still gets exactly SNAPSHOT_HZ snapshots per second.
+            let tick = state.tick;
+            let conns = state.conns.iter()
+                .filter(|&(&conn, _)| conn % STAGGER == tick % STAGGER)
+                .map(|(&conn, pc)| (conn, pc.entity))
+                .collect();
+            (tick, conns)
         };
         if conn_players.is_empty() {
             return;
@@ -721,35 +774,38 @@ impl System for SnapshotBroadcastSystem {
         let mut per_conn: Vec<(ConnId, Vec<(u64, Entity, Vec3, f32)>)> = Vec::with_capacity(conn_players.len());
         {
             let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
+            // One view for the whole gather: the replication filter (PrefabId)
+            // and the position come from a single lookup per candidate.
+            let mut repl_q = world.query::<(&Transform, &PrefabId)>();
+            let repl_view = repl_q.view();
             for &(conn, player) in &conn_players {
                 let Ok(center) = world.get::<&Transform>(player).map(|t| t.position) else { continue };
-                let mut seen: HashSet<Entity> = HashSet::new();
-                let mut current: Vec<(u64, Entity, Vec3, f32)> = Vec::new();
-                for entity in grid.query_radius(center, AOI_RADIUS) {
-                    if !seen.insert(entity) {
+                self.aoi_scratch.clear();
+                grid.query_radius_into(center, AOI_RADIUS, &mut self.aoi_scratch);
+                self.seen.clear();
+                let mut current: Vec<(u64, Entity, Vec3, f32)> = Vec::with_capacity(self.aoi_scratch.len());
+                for &entity in &self.aoi_scratch {
+                    if !self.seen.insert(entity) {
                         continue;
                     }
-                    if world.get::<&PrefabId>(entity).is_err() {
-                        continue;
-                    }
-                    let Ok(pos) = world.get::<&Transform>(entity).map(|t| t.position) else { continue };
-                    let dist_sq = pos.distance_squared(center);
+                    let Some((t, _)) = repl_view.get(entity) else { continue };
+                    let dist_sq = t.position.distance_squared(center);
                     if dist_sq > AOI_RADIUS * AOI_RADIUS {
                         continue;
                     }
-                    current.push((entity.to_bits().get(), entity, pos, dist_sq));
+                    current.push((entity.to_bits().get(), entity, t.position, dist_sq));
                 }
                 per_conn.push((conn, current));
             }
         }
 
         let state = resources.get_mut::<NetServerState>().unwrap();
-        let tick = state.tick;
         for (conn, current) in per_conn {
             let Some(pc) = state.conns.get_mut(&conn) else { continue };
 
-            let current_ids: HashSet<u64> = current.iter().map(|&(id, ..)| id).collect();
-            let leaves: Vec<u64> = pc.known.difference(&current_ids).copied().collect();
+            self.current_ids.clear();
+            self.current_ids.extend(current.iter().map(|&(id, ..)| id));
+            let leaves: Vec<u64> = pc.known.difference(&self.current_ids).copied().collect();
             let enters: Vec<EntityState> = current
                 .iter()
                 .filter(|(id, ..)| !pc.known.contains(id))
@@ -770,7 +826,8 @@ impl System for SnapshotBroadcastSystem {
                     EntityPos { id, pos }
                 })
                 .collect();
-            pc.known = current_ids;
+            // The old known set becomes next conn's current_ids scratch.
+            std::mem::swap(&mut pc.known, &mut self.current_ids);
 
             let last_processed_seq = pc.applied_seq;
             state.server.send(conn, encode(&ServerMsg::Snapshot {
@@ -801,6 +858,68 @@ impl System for AutosaveSystem {
         for pc in state.conns.values() {
             if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
                 state.db.save(pc.name.clone(), state.zone.name.clone(), tr.position, hp.current);
+            }
+        }
+    }
+}
+
+/// Benchmark seam (vordar-benches only): exposes just enough of the private
+/// snapshot/mechanic machinery to measure it. Sends to the fabricated ConnIds
+/// are silently dropped by engine-net's router (no such connection), so the
+/// benches measure the full sim-thread cost with zero network I/O.
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub mod bench {
+    use super::*;
+
+    pub const MAX_STATES: usize = MAX_SNAPSHOT_STATES;
+    pub const NEAREST: usize = NEAREST_GUARANTEED;
+    pub const AOI: f32 = AOI_RADIUS;
+    pub const STAGGER_TICKS: u64 = STAGGER;
+
+    pub fn select_states(
+        entries: &[(u64, f32)],
+        cursor: usize,
+        max: usize,
+        nearest: usize,
+    ) -> (Vec<usize>, usize) {
+        super::select_states(entries, cursor, max, nearest)
+    }
+
+    /// NetServerState with one PlayerConn per entity, keyed by fabricated
+    /// ConnIds 1..=n.
+    pub fn state_with_fake_conns(server: NetServer, db: DbHandle, players: &[Entity]) -> NetServerState {
+        let zone = ZoneDef { name: "bench".into(), chapter: None, portals: Vec::new() };
+        let directory = HashMap::from([("bench".to_owned(), server.local_addr())]);
+        let mut state = NetServerState::new(server, db, None, zone, directory, Instant::now());
+        for (i, &entity) in players.iter().enumerate() {
+            state.conns.insert(
+                (i + 1) as ConnId,
+                PlayerConn {
+                    entity,
+                    name: format!("bench-{i}"),
+                    queue: VecDeque::new(),
+                    applied_seq: 0,
+                    last_seq: 0,
+                    last_t: 0,
+                    known: HashSet::new(),
+                    history: VecDeque::new(),
+                    last_cast: HashMap::new(),
+                    rr_cursor: 0,
+                },
+            );
+        }
+        state
+    }
+
+    /// Fill every conn's applied-intent history to HISTORY_CAP with stamps at
+    /// `stamp` — mechanic resolution then rewinds the full history per player
+    /// target (the worst case) whenever `stamp` exceeds the rewind horizon.
+    pub fn fill_histories(state: &mut NetServerState, stamp: u64) {
+        for pc in state.conns.values_mut() {
+            pc.history.clear();
+            for k in 0..HISTORY_CAP {
+                pc.history.push_back((stamp + k as u64, Vec2::X));
             }
         }
     }

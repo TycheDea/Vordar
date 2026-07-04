@@ -181,7 +181,7 @@ impl App {
     /// Get-or-inserts the ComponentRegistry, so plugin order never matters.
     pub fn register_component<T>(&mut self, name: &str) -> &mut Self
     where
-        T: hecs::Component + serde::de::DeserializeOwned,
+        T: hecs::Component + serde::de::DeserializeOwned + Clone,
     {
         if !self.resources.contains::<ComponentRegistry>() {
             self.resources.insert(ComponentRegistry::new());
@@ -272,6 +272,15 @@ impl App {
                 std::thread::sleep(next_tick - now);
             }
             next_tick += budget;
+        }
+    }
+
+    /// Build the schedule once, then run exactly `n` ticks back-to-back with a
+    /// fixed dt — no sleeping, no wall-clock pacing. Benchmark/embedding seam.
+    pub fn run_ticks(&mut self, dt: f32, n: u64) {
+        self.scheduler.build();
+        for _ in 0..n {
+            self.tick(dt);
         }
     }
 

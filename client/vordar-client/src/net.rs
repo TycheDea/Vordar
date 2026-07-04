@@ -249,9 +249,11 @@ fn apply_snapshot(
     leaves: Vec<u64>,
     states: Vec<EntityPos>,
 ) {
+    // Take the map instead of cloning it — nothing below reads it through
+    // NetClientState, and it is written back at the end of this function.
     let (mut known, own_id, predict) = {
-        let state = resources.get::<NetClientState>().unwrap();
-        (state.entities.clone(), state.own_id, state.predict)
+        let state = resources.get_mut::<NetClientState>().unwrap();
+        (std::mem::take(&mut state.entities), state.own_id, state.predict)
     };
 
     // Enters first, so this snapshot's states can address the new entities.
@@ -279,18 +281,33 @@ fn apply_snapshot(
         }
     }
 
-    for state in states {
-        let Some(&entity) = known.get(&state.id) else { continue };
-        if predict && own_id == Some(state.id) {
-            reconcile_own(world, resources, entity, state.pos, last_processed_seq);
-        } else {
-            // Restart the lerp from wherever the entity is currently displayed.
-            let current = world.get::<&Transform>(entity).map(|t| t.position).unwrap_or(state.pos);
-            if let Ok(mut lerp) = world.get::<&mut NetLerp>(entity) {
-                lerp.from = current;
-                lerp.to = state.pos;
-                lerp.t = 0.0;
+    // Own-player state is handled by reconciliation, which needs &mut World —
+    // pull it out before the view below borrows the world.
+    let own_state = match (predict, own_id) {
+        (true, Some(own)) => states.iter().find(|s| s.id == own).map(|s| (own, s.pos)),
+        _ => None,
+    };
+
+    {
+        // One view for the whole batch instead of two world.gets per entity.
+        let mut lerp_q = world.query::<(&mut NetLerp, &Transform)>();
+        let mut lerp_view = lerp_q.view();
+        for state in &states {
+            if own_state.is_some_and(|(own, _)| state.id == own) {
+                continue;
             }
+            let Some(&entity) = known.get(&state.id) else { continue };
+            // Restart the lerp from wherever the entity is currently displayed.
+            let Some((lerp, transform)) = lerp_view.get_mut(entity) else { continue };
+            lerp.from = transform.position;
+            lerp.to = state.pos;
+            lerp.t = 0.0;
+        }
+    }
+
+    if let Some((own, server_pos)) = own_state {
+        if let Some(&entity) = known.get(&own) {
+            reconcile_own(world, resources, entity, server_pos, last_processed_seq);
         }
     }
 
@@ -374,7 +391,7 @@ fn correction_step(correction: Vec3, dt: f32) -> Vec3 {
 /// little each fixed Update tick. Corrections applied here are rendered as
 /// interpolated motion like any other movement; applying them where they are
 /// detected (Phase::Input) pops instead, because SaveTransformSystem captures
-/// PreviousTransform afterwards and the offset is never interpolated.
+/// PreviousTransform afterward and the offset is never interpolated.
 pub struct NetCorrectionSystem;
 
 impl System for NetCorrectionSystem {
@@ -635,6 +652,64 @@ impl System for NetCameraFollowSystem {
             state.own_entity().and_then(|e| crate::render_position(world, e, resources))
         };
         orbit_and_follow(target, resources, delta);
+    }
+}
+
+/// Benchmark seam (vordar-benches only): exposes the private snapshot-apply /
+/// reconciliation machinery so the client hot path is measurable headless.
+/// The NetClientState's socket points at an unroutable address — nothing the
+/// benches call ever touches the network.
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub mod bench {
+    use super::*;
+
+    /// NetClientState with no live connection: the net thread's connect
+    /// attempt fails in the background while the benched paths only read
+    /// and write the state fields.
+    pub fn state_for_bench(own_id: Option<u64>, predict: bool) -> NetClientState {
+        NetClientState {
+            client: NetClient::connect("127.0.0.1:9".parse().unwrap(), PROTOCOL_VERSION)
+                .expect("bench NetClient"),
+            user: "bench".into(),
+            own_id,
+            entities: HashMap::new(),
+            seq: 0,
+            predict,
+            pending: VecDeque::new(),
+            correction: Vec3::ZERO,
+            simulated_rtt: Duration::ZERO,
+        }
+    }
+
+    /// server-id → local-entity mapping (the enters path builds this normally).
+    pub fn map_entity(state: &mut NetClientState, id: u64, entity: Entity) {
+        state.entities.insert(id, entity);
+    }
+
+    pub fn push_pending(state: &mut NetClientState, seq: u32, dir: Vec2, dt: f32) {
+        state.pending.push_back(PendingIntent { seq, dir, dt });
+    }
+
+    pub fn apply_snapshot(
+        world: &mut World,
+        resources: &mut Resources,
+        last_processed_seq: u32,
+        enters: Vec<EntityState>,
+        leaves: Vec<u64>,
+        states: Vec<EntityPos>,
+    ) {
+        super::apply_snapshot(world, resources, last_processed_seq, enters, leaves, states);
+    }
+
+    pub fn reconcile_own(
+        world: &mut World,
+        resources: &mut Resources,
+        entity: Entity,
+        server_pos: Vec3,
+        last_processed_seq: u32,
+    ) {
+        super::reconcile_own(world, resources, entity, server_pos, last_processed_seq);
     }
 }
 

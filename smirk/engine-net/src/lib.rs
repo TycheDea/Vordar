@@ -23,6 +23,7 @@
 
 mod common;
 mod client;
+mod impair;
 mod server;
 
 pub use client::{ClientEvent, NetClient};

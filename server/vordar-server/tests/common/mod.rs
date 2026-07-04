@@ -53,6 +53,9 @@ pub struct Bot {
     pub redirect: Option<(String, SocketAddr)>,
     /// distinct snapshot ticks seen (snapshot-cadence measurement)
     pub snapshot_ticks: Vec<u64>,
+    /// pump-time arrival stamp of every snapshot (inter-snapshot gap
+    /// measurement for the loss probes)
+    pub snapshot_at: Vec<Instant>,
     /// ids that appeared in the latest snapshot's `states` list
     pub last_states: Vec<u64>,
 }
@@ -72,7 +75,13 @@ impl Bot {
     }
 
     pub fn connect_with_latency_as(addr: SocketAddr, name: &str, simulated_rtt: Duration) -> Self {
-        let client = NetClient::connect_with_latency(addr, PROTOCOL_VERSION, simulated_rtt)
+        Self::connect_impaired_as(addr, name, simulated_rtt, 0.0)
+    }
+
+    /// Latency plus receive-side datagram loss below QUIC (see engine-net's
+    /// `connect_impaired`) — the loss-probe constructor.
+    pub fn connect_impaired_as(addr: SocketAddr, name: &str, simulated_rtt: Duration, loss: f32) -> Self {
+        let client = NetClient::connect_impaired(addr, PROTOCOL_VERSION, simulated_rtt, loss)
             .expect("connect failed");
         Self {
             client,
@@ -88,6 +97,7 @@ impl Bot {
             world_offset: None,
             redirect: None,
             snapshot_ticks: Vec::new(),
+            snapshot_at: Vec::new(),
             last_states: Vec::new(),
         }
     }
@@ -118,6 +128,7 @@ impl Bot {
                         if self.snapshot_ticks.last() != Some(&tick) {
                             self.snapshot_ticks.push(tick);
                         }
+                        self.snapshot_at.push(Instant::now());
                         for e in enters {
                             self.last_snapshot.insert(e.id, e.pos);
                             self.prefabs.insert(e.id, e.prefab);

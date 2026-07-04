@@ -34,7 +34,7 @@ pub fn module() -> ChapterModule {
 
 /// Chapter-specific component — granted to the player when this entity dies.
 /// Attached via prefab data (see prefabs/grunt.ron), registered by this plugin.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct XpReward {
     pub amount: u32,
 }

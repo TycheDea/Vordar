@@ -58,6 +58,19 @@ impl NetClient {
         version: u8,
         simulated_rtt: Duration,
     ) -> Result<Self, NetError> {
+        Self::connect_impaired(addr, version, simulated_rtt, 0.0)
+    }
+
+    /// Like [`connect_with_latency`](Self::connect_with_latency), but also
+    /// drops received datagrams below QUIC with probability `loss` — dropped
+    /// stream frames stall until QUIC retransmits them, so head-of-line
+    /// behavior under loss is the real thing (see `impair.rs`). Testing only.
+    pub fn connect_impaired(
+        addr: SocketAddr,
+        version: u8,
+        simulated_rtt: Duration,
+        loss: f32,
+    ) -> Result<Self, NetError> {
         let one_way = simulated_rtt / 2;
         let epoch = Instant::now();
         let (event_tx, event_rx) = unbounded_channel();
@@ -78,7 +91,7 @@ impl NetClient {
                     Err(e) => { log::error!("net: tokio runtime failed: {e}"); return; }
                 };
                 rt.block_on(async move {
-                    match client_main(addr, version, epoch, event_tx.clone(), out_rx, thread_clock, one_way).await {
+                    match client_main(addr, version, epoch, event_tx.clone(), out_rx, thread_clock, one_way, loss).await {
                         Ok(()) => log::info!("net: connection closed"),
                         Err(e) => log::warn!("net: connection ended: {e}"),
                     }
@@ -126,6 +139,7 @@ impl NetClient {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn client_main(
     addr: SocketAddr,
     version: u8,
@@ -134,9 +148,14 @@ async fn client_main(
     mut out_rx: UnboundedReceiver<Vec<u8>>,
     clock: Arc<Clock>,
     one_way: Duration,
+    loss: f32,
 ) -> Result<(), NetError> {
     let bind: SocketAddr = if addr.is_ipv4() { "0.0.0.0:0".parse().unwrap() } else { "[::]:0".parse().unwrap() };
-    let mut endpoint = quinn::Endpoint::client(bind)?;
+    let mut endpoint = if loss > 0.0 {
+        crate::impair::lossy_client_endpoint(bind, loss)?
+    } else {
+        quinn::Endpoint::client(bind)?
+    };
     let mut config = client_crypto()?;
     // Keep idle connections alive — a player standing still must stay connected.
     let mut transport = quinn::TransportConfig::default();

@@ -1,0 +1,61 @@
+[package]
+name    = "vordar-benches"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# Criterion flags (--quick, --save-baseline) go to every bench target; the
+# default libtest harness on the lib would choke on them.
+bench = false
+
+[dependencies]
+engine-core     = { path = "../smirk/engine-core" }
+engine-app      = { path = "../smirk/engine-app", default-features = false }
+engine-physics  = { path = "../smirk/engine-physics" }
+engine-net      = { path = "../smirk/engine-net" }
+vordar-game     = { path = "../game/vordar-game" }
+vordar-protocol = { path = "../game/vordar-protocol" }
+vordar-server   = { path = "../server/vordar-server", features = ["bench-internals"] }
+vordar-client   = { path = "../client/vordar-client", features = ["bench-internals"] }
+glam            = { workspace = true }
+hecs            = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name    = "spatial_grid"
+harness = false
+
+[[bench]]
+name    = "physics_pipeline"
+harness = false
+
+[[bench]]
+name    = "enemy_ai"
+harness = false
+
+[[bench]]
+name    = "separation"
+harness = false
+
+[[bench]]
+name    = "snapshot"
+harness = false
+
+[[bench]]
+name    = "protocol"
+harness = false
+
+[[bench]]
+name    = "full_tick"
+harness = false
+
+[[bench]]
+name    = "prefab_spawn"
+harness = false
+
+[[bench]]
+name    = "client_netcode"
+harness = false

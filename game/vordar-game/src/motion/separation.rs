@@ -40,20 +40,20 @@ impl System for SeparationSystem {
         let active = resources.get::<ActivePairs>().expect("ActivePairs not in resources");
 
         // Pass 1: accumulate corrections from a consistent snapshot (order-independent).
+        // One query view for all pair lookups — a single borrow acquisition
+        // instead of six world.get calls (and two shape clones) per pair.
         let mut corrections: HashMap<Entity, Vec3> = HashMap::new();
-        for &(a, b) in &active.0 {
-            // Both must be Solid to separate.
-            let a_solid = world.get::<&Solid>(a).is_ok();
-            let b_solid = world.get::<&Solid>(b).is_ok();
-            if !a_solid || !b_solid { continue; }
+        {
+            let mut query = world.query::<(&Transform, &Hitbox, hecs::Satisfies<&Solid>)>();
+            let view = query.view();
+            for &(a, b) in &active.0 {
+                let (Some((t_a, h_a, a_solid)), Some((t_b, h_b, b_solid))) = (view.get(a), view.get(b)) else {
+                    continue;
+                };
+                // Both must be Solid to separate.
+                if !a_solid || !b_solid { continue; }
 
-            let pos_a   = world.get::<&Transform>(a).ok().map(|t| t.position);
-            let shape_a = world.get::<&Hitbox>(a).ok().map(|h| h.shape.clone());
-            let pos_b   = world.get::<&Transform>(b).ok().map(|t| t.position);
-            let shape_b = world.get::<&Hitbox>(b).ok().map(|h| h.shape.clone());
-
-            if let (Some(pa), Some(sa), Some(pb), Some(sb)) = (pos_a, shape_a, pos_b, shape_b) {
-                if let Some(correction) = mtv(&pa, &sa, &pb, &sb) {
+                if let Some(correction) = mtv(&t_a.position, &h_a.shape, &t_b.position, &h_b.shape) {
                     *corrections.entry(a).or_insert(Vec3::ZERO) += correction;
                     *corrections.entry(b).or_insert(Vec3::ZERO) -= correction;
                 }

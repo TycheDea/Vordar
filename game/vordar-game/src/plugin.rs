@@ -43,7 +43,7 @@ impl Plugin for CoreGamePlugin {
             .add_system(ChapterSetupSystem::new(), Phase::PreUpdate,   SystemOrder::First)
             // Logic
             .add_system(PlayerMovementSystem, Phase::Update,           SystemOrder::First)
-            .add_system(EnemyAISystem,        Phase::Update,           SystemOrder::Default)
+            .add_system(EnemyAISystem::new(), Phase::Update,           SystemOrder::Default)
             .add_system(WaveSpawnerSystem,    Phase::Update,           SystemOrder::Default)
             // World-resident enemy populations; no-op without ActiveChapter.
             .add_system(CampSystem::new(),    Phase::Update,           SystemOrder::Default)

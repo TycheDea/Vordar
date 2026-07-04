@@ -48,12 +48,16 @@ impl System for NarrowphaseSystem {
 
         // Reuse scratch set — clear preserves heap allocation.
         self.overlapping_buf.clear();
-        for (a, b) in &candidates {
-            let data_a = shape_data(world, *a);
-            let data_b = shape_data(world, *b);
-
-            if let (Some((pos_a, shape_a)), Some((pos_b, shape_b))) = (data_a, data_b) {
-                if shapes_overlap(pos_a, &shape_a, pos_b, &shape_b) {
+        {
+            // One query view for all pair lookups: a single borrow acquisition
+            // instead of per-entity world.get calls (and no shape clones).
+            let mut query = world.query::<(&Transform, &Hitbox)>();
+            let view = query.view();
+            for (a, b) in &candidates {
+                let (Some((t_a, h_a)), Some((t_b, h_b))) = (view.get(*a), view.get(*b)) else {
+                    continue;
+                };
+                if shapes_overlap(t_a.position, &h_a.shape, t_b.position, &h_b.shape) {
                     self.overlapping_buf.insert((*a, *b));
                 }
             }
@@ -87,14 +91,6 @@ impl System for NarrowphaseSystem {
         for (a, b) in started { bus.emit(CollisionStarted { a, b }); }
         for (a, b) in ended   { bus.emit(CollisionEnded   { a, b }); }
     }
-}
-
-/// Extract (position, collision shape) for a single entity.
-/// Returns None if the entity is missing Transform or Hitbox.
-fn shape_data(world: &World, entity: Entity) -> Option<(Vec3, CollisionShape)> {
-    let pos   = world.get::<&Transform>(entity).ok().map(|r| r.position)?;
-    let shape = world.get::<&Hitbox>(entity).ok().map(|r| r.shape.clone())?;
-    Some((pos, shape))
 }
 
 fn shapes_overlap(

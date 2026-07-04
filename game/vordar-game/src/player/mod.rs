@@ -15,7 +15,7 @@ use hecs::Entity;
 use std::collections::HashMap;
 
 /// Marker + speed for the player entity. Registered for RON spawning.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Player {
     pub speed: f32,
 }

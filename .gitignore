@@ -24,6 +24,7 @@ Thumbs.db
 
 # Claude Code / AI config + local design notes & task lists (kept local)
 .claude/
+/tasks/
 
 # Runtime data — server SQLite character database (+ WAL/SHM sidecars)
 /vordar.db

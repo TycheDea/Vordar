@@ -6,6 +6,11 @@ edition = "2021"
 [lib]
 name = "vordar_client"
 
+[features]
+# Exposes private netcode internals to vordar-benches. Never enabled by
+# normal builds — same pattern as vordar-server's bench-internals.
+bench-internals = []
+
 [[bin]]
 name = "sandbox"
 path = "src/bin/sandbox.rs"

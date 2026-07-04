@@ -17,7 +17,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const BOTS: usize = 200;
+/// Bot count — override with VORDAR_SOAK_BOTS (default 200) for scaling runs.
+fn soak_bots() -> usize {
+    std::env::var("VORDAR_SOAK_BOTS").ok().and_then(|s| s.parse().ok()).unwrap_or(200)
+}
+
 const SAMPLED: usize = 5;
 const WINDOW: Duration = Duration::from_secs(30);
 const PLAYER_SPEED: f32 = 6.0; // content/prefabs/player.ron
@@ -102,6 +106,7 @@ fn phase7_soak_200_bots_hold_tick_budget() {
     if cfg!(debug_assertions) {
         eprintln!("WARNING: soak running in debug — results will not be representative");
     }
+    let total_bots = soak_bots();
     let addr: SocketAddr = "127.0.0.1:25180".parse().unwrap();
 
     let recording = Arc::new(AtomicBool::new(false));
@@ -123,23 +128,24 @@ fn phase7_soak_200_bots_hold_tick_budget() {
                 Phase::PostUpdate,
                 SystemOrder::Last,
             );
-            // 90 s of sim at 60 Hz — covers ramp-up + window + walk + slack.
-            app.run_headless(60.0, Some(5400));
+            // ≥90 s of sim at 60 Hz — covers ramp-up + window + walk + slack;
+            // scaled with the bot count so bigger runs get a longer ramp.
+            app.run_headless(60.0, Some(5400.max(total_bots as u64 * 27)));
         });
     }
     std::thread::sleep(Duration::from_millis(300));
 
-    // ── Ramp up: 200 bots in batches of 20 every 250 ms. ──
-    let mut bots: Vec<Bot> = Vec::with_capacity(BOTS);
-    for batch in 0..(BOTS / 20) {
-        for _ in 0..20 {
+    // ── Ramp up: bots in batches of 20 every 250 ms. ──
+    let mut bots: Vec<Bot> = Vec::with_capacity(total_bots);
+    while bots.len() < total_bots {
+        for _ in 0..20.min(total_bots - bots.len()) {
             bots.push(Bot::connect(addr));
         }
         for bot in bots.iter_mut() {
             bot.pump();
         }
         std::thread::sleep(Duration::from_millis(250));
-        eprintln!("connected {}", (batch + 1) * 20);
+        eprintln!("connected {}", bots.len());
     }
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
@@ -147,13 +153,13 @@ fn phase7_soak_200_bots_hold_tick_budget() {
             bot.pump();
         }
         let welcomed = bots.iter().filter(|b| b.player_id.is_some()).count();
-        if welcomed == BOTS {
+        if welcomed == total_bots {
             break;
         }
-        assert!(Instant::now() < deadline, "only {welcomed}/{BOTS} bots welcomed in 60 s");
+        assert!(Instant::now() < deadline, "only {welcomed}/{total_bots} bots welcomed in 60 s");
         std::thread::sleep(Duration::from_millis(50));
     }
-    eprintln!("all {BOTS} bots welcomed");
+    eprintln!("all {total_bots} bots welcomed");
 
     // ── Split: 5 sampled bots stay on this thread (stats + the walker), the
     // rest spread over 4 driver threads as pure load. ──
@@ -196,19 +202,30 @@ fn phase7_soak_200_bots_hold_tick_budget() {
     }
     recording.store(false, Ordering::Relaxed);
 
-    // ── Assertions: tick budget held end-to-end. ──
+    // ── Stats first (a scaling probe past the budget must still report),
+    // then the budget assertions. ──
     let mut input = input_intervals.lock().unwrap().clone();
     let input_hz = input.len() as f64 / WINDOW.as_secs_f64();
     eprintln!("input: {} runs ({input_hz:.1} Hz), p99 interval {:.1} ms", input.len(), p99(&mut input) * 1e3);
+
+    let mut post = post_intervals.lock().unwrap().clone();
+    let post_hz = post.len() as f64 / WINDOW.as_secs_f64();
+    eprintln!("postupdate: {} runs ({post_hz:.1} Hz), p99 interval {:.1} ms", post.len(), p99(&mut post) * 1e3);
+
+    // Machine-readable summary for docs/benchmarks/BASELINE.md.
+    let avg_kb_s = sampled.iter().map(|b| b.bytes as f64).sum::<f64>()
+        / sampled.len() as f64 / WINDOW.as_secs_f64() / 1024.0;
+    println!(
+        "soak: bots={total_bots} input_hz={input_hz:.1} input_p99_ms={:.2} post_hz={post_hz:.1} post_p99_ms={:.2} kb_s_per_client={avg_kb_s:.1}",
+        p99(&mut input) * 1e3,
+        p99(&mut post) * 1e3,
+    );
+
     assert!(
         (58.0..=62.0).contains(&input_hz),
         "movement tick rate out of budget: {input_hz:.1} Hz"
     );
     assert!(p99(&mut input) < 0.025, "input p99 interval {:.1} ms ≥ 25 ms", p99(&mut input) * 1e3);
-
-    let mut post = post_intervals.lock().unwrap().clone();
-    let post_hz = post.len() as f64 / WINDOW.as_secs_f64();
-    eprintln!("postupdate: {} runs ({post_hz:.1} Hz), p99 interval {:.1} ms", post.len(), p99(&mut post) * 1e3);
     assert!(post_hz >= 9.0, "snapshot phase rate out of budget: {post_hz:.1} Hz");
 
     for (i, bot) in sampled.iter().enumerate() {
