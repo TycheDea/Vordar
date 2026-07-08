@@ -37,11 +37,15 @@ fn make_sampler(device: &Device) -> Sampler {
         mag_filter:      FilterMode::Linear,
         min_filter:      FilterMode::Linear,
         mipmap_filter:   MipmapFilterMode::Linear,
+        // VQ-C1: anisotropic filtering on every surface sampler. Requires all
+        // three filters Linear (they are).
+        anisotropy_clamp: 8,
         ..Default::default()
     })
 }
 
-/// Load a BC7-encoded DDS file directly as a GPU texture.
+/// Load a BC7-encoded DDS file directly as a GPU texture, uploading every
+/// baked mip level the file carries (VQ-C1).
 /// Returns Err if the file cannot be read or parsed.
 pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTexture, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {path}: {e}"))?;
@@ -50,11 +54,12 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTextu
 
     let width  = dds.header.width;
     let height = dds.header.height;
+    let mips   = dds.get_num_mipmap_levels().max(1);
 
     let texture = device.create_texture(&TextureDescriptor {
         label:           Some("Color Texture BC7"),
         size:            Extent3d { width, height, depth_or_array_layers: 1 },
-        mip_level_count: 1,
+        mip_level_count: mips,
         sample_count:    1,
         dimension:       TextureDimension::D2,
         format:          TextureFormat::Bc7RgbaUnorm,
@@ -62,12 +67,68 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTextu
         view_formats:    &[],
     });
 
-    // BC7: 4×4 blocks, 16 bytes each.
-    let blocks_x      = (width  + 3) / 4;
-    let blocks_y      = (height + 3) / 4;
-    let bytes_per_row = blocks_x * 16;
-    let mip_size      = (blocks_x * blocks_y * 16) as usize;
-    let data          = &dds.data[..mip_size.min(dds.data.len())];
+    // BC7: 4×4 blocks, 16 bytes each; levels are stored contiguously.
+    let mut offset = 0usize;
+    for level in 0..mips {
+        let w = (width >> level).max(1);
+        let h = (height >> level).max(1);
+        let blocks_x      = w.div_ceil(4);
+        let blocks_y      = h.div_ceil(4);
+        let bytes_per_row = blocks_x * 16;
+        let mip_size      = (blocks_x * blocks_y * 16) as usize;
+        if offset + mip_size > dds.data.len() {
+            log::warn!("{path}: DDS data truncated at mip {level} — uploaded {level} of {mips} levels");
+            break;
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture:   &texture,
+                mip_level: level,
+                origin:    wgpu::Origin3d::ZERO,
+                aspect:    TextureAspect::All,
+            },
+            &dds.data[offset..offset + mip_size],
+            wgpu::TexelCopyBufferLayout {
+                offset:         0,
+                bytes_per_row:  Some(bytes_per_row),
+                rows_per_image: Some(blocks_y),
+            },
+            Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        offset += mip_size;
+    }
+
+    let view    = texture.create_view(&TextureViewDescriptor::default());
+    let sampler = make_sampler(device);
+    Ok(ColorTexture { texture, view, sampler })
+}
+
+/// Upload RGBA8 pixels and build a full mip chain via the blit generator
+/// (VQ-C1). `srgb` as in `create_rgba_texture`. 1×1 textures skip mipgen.
+pub(crate) fn create_rgba_texture_mipped(
+    device: &Device,
+    queue:  &Queue,
+    mipgen: &crate::mipgen::MipGenerator,
+    width:  u32,
+    height: u32,
+    pixels: &[u8],
+    srgb:   bool,
+) -> ColorTexture {
+    let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
+    let mips = crate::mipgen::mip_level_count(width, height);
+    let texture = device.create_texture(&TextureDescriptor {
+        label:           Some("RGBA8 Mipped Texture"),
+        size:            Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: mips,
+        sample_count:    1,
+        dimension:       TextureDimension::D2,
+        format,
+        usage:           TextureUsages::TEXTURE_BINDING
+            | TextureUsages::COPY_DST
+            | TextureUsages::COPY_SRC
+            | TextureUsages::RENDER_ATTACHMENT,
+        view_formats:    &[],
+    });
 
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
@@ -76,18 +137,19 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTextu
             origin:    wgpu::Origin3d::ZERO,
             aspect:    TextureAspect::All,
         },
-        data,
+        pixels,
         wgpu::TexelCopyBufferLayout {
             offset:         0,
-            bytes_per_row:  Some(bytes_per_row),
-            rows_per_image: Some(blocks_y),
+            bytes_per_row:  Some(width * 4),
+            rows_per_image: Some(height),
         },
         Extent3d { width, height, depth_or_array_layers: 1 },
     );
+    mipgen.generate(device, queue, &texture);
 
     let view    = texture.create_view(&TextureViewDescriptor::default());
     let sampler = make_sampler(device);
-    Ok(ColorTexture { texture, view, sampler })
+    ColorTexture { texture, view, sampler }
 }
 
 /// Upload tightly-packed RGBA8 pixels as a GPU texture. `srgb` picks

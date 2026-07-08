@@ -14,6 +14,9 @@
 
 use crate::camera::{self, Camera};
 use crate::instance::SdfInstance;
+use crate::mesh::{self, MeshData};
+use crate::mesh_pipeline::{self, MeshInstance};
+use crate::mipgen::MipGenerator;
 use crate::pipeline::{self, INDICES};
 use crate::texture;
 use wgpu::util::DeviceExt;
@@ -132,16 +135,98 @@ pub fn render_sdf_scene(gpu: &HeadlessGpu, target: &SceneTarget, instances: &[Sd
     gpu.queue.submit(std::iter::once(encoder.finish()));
 }
 
-/// Read a 4-bytes-per-pixel `SceneTarget` back to CPU memory, rows unpadded
-/// (`width * height * 4` bytes, row-major). Blocks until the copy completes.
-pub fn read_rgba8(gpu: &HeadlessGpu, target: &SceneTarget) -> Vec<u8> {
+/// Render static glTF mesh data through the real mesh pipeline
+/// (mesh_shader.wgsl, full PBR material bind groups, mipped textures) into
+/// `target` — one instance at the origin, white tint, default camera + sun.
+/// Skinned data is rejected (the harness drives the static path).
+pub fn render_mesh_scene(gpu: &HeadlessGpu, target: &SceneTarget, data: MeshData, clear: wgpu::Color) {
+    assert!(data.skeleton.is_none(), "render_mesh_scene drives the static mesh path only");
+    let device = &gpu.device;
+
+    let camera = Camera::new(target.width as f32 / target.height as f32);
+    let (_cam_buf, _light_buf, camera_bgl, camera_bind_group) =
+        camera::create_gpu_resources(device, &camera);
+
+    let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
+    let mipgen       = MipGenerator::new(device);
+    let gpu_mesh     = mesh::upload_mesh(device, &gpu.queue, &material_bgl, &mipgen, data);
+    let render_pipeline =
+        mesh_pipeline::create_mesh_pipeline(device, target.format, &camera_bgl, &material_bgl);
+
+    let instance = MeshInstance {
+        model: glam::Mat4::IDENTITY.to_cols_array_2d(),
+        tint:  [1.0; 4],
+    };
+    let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label:    Some("Offscreen Mesh Instance Buffer"),
+        contents: bytemuck::cast_slice(&[instance]),
+        usage:    wgpu::BufferUsages::VERTEX,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Offscreen Mesh Encoder"),
+    });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Offscreen Mesh Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view:           &target.color_view,
+                resolve_target: None,
+                depth_slice:    None,
+                ops: wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(clear),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_pipeline(&render_pipeline);
+        pass.set_bind_group(0, &camera_bind_group, &[]);
+        pass.set_vertex_buffer(1, instance_buffer.slice(..));
+        for prim in &gpu_mesh.primitives {
+            pass.set_bind_group(1, &prim.material_bind_group, &[]);
+            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..prim.index_count, 0, 0..1);
+        }
+    }
+    gpu.queue.submit(std::iter::once(encoder.finish()));
+}
+
+/// Upload RGBA8 pixels and build the full mip chain through the real blit
+/// generator (VQ-C1). Exposed so tests can assert on downsampled levels.
+pub fn create_mipped_rgba8(
+    gpu:    &HeadlessGpu,
+    width:  u32,
+    height: u32,
+    pixels: &[u8],
+    srgb:   bool,
+) -> wgpu::Texture {
+    let mipgen = MipGenerator::new(&gpu.device);
+    texture::create_rgba_texture_mipped(&gpu.device, &gpu.queue, &mipgen, width, height, pixels, srgb)
+        .texture
+}
+
+/// Read one mip level of a 4-bytes-per-pixel texture back to CPU memory, rows
+/// unpadded (row-major). Blocks until the copy completes.
+pub fn read_texture_mip(gpu: &HeadlessGpu, texture: &wgpu::Texture, mip: u32) -> Vec<u8> {
     const ROW_ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
-    let unpadded = target.width * 4;
+    let width  = (texture.width() >> mip).max(1);
+    let height = (texture.height() >> mip).max(1);
+    let unpadded = width * 4;
     let padded   = unpadded.div_ceil(ROW_ALIGN) * ROW_ALIGN;
 
     let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label:              Some("Readback Buffer"),
-        size:               (padded * target.height) as u64,
+        size:               (padded * height) as u64,
         usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -151,8 +236,8 @@ pub fn read_rgba8(gpu: &HeadlessGpu, target: &SceneTarget) -> Vec<u8> {
     });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture:   &target.color,
-            mip_level: 0,
+            texture,
+            mip_level: mip,
             origin:    wgpu::Origin3d::ZERO,
             aspect:    wgpu::TextureAspect::All,
         },
@@ -161,10 +246,10 @@ pub fn read_rgba8(gpu: &HeadlessGpu, target: &SceneTarget) -> Vec<u8> {
             layout: wgpu::TexelCopyBufferLayout {
                 offset:         0,
                 bytes_per_row:  Some(padded),
-                rows_per_image: Some(target.height),
+                rows_per_image: Some(height),
             },
         },
-        wgpu::Extent3d { width: target.width, height: target.height, depth_or_array_layers: 1 },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
     );
     gpu.queue.submit(std::iter::once(encoder.finish()));
 
@@ -175,12 +260,18 @@ pub fn read_rgba8(gpu: &HeadlessGpu, target: &SceneTarget) -> Vec<u8> {
         .expect("device poll failed");
 
     let mapped = slice.get_mapped_range();
-    let mut pixels = Vec::with_capacity((unpadded * target.height) as usize);
-    for row in 0..target.height {
+    let mut pixels = Vec::with_capacity((unpadded * height) as usize);
+    for row in 0..height {
         let start = (row * padded) as usize;
         pixels.extend_from_slice(&mapped[start..start + unpadded as usize]);
     }
     drop(mapped);
     readback.unmap();
     pixels
+}
+
+/// Read a 4-bytes-per-pixel `SceneTarget` back to CPU memory, rows unpadded
+/// (`width * height * 4` bytes, row-major). Blocks until the copy completes.
+pub fn read_rgba8(gpu: &HeadlessGpu, target: &SceneTarget) -> Vec<u8> {
+    read_texture_mip(gpu, &target.color, 0)
 }

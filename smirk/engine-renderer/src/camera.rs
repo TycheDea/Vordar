@@ -138,6 +138,8 @@ pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     right:     [f32; 4],
     up:        [f32; 4],
+    /// World-space eye position — the PBR shaders' view vector origin.
+    eye:       [f32; 4],
 }
 
 impl CameraUniform {
@@ -147,6 +149,7 @@ impl CameraUniform {
             view_proj: camera.build_view_projection_matrix().to_cols_array_2d(),
             right:     [right.x, right.y, right.z, 0.0],
             up:        [up.x, up.y, up.z, 0.0],
+            eye:       [camera.eye.x, camera.eye.y, camera.eye.z, 1.0],
         }
     }
 }
@@ -196,7 +199,8 @@ pub(crate) fn create_gpu_resources(
         entries: &[
             BindGroupLayoutEntry {
                 binding:    0,
-                visibility: ShaderStages::VERTEX,
+                // Fragment too: the PBR shaders read camera.eye for the view vector.
+                visibility: ShaderStages::VERTEX.union(ShaderStages::FRAGMENT),
                 ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                 count: None,
             },

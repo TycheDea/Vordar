@@ -11,9 +11,10 @@
 // needs no hook and instancing falls out of grouping by mesh index.
 
 use crate::anim::{AnimationClip, Interp, Joint, JointTracks, LocalTransform, Skeleton, Track};
-use crate::mesh_pipeline::MeshInstance;
-use crate::pipeline::Vertex;
+use crate::mesh_pipeline::{MaterialUniform, MeshInstance, MeshVertex};
+use crate::mipgen::MipGenerator;
 use crate::skinned_pipeline::{SkinnedMeshInstance, SkinnedVertex, MAX_JOINT_MATRICES, MAX_SKINNED_INSTANCES};
+use crate::tangent::generate_tangents;
 use crate::texture::{self, ColorTexture};
 use crate::RendererState;
 use engine_app::scheduler::{InterpolationAlpha, System};
@@ -44,14 +45,45 @@ pub struct VertexSkin {
     pub weights: [f32; 4],
 }
 
-pub struct PrimitiveData {
-    pub vertices: Vec<Vertex>,
-    pub indices:  Vec<u32>,
-    /// Linear-space multiplier from the material. Applied only when there is
-    /// no texture (baked into a 1×1); textured primitives with a non-white
-    /// factor are rare in practice and get a load-time warning instead.
+/// The full glTF metallic-roughness material of one primitive (VQ-A2/C2/C4).
+/// Missing maps stay None and bind 1×1 neutral defaults at upload; factors
+/// multiply per the glTF spec.
+pub struct MaterialData {
     pub base_color_factor: [f32; 4],
-    pub base_color_image:  Option<ImageData>,
+    pub metallic_factor:   f32,
+    pub roughness_factor:  f32,
+    pub emissive_factor:   [f32; 3],
+    /// KHR_materials_emissive_strength (1.0 when absent) — HDR emissive for
+    /// bloom (VQ-C3).
+    pub emissive_strength: f32,
+    pub base_color_image:         Option<ImageData>, // sRGB
+    pub normal_image:             Option<ImageData>, // linear
+    pub metallic_roughness_image: Option<ImageData>, // linear (g=rough, b=metal)
+    pub emissive_image:           Option<ImageData>, // sRGB
+    pub occlusion_image:          Option<ImageData>, // linear (r)
+}
+
+impl Default for MaterialData {
+    fn default() -> Self {
+        Self {
+            base_color_factor: [1.0; 4],
+            metallic_factor:   1.0,
+            roughness_factor:  1.0,
+            emissive_factor:   [0.0; 3],
+            emissive_strength: 1.0,
+            base_color_image:         None,
+            normal_image:             None,
+            metallic_roughness_image: None,
+            emissive_image:           None,
+            occlusion_image:          None,
+        }
+    }
+}
+
+pub struct PrimitiveData {
+    pub vertices: Vec<MeshVertex>,
+    pub indices:  Vec<u32>,
+    pub material: MaterialData,
     /// Present iff this primitive is skinned (node had a skin). When Some,
     /// `vertices` are in mesh-local space (node transform NOT baked) — the
     /// joint palette places them.
@@ -303,16 +335,35 @@ fn visit_node(
                 .map(|t| t.into_f32().collect())
                 .unwrap_or_else(|| vec![[0.0, 0.0]; positions.len()]);
 
-            let vertices: Vec<Vertex> = positions
+            let indices: Vec<u32> = reader
+                .read_indices()
+                .map(|i| i.into_u32().collect())
+                .unwrap_or_else(|| (0..positions.len() as u32).collect());
+
+            // Tangents: from the asset when present, otherwise generated in
+            // source space (VQ-C4). Generation runs pre-transform; the
+            // normal-matrix rotation below carries them to world space.
+            let tangents: Vec<[f32; 4]> = reader
+                .read_tangents()
+                .map(|t| t.collect())
+                .unwrap_or_else(|| generate_tangents(&positions, &normals, &uvs, &indices));
+
+            let vertices: Vec<MeshVertex> = positions
                 .iter()
                 .zip(normals.iter())
                 .zip(uvs.iter())
-                .map(|((p, n), uv)| Vertex {
+                .zip(tangents.iter())
+                .map(|(((p, n), uv), t)| MeshVertex {
                     position: vtx_xform.transform_point3((*p).into()).to_array(),
                     normal:   (normal_mat * glam::Vec3::from(*n))
                         .normalize_or_zero()
                         .to_array(),
                     uv: *uv,
+                    tangent: {
+                        let txyz = (normal_mat * glam::Vec3::new(t[0], t[1], t[2]))
+                            .normalize_or_zero();
+                        [txyz.x, txyz.y, txyz.z, t[3]]
+                    },
                 })
                 .collect();
 
@@ -336,31 +387,55 @@ fn visit_node(
                 None
             };
 
-            let indices: Vec<u32> = reader
-                .read_indices()
-                .map(|i| i.into_u32().collect())
-                .unwrap_or_else(|| (0..vertices.len() as u32).collect());
+            let material = read_material(&prim.material(), images, path);
 
-            let pbr = prim.material().pbr_metallic_roughness();
-            let base_color_factor = pbr.base_color_factor();
-            let base_color_image = pbr.base_color_texture().and_then(|info| {
-                let img = images.get(info.texture().source().index())?;
-                let converted = to_rgba8(img);
-                if converted.is_none() {
-                    log::warn!("{path}: unsupported base-color image format {:?}", img.format);
-                }
-                converted
-            });
-            if base_color_image.is_some() && base_color_factor != [1.0; 4] {
-                log::warn!("{path}: textured primitive has baseColorFactor != 1 — factor ignored");
-            }
-
-            out.push(PrimitiveData { vertices, indices, base_color_factor, base_color_image, skin });
+            out.push(PrimitiveData { vertices, indices, material, skin });
         }
     }
 
     for child in node.children() {
         visit_node(&child, global, buffers, images, path, out);
+    }
+}
+
+/// Read the whole glTF metallic-roughness material of a primitive (VQ-A2):
+/// every texture slot plus the scalar/vector factors.
+fn read_material(
+    mat:    &gltf::Material,
+    images: &[gltf::image::Data],
+    path:   &str,
+) -> MaterialData {
+    let fetch = |index: usize, slot: &str| -> Option<ImageData> {
+        let img = images.get(index)?;
+        let converted = to_rgba8(img);
+        if converted.is_none() {
+            log::warn!("{path}: unsupported {slot} image format {:?}", img.format);
+        }
+        converted
+    };
+
+    let pbr = mat.pbr_metallic_roughness();
+    MaterialData {
+        base_color_factor: pbr.base_color_factor(),
+        metallic_factor:   pbr.metallic_factor(),
+        roughness_factor:  pbr.roughness_factor(),
+        emissive_factor:   mat.emissive_factor(),
+        emissive_strength: mat.emissive_strength().unwrap_or(1.0),
+        base_color_image: pbr
+            .base_color_texture()
+            .and_then(|i| fetch(i.texture().source().index(), "base-color")),
+        normal_image: mat
+            .normal_texture()
+            .and_then(|i| fetch(i.texture().source().index(), "normal")),
+        metallic_roughness_image: pbr
+            .metallic_roughness_texture()
+            .and_then(|i| fetch(i.texture().source().index(), "metallic-roughness")),
+        emissive_image: mat
+            .emissive_texture()
+            .and_then(|i| fetch(i.texture().source().index(), "emissive")),
+        occlusion_image: mat
+            .occlusion_texture()
+            .and_then(|i| fetch(i.texture().source().index(), "occlusion")),
     }
 }
 
@@ -390,9 +465,10 @@ pub(crate) struct GpuPrimitive {
     pub(crate) vertex_buffer: Buffer,
     pub(crate) index_buffer:  Buffer,
     pub(crate) index_count:   u32,
-    // ColorTexture kept alive alongside its bind group (same pattern as texture_store).
-    pub(crate) _texture:           ColorTexture,
-    pub(crate) texture_bind_group: BindGroup,
+    // Textures + factor uniform kept alive alongside their bind group.
+    pub(crate) _textures:          Vec<ColorTexture>,
+    pub(crate) _material_buffer:   Buffer,
+    pub(crate) material_bind_group: BindGroup,
 }
 
 /// CPU-side animation data kept next to a skinned GpuMesh so sampling needs no
@@ -409,16 +485,35 @@ pub(crate) struct GpuMesh {
     pub(crate) skin: Option<CpuSkin>,
 }
 
-fn upload_mesh(
+/// One material texture slot: the image (sRGB or linear, mipped) when the
+/// asset has one, else a 1×1 neutral default so the bind group is complete.
+fn slot_texture(
+    device:  &Device,
+    queue:   &Queue,
+    mipgen:  &MipGenerator,
+    image:   &Option<ImageData>,
+    srgb:    bool,
+    neutral: [u8; 4],
+) -> ColorTexture {
+    match image {
+        Some(img) => texture::create_rgba_texture_mipped(
+            device, queue, mipgen, img.width, img.height, &img.pixels, srgb,
+        ),
+        None => texture::create_rgba_texture(device, queue, 1, 1, &neutral, false),
+    }
+}
+
+pub(crate) fn upload_mesh(
     device: &Device,
     queue:  &Queue,
     layout: &BindGroupLayout,
+    mipgen: &MipGenerator,
     data:   MeshData,
 ) -> GpuMesh {
     let skinned = data.skeleton.is_some();
     let primitives = data.primitives.iter().map(|p| {
-        // Skinned meshes upload SkinnedVertex (position/normal/uv + joints/
-        // weights); static meshes keep the 32-byte Vertex layout unchanged.
+        // Skinned meshes upload SkinnedVertex (adds joints/weights); static
+        // meshes upload MeshVertex directly.
         let vertex_buffer = if skinned {
             let verts: Vec<SkinnedVertex> = p.vertices.iter().enumerate().map(|(i, v)| {
                 let sk = p.skin.as_ref().map(|s| s[i]).unwrap_or(VertexSkin {
@@ -429,6 +524,7 @@ fn upload_mesh(
                     position: v.position,
                     normal:   v.normal,
                     uv:       v.uv,
+                    tangent:  v.tangent,
                     joints:   sk.joints,
                     weights:  sk.weights,
                 }
@@ -450,30 +546,53 @@ fn upload_mesh(
             contents: bytemuck::cast_slice(&p.indices),
             usage:    BufferUsages::INDEX,
         });
-        let tex = match &p.base_color_image {
-            Some(img) => texture::create_rgba_texture(
-                device, queue, img.width, img.height, &img.pixels, true,
-            ),
-            // Untextured: 1×1 of the base-color factor (linear values in a
-            // linear format — no sRGB encode needed).
-            None => {
-                let f = p.base_color_factor;
-                let px = [
-                    (f[0].clamp(0.0, 1.0) * 255.0) as u8,
-                    (f[1].clamp(0.0, 1.0) * 255.0) as u8,
-                    (f[2].clamp(0.0, 1.0) * 255.0) as u8,
-                    (f[3].clamp(0.0, 1.0) * 255.0) as u8,
-                ];
-                texture::create_rgba_texture(device, queue, 1, 1, &px, false)
-            }
+
+        // The five material textures (VQ-A2/C2): sRGB for color-like slots,
+        // linear for data-like slots; 1×1 neutral defaults where absent.
+        let m = &p.material;
+        let albedo   = slot_texture(device, queue, mipgen, &m.base_color_image, true, [255; 4]);
+        let normal   = slot_texture(device, queue, mipgen, &m.normal_image, false, [128, 128, 255, 255]);
+        let mr       = slot_texture(device, queue, mipgen, &m.metallic_roughness_image, false, [255; 4]);
+        let emissive = slot_texture(device, queue, mipgen, &m.emissive_image, true, [255; 4]);
+        let ao       = slot_texture(device, queue, mipgen, &m.occlusion_image, false, [255; 4]);
+
+        let uniform = MaterialUniform {
+            base_color: m.base_color_factor,
+            emissive: [
+                m.emissive_factor[0] * m.emissive_strength,
+                m.emissive_factor[1] * m.emissive_strength,
+                m.emissive_factor[2] * m.emissive_strength,
+                0.0,
+            ],
+            mr: [m.metallic_factor, m.roughness_factor, 0.0, 0.0],
         };
-        let texture_bind_group = texture::create_bind_group(device, layout, &tex);
+        let material_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label:    Some("Material Uniform"),
+            contents: bytemuck::cast_slice(&[uniform]),
+            usage:    BufferUsages::UNIFORM,
+        });
+
+        let material_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("Material Bind Group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&albedo.view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&albedo.sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&normal.view) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&mr.view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&emissive.view) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&ao.view) },
+                wgpu::BindGroupEntry { binding: 6, resource: material_buffer.as_entire_binding() },
+            ],
+        });
+
         GpuPrimitive {
             vertex_buffer,
             index_buffer,
             index_count: p.indices.len() as u32,
-            _texture: tex,
-            texture_bind_group,
+            _textures: vec![albedo, normal, mr, emissive, ao],
+            _material_buffer: material_buffer,
+            material_bind_group,
         }
     }).collect();
 
@@ -495,6 +614,7 @@ impl MeshStore {
         device: &Device,
         queue:  &Queue,
         layout: &BindGroupLayout,
+        mipgen: &MipGenerator,
         path:   &str,
     ) -> Option<usize> {
         if let Some(&cached) = self.by_path.get(path) {
@@ -503,7 +623,7 @@ impl MeshStore {
         let result = match load_gltf_data(path) {
             Ok(data) => {
                 let idx = self.meshes.len();
-                self.meshes.push(upload_mesh(device, queue, layout, data));
+                self.meshes.push(upload_mesh(device, queue, layout, mipgen, data));
                 Some(idx)
             }
             Err(e) => {
@@ -669,7 +789,9 @@ impl System for MeshRenderSyncSystem {
                 .query::<(Entity, &Transform, Option<&PreviousTransform>, &RenderMesh, Option<&mut AnimationPlayer>)>()
                 .iter()
             {
-                let Some(idx) = store.get_or_load(&state.device, &state.queue, &state.texture_bgl, &mesh.asset)
+                let Some(idx) = store.get_or_load(
+                    &state.device, &state.queue, &state.material_bgl, &state.mipgen, &mesh.asset,
+                )
                 else { continue };
                 let render_pos = match prev {
                     Some(p) => p.position.lerp(transform.position, alpha),
@@ -846,8 +968,11 @@ mod tests {
         assert_eq!(p.vertices[0].normal, [0.0, 0.0, 1.0]);
         assert_eq!(p.vertices[2].uv, [0.0, 1.0]);
         // Solid-color material, no texture.
-        assert_eq!(p.base_color_factor, [0.2, 0.4, 0.8, 1.0]);
-        assert!(p.base_color_image.is_none());
+        assert_eq!(p.material.base_color_factor, [0.2, 0.4, 0.8, 1.0]);
+        assert!(p.material.base_color_image.is_none());
+        // No TANGENT accessor in the file — generated from UVs. This
+        // triangle's UVs map u to +X, so the tangent points along +X.
+        assert_eq!(p.vertices[0].tangent, [1.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -999,7 +1124,7 @@ mod tests {
         assert!(!data.primitives.is_empty());
         let p = &data.primitives[0];
         assert!(p.vertices.len() > 100, "real mesh, not a placeholder");
-        let img = p.base_color_image.as_ref().expect("avocado has a base-color texture");
+        let img = p.material.base_color_image.as_ref().expect("avocado has a base-color texture");
         assert_eq!(img.pixels.len() as u32, img.width * img.height * 4, "tightly packed RGBA8");
     }
 

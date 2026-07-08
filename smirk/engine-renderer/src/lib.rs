@@ -5,8 +5,10 @@ pub mod instance;
 pub mod menu;
 pub mod mesh;
 pub(crate) mod mesh_pipeline;
+pub(crate) mod mipgen;
 pub mod offscreen;
 pub mod particle_pipeline;
+pub mod tangent;
 pub mod pipeline;
 pub(crate) mod skinned_pipeline;
 pub mod texture;
@@ -15,6 +17,7 @@ pub mod ui_layers;
 pub use dev_overlay::DevOverlaySystem;
 pub use menu::{MenuState, MenuSystem};
 pub use mesh::{MeshDrawList, MeshRenderSyncSystem, MeshStore, SkinnedDrawList, SocketConfig, SocketTransforms};
+pub use mesh_pipeline::MeshVertex;
 pub use particle_pipeline::{ParticleInstance, MAX_PARTICLES};
 pub use ui_layers::UiLayers;
 
@@ -88,6 +91,8 @@ pub(crate) struct RendererState {
     pub(crate) depth_view:        wgpu::TextureView,
     // ── textures ──
     pub(crate) texture_bgl:          wgpu::BindGroupLayout,
+    pub(crate) material_bgl:         wgpu::BindGroupLayout,
+    pub(crate) mipgen:               mipgen::MipGenerator,
     pub(crate) texture_store:        Vec<(ColorTexture, wgpu::BindGroup)>,
     pub(crate) active_texture_idx:   usize,
     // ── egui ──
@@ -142,15 +147,17 @@ impl RendererState {
         let vertex_buffer   = pipeline::create_vertex_buffer(&device);
         let index_buffer    = pipeline::create_index_buffer(&device);
         let texture_bgl     = pipeline::create_texture_bind_group_layout(&device);
+        let material_bgl    = mesh_pipeline::create_material_bind_group_layout(&device);
+        let mipgen          = mipgen::MipGenerator::new(&device);
         let default_tex     = texture::create_default_white(&device, &queue);
         let default_bg      = texture::create_bind_group(&device, &texture_bgl, &default_tex);
         let render_pipeline = pipeline::create_pipeline(&device, format, &camera_bgl, &texture_bgl);
         let mesh_render_pipeline =
-            mesh_pipeline::create_mesh_pipeline(&device, format, &camera_bgl, &texture_bgl);
+            mesh_pipeline::create_mesh_pipeline(&device, format, &camera_bgl, &material_bgl);
 
         let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(&device);
         let skinned_render_pipeline = skinned_pipeline::create_skinned_pipeline(
-            &device, format, &camera_bgl, &texture_bgl, &joint_bgl,
+            &device, format, &camera_bgl, &material_bgl, &joint_bgl,
         );
         let particle_render_pipeline =
             particle_pipeline::create_particle_pipeline(&device, format, &camera_bgl);
@@ -247,6 +254,8 @@ impl RendererState {
                 camera, camera_buffer, light_buffer, camera_bind_group,
                 depth_texture, depth_view,
                 texture_bgl,
+                material_bgl,
+                mipgen,
                 texture_store,
                 active_texture_idx: 0,
                 egui_ctx,
@@ -814,7 +823,7 @@ impl System for RenderSystem {
                         let count = count.min(MAX_MESH_INSTANCES as u32 - first);
                         let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                         for prim in &gpu_mesh.primitives {
-                            pass.set_bind_group(1, &prim.texture_bind_group, &[]);
+                            pass.set_bind_group(1, &prim.material_bind_group, &[]);
                             pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                             pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                             pass.draw_indexed(0..prim.index_count, 0, first..first + count);
@@ -835,7 +844,7 @@ impl System for RenderSystem {
                     for &(mesh_idx, first, count) in &list.ranges {
                         let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                         for prim in &gpu_mesh.primitives {
-                            pass.set_bind_group(1, &prim.texture_bind_group, &[]);
+                            pass.set_bind_group(1, &prim.material_bind_group, &[]);
                             pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                             pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                             pass.draw_indexed(0..prim.index_count, 0, first..first + count);

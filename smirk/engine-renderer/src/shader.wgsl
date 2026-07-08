@@ -1,7 +1,13 @@
 // ── Uniforms ──────────────────────────────────────────────────────────────────
 
+struct Camera {
+    view_proj: mat4x4<f32>,
+    right:     vec4<f32>,
+    up:        vec4<f32>,
+    eye:       vec4<f32>, // world-space camera position
+}
 @group(0) @binding(0)
-var<uniform> view_proj: mat4x4<f32>;
+var<uniform> camera: Camera;
 
 struct LightUniform {
     direction: vec3<f32>, // world-space, normalised, pointing TOWARD light
@@ -55,7 +61,7 @@ fn vtx_main(
     let norm_mat = mat3x3<f32>(col0 / dot(col0, col0), col1 / dot(col1, col1), col2 / dot(col2, col2));
 
     var out: VertexOutput;
-    out.clip_pos     = view_proj * world;
+    out.clip_pos     = camera.view_proj * world;
     out.color        = inst_color;
     out.shape_type   = shape_type;
     out.local_pos    = position;
@@ -99,10 +105,59 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if abs(p.x) < 0.14 { base = mix(base, vec3<f32>(0.35, 0.60, 0.95), 0.8); }
     }
 
-    // Lambert diffuse + ambient
-    let N    = normalize(in.normal);
-    let diff = max(dot(N, light.direction), 0.0);
-    let lit  = light.ambient + diff * (1.0 - light.ambient);
+    // Cook-Torrance GGX with fixed dielectric material params (rough matte —
+    // primitives are dev placeholders/ground), matching the mesh passes so
+    // mixed scenes light consistently.
+    let N = normalize(in.normal);
+    let V = normalize(camera.eye.xyz - in.world_pos);
+    return vec4<f32>(shade_pbr(N, V, base, 0.0, 0.85, 1.0), 1.0);
+}
 
-    return vec4<f32>(base * lit * light.color, 1.0);
+// ── Cook-Torrance GGX (same math as mesh_shader.wgsl — WGSL has no includes) ─
+
+const PI: f32 = 3.14159265;
+
+fn d_ggx(NdotH: f32, rough: f32) -> f32 {
+    let a  = rough * rough;
+    let a2 = a * a;
+    let d  = NdotH * NdotH * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d);
+}
+
+fn g_smith(NdotV: f32, NdotL: f32, rough: f32) -> f32 {
+    let r  = rough + 1.0;
+    let k  = r * r / 8.0;
+    let gv = NdotV / (NdotV * (1.0 - k) + k);
+    let gl = NdotL / (NdotL * (1.0 - k) + k);
+    return gv * gl;
+}
+
+fn f_schlick(VdotH: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VdotH, 5.0);
+}
+
+fn shade_pbr(
+    N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
+    metallic: f32, roughness: f32, ao: f32,
+) -> vec3<f32> {
+    let L = light.direction;
+    let H = normalize(V + L);
+    let NdotL = max(dot(N, L), 0.0);
+    let NdotV = max(dot(N, V), 1e-4);
+    let NdotH = max(dot(N, H), 0.0);
+    let VdotH = max(dot(V, H), 0.0);
+
+    let rough = clamp(roughness, 0.045, 1.0);
+    let f0    = mix(vec3<f32>(0.04), albedo, metallic);
+
+    let d = d_ggx(NdotH, rough);
+    let g = g_smith(NdotV, NdotL, rough);
+    let f = f_schlick(VdotH, f0);
+
+    let specular = d * g * f / max(4.0 * NdotV * NdotL, 1e-4);
+    let kd       = (vec3<f32>(1.0) - f) * (1.0 - metallic);
+
+    let direct  = (kd * albedo + specular) * NdotL * light.color;
+    let ambient = light.ambient * albedo * ao;
+    return ambient + direct;
 }

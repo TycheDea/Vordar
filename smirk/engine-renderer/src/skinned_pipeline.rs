@@ -11,16 +11,18 @@ use wgpu::{
 };
 
 /// GPU vertex for skinned meshes. `joints` are u16×4 (delivered to the shader
-/// as `vec4<u32>` by the Uint16x4 format); `weights` sum to 1.
+/// as `vec4<u32>` by the Uint16x4 format); `weights` sum to 1. `tangent` is
+/// xyz + handedness w (glTF convention) for normal mapping.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct SkinnedVertex {
     pub(crate) position: [f32; 3], // 0
     pub(crate) normal:   [f32; 3], // 12
     pub(crate) uv:       [f32; 2], // 24
-    pub(crate) joints:   [u16; 4], // 32
-    pub(crate) weights:  [f32; 4], // 40
-}                                  // 56 bytes
+    pub(crate) tangent:  [f32; 4], // 32
+    pub(crate) joints:   [u16; 4], // 48
+    pub(crate) weights:  [f32; 4], // 56
+}                                  // 72 bytes
 
 /// Per-instance data for the skinned pass: transform, tint, and the base
 /// offset of this instance's joint block in the shared joint storage buffer.
@@ -33,7 +35,7 @@ pub(crate) struct SkinnedMeshInstance {
     pub(crate) _pad:       [u32; 3],      // 84 — pad to 96
 }
 
-pub(crate) const SKINNED_VERTEX_SIZE:   usize = size_of::<SkinnedVertex>();       // 56
+pub(crate) const SKINNED_VERTEX_SIZE:   usize = size_of::<SkinnedVertex>();       // 72
 pub(crate) const SKINNED_INSTANCE_SIZE: usize = size_of::<SkinnedMeshInstance>(); // 96
 
 /// Skinned draw caps. The joint palette holds up to
@@ -64,14 +66,14 @@ pub(crate) fn create_skinned_pipeline(
     device:         &Device,
     surface_format: TextureFormat,
     camera_bgl:     &BindGroupLayout,
-    texture_bgl:    &BindGroupLayout,
+    material_bgl:   &BindGroupLayout,
     joint_bgl:      &BindGroupLayout,
 ) -> RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("skinned_mesh_shader.wgsl"));
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label:              Some("Skinned Pipeline Layout"),
-        bind_group_layouts: &[Some(camera_bgl), Some(texture_bgl), Some(joint_bgl)],
+        bind_group_layouts: &[Some(camera_bgl), Some(material_bgl), Some(joint_bgl)],
         immediate_size:     0,
     });
 
@@ -79,8 +81,9 @@ pub(crate) fn create_skinned_pipeline(
         VertexAttribute { offset:  0, shader_location: 0, format: Float32x3 }, // position
         VertexAttribute { offset: 12, shader_location: 1, format: Float32x3 }, // normal
         VertexAttribute { offset: 24, shader_location: 2, format: Float32x2 }, // uv
-        VertexAttribute { offset: 32, shader_location: 3, format: Uint16x4 },  // joints
-        VertexAttribute { offset: 40, shader_location: 4, format: Float32x4 }, // weights
+        VertexAttribute { offset: 32, shader_location: 3, format: Float32x4 }, // tangent
+        VertexAttribute { offset: 48, shader_location: 4, format: Uint16x4 },  // joints
+        VertexAttribute { offset: 56, shader_location: 5, format: Float32x4 }, // weights
     ];
     let vertex_buffer_layout = VertexBufferLayout {
         array_stride: SKINNED_VERTEX_SIZE as u64,
@@ -89,12 +92,12 @@ pub(crate) fn create_skinned_pipeline(
     };
 
     let instance_attributes = [
-        VertexAttribute { offset:  0, shader_location: 5, format: Float32x4 }, // model row 0
-        VertexAttribute { offset: 16, shader_location: 6, format: Float32x4 },
-        VertexAttribute { offset: 32, shader_location: 7, format: Float32x4 },
-        VertexAttribute { offset: 48, shader_location: 8, format: Float32x4 },
-        VertexAttribute { offset: 64, shader_location: 9, format: Float32x4 }, // tint
-        VertexAttribute { offset: 80, shader_location: 10, format: Uint32 },   // joint_base
+        VertexAttribute { offset:  0, shader_location: 6, format: Float32x4 }, // model row 0
+        VertexAttribute { offset: 16, shader_location: 7, format: Float32x4 },
+        VertexAttribute { offset: 32, shader_location: 8, format: Float32x4 },
+        VertexAttribute { offset: 48, shader_location: 9, format: Float32x4 },
+        VertexAttribute { offset: 64, shader_location: 10, format: Float32x4 }, // tint
+        VertexAttribute { offset: 80, shader_location: 11, format: Uint32 },    // joint_base
     ];
     let instance_buffer_layout = VertexBufferLayout {
         array_stride: SKINNED_INSTANCE_SIZE as u64,
