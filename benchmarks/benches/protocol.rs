@@ -16,10 +16,10 @@ fn snapshot_64() -> ServerMsg {
         tick: 123_456,
         last_processed_seq: 7_890,
         enters: (0..8)
-            .map(|i| EntityState { id: 1_000 + i, prefab: "enemy_sentinel".into(), pos: pos(i) })
+            .map(|i| EntityState { id: 1_000 + i, prefab: "enemy_sentinel".into(), pos: pos(i), hp: 40 })
             .collect(),
         leaves: (0..8).map(|i| 2_000 + i).collect(),
-        states: (0..64).map(|i| EntityPos { id: 3_000 + i, pos: pos(i) }).collect(),
+        states: (0..64).map(|i| EntityPos { id: 3_000 + i, pos: pos(i), hp: 40 }).collect(),
     }
 }
 

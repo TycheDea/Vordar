@@ -87,6 +87,11 @@ pub struct Hitbox {
 #[derive(Clone, serde::Deserialize)]
 pub struct Solid;
 
+/// A Solid that never yields: separation pushes only the other party
+/// (buildings, posted NPCs). Two Anchored solids never push each other.
+#[derive(Clone, serde::Deserialize)]
+pub struct Anchored;
+
 #[derive(Clone, serde::Deserialize)]
 pub enum CollisionShape {
     Aabb { half_extents: Vec3 },
@@ -120,11 +125,15 @@ impl Default for RenderShapeType {
     fn default() -> Self { Self::Cube }
 }
 
-/// One element of a composed visual. Offset and scale are in the parent entity's local space.
+/// One element of a composed visual. Offset, rotation, and scale are in the
+/// parent entity's local space. `rotation` defaults to identity so existing
+/// prefab RON keeps parsing unchanged.
 #[derive(Clone, serde::Deserialize)]
 pub struct SubShape {
     pub shape:  RenderShapeType,
     pub offset: Vec3,
+    #[serde(default)]
+    pub rotation: Quat,
     pub scale:  Vec3,
     pub color:  Vec3,
 }
@@ -134,6 +143,81 @@ pub struct SubShape {
 #[derive(Clone, serde::Deserialize)]
 pub struct ShapeGroup {
     pub shapes: Vec<SubShape>,
+}
+
+/// Draw a glTF model instead of primitive shapes. `asset` is a path relative
+/// to the process working directory (content convention: "content/models/…").
+/// `tint` multiplies the material's base color; white = unchanged.
+#[derive(Clone, serde::Deserialize)]
+pub struct RenderMesh {
+    pub asset: String,
+    #[serde(default = "white")]
+    pub tint: Vec3,
+}
+
+fn white() -> Vec3 { Vec3::ONE }
+
+/// Skeletal animation playback state for a skinned `RenderMesh` entity.
+/// Code-inserted only (never RON): the engine attaches a default and the
+/// game's controller drives it via `transition_to`. Sampling/skinning lives in
+/// engine-renderer; this is just the cursor + crossfade bookkeeping.
+#[derive(Clone)]
+pub struct AnimationPlayer {
+    /// Name of the clip currently playing (matched against the asset's clips;
+    /// empty or unknown falls back to the first clip).
+    pub clip:    String,
+    /// Playback cursor, seconds into `clip`.
+    pub time:    f32,
+    /// Time multiplier — >1 speeds the clip up (e.g. faster strides at speed).
+    pub speed:   f32,
+    /// Loop the clip (locomotion) vs. hold the last frame (death/one-shots).
+    pub looping: bool,
+    /// The outgoing clip during a crossfade; None once the blend completes.
+    pub prev:      Option<PrevClip>,
+    /// Crossfade duration in seconds.
+    pub blend_dur: f32,
+    /// Elapsed crossfade time; blend weight = (blend_t / blend_dur).
+    pub blend_t:   f32,
+}
+
+/// A frozen snapshot of the clip being blended out of.
+#[derive(Clone)]
+pub struct PrevClip {
+    pub clip: String,
+    pub time: f32,
+}
+
+impl Default for AnimationPlayer {
+    fn default() -> Self {
+        Self {
+            clip:      String::new(),
+            time:      0.0,
+            speed:     1.0,
+            looping:   true,
+            prev:      None,
+            blend_dur: 0.15,
+            blend_t:   0.0,
+        }
+    }
+}
+
+impl AnimationPlayer {
+    /// Smoothly cross-fade to `clip` over `blend` seconds. A no-op if already
+    /// playing it (so calling this every frame from a controller is cheap and
+    /// doesn't restart the clip). The outgoing clip is frozen at its current
+    /// time and blended out.
+    pub fn transition_to(&mut self, clip: &str, looping: bool, blend: f32) {
+        if self.clip == clip {
+            self.looping = looping;
+            return;
+        }
+        self.prev = Some(PrevClip { clip: std::mem::take(&mut self.clip), time: self.time });
+        self.clip = clip.to_owned();
+        self.time = 0.0;
+        self.looping = looping;
+        self.blend_dur = blend.max(1e-4);
+        self.blend_t = 0.0;
+    }
 }
 
 #[cfg(test)]

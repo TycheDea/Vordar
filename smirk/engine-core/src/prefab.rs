@@ -13,7 +13,7 @@
 // (component names, prefab ids) is reachable from data files today and from
 // a scripting layer later without touching engine code.
 
-use crate::components::{CellOccupant, Health, Hitbox, PreviousTransform, RenderShape, ShapeGroup, Solid, Transform, Velocity};
+use crate::components::{Anchored, CellOccupant, Health, Hitbox, PreviousTransform, RenderMesh, RenderShape, ShapeGroup, Solid, Transform, Velocity};
 use crate::traits::{Resources, SpawnContext, SpawnQueue};
 use glam::Vec3;
 use hecs::{Entity, EntityBuilder};
@@ -265,6 +265,8 @@ pub fn register_core_components(reg: &mut ComponentRegistry) {
     reg.register::<Velocity>("Velocity");
     reg.register::<Health>("Health");
     reg.register::<Solid>("Solid");
+    reg.register::<Anchored>("Anchored");
     reg.register::<RenderShape>("RenderShape");
     reg.register::<ShapeGroup>("ShapeGroup");
+    reg.register::<RenderMesh>("RenderMesh");
 }

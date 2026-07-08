@@ -1,0 +1,18 @@
+// Ravager — the playable class while there is no class picker. A Human
+// wearing the ravager's gear; the visual is composed client-side from
+// content/races/human.ron + content/classes/ravager.ron's outfit.
+// Stats: hits harder than the wayfarer (power, crits), no bonus defense —
+// "trades defense for relentless pressure". Physical-natured (affinity).
+(
+    components: {
+        "Transform":  (),
+        "Velocity":   (),
+        "Hitbox":     (shape: Aabb(half_extents: (0.5, 0.5, 0.5))),
+        "Solid":      (),
+        "Health":     (current: 100, max: 100),
+        "Player":     (speed: 6.0),
+        "Race":       (id: "human"),
+        "Class":      (id: "ravager"),
+        "CombatStats": (power: 4, defense: 0, crit_chance: 0.15, crit_mult: 1.6, affinity: Some(Physical)),
+    },
+)

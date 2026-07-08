@@ -14,7 +14,7 @@ use engine_app::events::EventBus;
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_app::time::Time;
-use engine_core::components::{RenderShape, Transform};
+use engine_core::components::{Health, RenderShape, Transform};
 use engine_core::prefab::spawn_prefab;
 use engine_core::traits::{DespawnQueue, Resources, SpawnContext};
 use engine_core::World;
@@ -76,14 +76,26 @@ impl Plugin for NetClientPlugin {
         })
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         .add_system(NetSendInputSystem, Phase::Input, SystemOrder::after::<NetReceiveSystem>())
-        .add_system(MouseCastSystem, Phase::Input, SystemOrder::after::<NetSendInputSystem>())
-        .add_system(BlastCastSystem { was_q: false }, Phase::Input, SystemOrder::after::<MouseCastSystem>())
+        .add_system(AbilityCastSystem::new(), Phase::Input, SystemOrder::after::<NetSendInputSystem>())
         .insert_resource(WorldTime { offset_micros: 0, synced: false })
         .insert_resource(crate::CastState::new())
         .insert_resource(crate::presentation::CurrentZone("start".into()))
         .insert_resource(vordar_game::zones::load_zones("content/zones/zones.ron"))
+        .insert_resource(crate::vfx::ParticleSim::new())
         .add_system(NetLerpSystem, Phase::Update, SystemOrder::First)
         .add_system(crate::presentation::ZoneDressingSystem::new(), Phase::Update, SystemOrder::Default)
+        .add_system(crate::body::BodyComposeSystem, Phase::Update, SystemOrder::Default)
+        .add_system(crate::react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
+        .add_system(crate::react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
+        .add_system(crate::pose::PoseAnimationSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::RenderSyncSystem>())
+        // Facing + locomotion drive skinned meshes — same registration as the
+        // sandbox plugin; remote entities animate from NetMotion (snapshot
+        // deltas), the predicted own player from its real sim Velocity.
+        // Hit reacts watch replicated hp (protocol v8) for flinches + sparks.
+        .add_system(crate::react::HitReactSystem, Phase::RenderSync, SystemOrder::before::<crate::locomotion::LocomotionSystem>())
+        .add_system(crate::locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
+        .add_system(crate::locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
+        .add_system(crate::vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
         .add_system(NetCameraFollowSystem, Phase::RenderSync, SystemOrder::First)
         .add_system(TelegraphFillSystem, Phase::RenderSync, SystemOrder::First)
         .add_system(DayNightSystem, Phase::RenderSync, SystemOrder::First);
@@ -91,8 +103,11 @@ impl Plugin for NetClientPlugin {
         if self.predict {
             // The shared simulation moves our own player. Remote players stay
             // NetLerp-driven: no intents are emitted for them, so the shared
-            // systems hold their velocity at zero.
+            // systems hold their velocity at zero. LeapSystem mirrors the
+            // server's dash override so an Onslaught moves the own view
+            // immediately instead of waiting a round-trip.
             app.add_system(PlayerMovementSystem, Phase::Update, SystemOrder::First)
+                .add_system(vordar_game::combat::leap::LeapSystem, Phase::Update, SystemOrder::Default)
                 .add_system(MovementSystem, Phase::Update, SystemOrder::Last)
                 .add_system(NetCorrectionSystem, Phase::Update, SystemOrder::Last);
         }
@@ -186,6 +201,9 @@ impl System for NetReceiveSystem {
                         wt.offset_micros = world_micros as i64 - at_server_micros as i64;
                         wt.synced = true;
                     }
+                    Some(ServerMsg::EntityDied { id, pos }) => {
+                        handle_entity_died(world, resources, id, pos);
+                    }
                     Some(ServerMsg::Redirect { zone, addr }) => {
                         // Zone transfer: WE close the old connection (dropping
                         // the NetClient) and start fresh at the new address.
@@ -241,6 +259,54 @@ fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, add
     }
 }
 
+/// The server's death signal (v8): burst + cosmetic corpse for the dying
+/// entity. Snapshots stop mentioning it the same tick, so its local entity is
+/// despawned here too instead of waiting for the AOI leave. Our own death is
+/// burst-only — the server re-Welcomes us into a respawned entity.
+fn handle_entity_died(world: &mut World, resources: &mut Resources, id: u64, pos: Vec3) {
+    let (entity, own) = {
+        let state = resources.get_mut::<NetClientState>().unwrap();
+        (state.entities.remove(&id), state.own_id == Some(id))
+    };
+    // Death burst at the server-authoritative position.
+    let color = entity
+        .and_then(|e| world.get::<&vordar_game::class::ClassId>(e).ok().map(|c| c.id.clone()))
+        .map(|class| crate::vfx::class_tint(resources, &class))
+        .unwrap_or(glam::Vec3::ONE);
+    if let Some(sim) = resources.get_mut::<crate::vfx::ParticleSim>() {
+        sim.burst(
+            pos + Vec3::Y,
+            color,
+            crate::vfx::DEATH_COUNT,
+            crate::vfx::DEATH_SPEED,
+            crate::vfx::DEATH_SIZE,
+        );
+    }
+    if own {
+        return; // respawn arrives via re-Welcome; keep our entity
+    }
+    if let Some(entity) = entity {
+        // Corpse for mesh characters, then remove the live entity.
+        let corpse = {
+            let transform = world.get::<&Transform>(entity).map(|t| Transform::clone(&t));
+            let mesh = world
+                .get::<&engine_core::components::RenderMesh>(entity)
+                .map(|m| engine_core::components::RenderMesh::clone(&m));
+            let clips = world
+                .get::<&crate::locomotion::LocomotionClips>(entity)
+                .map(|c| c.death.clone());
+            match (transform, mesh, clips) {
+                (Ok(t), Ok(m), Ok(death)) if !death.is_empty() => Some((t, m, death)),
+                _ => None,
+            }
+        };
+        if let Some((transform, mesh, death)) = corpse {
+            crate::react::spawn_corpse(world, transform, mesh, &death);
+        }
+        resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
+    }
+}
+
 fn apply_snapshot(
     world: &mut World,
     resources: &mut Resources,
@@ -268,6 +334,11 @@ fn apply_snapshot(
                 if !is_own_predicted {
                     let _ = world.insert_one(entity, NetLerp { from: enter.pos, to: enter.pos, t: 1.0 });
                 }
+                // Seed replicated health (v8) so the hit-react watcher starts
+                // from the server's value, not the prefab's.
+                if let Ok(mut health) = world.get::<&mut Health>(entity) {
+                    health.current = enter.hp;
+                }
                 known.insert(enter.id, entity);
             }
             Err(e) => log::error!("replicated spawn '{}' failed: {e}", enter.prefab),
@@ -288,6 +359,23 @@ fn apply_snapshot(
         _ => None,
     };
 
+    // Replicated health (v8) — every state, own player included: the client
+    // never simulates its own damage, so the snapshot is the only source.
+    {
+        let mut hp_q = world.query::<&mut Health>();
+        let mut hp_view = hp_q.view();
+        for state in &states {
+            let Some(&entity) = known.get(&state.id) else { continue };
+            if let Some(health) = hp_view.get_mut(entity) {
+                health.current = state.hp;
+            }
+        }
+    }
+
+    // Snapshot-derived velocity estimates for the lerped entities, so
+    // locomotion/facing can animate remote characters (their sim Velocity is
+    // never driven). Collected inside the view borrow, inserted after it.
+    let mut net_motions: Vec<(Entity, Vec3)> = Vec::new();
     {
         // One view for the whole batch instead of two world.gets per entity.
         let mut lerp_q = world.query::<(&mut NetLerp, &Transform)>();
@@ -299,10 +387,14 @@ fn apply_snapshot(
             let Some(&entity) = known.get(&state.id) else { continue };
             // Restart the lerp from wherever the entity is currently displayed.
             let Some((lerp, transform)) = lerp_view.get_mut(entity) else { continue };
+            net_motions.push((entity, (state.pos - transform.position) * SNAPSHOT_HZ as f32));
             lerp.from = transform.position;
             lerp.to = state.pos;
             lerp.t = 0.0;
         }
+    }
+    for (entity, velocity) in net_motions {
+        let _ = world.insert_one(entity, crate::locomotion::NetMotion { velocity });
     }
 
     if let Some((own, server_pos)) = own_state {
@@ -516,52 +608,98 @@ impl System for TelegraphFillSystem {
     }
 }
 
-/// Left click fires "bolt" at the cursor's ground point — the player's only
-/// attack (Phase 7.5). Hold to auto-fire at the cooldown rate; the client
-/// gate is display/traffic hygiene, the server re-validates everything.
-pub struct MouseCastSystem;
+/// Keys for the edge-triggered ability slots (slot 1, slot 2). Slot 0 is the
+/// LMB held-repeat attack.
+const SLOT_KEYS: [winit::keyboard::KeyCode; 2] =
+    [winit::keyboard::KeyCode::KeyQ, winit::keyboard::KeyCode::KeyE];
 
-impl System for MouseCastSystem {
-    fn run(&mut self, _world: &mut World, resources: &mut Resources, delta: f32) {
-        let Some(target) = crate::presentation::poll_cast_target(resources, delta) else { return };
-        let state = resources.get_mut::<NetClientState>().unwrap();
-        let Some(t_server_micros) = state.client.server_now_micros() else { return };
-        if state.own_entity().is_none() {
-            return;
-        }
-        state.seq += 1;
-        state.client.send(encode(&ClientMsg::CastIntent {
-            seq: state.seq,
-            t_server_micros,
-            skill: "bolt".into(),
-            target: Vec2::new(target.x, target.z),
-        }));
-        resources.get_mut::<crate::CastState>().unwrap().bolt.fire();
+/// Casts the local class's abilities at the cursor's ground point: slot 0
+/// auto-fires while LMB is held (at the cooldown rate), later slots are
+/// edge-triggered keys (Q, E). Targets for ranged-capped effects are clamped
+/// so an honest cast is never rejected. The client gate is display/traffic
+/// hygiene — the server re-validates class, cooldown, and range.
+pub struct AbilityCastSystem {
+    /// Edge state per keyed slot.
+    was_down: [bool; SLOT_KEYS.len()],
+}
+
+impl AbilityCastSystem {
+    pub fn new() -> Self {
+        Self { was_down: [false; SLOT_KEYS.len()] }
     }
 }
 
-/// Q casts "blast" at the cursor's ground point — the scheduled-snapshot AOE
-/// from Phase 4, now on the action bar (slot 2). Edge-triggered; the target
-/// is clamped to the skill's range so an honest cast is never rejected.
-pub struct BlastCastSystem {
-    was_q: bool,
-}
+impl System for AbilityCastSystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
+        /// Slot metadata for the local class.
+        struct SlotMeta {
+            id: String,
+            /// Range clamp for targeted effects.
+            range: Option<f32>,
+            cooldown_secs: f32,
+            /// Leap cast time if it's a dash (drives the optimistic impulse).
+            leap_micros: Option<u64>,
+            /// Per-ability cast animation (cosmetic).
+            anim: Option<String>,
+            anim_secs: Option<f32>,
+        }
+        let Some(class) = crate::local_class(world, resources) else { return };
+        let slots: Vec<SlotMeta> = {
+            let Some(library) = resources.get::<vordar_game::class::ClassLibrary>() else { return };
+            library
+                .abilities_of(&class)
+                .iter()
+                .map(|a| {
+                    let (range, leap_micros) = match &a.effect {
+                        vordar_game::skills::AbilityEffect::Scheduled { max_range, .. } => (Some(*max_range), None),
+                        vordar_game::skills::AbilityEffect::Projectile { .. } => (None, None),
+                        vordar_game::skills::AbilityEffect::Leap { max_range, cast_micros, .. } => {
+                            (Some(*max_range), Some(*cast_micros))
+                        }
+                    };
+                    SlotMeta {
+                        id: a.id.clone(),
+                        range,
+                        cooldown_secs: a.cooldown_micros as f32 / 1e6,
+                        leap_micros,
+                        anim: a.anim.clone(),
+                        anim_secs: a.anim_secs,
+                    }
+                })
+                .collect()
+        };
+        {
+            let cooldowns: Vec<f32> = slots.iter().map(|s| s.cooldown_secs).collect();
+            let cast = resources.get_mut::<crate::CastState>().unwrap();
+            cast.sync(&class, &cooldowns);
+            cast.tick(delta);
+        }
 
-impl System for BlastCastSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let q = resources
-            .get::<engine_app::input::KeyboardState>()
-            .map(|kb| kb.is_pressed(winit::keyboard::KeyCode::KeyQ))
+        let mut triggered: Vec<usize> = Vec::new();
+        let lmb = resources
+            .get::<engine_app::input::MouseState>()
+            .map(|m| m.is_pressed(winit::event::MouseButton::Left))
             .unwrap_or(false);
-        let pressed = q && !self.was_q;
-        self.was_q = q;
-        if !pressed {
+        if lmb {
+            triggered.push(0);
+        }
+        for (i, key) in SLOT_KEYS.iter().enumerate() {
+            let down = resources
+                .get::<engine_app::input::KeyboardState>()
+                .map(|kb| kb.is_pressed(*key))
+                .unwrap_or(false);
+            if down && !self.was_down[i] {
+                triggered.push(i + 1);
+            }
+            self.was_down[i] = down;
+        }
+        triggered.retain(|&s| {
+            s < slots.len() && resources.get::<crate::CastState>().map(|c| c.ready(s)).unwrap_or(false)
+        });
+        if triggered.is_empty() {
             return;
         }
-        // Cooldowns tick in poll_cast_target (MouseCastSystem, every Input tick).
-        if !resources.get::<crate::CastState>().map(|c| c.blast.ready()).unwrap_or(false) {
-            return;
-        }
+
         let Some(cursor) = resources.get::<engine_app::input::MouseState>().and_then(|m| m.cursor()) else {
             return;
         };
@@ -572,27 +710,48 @@ impl System for BlastCastSystem {
             return;
         };
 
-        let max_range = match vordar_game::skills::skill("blast").map(|s| &s.effect) {
-            Some(vordar_game::skills::SkillEffect::Scheduled { max_range, .. }) => *max_range,
-            _ => return,
-        };
-        let from = Vec2::new(origin.x, origin.z);
-        let mut target = Vec2::new(ground.x, ground.z);
-        let offset = target - from;
-        if offset.length() > max_range {
-            target = from + offset.normalize() * max_range;
+        for slot in triggered {
+            let SlotMeta { id, range, leap_micros, anim, anim_secs, .. } = &slots[slot];
+            let from = Vec2::new(origin.x, origin.z);
+            let mut target = Vec2::new(ground.x, ground.z);
+            if let Some(max_range) = range {
+                let offset = target - from;
+                if offset.length() > *max_range {
+                    target = from + offset.normalize() * *max_range;
+                }
+            }
+            let (own, predict) = {
+                let state = resources.get_mut::<NetClientState>().unwrap();
+                let Some(t_server_micros) = state.client.server_now_micros() else { return };
+                state.seq += 1;
+                state.client.send(encode(&ClientMsg::CastIntent {
+                    seq: state.seq,
+                    t_server_micros,
+                    skill: id.clone(),
+                    target,
+                }));
+                (state.own_entity(), state.predict)
+            };
+            resources.get_mut::<crate::CastState>().unwrap().fire(slot);
+            if let Some(entity) = own {
+                crate::pose::trigger_swing(world, entity);
+                // Skinned-mesh cast animation (per-ability clip) — no-op if not animated.
+                crate::locomotion::trigger_attack_clip(world, entity, anim.as_deref(), *anim_secs);
+                let tint = crate::vfx::class_tint(resources, &class);
+                crate::vfx::cast_burst(world, resources, entity, tint);
+            }
+            // Optimistic dash: same deterministic velocity math the server
+            // runs, so reconciliation only ever sees ordinary drift. Rare
+            // server-side rejects surface as a correction snap.
+            if let (Some(cast_micros), Some(entity), true) = (leap_micros, own, predict) {
+                let cast_secs = *cast_micros as f32 / 1e6;
+                let to = Vec3::new(target.x, 0.0, target.y);
+                let _ = world.insert_one(entity, vordar_game::combat::LeapImpulse {
+                    velocity: vordar_game::combat::leap::leap_velocity(origin, to, cast_secs),
+                    remaining: cast_secs,
+                });
+            }
         }
-
-        let state = resources.get_mut::<NetClientState>().unwrap();
-        let Some(t_server_micros) = state.client.server_now_micros() else { return };
-        state.seq += 1;
-        state.client.send(encode(&ClientMsg::CastIntent {
-            seq: state.seq,
-            t_server_micros,
-            skill: "blast".into(),
-            target,
-        }));
-        resources.get_mut::<crate::CastState>().unwrap().blast.fire();
     }
 }
 

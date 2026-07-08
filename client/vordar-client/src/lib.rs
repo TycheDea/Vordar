@@ -3,9 +3,14 @@
 // replicates server snapshots into the local world. Everything here may touch
 // winit and the renderer; the shared simulation (vordar-game) never does.
 
+pub mod body;
+pub mod locomotion;
 pub mod net;
+pub mod pose;
 pub mod presentation;
+pub mod react;
 pub mod ui;
+pub mod vfx;
 
 use engine_app::app::App;
 use engine_app::events::EventBus;
@@ -58,27 +63,52 @@ impl Cooldown {
     }
 }
 
-/// Client-side cooldowns for the player's skills (action bar slots 1 + 2).
+/// Client-side cooldowns for the local class's abilities — one per action-bar
+/// slot, in the class's authored order (slot 0 = LMB, 1 = Q, 2 = E). Rebuilt
+/// when the local player's class becomes known or changes.
 pub struct CastState {
-    pub bolt: Cooldown,
-    pub blast: Cooldown,
+    pub class: Option<String>,
+    pub abilities: Vec<Cooldown>,
 }
 
 impl CastState {
     pub fn new() -> Self {
-        let blast_secs = vordar_game::skills::skill("blast")
-            .map(|s| s.cooldown_micros as f32 / 1e6)
-            .unwrap_or(3.0);
-        Self {
-            bolt: Cooldown::new(vordar_game::skills::BOLT_COOLDOWN_SECS),
-            blast: Cooldown::new(blast_secs),
+        Self { class: None, abilities: Vec::new() }
+    }
+
+    /// Rebuild the slots for `class` (cooldowns in seconds, slot order).
+    /// No-op while the class is unchanged, so in-flight cooldowns survive.
+    pub fn sync(&mut self, class: &str, cooldown_secs: &[f32]) {
+        if self.class.as_deref() == Some(class) {
+            return;
         }
+        self.class = Some(class.to_owned());
+        self.abilities = cooldown_secs.iter().map(|&s| Cooldown::new(s)).collect();
     }
 
     pub fn tick(&mut self, delta: f32) {
-        self.bolt.tick(delta);
-        self.blast.tick(delta);
+        for cooldown in &mut self.abilities {
+            cooldown.tick(delta);
+        }
     }
+
+    pub fn ready(&self, slot: usize) -> bool {
+        self.abilities.get(slot).map(|c| c.ready()).unwrap_or(false)
+    }
+
+    pub fn fire(&mut self, slot: usize) {
+        if let Some(cooldown) = self.abilities.get_mut(slot) {
+            cooldown.fire();
+        }
+    }
+}
+
+/// The local player's class id, once its entity exists — the net own-entity
+/// when online, the first Player entity in the sandbox.
+pub fn local_class(world: &World, resources: &Resources) -> Option<String> {
+    let entity = crate::net::own_entity(resources)
+        .or_else(|| world.query::<(Entity, &Player)>().iter().next().map(|(e, _)| e))?;
+    world.get::<&vordar_game::class::ClassId>(entity).ok().map(|c| c.id.clone())
 }
 
 /// WASD against the current camera axes → desired world-XZ direction (≤ unit).
@@ -174,9 +204,22 @@ impl Plugin for ClientPlugin {
         app.insert_resource(CastState::new())
             .insert_resource(presentation::CurrentZone("start".into()))
             .insert_resource(vordar_game::zones::load_zones("content/zones/zones.ron"))
+            .insert_resource(vfx::ParticleSim::new())
             .add_system(PlayerInputSystem, Phase::Input,      SystemOrder::Default)
             .add_system(presentation::SandboxCastSystem, Phase::Input, SystemOrder::Default)
             .add_system(presentation::ZoneDressingSystem::new(), Phase::Update, SystemOrder::Default)
+            .add_system(body::BodyComposeSystem, Phase::Update, SystemOrder::Default)
+            .add_system(react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
+            // Corpses must be cloned from dying entities BEFORE the flush removes them.
+            .add_system(react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
+            .add_system(pose::PoseAnimationSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::RenderSyncSystem>())
+            // Facing + locomotion drive skinned meshes; both must run before the
+            // mesh sync so rotation and clip selection are current this frame.
+            // Hit reacts run before locomotion so a fresh flinch wins the frame.
+            .add_system(react::HitReactSystem, Phase::RenderSync, SystemOrder::before::<locomotion::LocomotionSystem>())
+            .add_system(locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
+            .add_system(locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
+            .add_system(vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
             .add_system(CameraFollowSystem, Phase::RenderSync, SystemOrder::First);
         ui::install(app);
     }

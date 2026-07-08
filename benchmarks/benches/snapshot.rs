@@ -147,7 +147,7 @@ fn bench_mechanic_resolve(c: &mut Criterion) {
                         Transform::new(Vec3::ZERO),
                         // radius 50 covers the whole crowd; damage 0 keeps the
                         // world stationary across iterations.
-                        Mechanic { id: 1, radius: 50.0, damage: 0, resolve_at_micros: 0, caster },
+                        Mechanic { id: 1, radius: 50.0, damage: 0, damage_type: Default::default(), resolve_at_micros: 0, caster },
                     ));
                     let mut sys = MechanicResolveSystem::new();
                     let t = Instant::now();

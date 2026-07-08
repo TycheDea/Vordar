@@ -181,6 +181,7 @@ impl System for EnemyAISystem {
                 shot.order.dir,
                 shot.order.speed,
                 shot.order.damage,
+                Default::default(), // enemy shots are untyped (Physical) for now
                 shot.order.ttl,
                 shot.caster,
                 true, // enemy-fired: damages players only

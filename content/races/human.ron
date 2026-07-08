@@ -1,0 +1,23 @@
+// Human race. Phase C: renders as a rigged glTF humanoid (the CC0 KayKit
+// "Knight" — content/models/human.glb, scale + ground offset baked onto its
+// armature). The SDF `body` below is the pre-Phase-C silhouette, kept as a
+// fallback if `model` is removed; the mesh branch of BodyComposeSystem ignores
+// it. Clip names are read straight from the asset.
+(
+    body: [
+        (shape: Capsule, offset: (0.0, 0.05, 0.0), scale: (0.42, 0.55, 0.42), color: (0.42, 0.38, 0.30)),
+        (shape: Sphere,  offset: (0.0, 0.72, 0.0), scale: (0.26, 0.26, 0.26), color: (0.95, 0.85, 0.65)),
+    ],
+    model: Some((
+        asset: "content/models/human.glb",
+        idle:   "Idle",
+        walk:   "Walking_A",
+        run:    "Running_A",
+        attack: "1H_Melee_Attack_Chop",
+        death:  "Death_A",
+        hit:    "Hit_A",
+        walk_speed: 0.1,
+        run_speed:  3.0,
+        forward_offset: 3.14159, // KayKit rigs face +Z; π turns them to face travel
+    )),
+)

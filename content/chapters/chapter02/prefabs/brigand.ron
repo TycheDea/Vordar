@@ -1,0 +1,21 @@
+// Brigand — an outlaw prowling the roads outside Emberwood Rest. Aggressive
+// melee, tougher than a grunt but slower to anger. Zero custom code: melee
+// AttackKind + the shared data-driven behavior.
+(
+    components: {
+        "Transform":   (),
+        "Velocity":    (),
+        "ShapeGroup":  (shapes: [
+            (shape: Capsule, offset: (0.0, 0.05, 0.0),  scale: (0.46, 0.52, 0.46), color: (0.30, 0.28, 0.24)),
+            (shape: Sphere,  offset: (0.0, 0.68, 0.0),  scale: (0.26, 0.26, 0.26), color: (0.80, 0.66, 0.52)),
+            (shape: RoundedBox(corner_radius: 0.06), offset: (0.0, 0.82, 0.0), scale: (0.30, 0.10, 0.30), color: (0.20, 0.18, 0.14)),
+            (shape: Cube,    offset: (0.40, 0.15, 0.25), scale: (0.06, 0.34, 0.09), color: (0.45, 0.42, 0.40)),
+        ]),
+        "Hitbox":        (shape: Aabb(half_extents: (0.5, 0.5, 0.5))),
+        "Solid":         (),
+        "Health":        (current: 45, max: 45),
+        "Enemy":         (speed: 3.2, aggro_range: 8.0),
+        "ContactDamage": (amount: 12),
+        "XpReward":      (amount: 9),
+    },
+)

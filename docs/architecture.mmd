@@ -1,0 +1,32 @@
+%% Vordar — whole-project architecture (high level)
+%% Two applications over a shared game built on a reusable engine.
+%% Deliberately low-detail; see per-area diagrams for the internals.
+
+flowchart TB
+
+  PLAYER(["Player"])
+
+  CLIENT["Client<br/>input · rendering · prediction"]
+  SERVER["Server<br/>authoritative simulation · persistence"]
+
+  GAME["Shared game rules<br/>movement · combat · zones · skills"]
+  PROTO["Message protocol"]
+  CONTENT[("Content<br/>zones · prefabs · classes · chapters")]
+
+  ENGINE["Engine foundation<br/>world · loop · renderer · physics · networking · audio"]
+
+  DB[("Database")]
+
+  PLAYER <--> CLIENT
+  CLIENT <==>|"over network"| SERVER
+  SERVER <--> DB
+
+  CLIENT --> GAME
+  SERVER --> GAME
+  CLIENT -->|"encode / decode"| PROTO
+  SERVER -->|"encode / decode"| PROTO
+  GAME --> CONTENT
+
+  CLIENT --> ENGINE
+  SERVER --> ENGINE
+  GAME --> ENGINE

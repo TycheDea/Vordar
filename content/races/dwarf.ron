@@ -1,0 +1,23 @@
+// Dwarf race — short, wide, stout; mountain-forged and Physical-leaning.
+// Phase C: renders as the CC0 KayKit "Barbarian" (content/models/dwarf.glb).
+// The SDF `body` (with its braided-beard silhouette) is the pre-Phase-C
+// fallback; the mesh branch ignores it. Clip names read from the asset.
+(
+    body: [
+        (shape: Capsule, offset: (0.0, -0.05, 0.0), scale: (0.52, 0.42, 0.52), color: (0.40, 0.33, 0.26)),
+        (shape: Sphere,  offset: (0.0, 0.48, 0.0),  scale: (0.28, 0.28, 0.28), color: (0.92, 0.78, 0.62)),
+        (shape: RoundedBox(corner_radius: 0.05), offset: (0.0, 0.28, 0.16), scale: (0.20, 0.26, 0.10), color: (0.55, 0.35, 0.18)),
+    ],
+    model: Some((
+        asset: "content/models/dwarf.glb",
+        idle:   "Idle",
+        walk:   "Walking_A",
+        run:    "Running_A",
+        attack: "1H_Melee_Attack_Chop",
+        death:  "Death_A",
+        hit:    "Hit_A",
+        walk_speed: 0.1,
+        run_speed:  3.0,
+        forward_offset: 3.14159, // KayKit rigs face +Z; π turns them to face travel
+    )),
+)

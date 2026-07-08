@@ -15,7 +15,7 @@
 // are corrected before any downstream systems read them.
 
 use engine_app::scheduler::System;
-use engine_core::components::{CollisionShape, Hitbox, Solid, Transform};
+use engine_core::components::{Anchored, CollisionShape, Hitbox, Solid, Transform};
 use engine_core::traits::Resources;
 use engine_core::World;
 use engine_physics::narrowphase::ActivePairs;
@@ -44,18 +44,29 @@ impl System for SeparationSystem {
         // instead of six world.get calls (and two shape clones) per pair.
         let mut corrections: HashMap<Entity, Vec3> = HashMap::new();
         {
-            let mut query = world.query::<(&Transform, &Hitbox, hecs::Satisfies<&Solid>)>();
+            let mut query =
+                world.query::<(&Transform, &Hitbox, hecs::Satisfies<&Solid>, hecs::Satisfies<&Anchored>)>();
             let view = query.view();
             for &(a, b) in &active.0 {
-                let (Some((t_a, h_a, a_solid)), Some((t_b, h_b, b_solid))) = (view.get(a), view.get(b)) else {
+                let (Some((t_a, h_a, a_solid, a_anchored)), Some((t_b, h_b, b_solid, b_anchored))) =
+                    (view.get(a), view.get(b))
+                else {
                     continue;
                 };
-                // Both must be Solid to separate.
-                if !a_solid || !b_solid { continue; }
+                // Both must be Solid to separate; two Anchored never move.
+                if !a_solid || !b_solid || (a_anchored && b_anchored) { continue; }
 
                 if let Some(correction) = mtv(&t_a.position, &h_a.shape, &t_b.position, &h_b.shape) {
-                    *corrections.entry(a).or_insert(Vec3::ZERO) += correction;
-                    *corrections.entry(b).or_insert(Vec3::ZERO) -= correction;
+                    // An Anchored side yields nothing — the other side takes
+                    // the WHOLE separation (mtv returns each side's half).
+                    if a_anchored {
+                        *corrections.entry(b).or_insert(Vec3::ZERO) -= correction * 2.0;
+                    } else if b_anchored {
+                        *corrections.entry(a).or_insert(Vec3::ZERO) += correction * 2.0;
+                    } else {
+                        *corrections.entry(a).or_insert(Vec3::ZERO) += correction;
+                        *corrections.entry(b).or_insert(Vec3::ZERO) -= correction;
+                    }
                 }
             }
         }
@@ -106,5 +117,53 @@ fn mtv(pa: &Vec3, sa: &CollisionShape, pb: &Vec3, sb: &CollisionShape) -> Option
             let hb = Vec3::splat(*radius);
             mtv(pa, &CollisionShape::Aabb { half_extents: *half_extents }, pb, &CollisionShape::Aabb { half_extents: hb })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine_physics::narrowphase::ActivePairs;
+
+    fn solid(world: &mut World, x: f32) -> Entity {
+        world.spawn((
+            Transform::new(Vec3::new(x, 0.0, 0.0)),
+            Hitbox { shape: CollisionShape::Aabb { half_extents: Vec3::splat(0.5) } },
+            Solid,
+        ))
+    }
+
+    fn run_pair(world: &mut World, a: Entity, b: Entity) {
+        let mut resources = Resources::new();
+        let mut pairs = ActivePairs::new();
+        pairs.0.insert((a, b));
+        resources.insert(pairs);
+        SeparationSystem.run(world, &mut resources, 1.0 / 60.0);
+    }
+
+    #[test]
+    fn anchored_side_never_yields() {
+        let mut world = World::new();
+        let wall = solid(&mut world, 0.0);
+        world.insert_one(wall, Anchored).unwrap();
+        let walker = solid(&mut world, 0.8); // 0.2 overlap on x
+
+        run_pair(&mut world, wall, walker);
+        assert_eq!(world.get::<&Transform>(wall).unwrap().position.x, 0.0, "the wall must not move");
+        let moved = world.get::<&Transform>(walker).unwrap().position.x;
+        assert!(moved > 0.8, "the walker takes the whole correction, got {moved}");
+    }
+
+    #[test]
+    fn two_anchored_never_push_each_other() {
+        let mut world = World::new();
+        let a = solid(&mut world, 0.0);
+        let b = solid(&mut world, 0.6);
+        world.insert_one(a, Anchored).unwrap();
+        world.insert_one(b, Anchored).unwrap();
+
+        run_pair(&mut world, a, b);
+        assert_eq!(world.get::<&Transform>(a).unwrap().position.x, 0.0);
+        assert_eq!(world.get::<&Transform>(b).unwrap().position.x, 0.6);
     }
 }

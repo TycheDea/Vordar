@@ -1,13 +1,20 @@
+pub mod anim;
 pub mod camera;
 pub mod dev_overlay;
 pub mod instance;
 pub mod menu;
+pub mod mesh;
+pub(crate) mod mesh_pipeline;
+pub mod particle_pipeline;
 pub mod pipeline;
+pub(crate) mod skinned_pipeline;
 pub mod texture;
 pub mod ui_layers;
 
 pub use dev_overlay::DevOverlaySystem;
 pub use menu::{MenuState, MenuSystem};
+pub use mesh::{MeshDrawList, MeshRenderSyncSystem, MeshStore, SkinnedDrawList, SocketConfig, SocketTransforms};
+pub use particle_pipeline::{ParticleInstance, MAX_PARTICLES};
 pub use ui_layers::UiLayers;
 
 use std::mem::size_of;
@@ -23,7 +30,7 @@ use engine_app::input::KeyboardState;
 use engine_app::winit_processor::WinitEventProcessor;
 use engine_core::traits::DespawnQueue;
 use engine_core::components::{PreviousTransform, RenderShape, RenderShapeType, ShapeGroup, Transform};
-use glam::{Mat4, Quat};
+use glam::Mat4;
 use winit::keyboard::KeyCode;
 use crate::camera::{Camera, CameraUniform, LightUniform, ProjectionMode};
 use crate::menu::{draw_menu, MenuAction, MenuScreen, SettingsDraft}; // SettingsDraft used in apply_pending
@@ -50,6 +57,7 @@ impl Default for CameraConfig {
 }
 
 const MAX_INSTANCES: usize = 65_536;
+const MAX_MESH_INSTANCES: usize = 16_384;
 
 pub(crate) struct RendererState {
     pub(crate) surface:           wgpu::Surface<'static>,
@@ -60,6 +68,17 @@ pub(crate) struct RendererState {
     pub(crate) vertex_buffer:     wgpu::Buffer,
     pub(crate) index_buffer:      wgpu::Buffer,
     pub(crate) instance_buffer:   wgpu::Buffer,
+    // ── meshes ──
+    pub(crate) mesh_pipeline:        wgpu::RenderPipeline,
+    pub(crate) mesh_instance_buffer: wgpu::Buffer,
+    // ── skinned meshes ──
+    pub(crate) skinned_pipeline:        wgpu::RenderPipeline,
+    pub(crate) skinned_instance_buffer: wgpu::Buffer,
+    pub(crate) joint_buffer:            wgpu::Buffer,
+    pub(crate) joint_bind_group:        wgpu::BindGroup,
+    // ── particles ──
+    pub(crate) particle_pipeline:        wgpu::RenderPipeline,
+    pub(crate) particle_instance_buffer: wgpu::Buffer,
     pub(crate) camera:            Camera,
     pub(crate) camera_buffer:     wgpu::Buffer,
     pub(crate) light_buffer:      wgpu::Buffer,
@@ -125,12 +144,57 @@ impl RendererState {
         let default_tex     = texture::create_default_white(&device, &queue);
         let default_bg      = texture::create_bind_group(&device, &texture_bgl, &default_tex);
         let render_pipeline = pipeline::create_pipeline(&device, format, &camera_bgl, &texture_bgl);
+        let mesh_render_pipeline =
+            mesh_pipeline::create_mesh_pipeline(&device, format, &camera_bgl, &texture_bgl);
+
+        let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(&device);
+        let skinned_render_pipeline = skinned_pipeline::create_skinned_pipeline(
+            &device, format, &camera_bgl, &texture_bgl, &joint_bgl,
+        );
+        let particle_render_pipeline =
+            particle_pipeline::create_particle_pipeline(&device, format, &camera_bgl);
 
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label:              Some("Instance Buffer"),
             size:               (MAX_INSTANCES * size_of::<SdfInstance>()) as u64,
             usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
+        });
+
+        let mesh_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Mesh Instance Buffer"),
+            size:               (MAX_MESH_INSTANCES * mesh_pipeline::MESH_INSTANCE_SIZE) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let skinned_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Skinned Instance Buffer"),
+            size:               (skinned_pipeline::MAX_SKINNED_INSTANCES * skinned_pipeline::SKINNED_INSTANCE_SIZE) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let particle_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Particle Instance Buffer"),
+            size:               (particle_pipeline::MAX_PARTICLES * particle_pipeline::PARTICLE_INSTANCE_SIZE) as u64,
+            usage:              wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let joint_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Joint Palette Buffer"),
+            size:               (skinned_pipeline::MAX_JOINT_MATRICES * size_of::<[[f32; 4]; 4]>()) as u64,
+            usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let joint_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("Joint Palette Bind Group"),
+            layout:  &joint_bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding:  0,
+                resource: joint_buffer.as_entire_binding(),
+            }],
         });
 
         let (depth_texture, depth_view) =
@@ -171,6 +235,14 @@ impl RendererState {
                 surface, device, queue, config,
                 pipeline: render_pipeline,
                 vertex_buffer, index_buffer, instance_buffer,
+                mesh_pipeline: mesh_render_pipeline,
+                mesh_instance_buffer,
+                skinned_pipeline: skinned_render_pipeline,
+                skinned_instance_buffer,
+                joint_buffer,
+                joint_bind_group,
+                particle_pipeline: particle_render_pipeline,
+                particle_instance_buffer,
                 camera, camera_buffer, light_buffer, camera_bind_group,
                 depth_texture, depth_view,
                 texture_bgl,
@@ -193,9 +265,7 @@ impl RendererState {
         (self.depth_texture, self.depth_view) =
             texture::create_depth_texture(&self.device, w, h);
         self.camera.aspect = w as f32 / h as f32;
-        let uniform = CameraUniform::new(
-            self.camera.build_view_projection_matrix().to_cols_array_2d()
-        );
+        let uniform = CameraUniform::from_camera(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 }
@@ -226,9 +296,7 @@ pub fn update_camera(target: Option<GlamVec3>, yaw_delta: f32, pitch_delta: f32,
         .expect("RendererState not in resources");
     if let Some(t) = target { state.camera.target = t; }
     state.camera.orbit(yaw_delta, pitch_delta);
-    let uniform = CameraUniform::new(
-        state.camera.build_view_projection_matrix().to_cols_array_2d()
-    );
+    let uniform = CameraUniform::from_camera(&state.camera);
     state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
 }
 
@@ -251,9 +319,7 @@ pub fn zoom_camera(delta: f32, resources: &mut Resources) {
         .get_mut::<RendererState>()
         .expect("RendererState not in resources");
     state.camera.zoom(delta, min_radius, max_radius);
-    let uniform = CameraUniform::new(
-        state.camera.build_view_projection_matrix().to_cols_array_2d()
-    );
+    let uniform = CameraUniform::from_camera(&state.camera);
     state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
 }
 
@@ -396,6 +462,21 @@ pub fn init(window: &Arc<Window>, resources: &mut Resources) {
 
     resources.insert(state);
     resources.insert(pool);
+    resources.insert(MeshStore::default());
+    resources.insert(MeshDrawList::default());
+    resources.insert(SkinnedDrawList::default());
+    resources.insert(SocketConfig::default());
+    resources.insert(SocketTransforms::default());
+    resources.insert(ParticleDrawList::default());
+}
+
+/// World-space particle instances for this display frame. A game-side system
+/// (the client's particle sim) rebuilds `instances` every frame in
+/// Phase::RenderSync; RenderSystem uploads and draws them additively after the
+/// opaque passes. Anything past MAX_PARTICLES is ignored.
+#[derive(Default)]
+pub struct ParticleDrawList {
+    pub instances: Vec<ParticleInstance>,
 }
 
 pub fn on_resize(w: u32, h: u32, resources: &mut Resources) {
@@ -468,7 +549,7 @@ impl System for RenderSyncSystem {
 
             for (sub, key) in group.shapes.iter().zip(slots.0.iter()) {
                 let sub_model = parent_model
-                    * Mat4::from_scale_rotation_translation(sub.scale, Quat::IDENTITY, sub.offset);
+                    * Mat4::from_scale_rotation_translation(sub.scale, sub.rotation, sub.offset);
                 let (shape_type, shape_params) = shape_to_gpu(sub.shape);
                 let new_inst = SdfInstance {
                     model:       sub_model.to_cols_array_2d(),
@@ -595,6 +676,13 @@ impl System for RenderSystem {
             None
         };
 
+        // Mesh draw lists + store, taken out so they outlive the RendererState
+        // borrow below (returned at the end of the frame).
+        let mesh_list     = resources.get_mut::<MeshDrawList>().map(std::mem::take);
+        let skinned_list  = resources.get_mut::<SkinnedDrawList>().map(std::mem::take);
+        let mesh_store    = resources.get_mut::<MeshStore>().map(std::mem::take);
+        let particle_list = resources.get_mut::<ParticleDrawList>().map(std::mem::take);
+
         // ── All GPU work inside one mutable borrow of RendererState ───────────
         let state = resources.get_mut::<RendererState>()
             .expect("RendererState not in resources");
@@ -606,15 +694,57 @@ impl System for RenderSystem {
             buf_pos += count;
         }
 
+        if let Some(list) = mesh_list.as_ref().filter(|l| !l.instances.is_empty()) {
+            let n = list.instances.len().min(MAX_MESH_INSTANCES);
+            state.queue.write_buffer(
+                &state.mesh_instance_buffer, 0,
+                bytemuck::cast_slice(&list.instances[..n]),
+            );
+        }
+
+        // Skinned instances + joint palette.
+        if let Some(list) = skinned_list.as_ref().filter(|l| !l.instances.is_empty()) {
+            state.queue.write_buffer(
+                &state.skinned_instance_buffer, 0,
+                bytemuck::cast_slice(&list.instances),
+            );
+            if !list.joints.is_empty() {
+                state.queue.write_buffer(
+                    &state.joint_buffer, 0,
+                    bytemuck::cast_slice(&list.joints),
+                );
+            }
+        }
+
+        // Particles.
+        let particle_count = particle_list
+            .as_ref()
+            .map(|l| l.instances.len().min(particle_pipeline::MAX_PARTICLES))
+            .unwrap_or(0);
+        if particle_count > 0 {
+            let list = particle_list.as_ref().expect("count > 0");
+            state.queue.write_buffer(
+                &state.particle_instance_buffer, 0,
+                bytemuck::cast_slice(&list.instances[..particle_count]),
+            );
+        }
+
         // wgpu 29: get_current_texture() returns CurrentSurfaceTexture enum
         let surface_texture = match state.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 state.resize(state.config.width, state.config.height);
+                restore_mesh_resources(resources, mesh_list, skinned_list, mesh_store, particle_list);
                 return;
             }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
-            wgpu::CurrentSurfaceTexture::Validation => return,
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                restore_mesh_resources(resources, mesh_list, skinned_list, mesh_store, particle_list);
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                restore_mesh_resources(resources, mesh_list, skinned_list, mesh_store, particle_list);
+                return;
+            }
         };
 
         let view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -670,6 +800,57 @@ impl System for RenderSystem {
             pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
             pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
+
+            // Mesh pass — same render pass and camera bind group, real geometry.
+            // Ranges are sorted by first-instance, so overflow past the buffer
+            // cap ends the loop rather than wrapping.
+            if let (Some(list), Some(store)) = (mesh_list.as_ref(), mesh_store.as_ref()) {
+                if !list.instances.is_empty() {
+                    pass.set_pipeline(&state.mesh_pipeline);
+                    pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
+                    for &(mesh_idx, first, count) in &list.ranges {
+                        if first as usize >= MAX_MESH_INSTANCES { break; }
+                        let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                        for prim in &gpu_mesh.primitives {
+                            pass.set_bind_group(1, &prim.texture_bind_group, &[]);
+                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                        }
+                    }
+                }
+            }
+
+            // Skinned mesh pass — same camera bind group, plus the joint
+            // palette (group 2). Instances index their own joint block via the
+            // joint_base instance attribute, so one draw per mesh still works.
+            if let (Some(list), Some(store)) = (skinned_list.as_ref(), mesh_store.as_ref()) {
+                if !list.instances.is_empty() {
+                    pass.set_pipeline(&state.skinned_pipeline);
+                    pass.set_bind_group(0, &state.camera_bind_group, &[]);
+                    pass.set_bind_group(2, &state.joint_bind_group, &[]);
+                    pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
+                    for &(mesh_idx, first, count) in &list.ranges {
+                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                        for prim in &gpu_mesh.primitives {
+                            pass.set_bind_group(1, &prim.texture_bind_group, &[]);
+                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                        }
+                    }
+                }
+            }
+
+            // Particle pass — additive billboards, drawn last so the read-only
+            // depth test sees all opaque geometry.
+            if particle_count > 0 {
+                pass.set_pipeline(&state.particle_pipeline);
+                pass.set_bind_group(0, &state.camera_bind_group, &[]);
+                pass.set_vertex_buffer(0, state.particle_instance_buffer.slice(..));
+                pass.draw(0..4, 0..particle_count as u32);
+            }
         }
 
         // Egui overlay pass (Load existing pixels — don't clear the 3D scene)
@@ -703,7 +884,24 @@ impl System for RenderSystem {
         }
         state.queue.submit(std::iter::once(encoder.finish()));
         surface_texture.present();
+
+        restore_mesh_resources(resources, mesh_list, skinned_list, mesh_store, particle_list);
     }
+}
+
+/// Return the taken mesh draw lists/store to Resources — called on every exit
+/// path of RenderSystem::run so loaded meshes survive skipped frames.
+fn restore_mesh_resources(
+    resources: &mut Resources,
+    list:      Option<MeshDrawList>,
+    skinned:   Option<SkinnedDrawList>,
+    store:     Option<MeshStore>,
+    particles: Option<ParticleDrawList>,
+) {
+    if let Some(l) = list      { resources.insert(l); }
+    if let Some(s) = skinned   { resources.insert(s); }
+    if let Some(s) = store     { resources.insert(s); }
+    if let Some(p) = particles { resources.insert(p); }
 }
 
 impl RenderSystem {
@@ -826,9 +1024,7 @@ impl System for CycleCameraSystem {
             let state = resources.get_mut::<RendererState>()
                 .expect("RendererState not in resources");
             state.camera.cycle_projection();
-            let uniform = CameraUniform::new(
-                state.camera.build_view_projection_matrix().to_cols_array_2d()
-            );
+            let uniform = CameraUniform::from_camera(&state.camera);
             state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
         }
 
@@ -910,6 +1106,7 @@ impl Plugin for RenderPlugin {
             // Attach slots to slotless renderables, then sync transforms to the GPU pool.
             .add_system(RenderSlotAttachSystem,    Phase::RenderSync,   SystemOrder::First)
             .add_system(RenderSyncSystem,          Phase::RenderSync,   SystemOrder::Default)
+            .add_system(MeshRenderSyncSystem::new(), Phase::RenderSync, SystemOrder::Default)
             .add_system(RenderSystem::new(),       Phase::Render,       SystemOrder::Default);
     }
 }

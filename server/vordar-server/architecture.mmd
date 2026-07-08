@@ -1,0 +1,91 @@
+%% vordar-server architecture
+%% One headless app per zone; one shared persistence worker; one shared world-time origin.
+%% Render: any Mermaid viewer (GitHub, mermaid.live, Obsidian, VS Code Mermaid ext).
+
+flowchart TB
+
+  CLIENT[["Clients (over network)"]]
+
+  %% ------------------------------------------------------------------
+  %% Bootstrap — main thread
+  %% ------------------------------------------------------------------
+  subgraph MAIN["main() — main thread"]
+    direction TB
+    A0["parse address"]
+    A1["load_zones<br/>validate_zones — topology check"]
+    A2["build directory:<br/>zone name → base_port + i"]
+    A3["create local database"]
+    A4["instantiate world_origin (shared epoch for all zones)"]
+    A5["for each zone: spawn zone thread<br/>then join all"]
+    A0 --> A1 --> A2 --> A3 --> A4 --> A5
+  end
+
+  %% ------------------------------------------------------------------
+  %% One zone = one headless app, built on its own thread
+  %% ------------------------------------------------------------------
+  subgraph ZONE["zone-&lt;name&gt; thread (one per zone)"]
+    direction TB
+    B0["bind network server to address"]
+    B1["create app with physics, prefab<br/>and core game modules"]
+    B2["install networking and persistence<br/>(server, database, zone, directory, world origin)"]
+    B3["install chapter content<br/>(chapter 1 / chapter 2)"]
+    B4["load world events"]
+    B5["run headless simulation at 60 Hz"]
+    B0 --> B1 --> B2 --> B3 --> B4 --> B5
+  end
+
+  %% ------------------------------------------------------------------
+  %% Simulation schedule, advanced every tick
+  %% ------------------------------------------------------------------
+  subgraph SCHED["Simulation schedule — per tick @ 60 Hz"]
+    direction TB
+
+    subgraph P_IN["Input phase"]
+      S1["receive network input<br/>decode client messages<br/>on login → load character<br/>validate move / cast intents<br/>finished loads → spawn player + welcome<br/>apply one move intent per player each tick"]
+    end
+
+    subgraph P_UP["Update phase — game and physics"]
+      S2["movement · combat · projectiles<br/>collision and contact damage · separation<br/>enemies · spatial grid"]
+    end
+
+    subgraph P_POST["Post-update phase — fixed 60 Hz"]
+      S3["resolve mechanics<br/>(rewind hit test @ 10 Hz)"]
+      S4["update ravager rage<br/>(from damage dealt)"]
+      S5["transfer players through portals<br/>(@ 10 Hz)"]
+      S6["broadcast snapshots<br/>area-of-interest diff · crowd throttle · staggered @ 10 Hz"]
+      S7["autosave players (~30 s)"]
+      S3 -->|before| S6
+      S3 -->|after| S4
+      S5 -->|before| S6
+    end
+
+    P_IN --> P_UP --> P_POST
+  end
+
+  %% ------------------------------------------------------------------
+  %% Shared persistence worker
+  %% ------------------------------------------------------------------
+  subgraph DB["database thread (shared by all zones)"]
+    direction TB
+    D0["database request queue (single FIFO)"]
+    D1["worker: load / save characters"]
+    D0 --> D1
+  end
+
+  %% ------------------------------------------------------------------
+  %% Cross-subgraph wiring
+  %% ------------------------------------------------------------------
+  A5 -->|"spawn thread"| B0
+  A3 -.->|"database handle"| B2
+  A4 -.->|"world origin"| B2
+  B5 ==> SCHED
+
+  CLIENT -->|"login / move / cast messages"| S1
+  S6 -->|"snapshots · welcome · mechanic · hit results"| CLIENT
+  S5 -->|"redirect to new zone"| CLIENT
+
+  S1 -->|"load / save character"| D0
+  S3 -->|save| D0
+  S5 -->|"save (transfer)"| D0
+  S7 -->|"save (autosave)"| D0
+  D1 -.->|"loaded character"| S1

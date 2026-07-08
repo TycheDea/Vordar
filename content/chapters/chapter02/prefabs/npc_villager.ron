@@ -1,0 +1,14 @@
+// Villager — a human townsperson. The body composes client-side from the
+// human race base (no class = no gear). Deliberately NO Health: every damage
+// path requires Health on the target, so villagers are immune by
+// construction. Anchored: holds their post, players can't shove them.
+(
+    components: {
+        "Transform": (),
+        "Race":      (id: "human"),
+        "Npc":       (),
+        "Hitbox":    (shape: Aabb(half_extents: (0.45, 0.5, 0.45))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

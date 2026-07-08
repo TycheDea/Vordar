@@ -58,6 +58,10 @@ pub struct Bot {
     pub snapshot_at: Vec<Instant>,
     /// ids that appeared in the latest snapshot's `states` list
     pub last_states: Vec<u64>,
+    /// latest replicated hp per entity (v8)
+    pub last_hp: HashMap<u64, i32>,
+    /// EntityDied messages as (id, pos), in arrival order (v8)
+    pub deaths: Vec<(u64, glam::Vec3)>,
 }
 
 impl Bot {
@@ -99,6 +103,8 @@ impl Bot {
             snapshot_ticks: Vec::new(),
             snapshot_at: Vec::new(),
             last_states: Vec::new(),
+            last_hp: HashMap::new(),
+            deaths: Vec::new(),
         }
     }
 
@@ -131,15 +137,18 @@ impl Bot {
                         self.snapshot_at.push(Instant::now());
                         for e in enters {
                             self.last_snapshot.insert(e.id, e.pos);
+                            self.last_hp.insert(e.id, e.hp);
                             self.prefabs.insert(e.id, e.prefab);
                         }
                         for id in leaves {
                             self.last_snapshot.remove(&id);
+                            self.last_hp.remove(&id);
                             self.prefabs.remove(&id);
                         }
                         self.last_states = states.iter().map(|s| s.id).collect();
                         for s in states {
                             self.last_snapshot.insert(s.id, s.pos);
+                            self.last_hp.insert(s.id, s.hp);
                         }
                     }
                     Some(ServerMsg::MechanicScheduled { id, resolve_at_micros, .. }) => {
@@ -153,6 +162,9 @@ impl Bot {
                     }
                     Some(ServerMsg::Redirect { zone, addr }) => {
                         self.redirect = Some((zone, addr));
+                    }
+                    Some(ServerMsg::EntityDied { id, pos }) => {
+                        self.deaths.push((id, pos));
                     }
                     None => panic!("undecodable server message"),
                 }

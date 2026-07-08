@@ -1,0 +1,12 @@
+// The town elder — a dwarf, so the plaza shows more than one race. Same
+// immune-by-construction rules as the villager (no Health, Anchored).
+(
+    components: {
+        "Transform": (),
+        "Race":      (id: "dwarf"),
+        "Npc":       (),
+        "Hitbox":    (shape: Aabb(half_extents: (0.5, 0.4, 0.5))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

@@ -1,20 +1,17 @@
-// Player ("the wayfarer") — teal-cloaked traveler with a floating cyan focus
-// crystal at the shoulder: the crystal is the weapon (bolts share its color).
-// The teal body is also the minimap dot color. Sim components unchanged.
+// Player ("the wayfarer") — a Human wearing the human class's traveler
+// outfit. The visual is composed client-side: race base body (content/races/
+// human.ron) + class outfit (content/classes/human.ron) — no ShapeGroup is
+// authored here. Sim components unchanged.
 // Component names must match ComponentRegistry registrations.
 (
     components: {
         "Transform":  (),
         "Velocity":   (),
-        "ShapeGroup": (shapes: [
-            (shape: Capsule, offset: (0.0, 0.05, 0.0),  scale: (0.42, 0.55, 0.42), color: (0.20, 0.85, 0.55)),
-            (shape: Sphere,  offset: (0.0, 0.72, 0.0),  scale: (0.26, 0.26, 0.26), color: (0.95, 0.85, 0.65)),
-            (shape: RoundedBox(corner_radius: 0.1), offset: (0.0, 0.1, -0.22), scale: (0.46, 0.6, 0.1), color: (0.10, 0.30, 0.25)),
-            (shape: Diamond, offset: (0.5, 0.55, 0.0),  scale: (0.13, 0.24, 0.13), color: (0.35, 0.95, 1.0)),
-        ]),
         "Hitbox":     (shape: Aabb(half_extents: (0.5, 0.5, 0.5))),
         "Solid":      (),
         "Health":     (current: 100, max: 100),
         "Player":     (speed: 6.0),
+        "Race":       (id: "human"),
+        "Class":      (id: "human"),
     },
 )

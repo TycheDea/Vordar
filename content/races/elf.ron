@@ -1,0 +1,23 @@
+// Elf race — slender and pale, silver-haired keeper of the World Tree's roots
+// (Life-attuned). Phase C: renders as the CC0 KayKit "Rogue"
+// (content/models/elf.glb) — a lithe hooded figure that reads elvish. The SDF
+// `body` is the pre-Phase-C fallback; the mesh branch ignores it.
+(
+    body: [
+        (shape: Capsule, offset: (0.0, 0.08, 0.0),  scale: (0.36, 0.60, 0.36), color: (0.52, 0.58, 0.50)),
+        (shape: Sphere,  offset: (0.0, 0.80, 0.0),  scale: (0.24, 0.24, 0.24), color: (0.96, 0.92, 0.85)),
+        (shape: RoundedBox(corner_radius: 0.08), offset: (0.0, 0.92, -0.06), scale: (0.22, 0.12, 0.24), color: (0.85, 0.88, 0.90)),
+    ],
+    model: Some((
+        asset: "content/models/elf.glb",
+        idle:   "Idle",
+        walk:   "Walking_A",
+        run:    "Running_A",
+        attack: "1H_Melee_Attack_Chop",
+        death:  "Death_A",
+        hit:    "Hit_A",
+        walk_speed: 0.1,
+        run_speed:  3.0,
+        forward_offset: 3.14159, // KayKit rigs face +Z; π turns them to face travel
+    )),
+)

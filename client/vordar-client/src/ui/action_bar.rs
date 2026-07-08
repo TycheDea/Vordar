@@ -1,8 +1,9 @@
 // Action bar — MMO-style skill slots, bottom-center.
 //
-// ActionBarSyncSystem publishes the slots from CastState each display frame;
+// ActionBarSyncSystem publishes the slots from the local class's abilities
+// (ClassLibrary order = slot order) + CastState cooldowns each display frame;
 // the `draw` callback (a UiLayers layer) renders them. Non-interactable v1:
-// the keybinds are the input (LMB = bolt, Q = blast); clicking slots is later
+// the keybinds are the input (slot 0 = LMB, 1 = Q, 2 = E); clicking is later
 // polish.
 
 use crate::CastState;
@@ -12,13 +13,16 @@ use engine_core::World;
 use hecs::Entity;
 use vordar_game::Player;
 
+/// Keybind labels by slot index (matches AbilityCastSystem's input mapping).
+const KEYBINDS: [&str; 5] = ["LMB", "Q", "E", "", ""];
+
 #[derive(Clone)]
 pub struct SkillSlot {
-    pub label: &'static str,
+    pub label: String,
     pub keybind: &'static str,
     /// Remaining-cooldown fraction (1.0 = just fired → 0.0 = ready); None = ready.
     pub cooldown_frac: Option<f32>,
-    /// Disabled slots draw dimmed (e.g. blast offline, empty slots).
+    /// Disabled slots draw dimmed (e.g. server-resolved abilities offline, empty slots).
     pub enabled: bool,
 }
 
@@ -28,29 +32,43 @@ pub struct ActionBarState {
     pub slots: Vec<SkillSlot>,
 }
 
-/// Fills the bar from CastState. Blast is a server-resolved mechanic, so its
-/// slot is enabled only when playing online (NetClientState present).
+/// Fills the bar from the local class + CastState. Scheduled (server-resolved)
+/// abilities are enabled only when playing online (NetClientState present);
+/// projectiles work offline too (the sandbox fires them locally).
 pub struct ActionBarSyncSystem;
 
 impl System for ActionBarSyncSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let has_player = crate::net::own_entity(resources).is_some()
             || world.query::<(Entity, &Player)>().iter().next().is_some();
-        let online = resources.contains::<crate::net::NetClientState>();
-        let (bolt, blast) = resources
+
+        // Ability names per slot, in class-authored order. Every slot the class
+        // has is castable here: the sandbox plays each ability's animation
+        // locally (SandboxCastSystem), and online the server resolves it.
+        let abilities: Vec<String> = crate::local_class(world, resources)
+            .and_then(|class| {
+                let library = resources.get::<vordar_game::class::ClassLibrary>()?;
+                Some(library.abilities_of(&class).iter().map(|a| a.name.clone()).collect())
+            })
+            .unwrap_or_default();
+        let fracs: Vec<Option<f32>> = resources
             .get::<CastState>()
-            .map(|c| (c.bolt.remaining_frac(), c.blast.remaining_frac()))
-            .unwrap_or((None, None));
+            .map(|c| c.abilities.iter().map(|cd| cd.remaining_frac()).collect())
+            .unwrap_or_default();
 
         let Some(bar) = resources.get_mut::<ActionBarState>() else { return };
         bar.open = has_player;
-        bar.slots = vec![
-            SkillSlot { label: "Bolt", keybind: "LMB", cooldown_frac: bolt, enabled: true },
-            SkillSlot { label: "Blast", keybind: "Q", cooldown_frac: blast, enabled: online },
-            SkillSlot { label: "", keybind: "", cooldown_frac: None, enabled: false },
-            SkillSlot { label: "", keybind: "", cooldown_frac: None, enabled: false },
-            SkillSlot { label: "", keybind: "", cooldown_frac: None, enabled: false },
-        ];
+        bar.slots = (0..KEYBINDS.len())
+            .map(|i| match abilities.get(i) {
+                Some(name) => SkillSlot {
+                    label: name.clone(),
+                    keybind: KEYBINDS[i],
+                    cooldown_frac: fracs.get(i).copied().flatten(),
+                    enabled: true,
+                },
+                None => SkillSlot { label: String::new(), keybind: "", cooldown_frac: None, enabled: false },
+            })
+            .collect();
     }
 }
 
@@ -106,7 +124,7 @@ pub fn draw(ctx: &egui::Context, resources: &Resources) {
                 painter.text(
                     Pos2::new(r.center().x, r.max.y - 4.0),
                     Align2::CENTER_BOTTOM,
-                    slot.label,
+                    slot.label.as_str(),
                     egui::FontId::proportional(11.0),
                     text,
                 );

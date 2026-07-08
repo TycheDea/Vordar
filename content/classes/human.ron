@@ -1,0 +1,52 @@
+// Human's kit — abilities migrated verbatim from the old hardcoded SKILLS
+// const (numbers unchanged). Authored ability order is action-bar slot order:
+// slot 0 = LMB (bolt), slot 1 = Q (blast).
+//
+// Outfit (the wayfarer): teal traveler's cloak + the floating cyan focus
+// crystal at the shoulder — the crystal is the weapon (bolts share its
+// color), so it's what swings on a cast.
+(
+    abilities: [
+        (
+            id: "bolt",
+            name: "Bolt",
+            cooldown_micros: 600000,
+            anim: Some("Spellcast_Shoot"),
+            anim_secs: Some(0.4),
+            effect: Projectile(
+                prefab: "bolt",
+                speed: 18.0,
+                damage: 12,
+                ttl_secs: 1.5,
+                spawn_offset: 0.9,
+            ),
+        ),
+        (
+            id: "blast",
+            name: "Blast",
+            cooldown_micros: 3000000,
+            anim: Some("Spellcast_Long"),
+            anim_secs: Some(1.0),
+            effect: Scheduled(
+                telegraph_prefab: "telegraph",
+                radius: 4.0,
+                damage: 25,
+                cast_micros: 2000000,
+                max_range: 15.0,
+            ),
+        ),
+    ],
+    outfit: [
+        (shape: RoundedBox(corner_radius: 0.1), offset: (0.0, 0.1, -0.22), scale: (0.46, 0.6, 0.1), color: (0.10, 0.30, 0.25)),
+        (shape: Diamond, offset: (0.5, 0.55, 0.0), scale: (0.13, 0.24, 0.13), color: (0.35, 0.95, 1.0)),
+    ],
+    pose: (
+        bob_amplitude: 0.025,
+        bob_speed: 1.6,
+        swing_index: Some(1),
+        swing_arc: (0.15, 0.20, 0.30),
+    ),
+    // Skinned-race tint (the wayfarer): a cool steel-cyan cast, rhyming with
+    // the focus crystal. Ignored by SDF races (they dress via `outfit`).
+    tint: Some((0.66, 0.80, 1.0)),
+)

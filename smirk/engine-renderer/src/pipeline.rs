@@ -11,10 +11,10 @@ use wgpu::{
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct Vertex {
-    pub(crate) position: [f32; 3],
-    pub(crate) normal:   [f32; 3],
-    pub(crate) uv:       [f32; 2],  // stride: 32 bytes
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub normal:   [f32; 3],
+    pub uv:       [f32; 2],  // stride: 32 bytes
 }
 
 // 24 vertices — 4 per face, each face sharing one outward normal.

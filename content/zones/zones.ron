@@ -15,6 +15,7 @@
         ),
         (
             name: "east",
+            chapter: Some("chapter02"),
             portals: [
                 (pos: (-22.0, 0.0, 0.0), radius: 2.0, target_zone: "start", target_pos: (16.0, 0.0, 0.0)),
             ],

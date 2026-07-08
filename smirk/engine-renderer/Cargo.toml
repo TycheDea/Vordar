@@ -21,4 +21,5 @@ rand = "0.10.0"
 egui = { workspace = true }
 egui-wgpu = "0.34"
 egui-winit = "0.34"
+gltf = { version = "1.4.1", features = ["import"] }
 

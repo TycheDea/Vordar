@@ -6,11 +6,15 @@
 // needs the component loaders and prefab definitions to display replicated
 // entities, but must NOT run the simulation (the server is authoritative).
 
+use crate::combat::buff::BuffDecaySystem;
 use crate::combat::contact_damage::{ContactDamage, ContactDamageSystem};
 use crate::combat::death::DeathSystem;
+use crate::combat::leap::LeapSystem;
 use crate::combat::projectile::{ProjectileHitSystem, ProjectileTtlSystem};
+use crate::combat::stats::CombatStats;
 use crate::enemies::{BehaviorRegistry, Enemy, EnemyAISystem};
 use crate::motion::{MovementSystem, SeparationSystem};
+use crate::player::class::{ClassId, ClassLibrary, RaceId, RaceLibrary};
 use crate::player::{Player, PlayerMovementSystem};
 use crate::world::camp::CampSystem;
 use crate::world::wave_spawner::{ChapterSetupSystem, WaveSpawnerSystem};
@@ -26,8 +30,14 @@ impl Plugin for GameComponentsPlugin {
         app.register_component::<Player>("Player")
             .register_component::<Enemy>("Enemy")
             .register_component::<ContactDamage>("ContactDamage")
+            .register_component::<CombatStats>("CombatStats")
+            .register_component::<ClassId>("Class")
+            .register_component::<RaceId>("Race")
+            .register_component::<crate::vfx::VfxTrail>("VfxTrail")
             // Shared prefabs (chapter plugins add their own dirs on top).
             .add_prefab_dir("content/prefabs");
+        app.resource_or_default::<ClassLibrary>().load_dir("content/classes");
+        app.resource_or_default::<RaceLibrary>().load_dir("content/races");
     }
 }
 
@@ -41,8 +51,13 @@ impl Plugin for CoreGamePlugin {
         app.add_plugin(GameComponentsPlugin)
             // Chapter start (once)
             .add_system(ChapterSetupSystem::new(), Phase::PreUpdate,   SystemOrder::First)
+            // Timers/cooldowns wind down here; buffs drop at zero.
+            .add_system(BuffDecaySystem,      Phase::PreUpdate,        SystemOrder::Default)
             // Logic
             .add_system(PlayerMovementSystem, Phase::Update,           SystemOrder::First)
+            // Dash override — must land between PlayerMovement (First) and
+            // Movement (Last) so a leap wins over input for its duration.
+            .add_system(LeapSystem,           Phase::Update,           SystemOrder::Default)
             .add_system(EnemyAISystem::new(), Phase::Update,           SystemOrder::Default)
             .add_system(WaveSpawnerSystem,    Phase::Update,           SystemOrder::Default)
             // World-resident enemy populations; no-op without ActiveChapter.

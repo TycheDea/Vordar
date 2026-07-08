@@ -19,15 +19,16 @@ pub mod events;
 pub mod motion;
 pub mod player;
 pub mod plugin;
+pub mod vfx;
 pub mod world;
 
 pub use plugin::{CoreGamePlugin, GameComponentsPlugin};
 
 // The heavily-used names, at the crate root.
-pub use combat::{ContactDamage, Mechanic, OnDeath, Projectile};
+pub use combat::{CombatStats, ContactDamage, Mechanic, OnDeath, Projectile};
 pub use enemies::{AttackKind, Enemy, Provoked};
 pub use player::Player;
 
-// Short content-facing module paths (`vordar_game::skills::skill`, ...).
-pub use player::skills;
+// Short content-facing module paths (`vordar_game::skills::AbilityDef`, ...).
+pub use player::{class, skills};
 pub use world::{chapter, zones};

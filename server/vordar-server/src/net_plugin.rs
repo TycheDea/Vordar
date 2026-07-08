@@ -2,7 +2,7 @@
 
 use crate::db::{CharacterRecord, DbHandle, DbLoaded, DbWorker};
 use engine_app::app::App;
-use engine_app::events::EventBus;
+use engine_app::events::{EventBus, HealthDepleted};
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_app::tick_rate::TickRate;
@@ -17,11 +17,15 @@ use hecs::Entity;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::Instant;
+use vordar_game::combat::buff::{ravager_mods, RavagerRageSystem};
+use vordar_game::combat::leap::{leap_velocity, LeapImpulse};
 use vordar_game::combat::projectile::spawn_projectile;
-use vordar_game::events::MoveIntent;
+use vordar_game::combat::stats::{compute_damage, DamageType};
+use vordar_game::events::{DamageDealt, MoveIntent};
+use vordar_game::player::class::{ClassId, ClassLibrary, DEFAULT_CLASS};
 use vordar_game::player::movement_velocity;
-use vordar_game::skills::{skill, SkillEffect};
-use vordar_game::{Enemy, Mechanic, Player, Provoked};
+use vordar_game::skills::AbilityEffect;
+use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
 use vordar_game::world::WorldTimeRes;
 use vordar_game::zones::{portal_hit, ZoneDef};
 use vordar_protocol::{decode, encode, ClientMsg, EntityPos, EntityState, ServerMsg, PROTOCOL_VERSION, SNAPSHOT_HZ};
@@ -37,6 +41,11 @@ const FUTURE_SLACK_MICROS: u64 = 50_000;
 /// buffer here; beyond the cap the oldest are dropped (the client re-converges
 /// via reconciliation). Flooding buys queue latency, never extra speed.
 const INTENT_QUEUE_CAP: usize = 16;
+
+/// What a character spawns as. The Ravager is the playable class while there
+/// is no character-creation/class-picker; the "player" (Human) prefab and its
+/// kit stay shipped and tested.
+const PLAYER_PREFAB: &str = "ravager";
 /// Area-of-interest radius around each player: only entities inside it are
 /// replicated to that client. Comfortably beyond the camera's view.
 const AOI_RADIUS: f32 = 40.0;
@@ -103,8 +112,13 @@ pub fn install(
         .insert_resource(WorldTimeRes(0))
         .set_phase_rate(Phase::PostUpdate, TickRate::Fixed(POST_HZ))
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
+        // Deaths broadcast before the flush removes the dying entity.
+        .add_system(DeathBroadcastSystem, Phase::DespawnFlush, SystemOrder::First)
         // Resolve before broadcasting so deaths reach the same snapshot wave.
         .add_system(MechanicResolveSystem::new(), Phase::PostUpdate, SystemOrder::before::<SnapshotBroadcastSystem>())
+        // Rage stacks read the tick's DamageDealt events: CollisionResolve's
+        // (earlier phase) and MechanicResolve's (just above) in one pass.
+        .add_system(RavagerRageSystem, Phase::PostUpdate, SystemOrder::after::<MechanicResolveSystem>())
         // Transfer before broadcasting: a redirected player must not receive
         // one more snapshot after their Redirect.
         .add_system(ZoneTransferSystem::new(), Phase::PostUpdate, SystemOrder::before::<SnapshotBroadcastSystem>())
@@ -216,6 +230,13 @@ pub struct NetReceiveSystem;
 
 impl System for NetReceiveSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        // Cloned once up front: ClassLibrary is read-only content, and this
+        // sidesteps holding an immutable Resources borrow across the event
+        // loop's many `resources.get_mut::<NetServerState>()` calls below.
+        let class_library = resources.get::<ClassLibrary>()
+            .expect("ClassLibrary not in resources")
+            .clone();
+
         // Publish the world clock for world systems (events, future schedules).
         let world_now = resources.get::<NetServerState>().unwrap().world_micros();
         resources.get_mut::<WorldTimeRes>().unwrap().0 = world_now;
@@ -224,7 +245,7 @@ impl System for NetReceiveSystem {
 
         // Projectile casts accepted this tick — spawned after the event loop
         // releases the NetServerState borrow (spawn_projectile needs resources).
-        let mut pending_bolts: Vec<(String, Vec3, Vec3, f32, i32, f32, Entity)> = Vec::new();
+        let mut pending_bolts: Vec<(String, Vec3, Vec3, f32, i32, DamageType, f32, Entity)> = Vec::new();
 
         for event in events {
             match event {
@@ -328,8 +349,12 @@ impl System for NetReceiveSystem {
                             }
                             pc.last_seq = seq;
                             pc.last_t = t;
-                            let Some(def) = skill(&skill_id) else {
-                                log::warn!("conn {conn}: unknown skill '{skill_id}'");
+                            let caster = pc.entity;
+                            let class_id = world.get::<&ClassId>(caster)
+                                .map(|c| c.id.clone())
+                                .unwrap_or_else(|_| DEFAULT_CLASS.to_owned());
+                            let Some(def) = class_library.get(&class_id, &skill_id) else {
+                                log::warn!("conn {conn}: unknown ability '{skill_id}' for class '{class_id}'");
                                 continue;
                             };
                             let now = state.server.now_micros();
@@ -339,13 +364,14 @@ impl System for NetReceiveSystem {
                                 log::debug!("conn {conn}: '{skill_id}' on cooldown");
                                 continue;
                             }
-                            let caster = pc.entity;
                             let Ok(caster_pos) = world.get::<&Transform>(caster).map(|tr| tr.position) else {
                                 continue;
                             };
                             let target = Vec3::new(target.x, 0.0, target.y);
-                            match def.effect {
-                                SkillEffect::Scheduled { telegraph_prefab, radius, damage, cast_micros, max_range } => {
+                            match &def.effect {
+                                AbilityEffect::Scheduled { telegraph_prefab, radius, damage, damage_type, cast_micros, max_range } => {
+                                    let (telegraph_prefab, radius, damage, damage_type, cast_micros, max_range) =
+                                        (telegraph_prefab.clone(), *radius, *damage, *damage_type, *cast_micros, *max_range);
                                     if caster_pos.distance_squared(target) > max_range * max_range {
                                         log::debug!("conn {conn}: cast out of range");
                                         continue;
@@ -362,13 +388,14 @@ impl System for NetReceiveSystem {
                                             id,
                                             radius,
                                             damage,
+                                            damage_type,
                                             resolve_at_micros,
                                             caster,
                                         },
                                     ));
                                     state.server.broadcast(encode(&ServerMsg::MechanicScheduled {
                                         id,
-                                        telegraph_prefab: telegraph_prefab.to_owned(),
+                                        telegraph_prefab,
                                         pos: target,
                                         radius,
                                         resolve_at_micros,
@@ -376,7 +403,9 @@ impl System for NetReceiveSystem {
                                     }));
                                     log::info!("conn {conn}: mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
                                 }
-                                SkillEffect::Projectile { prefab, speed, damage, ttl_secs, spawn_offset } => {
+                                AbilityEffect::Projectile { prefab, speed, damage, damage_type, ttl_secs, spawn_offset } => {
+                                    let (prefab, speed, damage, damage_type, ttl_secs, spawn_offset) =
+                                        (prefab.clone(), *speed, *damage, *damage_type, *ttl_secs, *spawn_offset);
                                     // No range gate: the target only fixes the
                                     // flight direction; the projectile itself
                                     // is the range limit (speed × ttl).
@@ -388,14 +417,55 @@ impl System for NetReceiveSystem {
                                     let dir = dir.normalize();
                                     pc.last_cast.insert(skill_id.clone(), now);
                                     pending_bolts.push((
-                                        prefab.to_owned(),
+                                        prefab,
                                         caster_pos + dir * spawn_offset,
                                         dir,
                                         speed,
                                         damage,
+                                        damage_type,
                                         ttl_secs,
                                         caster,
                                     ));
+                                }
+                                AbilityEffect::Leap { telegraph_prefab, radius, damage, damage_type, cast_micros, max_range } => {
+                                    let (telegraph_prefab, radius, damage, damage_type, cast_micros, max_range) =
+                                        (telegraph_prefab.clone(), *radius, *damage, *damage_type, *cast_micros, *max_range);
+                                    if caster_pos.distance_squared(target) > max_range * max_range {
+                                        log::debug!("conn {conn}: leap out of range");
+                                        continue;
+                                    }
+                                    pc.last_cast.insert(skill_id.clone(), now);
+                                    state.next_mechanic_id += 1;
+                                    let id = state.next_mechanic_id;
+                                    // Same scheduling as Scheduled — the arrival hit test IS a
+                                    // Mechanic — plus a dash whose countdown ends at the same
+                                    // instant (both derived from cast_micros).
+                                    let resolve_at_micros = now + cast_micros;
+                                    let cast_secs = cast_micros as f32 / 1e6;
+                                    world.spawn((
+                                        Transform::new(target),
+                                        Mechanic {
+                                            id,
+                                            radius,
+                                            damage,
+                                            damage_type,
+                                            resolve_at_micros,
+                                            caster,
+                                        },
+                                    ));
+                                    let _ = world.insert_one(caster, LeapImpulse {
+                                        velocity: leap_velocity(caster_pos, target, cast_secs),
+                                        remaining: cast_secs,
+                                    });
+                                    state.server.broadcast(encode(&ServerMsg::MechanicScheduled {
+                                        id,
+                                        telegraph_prefab,
+                                        pos: target,
+                                        radius,
+                                        resolve_at_micros,
+                                        duration_micros: cast_micros,
+                                    }));
+                                    log::info!("conn {conn}: leap mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
                                 }
                             }
                         }
@@ -407,8 +477,8 @@ impl System for NetReceiveSystem {
         }
 
         // Spawn the projectiles accepted above (player-fired: damages enemies).
-        for (prefab, origin, dir, speed, damage, ttl, caster) in pending_bolts {
-            spawn_projectile(world, resources, &prefab, origin, dir, speed, damage, ttl, caster, false);
+        for (prefab, origin, dir, speed, damage, damage_type, ttl, caster) in pending_bolts {
+            spawn_projectile(world, resources, &prefab, origin, dir, speed, damage, damage_type, ttl, caster, false);
         }
 
         // Finished character loads → spawn + Welcome. The connection enters
@@ -438,7 +508,7 @@ impl System for NetReceiveSystem {
                     continue;
                 }
             }
-            let result = spawn_prefab("player", record.pos, &mut SpawnContext { world, resources });
+            let result = spawn_prefab(PLAYER_PREFAB, record.pos, &mut SpawnContext { world, resources });
             let state = resources.get_mut::<NetServerState>().unwrap();
             match result {
                 Ok(entity) => {
@@ -481,7 +551,7 @@ impl System for NetReceiveSystem {
                 .collect()
         };
         for conn in dead {
-            let result = spawn_prefab("player", spawn_position(conn), &mut SpawnContext { world, resources });
+            let result = spawn_prefab(PLAYER_PREFAB, spawn_position(conn), &mut SpawnContext { world, resources });
             let state = resources.get_mut::<NetServerState>().unwrap();
             let Some(pc) = state.conns.get_mut(&conn) else { continue };
             match result {
@@ -611,8 +681,20 @@ impl System for MechanicResolveSystem {
             }
 
             for &entity in &hit_entities {
+                let dmg = {
+                    let atk = world.get::<&CombatStats>(mech.caster).ok();
+                    let def = world.get::<&CombatStats>(entity).ok();
+                    let seed = mech.id ^ entity.to_bits().get().rotate_left(21);
+                    let (bonus_power, mult) = ravager_mods(world, mech.caster, entity);
+                    let base = compute_damage(mech.damage + bonus_power, mech.damage_type, atk.as_deref(), def.as_deref(), seed);
+                    (base as f32 * mult).round() as i32
+                };
                 if let Ok(mut health) = world.get::<&mut Health>(entity) {
-                    health.current -= mech.damage;
+                    health.current -= dmg;
+                    resources
+                        .get_mut::<EventBus>()
+                        .unwrap()
+                        .emit(DamageDealt { attacker: mech.caster, target: entity, amount: dmg });
                 }
                 // Targeted damage wakes passive enemies, same as projectiles.
                 if world.get::<&Enemy>(entity).is_ok() {
@@ -771,29 +853,30 @@ impl System for SnapshotBroadcastSystem {
         // Per-client AOI: grid cells are coarse and multi-cell entities appear
         // more than once, so dedupe and apply the exact radius test — a fuzzy
         // border would make entities flap in and out between snapshots.
-        let mut per_conn: Vec<(ConnId, Vec<(u64, Entity, Vec3, f32)>)> = Vec::with_capacity(conn_players.len());
+        let mut per_conn: Vec<(ConnId, Vec<(u64, Entity, Vec3, i32, f32)>)> = Vec::with_capacity(conn_players.len());
         {
             let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
-            // One view for the whole gather: the replication filter (PrefabId)
-            // and the position come from a single lookup per candidate.
-            let mut repl_q = world.query::<(&Transform, &PrefabId)>();
+            // One view for the whole gather: the replication filter (PrefabId),
+            // position, and health come from a single lookup per candidate.
+            let mut repl_q = world.query::<(&Transform, &PrefabId, Option<&Health>)>();
             let repl_view = repl_q.view();
             for &(conn, player) in &conn_players {
                 let Ok(center) = world.get::<&Transform>(player).map(|t| t.position) else { continue };
                 self.aoi_scratch.clear();
                 grid.query_radius_into(center, AOI_RADIUS, &mut self.aoi_scratch);
                 self.seen.clear();
-                let mut current: Vec<(u64, Entity, Vec3, f32)> = Vec::with_capacity(self.aoi_scratch.len());
+                let mut current: Vec<(u64, Entity, Vec3, i32, f32)> = Vec::with_capacity(self.aoi_scratch.len());
                 for &entity in &self.aoi_scratch {
                     if !self.seen.insert(entity) {
                         continue;
                     }
-                    let Some((t, _)) = repl_view.get(entity) else { continue };
+                    let Some((t, _, hp)) = repl_view.get(entity) else { continue };
                     let dist_sq = t.position.distance_squared(center);
                     if dist_sq > AOI_RADIUS * AOI_RADIUS {
                         continue;
                     }
-                    current.push((entity.to_bits().get(), entity, t.position, dist_sq));
+                    let hp = hp.map(|h| h.current).unwrap_or(0);
+                    current.push((entity.to_bits().get(), entity, t.position, hp, dist_sq));
                 }
                 per_conn.push((conn, current));
             }
@@ -809,21 +892,21 @@ impl System for SnapshotBroadcastSystem {
             let enters: Vec<EntityState> = current
                 .iter()
                 .filter(|(id, ..)| !pc.known.contains(id))
-                .filter_map(|&(id, entity, pos, _)| {
+                .filter_map(|&(id, entity, pos, hp, _)| {
                     let prefab = world.get::<&PrefabId>(entity).ok()?.0.clone();
-                    Some(EntityState { id, prefab, pos })
+                    Some(EntityState { id, prefab, pos, hp })
                 })
                 .collect();
             // Crowd throttling: only `states` is budgeted — identity (enters/
             // leaves/known) must track the full AOI or the diff corrupts.
-            let entries: Vec<(u64, f32)> = current.iter().map(|&(id, _, _, d)| (id, d)).collect();
+            let entries: Vec<(u64, f32)> = current.iter().map(|&(id, _, _, _, d)| (id, d)).collect();
             let (selected, cursor) = select_states(&entries, pc.rr_cursor, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
             pc.rr_cursor = cursor;
             let states: Vec<EntityPos> = selected
                 .into_iter()
                 .map(|i| {
-                    let (id, _, pos, _) = current[i];
-                    EntityPos { id, pos }
+                    let (id, _, pos, hp, _) = current[i];
+                    EntityPos { id, pos, hp }
                 })
                 .collect();
             // The old known set becomes next conn's current_ids scratch.
@@ -837,6 +920,46 @@ impl System for SnapshotBroadcastSystem {
                 leaves,
                 states,
             }));
+        }
+    }
+}
+
+/// Broadcasts `EntityDied` (v8) for entities whose Health depleted this tick.
+/// Phase::DespawnFlush, First — after DeathSystem emitted the event
+/// (CollisionResolve) but before the flush removes the entity, so its final
+/// position is still readable. Snapshots stop mentioning the entity the same
+/// tick; this message is the client's only death signal (corpse + burst).
+/// Sent only to connections whose known set contains the entity.
+pub struct DeathBroadcastSystem;
+
+impl System for DeathBroadcastSystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        let deaths: Vec<(u64, Vec3)> = resources
+            .get::<EventBus>()
+            .map(|bus| {
+                bus.read::<HealthDepleted>()
+                    .filter_map(|e| {
+                        let pos = world.get::<&Transform>(e.entity).ok()?.position;
+                        Some((e.entity.to_bits().get(), pos))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if deaths.is_empty() {
+            return;
+        }
+        let state = resources.get_mut::<NetServerState>().unwrap();
+        for (id, pos) in deaths {
+            let msg = encode(&ServerMsg::EntityDied { id, pos });
+            let targets: Vec<ConnId> = state
+                .conns
+                .iter()
+                .filter(|(_, pc)| pc.known.contains(&id))
+                .map(|(&conn, _)| conn)
+                .collect();
+            for conn in targets {
+                state.server.send(conn, msg.clone());
+            }
         }
     }
 }

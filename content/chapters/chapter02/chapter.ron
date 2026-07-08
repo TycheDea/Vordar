@@ -1,0 +1,33 @@
+// Chapter 2 — Emberwood Rest: the first town, in the "east" zone.
+//
+// Layout (portal from start is at x=-22, arrival at x=-16; the corridor
+// along -X stays clear):
+//   - the plaza sits around x 4..16: town hall + cottages + villagers,
+//     all initial_spawns (spawn once, nothing here can die);
+//   - monster camps sit OUTSIDE town. Placement discipline (no navmesh,
+//     enemies beeline): every camp's southern/northern aggro reach
+//     (radius + aggro_range) stays clear of every building hitbox:
+//       grunts   (aggro 10) at z=28, reach z >= 14 — cottages end at z ~8.5
+//       brigands (aggro  8) at z=-27, reach z <= -14
+//       mossbacks (passive) graze far east.
+(
+    name: "Chapter 2 — Emberwood Rest",
+    spawning: (
+        max_alive: 32,
+        waves: [],
+    ),
+    initial_spawns: [
+        (prefab: "town_hall",    positions: [(10.0, 0.0, 0.0)]),
+        (prefab: "cottage",      positions: [(4.0, 0.0, 6.5), (4.5, 0.0, -6.5), (15.0, 0.0, 7.0)]),
+        (prefab: "npc_villager", positions: [(6.5, 0.0, 2.5), (12.5, 0.0, -3.5)]),
+        (prefab: "npc_elder",    positions: [(6.0, 0.0, -2.0)]),
+    ],
+    camps: [
+        // North road pack — the town's first quest-shaped nuisance.
+        (prefab: "grunt",    center: (8.0, 0.0, 28.0),   radius: 4.0, count: 4, respawn_seconds: 15.0),
+        // Brigands ambush the south road.
+        (prefab: "brigand",  center: (10.0, 0.0, -27.0), radius: 5.0, count: 3, respawn_seconds: 20.0),
+        // Mossbacks graze the far east fields — harmless until poked.
+        (prefab: "mossback", center: (30.0, 0.0, 10.0),  radius: 4.0, count: 3, respawn_seconds: 20.0),
+    ],
+)

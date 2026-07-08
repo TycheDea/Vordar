@@ -1,0 +1,25 @@
+// Valkyrie race — taller and brighter, divine-attuned warrior-maiden bearing.
+// Phase C: renders as the CC0 KayKit "Mage" (content/models/valkyrie.glb) — a
+// robed, caped silhouette that reads as a bearer of divine power. The SDF
+// `body` (with folded-wing silhouette) is the pre-Phase-C fallback; ignored by
+// the mesh branch.
+(
+    body: [
+        (shape: Capsule, offset: (0.0, 0.10, 0.0),   scale: (0.40, 0.64, 0.40), color: (0.78, 0.76, 0.70)),
+        (shape: Sphere,  offset: (0.0, 0.86, 0.0),   scale: (0.25, 0.25, 0.25), color: (0.98, 0.90, 0.75)),
+        (shape: Diamond, offset: (0.22, 0.55, -0.28), scale: (0.10, 0.42, 0.16), color: (0.95, 0.93, 0.85)),
+        (shape: Diamond, offset: (-0.22, 0.55, -0.28), scale: (0.10, 0.42, 0.16), color: (0.95, 0.93, 0.85)),
+    ],
+    model: Some((
+        asset: "content/models/valkyrie.glb",
+        idle:   "Idle",
+        walk:   "Walking_A",
+        run:    "Running_A",
+        attack: "1H_Melee_Attack_Chop",
+        death:  "Death_A",
+        hit:    "Hit_A",
+        walk_speed: 0.1,
+        run_speed:  3.0,
+        forward_offset: 3.14159, // KayKit rigs face +Z; π turns them to face travel
+    )),
+)

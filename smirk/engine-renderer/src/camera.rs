@@ -111,17 +111,43 @@ impl Camera {
         self.eye.z = self.target.z + self.radius * self.angle.sin() * self.pitch.cos();
         self.eye.y = self.target.y + self.radius * self.pitch.sin();
     }
+
+    /// The camera's world-space right and up vectors — the plane billboards
+    /// (particles) expand in. Derived from the same look-at inputs as
+    /// `build_view_projection_matrix`, including the TopDown up-flip.
+    pub(crate) fn basis(&self) -> (glam::Vec3, glam::Vec3) {
+        let world_up = match self.mode {
+            ProjectionMode::TopDown => glam::Vec3::NEG_Z,
+            _ => glam::Vec3::Y,
+        };
+        let forward = (self.target - self.eye)
+            .try_normalize()
+            .unwrap_or(glam::Vec3::NEG_Z);
+        let right = forward
+            .cross(world_up)
+            .try_normalize()
+            .unwrap_or(glam::Vec3::X);
+        let up = right.cross(forward);
+        (right, up)
+    }
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    right:     [f32; 4],
+    up:        [f32; 4],
 }
 
 impl CameraUniform {
-    pub(crate) fn new(view_proj: [[f32; 4]; 4]) -> Self {
-        Self { view_proj }
+    pub(crate) fn from_camera(camera: &Camera) -> Self {
+        let (right, up) = camera.basis();
+        Self {
+            view_proj: camera.build_view_projection_matrix().to_cols_array_2d(),
+            right:     [right.x, right.y, right.z, 0.0],
+            up:        [up.x, up.y, up.z, 0.0],
+        }
     }
 }
 
@@ -152,7 +178,7 @@ pub(crate) fn create_gpu_resources(
     device: &wgpu::Device,
     camera: &Camera,
 ) -> (Buffer, Buffer, BindGroupLayout, BindGroup) {
-    let cam_uniform = CameraUniform::new(camera.build_view_projection_matrix().to_cols_array_2d());
+    let cam_uniform = CameraUniform::from_camera(camera);
     let camera_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label:    Some("Camera Uniform"),
         contents: bytemuck::cast_slice(&[cam_uniform]),
@@ -193,4 +219,37 @@ pub(crate) fn create_gpu_resources(
     });
 
     (camera_buffer, light_buffer, layout, bind_group)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basis_is_orthonormal_in_every_projection_mode() {
+        let mut cam = Camera::new(16.0 / 9.0);
+        for _ in 0..3 {
+            let (right, up) = cam.basis();
+            let forward = (cam.target - cam.eye).normalize();
+            assert!((right.length() - 1.0).abs() < 1e-4, "{:?}: |right| = 1", cam.mode);
+            assert!((up.length() - 1.0).abs() < 1e-4, "{:?}: |up| = 1", cam.mode);
+            assert!(right.dot(up).abs() < 1e-4, "{:?}: right ⊥ up", cam.mode);
+            assert!(right.dot(forward).abs() < 1e-4, "{:?}: right ⊥ forward", cam.mode);
+            assert!(up.dot(forward).abs() < 1e-4, "{:?}: up ⊥ forward", cam.mode);
+            cam.cycle_projection();
+        }
+    }
+
+    #[test]
+    fn topdown_basis_matches_screen_axes() {
+        // TopDown looks straight down with north (-Z) at the top of the screen,
+        // so a billboard's right is +X and its up is -Z.
+        let mut cam = Camera::new(1.0);
+        cam.cycle_projection(); // Perspective -> Isometric
+        cam.cycle_projection(); // Isometric -> TopDown
+        assert_eq!(cam.mode, ProjectionMode::TopDown);
+        let (right, up) = cam.basis();
+        assert!(right.abs_diff_eq(glam::Vec3::X, 1e-3), "right = +X, got {right}");
+        assert!(up.abs_diff_eq(glam::Vec3::NEG_Z, 1e-3), "up = -Z, got {up}");
+    }
 }

@@ -6,5 +6,6 @@
         "Velocity":    (),
         "RenderShape": (shape: Diamond, color: (0.70, 0.50, 1.0)),
         "Hitbox":      (shape: Sphere(radius: 0.2)),
+        "VfxTrail":    (color: (0.70, 0.50, 1.0), rate: 45.0),
     },
 )

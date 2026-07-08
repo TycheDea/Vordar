@@ -158,9 +158,11 @@ fn phase4_scheduled_aoe() {
     a.wait_for("A sees B", Duration::from_secs(5), |bot| bot.last_snapshot.contains_key(&b_id));
 
     // ── Cast 1: B stands still inside the area → hit (caster A excluded). ──
+    // "cleave" (the Ravager's heavy Scheduled hit) shares blast's choreography
+    // numbers: radius 4.0, 2 s cast, 3 s cooldown.
     let b_pos = *a.last_snapshot.get(&b_id).unwrap();
     let target = glam::Vec2::new(b_pos.x, b_pos.z);
-    a.send_cast("blast", target);
+    a.send_cast("cleave", target);
     a.wait_for("A gets MechanicScheduled", Duration::from_secs(3), |bot| !bot.mechanics.is_empty());
     b.wait_for("B gets MechanicScheduled", Duration::from_secs(3), |bot| !bot.mechanics.is_empty());
     // The design's broadcast rule: every client gets the SAME schedule.
@@ -178,7 +180,7 @@ fn phase4_scheduled_aoe() {
     a.pump();
     b.pump();
     let b_pos = *a.last_snapshot.get(&b_id).unwrap();
-    a.send_cast("blast", glam::Vec2::new(b_pos.x, b_pos.z));
+    a.send_cast("cleave", glam::Vec2::new(b_pos.x, b_pos.z));
     b.wait_for("B gets second schedule", Duration::from_secs(3), |bot| bot.mechanics.len() >= 2);
     let (mech2, resolve_at) = *b.mechanics.last().unwrap();
     assert_ne!(mech1, mech2);
@@ -213,7 +215,7 @@ fn phase4_scheduled_aoe() {
     b.client.send(encode(&ClientMsg::CastIntent {
         seq: b.seq,
         t_server_micros: now.saturating_sub(10_000_000),
-        skill: "blast".into(),
+        skill: "cleave".into(),
         target: glam::Vec2::ZERO,
     }));
     std::thread::sleep(Duration::from_millis(1500));
@@ -384,13 +386,13 @@ fn phase3_aoi_border() {
     assert!(bot.last_snapshot.len() >= 101, "near NPCs flapped out of the AOI");
 }
 
-// Phase 7.5: the player's left-click projectile, end to end. A camp-resident
-// grunt replicates into the bot's AOI; the bot fires "bolt" casts at it. The
-// bolt entity itself must replicate (it's an ordinary prefab entity), and
-// three hits (3 × 12 ≥ 30 HP) must kill the grunt — observed as an AOI leave
-// while the bot stays alive (player_id never changes → no death re-Welcome).
+// Phase 7.5 (Ravager rework): the player's default attack, end to end. A
+// camp-resident grunt replicates into the bot's AOI; the bot closes to melee
+// and casts "rend" (fast Scheduled strike, 20 dmg with the Ravager's power)
+// until the grunt's 30 HP run out — observed as an AOI leave while the bot
+// stays alive (player_id never changes → no death re-Welcome).
 #[test]
-fn phase7_5_bolt_kills_camped_enemy() {
+fn phase7_5_rend_kills_camped_enemy() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25163".parse().unwrap();
     std::thread::spawn(move || {
@@ -409,27 +411,98 @@ fn phase7_5_bolt_kills_camped_enemy() {
     let original_body = bot.player_id.unwrap();
     let grunt_id = *bot.prefabs.iter().find(|(_, p)| *p == "grunt").unwrap().0;
 
-    // Fire at the grunt's latest known position until it dies. It will charge
-    // us once provoked — aiming at its current spot still works because it
-    // approaches along the firing line.
-    let mut saw_bolt = false;
-    let mut last_cast = Instant::now() - Duration::from_secs(1);
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // Fight at rend's edge: close to ~2.2, back off under 1.6 (the grunt's
+    // 2.5 speed can't catch the bot's 6.0 — face-tanking a 10-per-contact
+    // charger at the Ravager's zero defense loses), rend whenever in range
+    // and off cooldown. Two clean hits (16 + 4 power) beat 30 HP.
+    let mut last_cast = Instant::now() - Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(25);
+    let mut hp_seen: Vec<i32> = Vec::new();
     while bot.last_snapshot.contains_key(&grunt_id) {
-        assert!(Instant::now() < deadline, "grunt survived 20 s of bolts");
-        if last_cast.elapsed() > Duration::from_millis(700) {
-            if let Some(pos) = bot.last_snapshot.get(&grunt_id).copied() {
-                bot.send_cast("bolt", glam::Vec2::new(pos.x, pos.z));
+        assert!(Instant::now() < deadline, "grunt survived 25 s of rends");
+        if let (Some(own), Some(grunt)) = (bot.own_pos(), bot.last_snapshot.get(&grunt_id).copied()) {
+            let offset = glam::Vec2::new(grunt.x - own.x, grunt.z - own.z);
+            let dist = offset.length();
+            if dist > 2.2 {
+                bot.send_move(offset.normalize());
+            } else if dist < 1.6 {
+                bot.send_move(-offset.normalize());
+            } else {
+                bot.send_move(glam::Vec2::ZERO);
+            }
+            if dist <= 2.4 && last_cast.elapsed() > Duration::from_millis(1000) {
+                bot.send_cast("rend", glam::Vec2::new(grunt.x, grunt.z));
                 last_cast = Instant::now();
             }
         }
         bot.pump();
-        saw_bolt |= bot.prefabs.values().any(|p| p == "bolt");
+        if let Some(&hp) = bot.last_hp.get(&grunt_id) {
+            if hp_seen.last() != Some(&hp) {
+                hp_seen.push(hp);
+            }
+        }
         std::thread::sleep(Duration::from_millis(16));
     }
+    // The death message may ride the tick after the AOI-leave snapshot.
+    bot.wait_for("EntityDied for the grunt", Duration::from_secs(2), |b| {
+        b.deaths.iter().any(|&(id, _)| id == grunt_id)
+    });
 
-    assert!(saw_bolt, "the bolt projectile must replicate like any entity");
+    assert!(!bot.mechanics.is_empty(), "rend's strike schedule must replicate");
     assert_eq!(bot.player_id, Some(original_body), "the bot must survive the fight");
+    // Protocol v8: hp rides in snapshots — the grunt's 30 HP visibly drops
+    // before it dies, and its death is announced with a position.
+    assert_eq!(hp_seen.first(), Some(&30), "grunt enters at full health, saw {hp_seen:?}");
+    assert!(
+        hp_seen.windows(2).all(|w| w[1] < w[0]),
+        "replicated hp only decreases during the fight: {hp_seen:?}"
+    );
+    assert!(hp_seen.len() >= 2, "at least one damage tick replicated: {hp_seen:?}");
+}
+
+// The Ravager's gap-closer, end to end: one Onslaught cast must both dash the
+// caster's replicated position to the target point and fire the arrival hit
+// test there (hitting the bystander, never the caster).
+#[test]
+fn ravager_onslaught_dashes_and_resolves() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25166".parse().unwrap();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut a = Bot::connect(addr);
+    a.wait_for("A welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    a.wait_for("A clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    let mut b = Bot::connect_as(addr, "bystander");
+    b.wait_for("B welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    let a_id = a.player_id.unwrap();
+    let b_id = b.player_id.unwrap();
+    a.wait_for("A sees B", Duration::from_secs(5), |bot| bot.last_snapshot.contains_key(&b_id));
+
+    let start = a.own_pos().unwrap();
+    let target = *a.last_snapshot.get(&b_id).unwrap();
+    let start_dist = (glam::Vec2::new(start.x, start.z) - glam::Vec2::new(target.x, target.z)).length();
+    a.send_cast("onslaught", glam::Vec2::new(target.x, target.z));
+
+    a.wait_for("dash schedule broadcast", Duration::from_secs(3), |bot| !bot.mechanics.is_empty());
+    let (mech, _) = a.mechanics[0];
+    a.wait_for("arrival hit result", Duration::from_secs(4), |bot| bot.hit_results.contains_key(&mech));
+    let hits = &a.hit_results[&mech];
+    assert!(hits.contains(&b_id), "the bystander stood at the arrival point and must be hit");
+    assert!(!hits.contains(&a_id), "the caster is excluded from its own arrival strike");
+
+    // The dash itself: A's replicated position must have closed on the target
+    // (separation pushes the two solids apart after landing, so "close", not
+    // "exact").
+    settle(&mut a, Duration::from_millis(500));
+    let end = a.own_pos().unwrap();
+    let end_dist = (glam::Vec2::new(end.x, end.z) - glam::Vec2::new(target.x, target.z)).length();
+    assert!(
+        end_dist < 2.0 && end_dist < start_dist * 0.5,
+        "the caster must dash to the target: start {start_dist:.2} → end {end_dist:.2}"
+    );
 }
 
 // Phase 6: disconnect saves the character; reconnecting with the same name
@@ -496,9 +569,10 @@ fn phase6_health_persists_in_db() {
     let victim_id = victim.player_id.unwrap();
     atk.wait_for("atk sees victim", Duration::from_secs(5), |b| b.last_snapshot.contains_key(&victim_id));
 
-    // Blast the stationary victim (25 damage, resolves 2 s after the cast).
+    // Cleave the stationary victim (30 base + the Ravager's power, possibly a
+    // crit — resolves 2 s after the cast).
     let vp = *atk.last_snapshot.get(&victim_id).unwrap();
-    atk.send_cast("blast", glam::Vec2::new(vp.x, vp.z));
+    atk.send_cast("cleave", glam::Vec2::new(vp.x, vp.z));
     atk.wait_for("hit lands on victim", Duration::from_secs(6), |b| {
         b.hit_results.values().any(|hits| hits.contains(&victim_id))
     });
@@ -513,7 +587,10 @@ fn phase6_health_persists_in_db() {
             conn.query_row("SELECT health FROM characters WHERE name = 'victim'", [], |r| r.get(0)).ok()
         });
         if health.is_some_and(|h| h < 100) {
-            assert_eq!(health, Some(75), "one blast = 25 damage");
+            // The point is persistence, not the formula (stats.rs unit-tests
+            // that): damaged, alive, and the damage magnitude is one cleave's.
+            let h = health.unwrap();
+            assert!((100 - 54..100).contains(&h), "one cleave's damage expected, got {h}");
             break;
         }
         assert!(Instant::now() < deadline, "victim's damaged health never reached the db: {health:?}");

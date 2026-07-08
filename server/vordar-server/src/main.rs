@@ -23,7 +23,7 @@ use vordar_server::{build_zone_app, TICK_HZ};
 /// Every chapter this binary can host. Linking a new chapter crate +
 /// one line here is the entire integration.
 fn chapters() -> ChapterRegistry {
-    ChapterRegistry::new(vec![chapter_01::module()])
+    ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module()])
 }
 
 fn main() {

@@ -1,0 +1,55 @@
+%% Vordar online play — the client/server round-trip
+%% Predict locally, send intents, reconcile against the server's authority.
+%% The server is the single source of truth; the client stays responsive by
+%% predicting its own movement and correcting when snapshots disagree.
+
+flowchart TB
+
+  subgraph CLIENT["Client — presentation and prediction"]
+    direction TB
+
+    CI["read movement and ability input"]
+    CP["predict: apply own movement now<br/>using the shared movement rule"]
+    CS["send intents (stamped with synced clock)<br/>and remember them as pending"]
+    CI --> CP --> CS
+
+    subgraph CRECV["on snapshot from server"]
+      direction TB
+      R1["spawn / despawn replicated entities<br/>(entered / left the area of interest)"]
+      R2["interpolate remote entities<br/>between snapshot positions"]
+      R3["reconcile own player:<br/>rebase onto authoritative position,<br/>replay not-yet-processed intents"]
+      R4{"prediction error?"}
+      R5["within trust band → keep prediction"]
+      R6["moderate drift → blend out over time"]
+      R7["large mispredict → snap to authority"]
+      R1 --> R2 --> R3 --> R4
+      R4 -->|small| R5
+      R4 -->|medium| R6
+      R4 -->|large| R7
+    end
+
+    subgraph CVIS["presentation (pure functions of the synced clock)"]
+      direction TB
+      V1["day / night and world-event tint"]
+      V2["telegraph fill counts down to resolve time"]
+      V3["camera follows interpolated position"]
+    end
+  end
+
+  subgraph SERVER["Server — single source of truth (per zone)"]
+    direction TB
+    SV["validate intents<br/>(sequence, timing, speed caps)"]
+    SM["run shared simulation<br/>one intent per player per tick"]
+    SR["resolve mechanics<br/>(rewind hit test at intent time)"]
+    SB["broadcast area-of-interest snapshots"]
+    SV --> SM --> SR --> SB
+  end
+
+  SHARED(["shared movement rule<br/>same math on client and server"])
+  CP -.-> SHARED
+  SM -.-> SHARED
+
+  CS ==>|"login · move · cast intents"| SV
+  SB ==>|"snapshots · welcome · hit results"| CRECV
+  SB ==>|"world clock (synced time)"| CVIS
+  SR ==>|"redirect at zone portal"| CLIENT

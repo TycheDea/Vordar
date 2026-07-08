@@ -90,6 +90,50 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTextu
     Ok(ColorTexture { texture, view, sampler })
 }
 
+/// Upload tightly-packed RGBA8 pixels as a GPU texture. `srgb` picks
+/// Rgba8UnormSrgb (for sRGB-encoded images, e.g. glTF base color) vs plain
+/// Rgba8Unorm (for linear data).
+pub(crate) fn create_rgba_texture(
+    device: &Device,
+    queue:  &Queue,
+    width:  u32,
+    height: u32,
+    pixels: &[u8],
+    srgb:   bool,
+) -> ColorTexture {
+    let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
+    let texture = device.create_texture(&TextureDescriptor {
+        label:           Some("RGBA8 Texture"),
+        size:            Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count:    1,
+        dimension:       TextureDimension::D2,
+        format,
+        usage:           TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats:    &[],
+    });
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture:   &texture,
+            mip_level: 0,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    TextureAspect::All,
+        },
+        pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset:         0,
+            bytes_per_row:  Some(width * 4),
+            rows_per_image: Some(height),
+        },
+        Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+
+    let view    = texture.create_view(&TextureViewDescriptor::default());
+    let sampler = make_sampler(device);
+    ColorTexture { texture, view, sampler }
+}
+
 /// Procedural RGBA8 checkerboard texture (size×size, tile_size pixels per square).
 /// Useful for testing the texture pipeline without any asset files.
 pub fn create_checker_texture(

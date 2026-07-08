@@ -13,7 +13,7 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 7;
+pub const PROTOCOL_VERSION: u8 = 8;
 
 /// Snapshot rate. The server drives its snapshot phase with this; the client
 /// uses it to pace interpolation between snapshots.
@@ -80,6 +80,11 @@ pub enum ServerMsg {
     /// logging into a zone that doesn't own the character. The CLIENT closes
     /// the old connection — a server-side kick could outrace this frame.
     Redirect { zone: String, addr: std::net::SocketAddr },
+    /// An entity in your AOI died at `pos` (v8). Snapshots stop mentioning it
+    /// the same tick, so this is the client's only death signal — it drives
+    /// the cosmetic corpse + death burst. Sent only to clients whose known
+    /// set contains the entity.
+    EntityDied { id: u64, pos: Vec3 },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -89,12 +94,17 @@ pub struct EntityState {
     /// Prefab to spawn client-side for this entity.
     pub prefab: String,
     pub pos: Vec3,
+    /// Current health (v8) — cosmetic on the client (hit reacts, health bars);
+    /// 0 for entities without a Health component.
+    pub hp: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntityPos {
     pub id: u64,
     pub pos: Vec3,
+    /// Current health (v8); 0 for entities without a Health component.
+    pub hp: i32,
 }
 
 pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
@@ -157,9 +167,9 @@ mod tests {
         let msg = ServerMsg::Snapshot {
             tick: 42,
             last_processed_seq: 17,
-            enters: vec![EntityState { id: 9, prefab: "player".into(), pos: Vec3::new(1.0, 0.0, -3.0) }],
+            enters: vec![EntityState { id: 9, prefab: "player".into(), pos: Vec3::new(1.0, 0.0, -3.0), hp: 100 }],
             leaves: vec![4],
-            states: vec![EntityPos { id: 9, pos: Vec3::new(1.0, 0.0, -3.0) }],
+            states: vec![EntityPos { id: 9, pos: Vec3::new(1.0, 0.0, -3.0), hp: 100 }],
         };
         let bytes = encode(&msg);
         match decode::<ServerMsg>(&bytes).unwrap() {
@@ -170,6 +180,20 @@ mod tests {
                 assert_eq!(enters[0].prefab, "player");
                 assert_eq!(leaves, vec![4]);
                 assert_eq!(states[0].id, 9);
+                assert_eq!(states[0].hp, 100, "hp rides in every state (v8)");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn entity_died_roundtrip() {
+        let msg = ServerMsg::EntityDied { id: 77, pos: Vec3::new(2.0, 0.0, 5.0) };
+        let bytes = encode(&msg);
+        match decode::<ServerMsg>(&bytes).unwrap() {
+            ServerMsg::EntityDied { id, pos } => {
+                assert_eq!(id, 77);
+                assert!((pos - Vec3::new(2.0, 0.0, 5.0)).length() < 1e-6);
             }
             _ => panic!("wrong variant"),
         }

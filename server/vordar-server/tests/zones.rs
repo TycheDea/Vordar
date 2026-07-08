@@ -187,6 +187,87 @@ fn phase7_login_routes_to_saved_zone() {
     );
 }
 
+// Chapter 2's town (shipped zones.ron: east = chapter02): buildings and
+// villagers replicate as ordinary prefab entities, a villager can't be hit
+// by an AOE centered on it (no Health = immune by construction, the pin for
+// that design), and the monster camps prowl outside town.
+#[test]
+fn town_zone_replicates_and_villagers_are_unhittable() {
+    workspace_root();
+    let start_addr: SocketAddr = "127.0.0.1:25177".parse().unwrap();
+    let east_addr: SocketAddr = "127.0.0.1:25178".parse().unwrap();
+
+    // Like spawn_zone_server, but east runs the town chapter — installed the
+    // same way main.rs installs zone chapters.
+    let mut zones = test_zones();
+    zones[1].chapter = Some("chapter02".into());
+    let directory: HashMap<String, SocketAddr> =
+        HashMap::from([("start".to_owned(), start_addr), ("east".to_owned(), east_addr)]);
+    let worker = DbWorker::spawn(":memory:").expect("db open");
+    let world_origin = Instant::now();
+    for zone in zones {
+        let addr = directory[&zone.name];
+        let directory = directory.clone();
+        let handle = worker.handle();
+        std::thread::spawn(move || {
+            let chapter = zone.chapter.clone();
+            let mut app = build_zone_app(addr, handle, zone, directory, world_origin);
+            if let Some(name) = chapter.as_deref() {
+                vordar_game::chapter::ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module()])
+                    .install(name, &mut app)
+                    .unwrap();
+            }
+            app.run_headless(60.0, Some(3600));
+        });
+    }
+    std::mem::forget(worker);
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut bot = Bot::connect_as(start_addr, "traveler");
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+    walk_into_portal(&mut bot, Vec3::new(10.0, 0.0, 0.0), Duration::from_secs(10));
+    bot.follow_redirect();
+    bot.wait_for("welcome in east", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("clock sync in east", Duration::from_secs(5), |b| {
+        b.client.server_offset_micros().is_some()
+    });
+    bot.wait_for("the town replicates", Duration::from_secs(10), |b| {
+        let has = |p: &str| b.prefabs.values().any(|v| v == p);
+        has("town_hall") && has("npc_villager") && has("npc_elder") && has("cottage")
+    });
+    bot.wait_for("camps replicate outside town", Duration::from_secs(10), |b| {
+        let has = |p: &str| b.prefabs.values().any(|v| v == p);
+        has("grunt") && has("brigand")
+    });
+
+    // Walk into cleave range of a villager and drop the AOE on its head.
+    let npc_id = *bot.prefabs.iter().find(|(_, p)| *p == "npc_villager").unwrap().0;
+    let npc = *bot.last_snapshot.get(&npc_id).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        assert!(Instant::now() < deadline, "never reached the villager");
+        let own = bot.own_pos().unwrap();
+        let offset = glam::Vec2::new(npc.x - own.x, npc.z - own.z);
+        if offset.length() < 6.0 {
+            bot.send_move(glam::Vec2::ZERO);
+            break;
+        }
+        bot.send_move(offset.normalize());
+        bot.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    bot.send_cast("cleave", glam::Vec2::new(npc.x, npc.z));
+    bot.wait_for("cleave schedules", Duration::from_secs(3), |b| !b.mechanics.is_empty());
+    let (mech, _) = *bot.mechanics.last().unwrap();
+    bot.wait_for("cleave resolves", Duration::from_secs(4), |b| b.hit_results.contains_key(&mech));
+    assert!(
+        !bot.hit_results[&mech].contains(&npc_id),
+        "villagers have no Health and must be unhittable by construction"
+    );
+    assert!(bot.last_snapshot.contains_key(&npc_id), "the villager still stands");
+}
+
 // Every zone shares one world-time origin: two clients in two different
 // zones must compute the same absolute world time (their per-zone server
 // clocks differ; the WorldClock mapping absorbs that).

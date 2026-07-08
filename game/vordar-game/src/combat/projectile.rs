@@ -6,7 +6,10 @@
 // fine for slow, dodgeable bolts; the scheduled-snapshot Mechanic path stays
 // the model for anything that needs "position at T" fairness.
 
+use crate::combat::buff::ravager_mods;
+use crate::combat::stats::{compute_damage, CombatStats, DamageType};
 use crate::enemies::{Enemy, Provoked};
+use crate::events::DamageDealt;
 use crate::player::Player;
 use engine_app::events::{CollisionStarted, EventBus};
 use engine_app::scheduler::System;
@@ -23,6 +26,7 @@ use std::collections::HashSet;
 /// projectiles never push or get pushed).
 pub struct Projectile {
     pub damage: i32,
+    pub damage_type: DamageType,
     /// Skipped by the hit test (you can't shoot yourself).
     pub caster: hecs::Entity,
     /// Seconds of flight left; despawned at zero.
@@ -34,6 +38,7 @@ pub struct Projectile {
 
 /// Spawn a projectile immediately: prefab visuals + code-attached flight
 /// state. `dir` must be unit length on the XZ plane.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_projectile(
     world: &mut World,
     resources: &mut Resources,
@@ -42,6 +47,7 @@ pub fn spawn_projectile(
     dir: Vec3,
     speed: f32,
     damage: i32,
+    damage_type: DamageType,
     ttl: f32,
     caster: Entity,
     hits_players: bool,
@@ -56,7 +62,7 @@ pub fn spawn_projectile(
     if let Ok(mut velocity) = world.get::<&mut Velocity>(entity) {
         velocity.linear = dir * speed;
     }
-    let _ = world.insert_one(entity, Projectile { damage, caster, ttl, hits_players });
+    let _ = world.insert_one(entity, Projectile { damage, damage_type, caster, ttl, hits_players });
     Some(entity)
 }
 
@@ -93,7 +99,9 @@ impl System for ProjectileHitSystem {
             projectile: Entity,
             victim: Entity,
             damage: i32,
+            damage_type: DamageType,
             provoke: bool,
+            caster: Entity,
         }
 
         let mut hits: Vec<Hit> = Vec::new();
@@ -124,15 +132,29 @@ impl System for ProjectileHitSystem {
                         projectile: this,
                         victim: other,
                         damage: projectile.damage,
+                        damage_type: projectile.damage_type,
                         provoke: !projectile.hits_players,
+                        caster: projectile.caster,
                     });
                 }
             }
         }
 
         for hit in &hits {
+            let dmg = {
+                let atk = world.get::<&CombatStats>(hit.caster).ok();
+                let def = world.get::<&CombatStats>(hit.victim).ok();
+                let seed = hit.projectile.to_bits().get() ^ hit.victim.to_bits().get().rotate_left(21);
+                let (bonus_power, mult) = ravager_mods(world, hit.caster, hit.victim);
+                let base = compute_damage(hit.damage + bonus_power, hit.damage_type, atk.as_deref(), def.as_deref(), seed);
+                (base as f32 * mult).round() as i32
+            };
             if let Ok(mut health) = world.get::<&mut Health>(hit.victim) {
-                health.current -= hit.damage;
+                health.current -= dmg;
+                resources
+                    .get_mut::<EventBus>()
+                    .unwrap()
+                    .emit(DamageDealt { attacker: hit.caster, target: hit.victim, amount: dmg });
             }
             if hit.provoke {
                 let _ = world.insert_one(hit.victim, Provoked);
@@ -172,7 +194,7 @@ mod tests {
         let mut world = World::new();
         let mut resources = base_resources();
         let caster = world.spawn((Player { speed: 6.0 },));
-        world.spawn((Projectile { damage: 5, caster, ttl: 0.5, hits_players: false },));
+        world.spawn((Projectile { damage: 5, damage_type: DamageType::Physical, caster, ttl: 0.5, hits_players: false },));
 
         for _ in 0..29 {
             ProjectileTtlSystem.run(&mut world, &mut resources, DT);
@@ -193,7 +215,7 @@ mod tests {
             idle_enemy(),
             Health { current: 30, max: 30 },
         ));
-        let bolt = world.spawn((Projectile { damage: 12, caster, ttl: 1.0, hits_players: false },));
+        let bolt = world.spawn((Projectile { damage: 12, damage_type: DamageType::Physical, caster, ttl: 1.0, hits_players: false },));
 
         resources.get_mut::<EventBus>().unwrap().emit(CollisionStarted { a: bolt, b: enemy });
         ProjectileHitSystem.run(&mut world, &mut resources, DT);
@@ -211,7 +233,7 @@ mod tests {
             Player { speed: 6.0 },
             Health { current: 100, max: 100 },
         ));
-        let bolt = world.spawn((Projectile { damage: 12, caster, ttl: 1.0, hits_players: true },));
+        let bolt = world.spawn((Projectile { damage: 12, damage_type: DamageType::Physical, caster, ttl: 1.0, hits_players: true },));
 
         resources.get_mut::<EventBus>().unwrap().emit(CollisionStarted { a: caster, b: bolt });
         ProjectileHitSystem.run(&mut world, &mut resources, DT);
@@ -227,7 +249,7 @@ mod tests {
         let imp = world.spawn((idle_enemy(),));
         // Enemy-fired bolt grazing another enemy: no friendly fire, keeps flying.
         let other_enemy = world.spawn((idle_enemy(), Health { current: 80, max: 80 }));
-        let bolt = world.spawn((Projectile { damage: 8, caster: imp, ttl: 1.0, hits_players: true },));
+        let bolt = world.spawn((Projectile { damage: 8, damage_type: DamageType::Physical, caster: imp, ttl: 1.0, hits_players: true },));
 
         resources.get_mut::<EventBus>().unwrap().emit(CollisionStarted { a: bolt, b: other_enemy });
         ProjectileHitSystem.run(&mut world, &mut resources, DT);
@@ -243,7 +265,7 @@ mod tests {
         let caster = world.spawn((Player { speed: 6.0 },));
         let e1 = world.spawn((idle_enemy(), Health { current: 30, max: 30 }));
         let e2 = world.spawn((idle_enemy(), Health { current: 30, max: 30 }));
-        let bolt = world.spawn((Projectile { damage: 12, caster, ttl: 1.0, hits_players: false },));
+        let bolt = world.spawn((Projectile { damage: 12, damage_type: DamageType::Physical, caster, ttl: 1.0, hits_players: false },));
 
         let bus = resources.get_mut::<EventBus>().unwrap();
         bus.emit(CollisionStarted { a: bolt, b: e1 });

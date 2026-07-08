@@ -8,5 +8,6 @@
         "Velocity":    (),
         "RenderShape": (shape: Sphere, color: (0.35, 0.95, 1.0)),
         "Hitbox":      (shape: Sphere(radius: 0.25)),
+        "VfxTrail":    (color: (0.35, 0.95, 1.0), rate: 60.0),
     },
 )
