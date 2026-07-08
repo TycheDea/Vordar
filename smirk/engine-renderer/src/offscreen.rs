@@ -17,6 +17,8 @@ use crate::mesh_pipeline::{self, MeshInstance};
 use crate::mipgen::MipGenerator;
 use crate::pipeline::{self, INDICES};
 use crate::post::{self, TonemapPass, HDR_FORMAT, SCENE_SAMPLES};
+use crate::shadow::{self, ShadowPipelines};
+use crate::skinned_pipeline;
 use crate::texture;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -123,6 +125,12 @@ pub struct OffscreenRenderer {
     tonemap:        TonemapPass,
     environment:    Environment,
     mipgen:         MipGenerator,
+    shadow_view:       wgpu::TextureView,
+    shadow_pipelines:  ShadowPipelines,
+    shadow_bind_group: wgpu::BindGroup,
+    light_vp_buffer:   wgpu::Buffer,
+    light_dir:         Vec3,
+    _shadow_texture:   wgpu::Texture,
     light_buffer:   wgpu::Buffer,
     camera_buffer:  wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -143,8 +151,20 @@ impl OffscreenRenderer {
         let device = &gpu.device;
 
         let camera = Camera::new(aspect);
-        let (camera_buffer, light_buffer, camera_bgl, camera_bind_group) =
-            camera::create_gpu_resources(device, &camera);
+        let (shadow_texture, shadow_view) = shadow::create_shadow_texture(device);
+        let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
+            camera::create_gpu_resources(device, &camera, &shadow_view);
+
+        let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(device);
+        let shadow_pipelines = ShadowPipelines::new(device, &joint_bgl);
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("Offscreen Shadow BG"),
+            layout:  &shadow_pipelines.bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding:  0,
+                resource: light_vp_buffer.as_entire_binding(),
+            }],
+        });
 
         let texture_bgl  = pipeline::create_texture_bind_group_layout(device);
         let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
@@ -169,6 +189,12 @@ impl OffscreenRenderer {
         Some(Self {
             vertex_buffer,
             index_buffer,
+            shadow_view,
+            shadow_pipelines,
+            shadow_bind_group,
+            light_vp_buffer,
+            light_dir: Vec3::new(-1.0, 2.0, -1.0).normalize(),
+            _shadow_texture: shadow_texture,
             camera_bgl,
             texture_bgl,
             material_bgl,
@@ -202,9 +228,10 @@ impl OffscreenRenderer {
         );
     }
 
-    pub fn set_light(&self, light: TestLight) {
+    pub fn set_light(&mut self, light: TestLight) {
+        self.light_dir = light.direction.normalize();
         let uniform = LightUniform {
-            direction: light.direction.normalize().to_array(),
+            direction: self.light_dir.to_array(),
             _pad:      0.0,
             color:     light.color.to_array(),
             ambient:   light.ambient,
@@ -224,18 +251,32 @@ impl OffscreenRenderer {
             contents: if instances.is_empty() { &[0u8; 96] } else { bytemuck::cast_slice(instances) },
             usage:    wgpu::BufferUsages::VERTEX,
         });
-        self.compose(target, clear, |pass, this| {
-            if !instances.is_empty() {
-                pass.set_pipeline(&this.sdf_pipeline);
-                pass.set_bind_group(0, &this.camera_bind_group, &[]);
-                pass.set_bind_group(1, &this.white_bg, &[]);
-                pass.set_bind_group(2, &this.environment.bind_group, &[]);
-                pass.set_vertex_buffer(0, this.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, instance_buffer.slice(..));
-                pass.set_index_buffer(this.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
-            }
-        });
+        self.compose(
+            target,
+            clear,
+            |pass, this| {
+                if !instances.is_empty() {
+                    pass.set_pipeline(&this.shadow_pipelines.sdf);
+                    pass.set_bind_group(0, &this.shadow_bind_group, &[]);
+                    pass.set_vertex_buffer(0, this.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                    pass.set_index_buffer(this.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
+                }
+            },
+            |pass, this| {
+                if !instances.is_empty() {
+                    pass.set_pipeline(&this.sdf_pipeline);
+                    pass.set_bind_group(0, &this.camera_bind_group, &[]);
+                    pass.set_bind_group(1, &this.white_bg, &[]);
+                    pass.set_bind_group(2, &this.environment.bind_group, &[]);
+                    pass.set_vertex_buffer(0, this.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                    pass.set_index_buffer(this.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
+                }
+            },
+        );
     }
 
     /// Render static glTF mesh data through the real mesh pipeline (full PBR
@@ -254,32 +295,69 @@ impl OffscreenRenderer {
             contents: bytemuck::cast_slice(&[instance]),
             usage:    wgpu::BufferUsages::VERTEX,
         });
-        self.compose(target, clear, |pass, this| {
-            pass.set_pipeline(&this.mesh_pipeline);
-            pass.set_bind_group(0, &this.camera_bind_group, &[]);
-            pass.set_bind_group(2, &this.environment.bind_group, &[]);
-            pass.set_vertex_buffer(1, instance_buffer.slice(..));
-            for prim in &gpu_mesh.primitives {
-                pass.set_bind_group(1, &prim.material_bind_group, &[]);
-                pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..prim.index_count, 0, 0..1);
-            }
-        });
+        self.compose(
+            target,
+            clear,
+            |pass, this| {
+                pass.set_pipeline(&this.shadow_pipelines.mesh);
+                pass.set_bind_group(0, &this.shadow_bind_group, &[]);
+                pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                for prim in &gpu_mesh.primitives {
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                }
+            },
+            |pass, this| {
+                pass.set_pipeline(&this.mesh_pipeline);
+                pass.set_bind_group(0, &this.camera_bind_group, &[]);
+                pass.set_bind_group(2, &this.environment.bind_group, &[]);
+                pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                for prim in &gpu_mesh.primitives {
+                    pass.set_bind_group(1, &prim.material_bind_group, &[]);
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                }
+            },
+        );
     }
 
-    /// Shared frame skeleton: scene pass (MSAA→resolve, optional sky) then
-    /// the ACES tonemap into the LDR output.
+    /// Shared frame skeleton: shadow depth pre-pass, scene pass
+    /// (MSAA→resolve, optional sky), then the ACES tonemap into the LDR
+    /// output — the same composition as the real frame.
     fn compose(
         &mut self,
-        target: &SceneTarget,
-        clear:  wgpu::Color,
-        draw:   impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
+        target:      &SceneTarget,
+        clear:       wgpu::Color,
+        shadow_draw: impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
+        draw:        impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
     ) {
         self.tonemap.set_source(&self.gpu.device, &target.resolve_view);
+        let light_vp = shadow::fit_light_vp(Vec3::ZERO, self.light_dir);
+        self.gpu.queue.write_buffer(
+            &self.light_vp_buffer, 0,
+            bytemuck::cast_slice(&light_vp.to_cols_array()),
+        );
         let mut encoder = self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Offscreen Encoder"),
         });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Offscreen Shadow Pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            shadow_draw(&mut pass, self);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Offscreen Main Pass"),

@@ -408,6 +408,80 @@ fn uniform_white_environment_lights_surfaces_uniformly() {
     );
 }
 
+// ── Phase 3: shadows ─────────────────────────────────────────────────────────
+
+/// VQ-D3: a cube floating above a ground slab under a 45° sun casts a dark
+/// band — pixel-wise darker than the identical scene without the caster,
+/// over an area clearly larger than the caster's own silhouette; far ground
+/// stays untouched.
+#[test]
+fn floating_cube_casts_shadow_band_on_ground() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    // 45° sun, no IBL so the shadow contrast is unambiguous.
+    r.set_light(TestLight {
+        direction: Vec3::new(-1.0, 1.0, 0.0),
+        color:     Vec3::new(1.0, 1.0, 1.0),
+        ambient:   0.0,
+    });
+
+    // Ground: a flat white slab; caster: a red cube 6 units up.
+    let ground = cube_at(Vec3::new(0.0, -0.55, 0.0), 1.0, [1.0, 1.0, 1.0]);
+    let ground = SdfInstance {
+        model: Mat4::from_scale_rotation_translation(
+            Vec3::new(60.0, 1.0, 60.0),
+            glam::Quat::IDENTITY,
+            Vec3::new(0.0, -0.55, 0.0),
+        )
+        .to_cols_array_2d(),
+        ..ground
+    };
+    let caster = cube_at(Vec3::new(0.0, 6.0, 0.0), 4.0, [1.0, 0.0, 0.0]);
+
+    let target_without = r.target(W, H);
+    r.render_sdf(&target_without, &[ground], wgpu::Color::BLACK);
+    let without = r.read(&target_without);
+
+    let target_with = r.target(W, H);
+    r.render_sdf(&target_with, &[ground, caster], wgpu::Color::BLACK);
+    let with = r.read(&target_with);
+
+    // Pixel-wise: green channel only (the red caster has no green, so green
+    // loss = ground darkened by shadow or occlusion).
+    let mut darkened = 0usize;
+    let mut unchanged_far = 0usize;
+    let mut checked_far = 0usize;
+    for (i, (a, b)) in without.chunks_exact(4).zip(with.chunks_exact(4)).enumerate() {
+        let (ga, gb) = (a[1] as i32, b[1] as i32);
+        if ga > 40 && gb < ga * 6 / 10 {
+            darkened += 1;
+        }
+        // Left edge column region is far from cube + shadow (sun from -x
+        // throws the shadow toward +x): must be untouched.
+        let x = i % W as usize;
+        if x < 20 && ga > 40 {
+            checked_far += 1;
+            if (ga - gb).abs() <= 10 {
+                unchanged_far += 1;
+            }
+        }
+    }
+    // The caster's own silhouette also removes green; require the darkened
+    // area to be clearly larger than the cube footprint alone.
+    let cube_footprint = with
+        .chunks_exact(4)
+        .filter(|p| p[0] > 40 && p[1] < p[0] / 3)
+        .count();
+    assert!(
+        darkened > cube_footprint + 300,
+        "shadow band must extend beyond the caster: darkened={darkened} footprint={cube_footprint}"
+    );
+    assert!(checked_far > 100, "far-ground control region present");
+    assert!(
+        unchanged_far as f64 > checked_far as f64 * 0.95,
+        "far ground unchanged: {unchanged_far}/{checked_far}"
+    );
+}
+
 /// VQ-D2: with the sky pass on, background pixels show the environment
 /// rather than the black clear.
 #[test]

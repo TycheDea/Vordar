@@ -22,6 +22,29 @@ struct LightUniform {
 @group(0) @binding(1)
 var<uniform> light: LightUniform;
 
+// Shadow receiving (VQ-D3) — shared scene group.
+@group(0) @binding(2) var<uniform> light_vp: mat4x4<f32>;
+@group(0) @binding(3) var t_shadow: texture_depth_2d;
+@group(0) @binding(4) var s_shadow: sampler_comparison;
+
+fn shadow_factor(world_pos: vec3<f32>) -> f32 {
+    let lp  = light_vp * vec4<f32>(world_pos, 1.0);
+    let ndc = lp.xyz / lp.w;
+    let uv  = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 || ndc.z <= 0.0) {
+        return 1.0;
+    }
+    let texel = 1.0 / 2048.0;
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            let offset = vec2<f32>(f32(dx), f32(dy)) * texel;
+            sum += textureSampleCompareLevel(t_shadow, s_shadow, uv + offset, ndc.z);
+        }
+    }
+    return sum / 9.0;
+}
+
 @group(1) @binding(0) var t_albedo:   texture_2d<f32>;
 @group(1) @binding(1) var s_mat:      sampler;
 @group(1) @binding(2) var t_normal:   texture_2d<f32>;
@@ -127,7 +150,7 @@ fn f_schlick(VdotH: f32, f0: vec3<f32>) -> vec3<f32> {
 
 fn shade_pbr(
     N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
-    metallic: f32, roughness: f32, ao: f32, emissive: vec3<f32>,
+    metallic: f32, roughness: f32, ao: f32, emissive: vec3<f32>, shadow: f32,
 ) -> vec3<f32> {
     let L = light.direction;
     let H = normalize(V + L);
@@ -146,7 +169,7 @@ fn shade_pbr(
     let specular = d * g * f / max(4.0 * NdotV * NdotL, 1e-4);
     let kd       = (vec3<f32>(1.0) - f) * (1.0 - metallic);
 
-    let direct  = (kd * albedo + specular) * NdotL * light.color;
+    let direct  = (kd * albedo + specular) * NdotL * light.color * shadow;
 
     // IBL ambient (same as mesh_shader.wgsl).
     let irr     = textureSample(t_irradiance, s_env, N).rgb;
@@ -181,5 +204,6 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let V = normalize(camera.eye.xyz - in.world_pos);
-    return vec4<f32>(shade_pbr(N, V, albedo, metallic, roughness, ao, emissive), 1.0);
+    let shadow = shadow_factor(in.world_pos);
+    return vec4<f32>(shade_pbr(N, V, albedo, metallic, roughness, ao, emissive, shadow), 1.0);
 }

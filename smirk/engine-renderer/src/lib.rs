@@ -10,6 +10,7 @@ pub(crate) mod mipgen;
 pub mod offscreen;
 pub mod particle_pipeline;
 pub(crate) mod post;
+pub(crate) mod shadow;
 pub mod tangent;
 pub mod pipeline;
 pub(crate) mod skinned_pipeline;
@@ -92,6 +93,13 @@ pub(crate) struct RendererState {
     // ── HDR + post (VQ-D1/D4) ──
     pub(crate) hdr:     post::HdrTargets,
     pub(crate) tonemap: post::TonemapPass,
+    // ── shadows (VQ-D3) ──
+    pub(crate) shadow_view:       wgpu::TextureView,
+    pub(crate) shadow_pipelines:  shadow::ShadowPipelines,
+    pub(crate) shadow_bind_group: wgpu::BindGroup,
+    pub(crate) light_vp_buffer:   wgpu::Buffer,
+    pub(crate) light_dir:         GlamVec3,
+    _shadow_texture: wgpu::Texture,
     // ── IBL environment (VQ-D2) ──
     pub(crate) env_bgl:      wgpu::BindGroupLayout,
     pub(crate) sky_bgl:      wgpu::BindGroupLayout,
@@ -149,8 +157,9 @@ impl RendererState {
         surface.configure(&device, &config);
 
         let camera = Camera::new(size.width as f32 / size.height as f32);
-        let (camera_buffer, light_buffer, camera_bgl, camera_bind_group) =
-            camera::create_gpu_resources(&device, &camera);
+        let (shadow_texture, shadow_view) = shadow::create_shadow_texture(&device);
+        let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
+            camera::create_gpu_resources(&device, &camera, &shadow_view);
 
         let vertex_buffer   = pipeline::create_vertex_buffer(&device);
         let index_buffer    = pipeline::create_index_buffer(&device);
@@ -183,6 +192,17 @@ impl RendererState {
         );
         let particle_render_pipeline =
             particle_pipeline::create_particle_pipeline(&device, scene_format, &camera_bgl);
+
+        // Depth-only shadow variants of the three geometry pipelines (VQ-D3).
+        let shadow_pipelines = shadow::ShadowPipelines::new(&device, &joint_bgl);
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("Shadow Cast Bind Group"),
+            layout:  &shadow_pipelines.bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding:  0,
+                resource: light_vp_buffer.as_entire_binding(),
+            }],
+        });
 
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label:              Some("Instance Buffer"),
@@ -272,6 +292,12 @@ impl RendererState {
                 particle_instance_buffer,
                 camera, camera_buffer, light_buffer, camera_bind_group,
                 hdr, tonemap,
+                shadow_view,
+                shadow_pipelines,
+                shadow_bind_group,
+                light_vp_buffer,
+                light_dir: GlamVec3::new(-1.0, 2.0, -1.0).normalize(),
+                _shadow_texture: shadow_texture,
                 env_bgl, sky_bgl, sky_pipeline, environment,
                 texture_bgl,
                 material_bgl,
@@ -416,8 +442,10 @@ pub fn set_exposure(exposure: f32, resources: &mut Resources) {
 pub fn set_light(dir: GlamVec3, color: GlamVec3, ambient: f32, resources: &mut Resources) {
     let state = resources.get_mut::<RendererState>()
         .expect("RendererState not in resources");
+    let dir = dir.normalize();
+    state.light_dir = dir; // shadow fitting reads the CPU copy
     let uniform = LightUniform {
-        direction: dir.normalize().to_array(),
+        direction: dir.to_array(),
         _pad:      0.0,
         color:     color.to_array(),
         ambient,
@@ -824,6 +852,74 @@ impl System for RenderSystem {
         let mut encoder = state.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor { label: Some("Render Encoder") }
         );
+
+        // Shadow pre-pass (VQ-D3): fit the sun's ortho volume around the
+        // camera target (texel-snapped) and render depth-only variants of
+        // every opaque draw. Particles don't cast.
+        {
+            let light_vp = shadow::fit_light_vp(state.camera.target, state.light_dir);
+            state.queue.write_buffer(
+                &state.light_vp_buffer, 0,
+                bytemuck::cast_slice(&light_vp.to_cols_array()),
+            );
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Shadow Pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &state.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+
+            // SDF primitives.
+            pass.set_pipeline(&state.shadow_pipelines.sdf);
+            pass.set_bind_group(0, &state.shadow_bind_group, &[]);
+            pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
+            pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
+            pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
+
+            // Static meshes.
+            if let (Some(list), Some(store)) = (mesh_list.as_ref(), mesh_store.as_ref()) {
+                if !list.instances.is_empty() {
+                    pass.set_pipeline(&state.shadow_pipelines.mesh);
+                    pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
+                    for &(mesh_idx, first, count) in &list.ranges {
+                        if first as usize >= MAX_MESH_INSTANCES { break; }
+                        let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                        for prim in &gpu_mesh.primitives {
+                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                        }
+                    }
+                }
+            }
+
+            // Skinned meshes (re-binds the shared joint palette).
+            if let (Some(list), Some(store)) = (skinned_list.as_ref(), mesh_store.as_ref()) {
+                if !list.instances.is_empty() {
+                    pass.set_pipeline(&state.shadow_pipelines.skinned);
+                    pass.set_bind_group(1, &state.joint_bind_group, &[]);
+                    pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
+                    for &(mesh_idx, first, count) in &list.ranges {
+                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                        for prim in &gpu_mesh.primitives {
+                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                        }
+                    }
+                }
+            }
+        }
 
         // Main 3D pass — MSAA HDR, resolved for the tonemap pass (VQ-D1/D4).
         {

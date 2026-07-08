@@ -1,5 +1,9 @@
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use wgpu::{BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferUsages, ShaderStages};
+use wgpu::{
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
+    BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferUsages,
+    SamplerBindingType, ShaderStages, TextureViewDimension,
+};
 
 /// Which projection the camera uses. Cycle at runtime with the C key.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -180,12 +184,16 @@ impl LightUniform {
     }
 }
 
-/// Creates uniform buffers (camera + light), bind group layout, and bind group.
-/// Returns (camera_buffer, light_buffer, bind_group_layout, bind_group).
+/// Creates uniform buffers (camera + light + shadow light_vp), the scene
+/// bind group layout, and the bind group. Shadow resources live here
+/// (bindings 2–4) because the skinned pipeline already uses the default max
+/// of 4 bind groups.
+/// Returns (camera_buffer, light_buffer, light_vp_buffer, layout, bind_group).
 pub(crate) fn create_gpu_resources(
-    device: &wgpu::Device,
-    camera: &Camera,
-) -> (Buffer, Buffer, BindGroupLayout, BindGroup) {
+    device:      &wgpu::Device,
+    camera:      &Camera,
+    shadow_view: &wgpu::TextureView,
+) -> (Buffer, Buffer, Buffer, BindGroupLayout, BindGroup) {
     let cam_uniform = CameraUniform::from_camera(camera);
     let camera_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label:    Some("Camera Uniform"),
@@ -199,21 +207,43 @@ pub(crate) fn create_gpu_resources(
         usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
     });
 
+    let light_vp_buffer = device.create_buffer_init(&BufferInitDescriptor {
+        label:    Some("Light VP Uniform"),
+        contents: bytemuck::cast_slice(&glam::Mat4::IDENTITY.to_cols_array()),
+        usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+    });
+
+    let shadow_sampler = crate::shadow::create_shadow_sampler(device);
+
+    let uniform_entry = |binding: u32, visibility: ShaderStages| BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+        count: None,
+    };
     let layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: Some("Scene Bind Group Layout"),
         entries: &[
+            // Fragment too: the PBR shaders read camera.eye for the view vector.
+            uniform_entry(0, ShaderStages::VERTEX.union(ShaderStages::FRAGMENT)),
+            uniform_entry(1, ShaderStages::FRAGMENT),
+            // Shadow receiving (VQ-D3): sun view-proj + depth map + comparison sampler.
+            uniform_entry(2, ShaderStages::FRAGMENT),
             BindGroupLayoutEntry {
-                binding:    0,
-                // Fragment too: the PBR shaders read camera.eye for the view vector.
-                visibility: ShaderStages::VERTEX.union(ShaderStages::FRAGMENT),
-                ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                binding:    3,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Texture {
+                    multisampled:   false,
+                    view_dimension: TextureViewDimension::D2,
+                    sample_type:    wgpu::TextureSampleType::Depth,
+                },
                 count: None,
             },
             BindGroupLayoutEntry {
-                binding:    1,
+                binding:    4,
                 visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-                count: None,
+                ty:         BindingType::Sampler(SamplerBindingType::Comparison),
+                count:      None,
             },
         ],
     });
@@ -224,10 +254,13 @@ pub(crate) fn create_gpu_resources(
         entries: &[
             BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
             BindGroupEntry { binding: 1, resource: light_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 2, resource: light_vp_buffer.as_entire_binding() },
+            BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(shadow_view) },
+            BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
         ],
     });
 
-    (camera_buffer, light_buffer, layout, bind_group)
+    (camera_buffer, light_buffer, light_vp_buffer, layout, bind_group)
 }
 
 #[cfg(test)]
