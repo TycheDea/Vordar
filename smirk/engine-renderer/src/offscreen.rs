@@ -239,8 +239,13 @@ impl OffscreenRenderer {
         self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
-    pub fn set_exposure(&self, exposure: f32) {
+    pub fn set_exposure(&mut self, exposure: f32) {
         self.tonemap.set_exposure(&self.gpu.queue, exposure);
+    }
+
+    /// Bloom composite strength; 0.0 disables bloom entirely.
+    pub fn set_bloom_intensity(&mut self, intensity: f32) {
+        self.tonemap.set_bloom_intensity(&self.gpu.queue, intensity);
     }
 
     /// Render SDF instances through the real primitive pipeline, then tonemap
@@ -333,7 +338,10 @@ impl OffscreenRenderer {
         shadow_draw: impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
         draw:        impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
     ) {
-        self.tonemap.set_source(&self.gpu.device, &target.resolve_view);
+        let bloom = crate::bloom::BloomPass::new(
+            &self.gpu.device, &target.resolve_view, target.width, target.height,
+        );
+        self.tonemap.set_source(&self.gpu.device, &target.resolve_view, &bloom.output_view);
         let light_vp = shadow::fit_light_vp(Vec3::ZERO, self.light_dir);
         self.gpu.queue.write_buffer(
             &self.light_vp_buffer, 0,
@@ -388,6 +396,7 @@ impl OffscreenRenderer {
                 pass.draw(0..3, 0..1);
             }
         }
+        bloom.encode(&mut encoder);
         self.tonemap.encode(&mut encoder, &target.output_view);
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
     }

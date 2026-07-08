@@ -7,11 +7,12 @@
 
 struct PostParams {
     exposure: f32,
+    bloom:    f32, // bloom intensity (0 = off)
     _pad0:    f32,
     _pad1:    f32,
-    _pad2:    f32,
 }
 @group(0) @binding(2) var<uniform> post: PostParams;
+@group(0) @binding(3) var t_bloom: texture_2d<f32>;
 
 struct VertexOutput {
     @builtin(position) clip_pos: vec4<f32>,
@@ -39,6 +40,7 @@ fn aces(x: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let hdr = textureSample(t_hdr, s_hdr, in.uv).rgb;
-    return vec4<f32>(aces(hdr * post.exposure), 1.0);
+    let hdr   = textureSample(t_hdr, s_hdr, in.uv).rgb;
+    let bloom = textureSample(t_bloom, s_hdr, in.uv).rgb * post.bloom;
+    return vec4<f32>(aces((hdr + bloom) * post.exposure), 1.0);
 }

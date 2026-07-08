@@ -408,6 +408,44 @@ fn uniform_white_environment_lights_surfaces_uniformly() {
     );
 }
 
+// ── Phase 4: bloom ───────────────────────────────────────────────────────────
+
+/// A small HDR-bright quad on black spreads energy beyond its own rect with
+/// bloom on; the identical render with bloom off keeps that region black.
+#[test]
+fn bloom_spreads_hdr_energy_beyond_the_emitter() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 0.0 });
+
+    let scene = || {
+        quad_with_material(3.0, MaterialData {
+            base_color_factor: [0.0, 0.0, 0.0, 1.0],
+            emissive_factor:   [1.0, 1.0, 1.0],
+            emissive_strength: 8.0, // over the bloom threshold (1.0)
+            ..Default::default()
+        })
+    };
+
+    r.set_bloom_intensity(0.5);
+    let target_on = r.target(W, H);
+    r.render_mesh(&target_on, scene(), wgpu::Color::BLACK);
+    let with_bloom = r.read(&target_on);
+
+    r.set_bloom_intensity(0.0);
+    let target_off = r.target(W, H);
+    r.render_mesh(&target_off, scene(), wgpu::Color::BLACK);
+    let without_bloom = r.read(&target_off);
+
+    // Halo = pixels lit with bloom but black without it.
+    let mut halo = 0usize;
+    for (a, b) in with_bloom.chunks_exact(4).zip(without_bloom.chunks_exact(4)) {
+        if a[1] > 6 && b[1] <= 2 {
+            halo += 1;
+        }
+    }
+    assert!(halo > 300, "bloom must spread beyond the emitter: halo={halo}px");
+}
+
 // ── Phase 3: shadows ─────────────────────────────────────────────────────────
 
 /// VQ-D3: a cube floating above a ground slab under a 45° sun casts a dark

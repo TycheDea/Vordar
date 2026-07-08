@@ -559,7 +559,9 @@ struct TelegraphVisual {
 }
 
 const TELEGRAPH_DIM: Vec3 = Vec3::new(0.45, 0.08, 0.08);
-const TELEGRAPH_BRIGHT: Vec3 = Vec3::new(1.0, 0.25, 0.1);
+// Components above 1.0 are HDR emissive (VQ-C3): an about-to-resolve
+// telegraph blooms threat red-orange (VQ-A4).
+const TELEGRAPH_BRIGHT: Vec3 = Vec3::new(2.2, 0.45, 0.15);
 
 fn spawn_telegraph(
     world: &mut World,

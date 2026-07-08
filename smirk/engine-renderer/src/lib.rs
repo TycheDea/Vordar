@@ -1,4 +1,5 @@
 pub mod anim;
+pub(crate) mod bloom;
 pub mod camera;
 pub mod dev_overlay;
 pub(crate) mod ibl;
@@ -93,6 +94,7 @@ pub(crate) struct RendererState {
     // ── HDR + post (VQ-D1/D4) ──
     pub(crate) hdr:     post::HdrTargets,
     pub(crate) tonemap: post::TonemapPass,
+    pub(crate) bloom:   bloom::BloomPass,
     // ── shadows (VQ-D3) ──
     pub(crate) shadow_view:       wgpu::TextureView,
     pub(crate) shadow_pipelines:  shadow::ShadowPipelines,
@@ -176,8 +178,9 @@ impl RendererState {
         let environment = ibl::Environment::default_gray(&device, &queue, &env_bgl, &sky_bgl);
         let sky_pipeline = post::create_sky_pipeline(&device, &camera_bgl, &sky_bgl);
         let hdr = post::HdrTargets::new(&device, size.width, size.height);
+        let bloom = bloom::BloomPass::new(&device, &hdr.resolve_view, size.width, size.height);
         let mut tonemap = post::TonemapPass::new(&device, format);
-        tonemap.set_source(&device, &hdr.resolve_view);
+        tonemap.set_source(&device, &hdr.resolve_view, &bloom.output_view);
         tonemap.set_exposure(&queue, 1.0);
 
         let scene_format = post::HDR_FORMAT;
@@ -291,7 +294,7 @@ impl RendererState {
                 particle_pipeline: particle_render_pipeline,
                 particle_instance_buffer,
                 camera, camera_buffer, light_buffer, camera_bind_group,
-                hdr, tonemap,
+                hdr, tonemap, bloom,
                 shadow_view,
                 shadow_pipelines,
                 shadow_bind_group,
@@ -319,7 +322,8 @@ impl RendererState {
         self.config.height = h;
         self.surface.configure(&self.device, &self.config);
         self.hdr = post::HdrTargets::new(&self.device, w, h);
-        self.tonemap.set_source(&self.device, &self.hdr.resolve_view);
+        self.bloom = bloom::BloomPass::new(&self.device, &self.hdr.resolve_view, w, h);
+        self.tonemap.set_source(&self.device, &self.hdr.resolve_view, &self.bloom.output_view);
         self.camera.aspect = w as f32 / h as f32;
         let uniform = CameraUniform::from_camera(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
@@ -1015,7 +1019,9 @@ impl System for RenderSystem {
             }
         }
 
-        // Tonemap: HDR resolve → swapchain (ACES + exposure).
+        // Bloom chain from the HDR resolve, then tonemap (ACES + exposure +
+        // bloom composite) onto the swapchain.
+        state.bloom.encode(&mut encoder);
         state.tonemap.encode(&mut encoder, &view);
 
         // Egui overlay pass (Load existing pixels — don't clear the 3D scene)

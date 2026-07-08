@@ -4,7 +4,7 @@
     components: {
         "Transform":   (scale: (0.18, 0.34, 0.18)),
         "Velocity":    (),
-        "RenderShape": (shape: Diamond, color: (0.70, 0.50, 1.0)),
+        "RenderShape": (shape: Diamond, color: (1.4, 1.0, 2.0)), // >1 = HDR emissive (VQ-C3)
         "Hitbox":      (shape: Sphere(radius: 0.2)),
         "VfxTrail":    (color: (0.70, 0.50, 1.0), rate: 45.0),
     },

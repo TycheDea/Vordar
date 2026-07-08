@@ -4,7 +4,7 @@
     components: {
         "Transform":   (scale: (0.24, 0.24, 0.24)),
         "Velocity":    (),
-        "RenderShape": (shape: Sphere, color: (1.0, 0.45, 0.10)),
+        "RenderShape": (shape: Sphere, color: (2.5, 1.1, 0.25)), // >1 = HDR emissive (VQ-C3), threat orange (VQ-A4)
         "Hitbox":      (shape: Sphere(radius: 0.2)),
         "VfxTrail":    (color: (1.0, 0.45, 0.10), rate: 45.0),
     },

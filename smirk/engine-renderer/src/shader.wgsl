@@ -144,7 +144,13 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let N = normalize(in.normal);
     let V = normalize(camera.eye.xyz - in.world_pos);
     let shadow = shadow_factor(in.world_pos);
-    return vec4<f32>(shade_pbr(N, V, base, 0.0, 0.85, 1.0, shadow), 1.0);
+
+    // VQ-C3: instance color components above 1.0 are HDR emissive — the part
+    // over 1 bypasses lighting and feeds bloom. Content cranks RON colors
+    // past 1 to glow (portals, projectiles, telegraph accents).
+    let emissive = max(base - vec3<f32>(1.0), vec3<f32>(0.0));
+    let albedo   = min(base, vec3<f32>(1.0));
+    return vec4<f32>(shade_pbr(N, V, albedo, 0.0, 0.85, 1.0, shadow) + emissive, 1.0);
 }
 
 // ── Cook-Torrance GGX (same math as mesh_shader.wgsl — WGSL has no includes) ─

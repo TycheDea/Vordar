@@ -65,13 +65,15 @@ impl HdrTargets {
     }
 }
 
-/// Fullscreen ACES tonemap: HDR resolve → LDR swapchain, exposure uniform.
+/// Fullscreen ACES tonemap: HDR resolve (+ bloom) → LDR swapchain.
 pub(crate) struct TonemapPass {
     pipeline:        wgpu::RenderPipeline,
     bgl:             wgpu::BindGroupLayout,
     sampler:         wgpu::Sampler,
     exposure_buffer: wgpu::Buffer,
     bind_group:      Option<wgpu::BindGroup>,
+    exposure:        f32,
+    bloom_intensity: f32,
 }
 
 impl TonemapPass {
@@ -106,6 +108,16 @@ impl TonemapPass {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding:    3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled:   false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type:    wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                }, // bloom
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -150,13 +162,25 @@ impl TonemapPass {
             usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let pass = Self { pipeline, bgl, sampler, exposure_buffer, bind_group: None };
-        pass
+        Self {
+            pipeline,
+            bgl,
+            sampler,
+            exposure_buffer,
+            bind_group:      None,
+            exposure:        1.0,
+            bloom_intensity: 0.12,
+        }
     }
 
-    /// (Re)point the pass at the scene's HDR resolve view — call at init and
-    /// on every resize.
-    pub(crate) fn set_source(&mut self, device: &Device, hdr_view: &wgpu::TextureView) {
+    /// (Re)point the pass at the scene's HDR resolve + bloom output — call at
+    /// init and on every resize.
+    pub(crate) fn set_source(
+        &mut self,
+        device:     &Device,
+        hdr_view:   &wgpu::TextureView,
+        bloom_view: &wgpu::TextureView,
+    ) {
         self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label:   Some("Tonemap Bind Group"),
             layout:  &self.bgl,
@@ -164,12 +188,26 @@ impl TonemapPass {
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(hdr_view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
                 wgpu::BindGroupEntry { binding: 2, resource: self.exposure_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(bloom_view) },
             ],
         }));
     }
 
-    pub(crate) fn set_exposure(&self, queue: &Queue, exposure: f32) {
-        queue.write_buffer(&self.exposure_buffer, 0, bytemuck::cast_slice(&[exposure, 0.0, 0.0, 0.0]));
+    pub(crate) fn set_exposure(&mut self, queue: &Queue, exposure: f32) {
+        self.exposure = exposure;
+        self.upload_params(queue);
+    }
+
+    pub(crate) fn set_bloom_intensity(&mut self, queue: &Queue, intensity: f32) {
+        self.bloom_intensity = intensity;
+        self.upload_params(queue);
+    }
+
+    fn upload_params(&self, queue: &Queue) {
+        queue.write_buffer(
+            &self.exposure_buffer, 0,
+            bytemuck::cast_slice(&[self.exposure, self.bloom_intensity, 0.0, 0.0]),
+        );
     }
 
     /// Draw the tonemapped scene onto `dst` (the swapchain view).
