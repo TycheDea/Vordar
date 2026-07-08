@@ -1,0 +1,4 @@
+// Bolt cast: a snap of arcane sparks off the focus hand.
+(
+    cast: Some((count: 14, speed: 4.0, size: 0.12, color: (0.7, 1.9, 2.0), cell: 1)),
+)

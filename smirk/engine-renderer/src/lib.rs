@@ -22,7 +22,7 @@ pub use dev_overlay::DevOverlaySystem;
 pub use menu::{MenuState, MenuSystem};
 pub use mesh::{MeshDrawList, MeshRenderSyncSystem, MeshStore, SkinnedDrawList, SocketConfig, SocketTransforms};
 pub use mesh_pipeline::MeshVertex;
-pub use particle_pipeline::{ParticleInstance, MAX_PARTICLES};
+pub use particle_pipeline::{ParticleInstance, ATLAS_GRID, MAX_PARTICLES};
 pub use ui_layers::UiLayers;
 
 use std::mem::size_of;
@@ -85,7 +85,12 @@ pub(crate) struct RendererState {
     pub(crate) joint_buffer:            wgpu::Buffer,
     pub(crate) joint_bind_group:        wgpu::BindGroup,
     // ── particles ──
-    pub(crate) particle_pipeline:        wgpu::RenderPipeline,
+    pub(crate) particle_additive:        wgpu::RenderPipeline,
+    pub(crate) particle_alpha:           wgpu::RenderPipeline,
+    pub(crate) particle_fx_bgl:          wgpu::BindGroupLayout,
+    pub(crate) particle_fx_bind_group:   wgpu::BindGroup,
+    pub(crate) particle_params_buffer:   wgpu::Buffer,
+    pub(crate) particle_atlas:           texture::ColorTexture,
     pub(crate) particle_instance_buffer: wgpu::Buffer,
     pub(crate) camera:            Camera,
     pub(crate) camera_buffer:     wgpu::Buffer,
@@ -196,8 +201,25 @@ impl RendererState {
         let skinned_render_pipeline = skinned_pipeline::create_skinned_pipeline(
             &device, scene_format, &camera_bgl, &material_bgl, &joint_bgl, &env_bgl,
         );
-        let particle_render_pipeline =
-            particle_pipeline::create_particle_pipeline(&device, scene_format, &camera_bgl);
+        // Particle pass resources (VQ-E3): atlas + soft-fade depth + params.
+        let particle_fx_bgl = particle_pipeline::create_particle_fx_bind_group_layout(&device);
+        let (particle_additive, particle_alpha) = particle_pipeline::create_particle_pipelines(
+            &device, scene_format, &camera_bgl, &particle_fx_bgl,
+        );
+        let particle_atlas = particle_pipeline::create_particle_atlas(&device, &queue);
+        let particle_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Particle FX Params"),
+            size:               16,
+            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let particle_fx_bind_group = create_particle_fx_bind_group(
+            &device, &particle_fx_bgl, &particle_atlas, &hdr.depth_view, &particle_params_buffer,
+        );
+        queue.write_buffer(
+            &particle_params_buffer, 0,
+            bytemuck::cast_slice(&[size.width as f32, size.height as f32, 0.6, 0.0]),
+        );
 
         // Depth-only shadow variants of the three geometry pipelines (VQ-D3).
         let shadow_pipelines = shadow::ShadowPipelines::new(&device, &joint_bgl);
@@ -294,7 +316,12 @@ impl RendererState {
                 skinned_instance_buffer,
                 joint_buffer,
                 joint_bind_group,
-                particle_pipeline: particle_render_pipeline,
+                particle_additive,
+                particle_alpha,
+                particle_fx_bgl,
+                particle_fx_bind_group,
+                particle_params_buffer,
+                particle_atlas,
                 particle_instance_buffer,
                 camera, camera_buffer, light_buffer, camera_bind_group,
                 hdr, tonemap, bloom,
@@ -328,10 +355,38 @@ impl RendererState {
         self.hdr = post::HdrTargets::new(&self.device, w, h);
         self.bloom = bloom::BloomPass::new(&self.device, &self.hdr.resolve_view, w, h);
         self.tonemap.set_source(&self.device, &self.hdr.resolve_view, &self.bloom.output_view);
+        // The particle pass samples the (re-created) scene depth.
+        self.particle_fx_bind_group = create_particle_fx_bind_group(
+            &self.device, &self.particle_fx_bgl, &self.particle_atlas,
+            &self.hdr.depth_view, &self.particle_params_buffer,
+        );
+        self.queue.write_buffer(
+            &self.particle_params_buffer, 0,
+            bytemuck::cast_slice(&[w as f32, h as f32, 0.6, 0.0]),
+        );
         self.camera.aspect = w as f32 / h as f32;
         let uniform = CameraUniform::from_camera(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
+}
+
+fn create_particle_fx_bind_group(
+    device:  &wgpu::Device,
+    layout:  &wgpu::BindGroupLayout,
+    atlas:   &texture::ColorTexture,
+    depth:   &wgpu::TextureView,
+    params:  &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label:   Some("Particle FX Bind Group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&atlas.view) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&atlas.sampler) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(depth) },
+            wgpu::BindGroupEntry { binding: 3, resource: params.as_entire_binding() },
+        ],
+    })
 }
 
 /// Allocate a render slot for a new entity. Call from SpawnQueue callbacks.
@@ -588,11 +643,13 @@ pub fn init(window: &Arc<Window>, resources: &mut Resources) {
 
 /// World-space particle instances for this display frame. A game-side system
 /// (the client's particle sim) rebuilds `instances` every frame in
-/// Phase::RenderSync; RenderSystem uploads and draws them additively after the
-/// opaque passes. Anything past MAX_PARTICLES is ignored.
+/// Phase::RenderSync; RenderSystem uploads and draws them after the opaque
+/// passes — `instances[..additive_count]` with the additive pipeline, the
+/// rest premultiplied-alpha. Anything past MAX_PARTICLES is ignored.
 #[derive(Default)]
 pub struct ParticleDrawList {
-    pub instances: Vec<ParticleInstance>,
+    pub instances:      Vec<ParticleInstance>,
+    pub additive_count: usize,
 }
 
 pub fn on_resize(w: u32, h: u32, resources: &mut Resources) {
@@ -953,17 +1010,18 @@ impl System for RenderSystem {
             }
         }
 
-        // Main 3D pass — MSAA HDR, resolved for the tonemap pass (VQ-D1/D4).
+        // Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the
+        // particle pass, which resolves at its end (VQ-D1/D4).
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view:           &state.hdr.msaa_view,
-                    resolve_target: Some(&state.hdr.resolve_view),
+                    resolve_target: None,
                     depth_slice:    None,
                     ops: wgpu::Operations {
                         load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Discard, // resolve target keeps the frame
+                        store: wgpu::StoreOp::Store,
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -1036,14 +1094,46 @@ impl System for RenderSystem {
             pass.set_bind_group(0, &state.camera_bind_group, &[]);
             pass.set_bind_group(1, &state.environment.sky_bind_group, &[]);
             pass.draw(0..3, 0..1);
+        }
 
-            // Particle pass — additive billboards, drawn last so the read-only
-            // depth test sees all opaque geometry and they blend over the sky.
+        // Particle pass (VQ-E3): depth read-only so the shader can sample the
+        // scene depth for the soft fade; additive first, then premultiplied
+        // alpha; the MSAA resolve happens at the end of this pass.
+        {
+            let additive_count = particle_list
+                .as_ref()
+                .map(|l| l.additive_count.min(particle_count))
+                .unwrap_or(0);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Particle Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view:           &state.hdr.msaa_view,
+                    resolve_target: Some(&state.hdr.resolve_view),
+                    depth_slice:    None,
+                    ops: wgpu::Operations {
+                        load:  wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard, // resolve keeps the frame
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view:        &state.hdr.depth_view,
+                    depth_ops:   None, // read-only: tested by particles, sampled for softness
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
             if particle_count > 0 {
-                pass.set_pipeline(&state.particle_pipeline);
                 pass.set_bind_group(0, &state.camera_bind_group, &[]);
+                pass.set_bind_group(1, &state.particle_fx_bind_group, &[]);
                 pass.set_vertex_buffer(0, state.particle_instance_buffer.slice(..));
-                pass.draw(0..4, 0..particle_count as u32);
+                if additive_count > 0 {
+                    pass.set_pipeline(&state.particle_additive);
+                    pass.draw(0..4, 0..additive_count as u32);
+                }
+                if particle_count > additive_count {
+                    pass.set_pipeline(&state.particle_alpha);
+                    pass.draw(0..4, additive_count as u32..particle_count as u32);
+                }
             }
         }
 

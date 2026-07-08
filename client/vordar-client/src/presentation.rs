@@ -251,7 +251,7 @@ impl System for SandboxCastSystem {
             // Skinned-mesh cast animation (per-ability clip) — no-op on SDF bodies.
             crate::locomotion::trigger_attack_clip(world, player, ability.anim.as_deref(), ability.anim_secs);
             let tint = crate::vfx::class_tint(resources, &class);
-            crate::vfx::cast_burst(world, resources, player, tint);
+            crate::vfx::cast_burst(world, resources, player, &ability.id, tint);
 
             // Projectile abilities also fire their bolt locally toward the cursor.
             if let AbilityEffect::Projectile { prefab, speed, damage, damage_type, ttl_secs, spawn_offset } = &ability.effect {

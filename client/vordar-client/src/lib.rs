@@ -213,6 +213,8 @@ impl Plugin for ClientPlugin {
             .add_system(react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
             // Corpses must be cloned from dying entities BEFORE the flush removes them.
             .add_system(react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
+            // Impact beats fire where despawning projectiles died (before the flush).
+            .add_system(vfx::ImpactBurstSystem, Phase::DespawnFlush, SystemOrder::First)
             .add_system(pose::PoseAnimationSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::RenderSyncSystem>())
             // Facing + locomotion drive skinned meshes; both must run before the
             // mesh sync so rotation and clip selection are current this frame.

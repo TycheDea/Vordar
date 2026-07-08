@@ -96,6 +96,8 @@ impl Plugin for NetClientPlugin {
         .add_system(crate::locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
         .add_system(crate::locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
         .add_system(crate::vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
+        // Impact beats fire where despawning projectiles died (before the flush).
+        .add_system(crate::vfx::ImpactBurstSystem, Phase::DespawnFlush, SystemOrder::First)
         .add_system(NetCameraFollowSystem, Phase::RenderSync, SystemOrder::First)
         .add_system(TelegraphFillSystem, Phase::RenderSync, SystemOrder::First)
         .add_system(DayNightSystem, Phase::RenderSync, SystemOrder::First);
@@ -604,6 +606,40 @@ impl System for TelegraphFillSystem {
             let fill = 1.0 - (remaining / telegraph.duration_micros as f32).clamp(0.0, 1.0);
             shape.color = TELEGRAPH_DIM.lerp(TELEGRAPH_BRIGHT, fill);
         }
+        // The scheduled-ability impact beat (VQ-E1/E4): the resolve moment
+        // pops threat-colored sparks + ground dust where the telegraph was.
+        let impact_positions: Vec<Vec3> = finished
+            .iter()
+            .filter_map(|&e| world.get::<&Transform>(e).ok().map(|t| t.position))
+            .collect();
+        if let Some(sim) = resources.get_mut::<crate::vfx::ParticleSim>() {
+            for pos in impact_positions {
+                sim.burst_def(pos, &vordar_game::vfx::BurstDef {
+                    count: 20,
+                    speed: 4.5,
+                    size:  0.13,
+                    color: TELEGRAPH_BRIGHT,
+                    cell:  1,
+                    blend: vordar_game::vfx::ParticleBlend::Additive,
+                    ttl: (0.25, 0.5),
+                    gravity: -7.0,
+                    drag: 2.5,
+                    stretch: 0.0,
+                });
+                sim.burst_def(pos, &vordar_game::vfx::BurstDef {
+                    count: 8,
+                    speed: 1.6,
+                    size:  0.35,
+                    color: Vec3::new(0.35, 0.28, 0.24),
+                    cell:  3,
+                    blend: vordar_game::vfx::ParticleBlend::Alpha,
+                    ttl: (0.6, 1.0),
+                    gravity: -1.0,
+                    drag: 1.5,
+                    stretch: 0.0,
+                });
+            }
+        }
         for entity in finished {
             resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
         }
@@ -740,7 +776,7 @@ impl System for AbilityCastSystem {
                 // Skinned-mesh cast animation (per-ability clip) — no-op if not animated.
                 crate::locomotion::trigger_attack_clip(world, entity, anim.as_deref(), *anim_secs);
                 let tint = crate::vfx::class_tint(resources, &class);
-                crate::vfx::cast_burst(world, resources, entity, tint);
+                crate::vfx::cast_burst(world, resources, entity, id, tint);
             }
             // Optimistic dash: same deterministic velocity math the server
             // runs, so reconciliation only ever sees ordinary drift. Rare

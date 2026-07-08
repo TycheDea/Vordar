@@ -6,6 +6,7 @@
         "Velocity":    (),
         "RenderShape": (shape: Diamond, color: (1.4, 1.0, 2.0)), // >1 = HDR emissive (VQ-C3)
         "Hitbox":      (shape: Sphere(radius: 0.2)),
-        "VfxTrail":    (color: (0.70, 0.50, 1.0), rate: 45.0),
+        "VfxTrail":    (color: (1.0, 0.75, 1.5), rate: 45.0, cell: 2, stretch: 1.2,
+                        impact: Some((count: 10, speed: 3.0, size: 0.10, color: (1.4, 1.0, 2.0), cell: 1))),
     },
 )

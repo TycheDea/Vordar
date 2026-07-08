@@ -1,0 +1,4 @@
+// Cleave cast: wide, heavier ember spray.
+(
+    cast: Some((count: 18, speed: 4.2, size: 0.13, color: (2.2, 0.8, 0.35), cell: 1)),
+)

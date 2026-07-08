@@ -38,6 +38,8 @@ impl Plugin for GameComponentsPlugin {
             .add_prefab_dir("content/prefabs");
         app.resource_or_default::<ClassLibrary>().load_dir("content/classes");
         app.resource_or_default::<RaceLibrary>().load_dir("content/races");
+        // Ability effect beats (VQ-E1); server parses and ignores.
+        app.resource_or_default::<crate::vfx::VfxLibrary>().load_dir("content/vfx");
     }
 }
 

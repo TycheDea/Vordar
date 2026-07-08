@@ -1,0 +1,4 @@
+// Onslaught cast: the big spin-up — embers plus lingering smoke.
+(
+    cast: Some((count: 28, speed: 5.5, size: 0.14, color: (2.4, 0.9, 0.4), cell: 1, ttl: (0.4, 0.8))),
+)

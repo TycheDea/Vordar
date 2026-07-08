@@ -103,6 +103,63 @@ fn race_models_within_budgets() {
     }
 }
 
+/// VQ-E1: every authored ability has its three VFX beats — a cast beat in
+/// content/vfx/<id>.ron, and (for projectiles) travel + impact on the
+/// projectile prefab's VfxTrail. Scheduled abilities telegraph instead; their
+/// impact fires at telegraph resolve (client code).
+#[test]
+fn ability_vfx_beats_exist() {
+    use vordar_game::player::skills::AbilityEffect;
+
+    let root = repo_root();
+    let mut classes = vordar_game::class::ClassLibrary::new();
+    classes.load_dir(root.join("content/classes").to_str().unwrap());
+    let mut vfx = vordar_game::vfx::VfxLibrary::new();
+    vfx.load_dir(root.join("content/vfx").to_str().unwrap());
+
+    // Prefab dirs a projectile prefab may live in.
+    let prefab_dirs = ["content/prefabs", "content/chapters/chapter01/prefabs", "content/chapters/chapter02/prefabs"];
+    let find_prefab = |name: &str| -> Option<std::path::PathBuf> {
+        prefab_dirs
+            .iter()
+            .map(|d| root.join(d).join(format!("{name}.ron")))
+            .find(|p| p.exists())
+    };
+
+    #[derive(serde::Deserialize)]
+    struct PrefabFile {
+        components: std::collections::HashMap<String, ron::Value>,
+    }
+
+    for class_id in ["human", "ravager"] {
+        for ability in classes.abilities_of(class_id) {
+            let def = vfx.get(&ability.id).unwrap_or_else(|| {
+                panic!("VQ-E1: ability '{}' has no content/vfx/{}.ron", ability.id, ability.id)
+            });
+            assert!(def.cast.is_some(), "VQ-E1: ability '{}' authors no cast beat", ability.id);
+
+            if let AbilityEffect::Projectile { prefab, .. } = &ability.effect {
+                let path = find_prefab(prefab)
+                    .unwrap_or_else(|| panic!("ability '{}': prefab '{prefab}' not found", ability.id));
+                let text = std::fs::read_to_string(&path).unwrap();
+                let file: PrefabFile = ron::from_str(&text)
+                    .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                let trail = file.components.get("VfxTrail").unwrap_or_else(|| {
+                    panic!("VQ-E1: projectile '{prefab}' has no VfxTrail (travel beat)")
+                });
+                let trail: vordar_game::vfx::VfxTrail = trail
+                    .clone()
+                    .into_rust()
+                    .unwrap_or_else(|e| panic!("{prefab} VfxTrail: {e}"));
+                assert!(
+                    trail.impact.is_some(),
+                    "VQ-E1: projectile '{prefab}' authors no impact beat"
+                );
+            }
+        }
+    }
+}
+
 /// Phase 6: every zone visual reference resolves — env HDRI, ground texture
 /// set (diff/nor_gl/rough maps), and every prop glTF parses.
 #[test]

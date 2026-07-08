@@ -41,7 +41,9 @@ impl HdrTargets {
             sample_count:    SCENE_SAMPLES,
             dimension:       wgpu::TextureDimension::D2,
             format:          TextureFormat::Depth32Float,
-            usage:           wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // TEXTURE_BINDING: the particle pass samples scene depth for the
+            // soft fade while the attachment is read-only.
+            usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats:    &[],
         });
         let resolve = device.create_texture(&wgpu::TextureDescriptor {
