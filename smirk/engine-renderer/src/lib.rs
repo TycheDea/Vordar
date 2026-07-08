@@ -5,6 +5,7 @@ pub mod instance;
 pub mod menu;
 pub mod mesh;
 pub(crate) mod mesh_pipeline;
+pub mod offscreen;
 pub mod particle_pipeline;
 pub mod pipeline;
 pub(crate) mod skinned_pipeline;

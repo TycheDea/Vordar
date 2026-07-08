@@ -4,12 +4,12 @@ use std::mem::size_of;
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct SdfInstance {
-    pub(crate) model:        [[f32; 4]; 4],  // offset  0 — 64 bytes
-    pub(crate) color:        [f32; 3],       // offset 64 — 12 bytes
-    pub(crate) shape_type:   u32,            // offset 76 —  4 bytes
-    pub(crate) shape_params: [f32; 4],       // offset 80 — 16 bytes
-}                                            // total: 96 bytes
+pub struct SdfInstance {
+    pub model:        [[f32; 4]; 4],  // offset  0 — 64 bytes
+    pub color:        [f32; 3],       // offset 64 — 12 bytes
+    pub shape_type:   u32,            // offset 76 —  4 bytes
+    pub shape_params: [f32; 4],       // offset 80 — 16 bytes
+}                                     // total: 96 bytes
 
 impl SdfInstance {
     pub(crate) fn zeroed() -> Self {

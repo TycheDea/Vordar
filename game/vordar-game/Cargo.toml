@@ -13,3 +13,8 @@ serde          = { workspace = true }
 ron            = { workspace = true }
 log            = { workspace = true }
 smallvec       = "1"
+
+[dev-dependencies]
+# Content-lint only (tests/content_lint.rs): CPU-side glTF parse via
+# load_gltf_data — no GPU is touched.
+engine-renderer = { path = "../../smirk/engine-renderer" }
