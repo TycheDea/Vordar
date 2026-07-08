@@ -18,6 +18,7 @@ vordar-game     = { path = "../game/vordar-game" }
 vordar-protocol = { path = "../game/vordar-protocol" }
 vordar-server   = { path = "../server/vordar-server", features = ["bench-internals"] }
 vordar-client   = { path = "../client/vordar-client", features = ["bench-internals"] }
+engine-renderer = { path = "../smirk/engine-renderer" }
 glam            = { workspace = true }
 hecs            = { workspace = true }
 
@@ -58,4 +59,8 @@ harness = false
 
 [[bench]]
 name    = "client_netcode"
+harness = false
+
+[[bench]]
+name    = "render_cpu"
 harness = false

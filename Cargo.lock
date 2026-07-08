@@ -4212,6 +4212,7 @@ dependencies = [
  "engine-core",
  "engine-net",
  "engine-physics",
+ "engine-renderer",
  "glam 0.32.1",
  "hecs",
  "vordar-client",

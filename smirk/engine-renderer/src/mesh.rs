@@ -765,11 +765,13 @@ pub struct MeshRenderSyncSystem {
     skinned_items: Vec<(usize, SkinnedMeshInstance)>,
     // TEMP (anim feel-check): throttles a ~1 Hz log of each skinned player's clip.
     log_accum: f32,
+    /// Throttles the 80%-of-cap warning (VQ-F2) to ~once per 5 s.
+    warn_accum: f32,
 }
 
 impl MeshRenderSyncSystem {
     pub fn new() -> Self {
-        Self { items: Vec::new(), skinned_items: Vec::new(), log_accum: 0.0 }
+        Self { items: Vec::new(), skinned_items: Vec::new(), log_accum: 0.0, warn_accum: 0.0 }
     }
 }
 
@@ -908,6 +910,20 @@ impl System for MeshRenderSyncSystem {
                 _ => skinned.ranges.push((idx, first, 1)),
             }
             skinned.instances.push(inst);
+        }
+
+        // Cap guardrails (VQ-F2): meter in the dev overlay, throttled warning
+        // past 80% — the seam that flags the future enemy influx early.
+        let skinned_count = skinned.instances.len();
+        if let Some(stats) = resources.get_mut::<engine_app::dev_stats::DevStats>() {
+            stats.set("skinned", format!("{skinned_count}/{MAX_SKINNED_INSTANCES}"));
+        }
+        self.warn_accum += delta;
+        if skinned_count * 10 > MAX_SKINNED_INSTANCES * 8 && self.warn_accum >= 5.0 {
+            self.warn_accum = 0.0;
+            log::warn!(
+                "skinned instances at {skinned_count}/{MAX_SKINNED_INSTANCES} (>80% of the engine cap)"
+            );
         }
 
         resources.insert(store);

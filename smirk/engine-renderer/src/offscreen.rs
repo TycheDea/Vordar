@@ -114,8 +114,6 @@ pub struct TestLight {
 /// RendererState, minus the window.
 pub struct OffscreenRenderer {
     pub gpu:        HeadlessGpu,
-    camera_bgl:     wgpu::BindGroupLayout,
-    texture_bgl:    wgpu::BindGroupLayout,
     material_bgl:   wgpu::BindGroupLayout,
     env_bgl:        wgpu::BindGroupLayout,
     sky_bgl:        wgpu::BindGroupLayout,
@@ -132,7 +130,6 @@ pub struct OffscreenRenderer {
     light_dir:         Vec3,
     _shadow_texture:   wgpu::Texture,
     light_buffer:   wgpu::Buffer,
-    camera_buffer:  wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     vertex_buffer:  wgpu::Buffer,
     index_buffer:   wgpu::Buffer,
@@ -152,7 +149,7 @@ impl OffscreenRenderer {
 
         let camera = Camera::new(aspect);
         let (shadow_texture, shadow_view) = shadow::create_shadow_texture(device);
-        let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
+        let (_camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
             camera::create_gpu_resources(device, &camera, &shadow_view);
 
         let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(device);
@@ -195,8 +192,6 @@ impl OffscreenRenderer {
             light_vp_buffer,
             light_dir: Vec3::new(-1.0, 2.0, -1.0).normalize(),
             _shadow_texture: shadow_texture,
-            camera_bgl,
-            texture_bgl,
             material_bgl,
             env_bgl,
             sky_bgl,
@@ -207,7 +202,6 @@ impl OffscreenRenderer {
             environment,
             mipgen,
             light_buffer,
-            camera_buffer,
             camera_bind_group,
             white_bg,
             _white: white,
@@ -399,7 +393,7 @@ impl OffscreenRenderer {
             }
         }
         bloom.encode(&mut encoder);
-        self.tonemap.encode(&mut encoder, &target.output_view);
+        self.tonemap.encode(&mut encoder, &target.output_view, None);
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
     }
 

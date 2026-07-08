@@ -100,6 +100,7 @@ pub(crate) struct RendererState {
     pub(crate) hdr:     post::HdrTargets,
     pub(crate) tonemap: post::TonemapPass,
     pub(crate) bloom:   bloom::BloomPass,
+    pub(crate) gpu_timer: Option<post::GpuTimer>,
     // ── shadows (VQ-D3) ──
     pub(crate) shadow_view:       wgpu::TextureView,
     pub(crate) shadow_pipelines:  shadow::ShadowPipelines,
@@ -144,7 +145,9 @@ impl RendererState {
 
         let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor {
-                required_features: wgpu::Features::TEXTURE_COMPRESSION_BC,
+                // Timestamps are optional (dev-overlay GPU timing, Phase 8).
+                required_features: wgpu::Features::TEXTURE_COMPRESSION_BC
+                    | (adapter.features() & wgpu::Features::TIMESTAMP_QUERY),
                 ..Default::default()
             })
         ).expect("failed to acquire device (TEXTURE_COMPRESSION_BC required — desktop GPU needed)");
@@ -186,6 +189,7 @@ impl RendererState {
         let environment = ibl::Environment::default_gray(&device, &queue, &env_bgl, &sky_bgl);
         let sky_pipeline = post::create_sky_pipeline(&device, &camera_bgl, &sky_bgl);
         let hdr = post::HdrTargets::new(&device, size.width, size.height);
+        let gpu_timer = post::GpuTimer::new(&device, &queue);
         let bloom = bloom::BloomPass::new(&device, &hdr.resolve_view, size.width, size.height);
         let mut tonemap = post::TonemapPass::new(&device, format);
         tonemap.set_source(&device, &hdr.resolve_view, &bloom.output_view);
@@ -324,7 +328,7 @@ impl RendererState {
                 particle_atlas,
                 particle_instance_buffer,
                 camera, camera_buffer, light_buffer, camera_bind_group,
-                hdr, tonemap, bloom,
+                hdr, tonemap, bloom, gpu_timer,
                 shadow_view,
                 shadow_pipelines,
                 shadow_bind_group,
@@ -750,12 +754,27 @@ pub struct RenderSystem {
     dirty_ranges: Vec<(u64, usize)>,
     /// Deferred actions collected from egui during the last frame.
     pending_menu: Vec<MenuAction>,
+    /// Frames spent above 80% of the particle cap (throttles the warning).
+    particle_warn: u32,
+    /// GPU frame timing (dev overlay): sampled sparsely, last value cached.
+    frame_index: u64,
+    last_gpu_ms: Option<f32>,
 }
+
+/// Sample the GPU frame time once every N frames while the overlay is open
+/// (each sample costs a blocking map — dev-only).
+const GPU_TIMING_INTERVAL: u64 = 30;
 
 impl RenderSystem {
     pub fn new() -> Self {
-        // TODO: init dirty_ranges: Vec::new() alongside gpu_buf and pending_menu.
-        Self { gpu_buf: Vec::new(), dirty_ranges: Vec::new(), pending_menu: Vec::new() }
+        Self {
+            gpu_buf: Vec::new(),
+            dirty_ranges: Vec::new(),
+            pending_menu: Vec::new(),
+            particle_warn: 0,
+            frame_index: 0,
+            last_gpu_ms: None,
+        }
     }
 }
 
@@ -788,6 +807,21 @@ impl System for RenderSystem {
         }
 
         // ── Snapshot lightweight state for egui draw (before mut borrow) ─────
+        self.frame_index += 1;
+        let overlay_open = resources
+            .get::<engine_app::dev_stats::DevStats>()
+            .map(|s| s.open)
+            .unwrap_or(false);
+        // Publish last frame's GPU time before the lines snapshot below.
+        if overlay_open {
+            if let (Some(ms), Some(stats)) =
+                (self.last_gpu_ms, resources.get_mut::<engine_app::dev_stats::DevStats>())
+            {
+                stats.set("gpu", format!("{ms:.2} ms"));
+            }
+        }
+        let sample_gpu = overlay_open && self.frame_index % GPU_TIMING_INTERVAL == 0;
+
         let window       = resources.get::<Arc<Window>>().cloned();
         let menu_snap    = resources.get::<MenuState>().cloned();
         let dev_lines    = resources.get::<engine_app::dev_stats::DevStats>()
@@ -855,6 +889,25 @@ impl System for RenderSystem {
         let skinned_list  = resources.get_mut::<SkinnedDrawList>().map(std::mem::take);
         let mesh_store    = resources.get_mut::<MeshStore>().map(std::mem::take);
         let particle_list = resources.get_mut::<ParticleDrawList>().map(std::mem::take);
+
+        // Cap guardrail (VQ-F2): meter + throttled warning past 80%.
+        {
+            let count = particle_list.as_ref().map(|l| l.instances.len()).unwrap_or(0);
+            if let Some(stats) = resources.get_mut::<engine_app::dev_stats::DevStats>() {
+                stats.set("particles", format!("{count}/{}", particle_pipeline::MAX_PARTICLES));
+            }
+            if count * 10 > particle_pipeline::MAX_PARTICLES * 8 {
+                self.particle_warn += 1;
+                if self.particle_warn % 300 == 1 {
+                    log::warn!(
+                        "live particles at {count}/{} (>80% of the engine cap)",
+                        particle_pipeline::MAX_PARTICLES
+                    );
+                }
+            } else {
+                self.particle_warn = 0;
+            }
+        }
 
         // ── All GPU work inside one mutable borrow of RendererState ───────────
         let state = resources.get_mut::<RendererState>()
@@ -963,6 +1016,11 @@ impl System for RenderSystem {
                     }),
                     stencil_ops: None,
                 }),
+                timestamp_writes: if sample_gpu {
+                    state.gpu_timer.as_ref().map(|t| t.begin_writes())
+                } else {
+                    None
+                },
                 ..Default::default()
             });
 
@@ -1140,7 +1198,15 @@ impl System for RenderSystem {
         // Bloom chain from the HDR resolve, then tonemap (ACES + exposure +
         // bloom composite) onto the swapchain.
         state.bloom.encode(&mut encoder);
-        state.tonemap.encode(&mut encoder, &view);
+        state.tonemap.encode(
+            &mut encoder,
+            &view,
+            if sample_gpu {
+                state.gpu_timer.as_ref().map(|t| t.end_writes())
+            } else {
+                None
+            },
+        );
 
         // Egui overlay pass (Load existing pixels — don't clear the 3D scene)
         if let (Some(prims), Some(sd)) = (egui_primitives.as_ref(), egui_screen.as_ref()) {
@@ -1171,7 +1237,17 @@ impl System for RenderSystem {
                 state.egui_renderer.free_texture(id);
             }
         }
+        if sample_gpu {
+            if let Some(timer) = state.gpu_timer.as_ref() {
+                timer.resolve(&mut encoder);
+            }
+        }
         state.queue.submit(std::iter::once(encoder.finish()));
+        if sample_gpu {
+            if let Some(timer) = state.gpu_timer.as_ref() {
+                self.last_gpu_ms = timer.read_blocking(&state.device).or(self.last_gpu_ms);
+            }
+        }
         surface_texture.present();
 
         restore_mesh_resources(resources, mesh_list, skinned_list, mesh_store, particle_list);

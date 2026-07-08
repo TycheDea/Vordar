@@ -5,21 +5,6 @@ use wgpu::{
     TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
 
-pub(crate) fn create_depth_texture(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {
-    let texture = device.create_texture(&TextureDescriptor {
-        label: Some("Depth Texture"),
-        size: Extent3d { width, height, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Depth32Float,
-        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
-    let view = texture.create_view(&Default::default());
-    (texture, view)
-}
-
 // ── Color textures ─────────────────────────────────────────────────────────────
 
 pub struct ColorTexture {
