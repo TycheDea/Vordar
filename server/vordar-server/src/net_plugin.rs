@@ -88,7 +88,7 @@ impl Plugin for NetServerPlugin {
         let db_owner = DbWorker::spawn(&self.db_path)
             .unwrap_or_else(|e| panic!("failed to open db '{}': {e}", self.db_path));
         let db = db_owner.handle();
-        let zone = ZoneDef { name: "start".into(), chapter: None, portals: Vec::new() };
+        let zone = ZoneDef { name: "start".into(), chapter: None, portals: Vec::new(), visuals: Default::default() };
         let directory = HashMap::from([("start".to_owned(), server.local_addr())]);
         install(app, server, db, Some(db_owner), zone, directory, Instant::now());
     }
@@ -1012,7 +1012,7 @@ pub mod bench {
     /// NetServerState with one PlayerConn per entity, keyed by fabricated
     /// ConnIds 1..=n.
     pub fn state_with_fake_conns(server: NetServer, db: DbHandle, players: &[Entity]) -> NetServerState {
-        let zone = ZoneDef { name: "bench".into(), chapter: None, portals: Vec::new() };
+        let zone = ZoneDef { name: "bench".into(), chapter: None, portals: Vec::new(), visuals: Default::default() };
         let directory = HashMap::from([("bench".to_owned(), server.local_addr())]);
         let mut state = NetServerState::new(server, db, None, zone, directory, Instant::now());
         for (i, &entity) in players.iter().enumerate() {

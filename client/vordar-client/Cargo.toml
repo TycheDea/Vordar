@@ -34,3 +34,8 @@ hecs            = { workspace = true }
 winit           = { workspace = true }
 log             = { workspace = true }
 egui            = { workspace = true }
+
+[dev-dependencies]
+# Offscreen render tests (tests/ground_render.rs) pass wgpu types to the
+# engine's headless harness.
+wgpu = "29"

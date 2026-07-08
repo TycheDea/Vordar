@@ -102,6 +102,9 @@ pub(crate) struct RendererState {
     pub(crate) light_vp_buffer:   wgpu::Buffer,
     pub(crate) light_dir:         GlamVec3,
     _shadow_texture: wgpu::Texture,
+    // CPU copy of the full light uniform so set_light / set_fog can update
+    // their halves independently.
+    pub(crate) light_state: LightUniform,
     // ── IBL environment (VQ-D2) ──
     pub(crate) env_bgl:      wgpu::BindGroupLayout,
     pub(crate) sky_bgl:      wgpu::BindGroupLayout,
@@ -301,6 +304,7 @@ impl RendererState {
                 light_vp_buffer,
                 light_dir: GlamVec3::new(-1.0, 2.0, -1.0).normalize(),
                 _shadow_texture: shadow_texture,
+                light_state: LightUniform::default_sun(),
                 env_bgl, sky_bgl, sky_pipeline, environment,
                 texture_bgl,
                 material_bgl,
@@ -448,13 +452,37 @@ pub fn set_light(dir: GlamVec3, color: GlamVec3, ambient: f32, resources: &mut R
         .expect("RendererState not in resources");
     let dir = dir.normalize();
     state.light_dir = dir; // shadow fitting reads the CPU copy
-    let uniform = LightUniform {
-        direction: dir.to_array(),
-        _pad:      0.0,
-        color:     color.to_array(),
-        ambient,
+    state.light_state.direction = dir.to_array();
+    state.light_state.color     = color.to_array();
+    state.light_state.ambient   = ambient;
+    state.queue.write_buffer(&state.light_buffer, 0, bytemuck::cast_slice(&[state.light_state]));
+}
+
+/// Upload procedurally-built mesh data (e.g. the zone ground) under a
+/// synthetic asset key; entities reference it via `RenderMesh { asset: key }`.
+/// Returns false headless (no renderer — nothing to draw into).
+pub fn register_procedural_mesh(key: &str, data: mesh::MeshData, resources: &mut Resources) -> bool {
+    let Some(mut store) = resources.get_mut::<MeshStore>().map(std::mem::take) else {
+        return false;
     };
-    state.queue.write_buffer(&state.light_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    let ok = match resources.get::<RendererState>() {
+        Some(state) => {
+            store.register(&state.device, &state.queue, &state.material_bgl, &state.mipgen, key, data);
+            true
+        }
+        None => false,
+    };
+    resources.insert(store);
+    ok
+}
+
+/// Distance fog for the current zone (VQ-A5): linear-space color, exponential
+/// density per world unit (0.0 disables).
+pub fn set_fog(color: GlamVec3, density: f32, resources: &mut Resources) {
+    let Some(state) = resources.get_mut::<RendererState>() else { return };
+    state.light_state.fog_color   = color.to_array();
+    state.light_state.fog_density = density;
+    state.queue.write_buffer(&state.light_buffer, 0, bytemuck::cast_slice(&[state.light_state]));
 }
 
 /// Create a procedural checkerboard texture without any asset files.

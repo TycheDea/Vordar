@@ -15,6 +15,8 @@ struct LightUniform {
     _pad:      f32,
     color:     vec3<f32>,
     ambient:   f32,
+    fog_color:   vec3<f32>,
+    fog_density: f32,
 }
 @group(0) @binding(1)
 var<uniform> light: LightUniform;
@@ -150,8 +152,16 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // past 1 to glow (portals, projectiles, telegraph accents).
     let emissive = max(base - vec3<f32>(1.0), vec3<f32>(0.0));
     let albedo   = min(base, vec3<f32>(1.0));
-    return vec4<f32>(shade_pbr(N, V, albedo, 0.0, 0.85, 1.0, shadow) + emissive, 1.0);
+    let color = shade_pbr(N, V, albedo, 0.0, 0.85, 1.0, shadow) + emissive;
+    return vec4<f32>(apply_fog(color, in.world_pos), 1.0);
 }
+/// Exponential distance fog (VQ-A5); density 0 disables.
+fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
+    let dist = length(camera.eye.xyz - world_pos);
+    let t = 1.0 - exp(-light.fog_density * dist);
+    return mix(color, light.fog_color, t);
+}
+
 
 // ── Cook-Torrance GGX (same math as mesh_shader.wgsl — WGSL has no includes) ─
 

@@ -9,6 +9,8 @@ license, and where it is used. Add a row *when the asset lands*, not after.
 | DamagedHelmet glTF sample | Khronos glTF-Sample-Assets (model by theblueturtle_) — https://github.com/KhronosGroup/glTF-Sample-Assets | CC BY 4.0 | Renderer test fixture only (PBR/IBL verification) — `content/source/test/DamagedHelmet.glb`. Never shipped in game content. |
 | MetalRoughSpheres glTF sample | Khronos glTF-Sample-Assets (Analytical Graphics) — https://github.com/KhronosGroup/glTF-Sample-Assets | CC BY 4.0 | Renderer test fixture only (metallic-roughness verification) — `content/source/test/MetalRoughSpheres.glb`. Never shipped in game content. |
 | Evening Road 01 (Pure Sky) HDRI, 2k | Poly Haven (Jarod Guest / Sergej Majboroda) — https://polyhaven.com/a/evening_road_01_puresky | CC0 | Zone sky + IBL environment — `content/textures/env/evening_road_01_puresky_2k.hdr` |
+| Brown Mud Leaves 01 texture set, 2k | Poly Haven (Rob Tuytel) — https://polyhaven.com/a/brown_mud_leaves_01 | CC0 | Zone ground PBR set — `content/textures/ground/mud_leaves/` |
+| Rock 07, Rock 09, Rock Face 01, Dead Quiver Trunk models, 1k | Poly Haven (Rico Cilliers / Dimitrios Savva) — https://polyhaven.com/models | CC0 | Zone props — `content/models/props/` (fetched via `scripts/asset-pipeline/fetch_polyhaven.mjs`) |
 
 ## Incoming (planned, AA visual upgrade)
 

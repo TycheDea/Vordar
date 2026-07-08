@@ -170,16 +170,21 @@ pub(crate) struct LightUniform {
     pub(crate) _pad:      f32,
     pub(crate) color:     [f32; 3], // RGB light intensity
     pub(crate) ambient:   f32,      // IBL ambient scale (1.0 = environment as authored)
+    // Distance fog (VQ-A5): linear-space color, exponential density.
+    pub(crate) fog_color:   [f32; 3],
+    pub(crate) fog_density: f32,
 }
 
 impl LightUniform {
     pub(crate) fn default_sun() -> Self {
         let dir = glam::Vec3::new(-1.0, 2.0, -1.0).normalize();
         Self {
-            direction: dir.to_array(),
-            _pad:      0.0,
-            color:     [1.0, 0.95, 0.85],
-            ambient:   1.0,
+            direction:   dir.to_array(),
+            _pad:        0.0,
+            color:       [1.0, 0.95, 0.85],
+            ambient:     1.0,
+            fog_color:   [0.30, 0.26, 0.28], // dusk haze
+            fog_density: 0.0,                // zones opt in via set_fog
         }
     }
 }

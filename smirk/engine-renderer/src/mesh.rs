@@ -600,6 +600,17 @@ pub(crate) fn upload_mesh(
     GpuMesh { primitives, skin }
 }
 
+/// Decode a PNG/JPG from disk into tightly-packed RGBA8 — the seam for
+/// building procedural `MaterialData` (ground texture sets) outside glTF.
+pub fn load_image_rgba(path: &str) -> Result<ImageData, String> {
+    let img = image::open(path).map_err(|e| format!("{path}: {e}"))?.into_rgba8();
+    Ok(ImageData {
+        width:  img.width(),
+        height: img.height(),
+        pixels: img.into_raw(),
+    })
+}
+
 /// Loaded meshes keyed by asset path. Failed loads are cached as None so a
 /// bad path logs once, not every frame.
 #[derive(Default)]
@@ -609,6 +620,24 @@ pub struct MeshStore {
 }
 
 impl MeshStore {
+    /// Upload procedurally-built mesh data under a synthetic key (e.g.
+    /// "zone-ground:start"). Re-registering a key uploads fresh data — zone
+    /// rebuilds replace their ground.
+    pub(crate) fn register(
+        &mut self,
+        device: &Device,
+        queue:  &Queue,
+        layout: &BindGroupLayout,
+        mipgen: &MipGenerator,
+        key:    &str,
+        data:   MeshData,
+    ) -> usize {
+        let idx = self.meshes.len();
+        self.meshes.push(upload_mesh(device, queue, layout, mipgen, data));
+        self.by_path.insert(key.to_owned(), Some(idx));
+        idx
+    }
+
     pub(crate) fn get_or_load(
         &mut self,
         device: &Device,

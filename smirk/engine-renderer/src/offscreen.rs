@@ -231,10 +231,12 @@ impl OffscreenRenderer {
     pub fn set_light(&mut self, light: TestLight) {
         self.light_dir = light.direction.normalize();
         let uniform = LightUniform {
-            direction: self.light_dir.to_array(),
-            _pad:      0.0,
-            color:     light.color.to_array(),
-            ambient:   light.ambient,
+            direction:   self.light_dir.to_array(),
+            _pad:        0.0,
+            color:       light.color.to_array(),
+            ambient:     light.ambient,
+            fog_color:   [0.0; 3],
+            fog_density: 0.0, // fog assertions belong to dedicated tests
         };
         self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }

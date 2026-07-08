@@ -5,7 +5,7 @@
 
 use crate::post::HDR_FORMAT;
 use wgpu::util::DeviceExt;
-use wgpu::{Device, TextureFormat};
+use wgpu::Device;
 
 pub(crate) const BLOOM_LEVELS: u32 = 6;
 const THRESHOLD: f32 = 1.0; // HDR emissive > 1.0 blooms (VQ-C3)

@@ -21,6 +21,79 @@ pub struct ZoneDef {
     pub chapter: Option<String>,
     #[serde(default)]
     pub portals: Vec<PortalDef>,
+    /// Visual dressing (client-only; the server parses but never reads it).
+    #[serde(default)]
+    pub visuals: ZoneVisuals,
+}
+
+/// Per-zone presentation (VQ-A5): environment HDRI (IBL + sky), distance
+/// fog, ground material, scattered props. All optional with dusk defaults.
+#[derive(Clone, serde::Deserialize)]
+pub struct ZoneVisuals {
+    /// Radiance .hdr path; None = the shared dusk default.
+    #[serde(default)]
+    pub env: Option<String>,
+    #[serde(default = "default_fog_color")]
+    pub fog_color: Vec3,
+    #[serde(default = "default_fog_density")]
+    pub fog_density: f32,
+    /// PBR ground texture set; None keeps the dev slab.
+    #[serde(default)]
+    pub ground: Option<GroundDef>,
+    #[serde(default)]
+    pub props: Vec<PropDef>,
+}
+
+impl Default for ZoneVisuals {
+    fn default() -> Self {
+        Self {
+            env:         None,
+            fog_color:   default_fog_color(),
+            fog_density: default_fog_density(),
+            ground:      None,
+            props:       Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub struct GroundDef {
+    /// Directory with `diff/nor_gl/rough` maps (Poly Haven jpg convention).
+    pub texture_dir: String,
+    /// World units per texture repeat.
+    #[serde(default = "default_ground_tile")]
+    pub tile: f32,
+    /// Ground mesh side length, centred on the origin.
+    #[serde(default = "default_ground_size")]
+    pub size: f32,
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub struct PropDef {
+    /// glTF path (e.g. "content/models/props/rock_09/rock_09_1k.gltf").
+    pub model: String,
+    pub pos: Vec3,
+    #[serde(default = "default_prop_scale")]
+    pub scale: f32,
+    /// Yaw in degrees.
+    #[serde(default)]
+    pub yaw: f32,
+}
+
+fn default_fog_color() -> Vec3 {
+    Vec3::new(0.30, 0.26, 0.28) // dusk haze
+}
+fn default_fog_density() -> f32 {
+    0.0
+}
+fn default_ground_tile() -> f32 {
+    6.0
+}
+fn default_ground_size() -> f32 {
+    400.0
+}
+fn default_prop_scale() -> f32 {
+    1.0
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -97,6 +170,7 @@ mod tests {
                         target_zone: "east".into(),
                         target_pos: Vec3::new(-16.0, 0.0, 0.0),
                     }],
+                    visuals: ZoneVisuals::default(),
                 },
                 ZoneDef {
                     name: "east".into(),
@@ -107,6 +181,7 @@ mod tests {
                         target_zone: "start".into(),
                         target_pos: Vec3::new(16.0, 0.0, 0.0),
                     }],
+                    visuals: ZoneVisuals::default(),
                 },
             ],
         }

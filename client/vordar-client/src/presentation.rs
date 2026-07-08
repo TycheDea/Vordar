@@ -14,7 +14,8 @@ use glam::{Vec2, Vec3};
 use hecs::Entity;
 use vordar_game::combat::projectile::spawn_projectile;
 use vordar_game::skills::AbilityEffect;
-use vordar_game::zones::ZonesDef;
+use engine_core::components::RenderMesh;
+use vordar_game::zones::{ZoneVisuals, ZonesDef};
 use vordar_game::Player;
 
 /// Excluded from the minimap (the ground would be one giant dot).
@@ -56,13 +57,24 @@ impl System for ZoneDressingSystem {
         }
         self.applied = Some(zone.clone());
 
-        // Zone environment: the dusk HDRI drives IBL ambient + the visible
-        // sky (VQ-A5/D2). Per-zone HDRI paths arrive with the Phase 6 zone
-        // schema; until then every zone shares the dusk mood.
+        // This zone's visual dressing from zones.ron (dusk defaults when the
+        // zone doesn't author any).
+        let visuals: ZoneVisuals = resources
+            .get::<ZonesDef>()
+            .and_then(|def| def.zones.iter().find(|z| z.name == zone))
+            .map(|z| z.visuals.clone())
+            .unwrap_or_default();
+
+        // Environment HDRI drives IBL ambient + the visible sky (VQ-A5/D2);
+        // fog depth-cues the horizon.
         engine_renderer::set_environment(
-            "content/textures/env/evening_road_01_puresky_2k.hdr",
+            visuals
+                .env
+                .as_deref()
+                .unwrap_or("content/textures/env/evening_road_01_puresky_2k.hdr"),
             resources,
         );
+        engine_renderer::set_fog(visuals.fog_color, visuals.fog_density, resources);
 
         // Tear down the previous zone's scenery.
         let old: Vec<Entity> = world.query::<(Entity, &ZoneDressing)>().iter().map(|(e, _)| e).collect();
@@ -73,23 +85,57 @@ impl System for ZoneDressingSystem {
             }
         }
 
-        // The ground: one big slab whose top face sits at y = -0.5, flush
-        // with every unit's hitbox bottom. shape_type 7 = the readable
-        // ground pattern (checker + gridlines + axis lines); params[0] is
-        // the gridline period in world units.
-        world.spawn((
-            Transform {
-                position: Vec3::new(0.0, -1.0, 0.0),
-                scale: Vec3::new(400.0, 1.0, 400.0),
-                ..Transform::default()
-            },
-            RenderShape {
-                shape: RenderShapeType::Custom { shape_type: 7, params: [8.0, 0.0, 0.0, 0.0] },
-                color: zone_palette(&zone),
-            },
-            ZoneDressing,
-            HudHidden,
-        ));
+        // The ground. With an authored texture set: a heightmap grid with the
+        // tiling PBR material (VQ-A2), flat across the play area. Otherwise
+        // the dev slab (shape_type 7 readable pattern) stays.
+        let mut mesh_ground = false;
+        if let Some(g) = &visuals.ground {
+            match crate::ground::load_ground_material(&g.texture_dir) {
+                Ok(material) => {
+                    let data = crate::ground::generate_ground(g.size, g.tile, material);
+                    let key = format!("zone-ground:{zone}");
+                    if engine_renderer::register_procedural_mesh(&key, data, resources) {
+                        world.spawn((
+                            Transform::default(),
+                            RenderMesh { asset: key, tint: Vec3::ONE },
+                            ZoneDressing,
+                            HudHidden,
+                        ));
+                        mesh_ground = true;
+                    }
+                }
+                Err(e) => log::error!("zone '{zone}' ground material: {e}"),
+            }
+        }
+        if !mesh_ground {
+            world.spawn((
+                Transform {
+                    position: Vec3::new(0.0, -1.0, 0.0),
+                    scale: Vec3::new(400.0, 1.0, 400.0),
+                    ..Transform::default()
+                },
+                RenderShape {
+                    shape: RenderShapeType::Custom { shape_type: 7, params: [8.0, 0.0, 0.0, 0.0] },
+                    color: zone_palette(&zone),
+                },
+                ZoneDressing,
+                HudHidden,
+            ));
+        }
+
+        // Scattered props (rocks, dead trees — silhouettes against the dusk).
+        for prop in &visuals.props {
+            world.spawn((
+                Transform {
+                    position: prop.pos,
+                    rotation: glam::Quat::from_rotation_y(prop.yaw.to_radians()),
+                    scale:    Vec3::splat(prop.scale),
+                },
+                RenderMesh { asset: prop.model.clone(), tint: Vec3::ONE },
+                ZoneDressing,
+                HudHidden,
+            ));
+        }
 
         // Portal monuments at this zone's exits.
         let portals: Vec<Vec3> = resources

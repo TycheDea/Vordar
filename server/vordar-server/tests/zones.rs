@@ -26,6 +26,7 @@ fn test_zones() -> Vec<ZoneDef> {
                 target_zone: "east".into(),
                 target_pos: Vec3::new(-6.0, 0.0, 0.0),
             }],
+            visuals: Default::default(),
         },
         ZoneDef {
             name: "east".into(),
@@ -36,6 +37,7 @@ fn test_zones() -> Vec<ZoneDef> {
                 target_zone: "start".into(),
                 target_pos: Vec3::new(6.0, 0.0, 0.0),
             }],
+            visuals: Default::default(),
         },
     ];
     validate_zones(&ZonesDef { zones: zones.clone() }).unwrap();

@@ -103,6 +103,36 @@ fn race_models_within_budgets() {
     }
 }
 
+/// Phase 6: every zone visual reference resolves — env HDRI, ground texture
+/// set (diff/nor_gl/rough maps), and every prop glTF parses.
+#[test]
+fn zone_visual_refs_load() {
+    let root = repo_root();
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+    for zone in &def.zones {
+        let v = &zone.visuals;
+        if let Some(env) = &v.env {
+            assert!(root.join(env).exists(), "zone '{}': env '{}' missing", zone.name, env);
+        }
+        if let Some(g) = &v.ground {
+            let dir = root.join(&g.texture_dir);
+            for tag in ["diff", "nor_gl", "rough"] {
+                let found = std::fs::read_dir(&dir)
+                    .unwrap_or_else(|e| panic!("zone '{}': ground dir {dir:?}: {e}", zone.name))
+                    .flatten()
+                    .any(|f| f.file_name().to_string_lossy().contains(tag));
+                assert!(found, "zone '{}': ground set lacks a *{tag}* map", zone.name);
+            }
+            assert!(g.tile > 0.0 && g.size > 0.0, "zone '{}': degenerate ground", zone.name);
+        }
+        for prop in &v.props {
+            let path = root.join(&prop.model);
+            load_gltf_data(path.to_str().unwrap())
+                .unwrap_or_else(|e| panic!("zone '{}': prop failed to parse: {e}", zone.name));
+        }
+    }
+}
+
 /// VQ-B3: every socket bone the renderer attaches to exists in each rig.
 /// (Socket names are the engine default set until Phase 5 makes them
 /// data-driven per race.)

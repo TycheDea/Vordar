@@ -12,6 +12,25 @@
             portals: [
                 (pos: (22.0, 0.0, 0.0), radius: 2.0, target_zone: "east", target_pos: (-16.0, 0.0, 0.0)),
             ],
+            // Theme pass (VQ-A5): dusk HDRI (the default env), depth fog,
+            // mud/leaves PBR ground, rock + dead-tree silhouettes. Props sit
+            // on the ground plane (y = -0.5), clear of spawn and portals.
+            visuals: (
+                fog_color: (0.28, 0.24, 0.27),
+                fog_density: 0.0055,
+                ground: Some((texture_dir: "content/textures/ground/mud_leaves", tile: 7.0)),
+                props: [
+                    (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (14.0, -0.5, -19.0), scale: 3.0, yaw: 40.0),
+                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-24.0, -0.5, 13.0), scale: 2.2, yaw: 205.0),
+                    (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (-11.0, -0.5, 27.0), scale: 1.6, yaw: 118.0),
+                    (model: "content/models/props/dead_quiver_trunk/dead_quiver_trunk_1k.gltf", pos: (-30.0, -0.5, -24.0), scale: 1.4, yaw: 75.0),
+                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (31.0, -0.5, 22.0),  scale: 1.8, yaw: 320.0),
+                    (model: "content/models/props/dead_quiver_trunk/dead_quiver_trunk_1k.gltf", pos: (40.0, -0.5, -35.0), scale: 1.7, yaw: 210.0),
+                    // Horizon landmarks out in the hills.
+                    (model: "content/models/props/rock_face_01/rock_face_01_1k.gltf", pos: (-95.0, -0.5, -70.0), scale: 4.0, yaw: 15.0),
+                    (model: "content/models/props/rock_face_01/rock_face_01_1k.gltf", pos: (80.0, -0.5, 105.0),  scale: 3.2, yaw: 250.0),
+                ],
+            ),
         ),
         (
             name: "east",
@@ -19,6 +38,16 @@
             portals: [
                 (pos: (-22.0, 0.0, 0.0), radius: 2.0, target_zone: "start", target_pos: (16.0, 0.0, 0.0)),
             ],
+            // Emberwood Rest: same dusk env; drier, warmer haze, sparser props.
+            visuals: (
+                fog_color: (0.32, 0.26, 0.24),
+                fog_density: 0.004,
+                ground: Some((texture_dir: "content/textures/ground/mud_leaves", tile: 7.0)),
+                props: [
+                    (model: "content/models/props/rock_09/rock_09_1k.gltf", pos: (18.0, -0.5, 20.0),  scale: 2.0, yaw: 160.0),
+                    (model: "content/models/props/rock_07/rock_07_1k.gltf", pos: (-14.0, -0.5, -22.0), scale: 2.4, yaw: 30.0),
+                ],
+            ),
         ),
     ],
 )
