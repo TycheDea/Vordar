@@ -3,10 +3,11 @@
 // uniforms as the other geometry passes so mixed scenes light consistently.
 
 struct Camera {
-    view_proj: mat4x4<f32>,
-    right:     vec4<f32>,
-    up:        vec4<f32>,
-    eye:       vec4<f32>, // world-space camera position
+    view_proj:     mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
+    right:         vec4<f32>,
+    up:            vec4<f32>,
+    eye:           vec4<f32>, // world-space camera position
 }
 @group(0) @binding(0)
 var<uniform> camera: Camera;
@@ -36,6 +37,15 @@ struct MaterialUniform {
 }
 @group(1) @binding(6)
 var<uniform> material: MaterialUniform;
+
+// ── Environment (group 2) — IBL ambient (VQ-D2) ─────────────────────────────
+
+@group(2) @binding(0) var t_irradiance: texture_cube<f32>;
+@group(2) @binding(1) var t_prefilter:  texture_cube<f32>;
+@group(2) @binding(2) var t_brdf:       texture_2d<f32>;
+@group(2) @binding(3) var s_env:        sampler;
+
+const PREFILTER_MAX_MIP: f32 = 4.0; // PREFILTER_MIPS - 1
 
 struct VertexOutput {
     @builtin(position) clip_pos:  vec4<f32>,
@@ -125,8 +135,17 @@ fn shade_pbr(
     let kd       = (vec3<f32>(1.0) - f) * (1.0 - metallic);
 
     let direct  = (kd * albedo + specular) * NdotL * light.color;
-    // Flat ambient until IBL lands (Phase 2); AO shapes it.
-    let ambient = light.ambient * albedo * ao;
+
+    // IBL ambient: diffuse irradiance + prefiltered specular with the
+    // split-sum BRDF. light.ambient scales it (the day/night seam).
+    let irr     = textureSample(t_irradiance, s_env, N).rgb;
+    let diffuse = irr * albedo * (1.0 - metallic);
+    let R       = reflect(-V, N);
+    let pre     = textureSampleLevel(t_prefilter, s_env, R, rough * PREFILTER_MAX_MIP).rgb;
+    let ab      = textureSample(t_brdf, s_env, vec2<f32>(NdotV, rough)).rg;
+    let spec_ibl = pre * (f0 * ab.x + vec3<f32>(ab.y));
+    let ambient  = light.ambient * (diffuse + spec_ibl) * ao;
+
     return ambient + direct + emissive;
 }
 

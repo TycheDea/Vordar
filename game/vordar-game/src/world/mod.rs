@@ -84,7 +84,9 @@ pub fn day_night_light(day_fraction: f32) -> (Vec3, Vec3, f32) {
     let night = Vec3::new(0.25, 0.3, 0.55);
     let day = Vec3::new(1.0, 0.95, 0.85);
     let color = night.lerp(day, daylight);
-    let ambient = 0.06 + 0.14 * daylight;
+    // Ambient scales the IBL environment (1.0 = as authored): full by day,
+    // dimmed — never dead — at night.
+    let ambient = 0.25 + 0.75 * daylight;
     (dir, color, ambient)
 }
 

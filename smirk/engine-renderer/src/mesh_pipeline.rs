@@ -88,6 +88,7 @@ pub(crate) fn create_mesh_pipeline(
     surface_format:             TextureFormat,
     camera_bind_group_layout:   &BindGroupLayout,
     material_bind_group_layout: &BindGroupLayout,
+    env_bind_group_layout:      &BindGroupLayout,
 ) -> RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("mesh_shader.wgsl"));
 
@@ -96,6 +97,7 @@ pub(crate) fn create_mesh_pipeline(
         bind_group_layouts: &[
             Some(camera_bind_group_layout),
             Some(material_bind_group_layout),
+            Some(env_bind_group_layout),
         ],
         immediate_size: 0,
     });
@@ -144,7 +146,7 @@ pub(crate) fn create_mesh_pipeline(
             stencil:             Default::default(),
             bias:                Default::default(),
         }),
-        multisample: Default::default(),
+        multisample: wgpu::MultisampleState { count: crate::post::SCENE_SAMPLES, ..Default::default() },
         fragment: Some(wgpu::FragmentState {
             module:      &shader,
             entry_point: Some("frag_main"),

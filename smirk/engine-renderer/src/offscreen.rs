@@ -1,24 +1,24 @@
 // Headless offscreen render harness — VQ-G1.
 //
 // Lets integration tests exercise the real scene pipelines (same WGSL, same
-// pipeline factories as RendererState) without a window or swapchain: render
-// into an owned color target, read the pixels back, assert analytically
-// (coverage %, darker-than, monotonic — never exact pixel values).
-//
-// Pre-stages the Phase-2 HDR retarget: `SceneTarget` is the "Main Pass renders
-// into a texture I own" abstraction; Phase 2 points RendererState's main pass
-// at one of these (Rgba16Float) instead of the swapchain view.
+// pipeline factories, same HDR → MSAA-resolve → ACES-tonemap composition as
+// RendererState) without a window or swapchain, then read pixels back and
+// assert analytically (coverage %, darker-than, monotonic — never exact
+// pixel values).
 //
 // Device requirements are deliberately minimal (no TEXTURE_COMPRESSION_BC —
 // fallback adapters lack it), so harness assets must be RGBA8/procedural.
 
-use crate::camera::{self, Camera};
+use crate::camera::{self, Camera, LightUniform};
+use crate::ibl::Environment;
 use crate::instance::SdfInstance;
 use crate::mesh::{self, MeshData};
 use crate::mesh_pipeline::{self, MeshInstance};
 use crate::mipgen::MipGenerator;
 use crate::pipeline::{self, INDICES};
+use crate::post::{self, TonemapPass, HDR_FORMAT, SCENE_SAMPLES};
 use crate::texture;
+use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 /// A GPU device with no surface attached. `None` when the machine has no
@@ -45,160 +45,279 @@ impl HeadlessGpu {
     }
 }
 
-/// An offscreen render target: color (readback-capable) + depth. The size and
-/// format the Main Pass renders into, decoupled from any swapchain.
+/// An offscreen frame target mirroring the real chain: MSAA HDR color +
+/// depth, single-sample HDR resolve, and the LDR output the tonemap pass
+/// writes (readback-capable).
 pub struct SceneTarget {
-    pub color:      wgpu::Texture,
-    pub color_view: wgpu::TextureView,
-    pub depth_view: wgpu::TextureView,
-    pub width:      u32,
-    pub height:     u32,
-    pub format:     wgpu::TextureFormat,
+    pub width:  u32,
+    pub height: u32,
+    msaa_view:    wgpu::TextureView,
+    depth_view:   wgpu::TextureView,
+    resolve_view: wgpu::TextureView,
+    output:       wgpu::Texture,
+    output_view:  wgpu::TextureView,
 }
 
 impl SceneTarget {
-    pub fn new(device: &wgpu::Device, width: u32, height: u32, format: wgpu::TextureFormat) -> Self {
-        let color = device.create_texture(&wgpu::TextureDescriptor {
-            label:           Some("Offscreen Scene Target"),
-            size:            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count:    1,
-            dimension:       wgpu::TextureDimension::D2,
-            format,
-            usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats:    &[],
-        });
-        let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
-        let (_, depth_view) = texture::create_depth_texture(device, width, height);
-        Self { color, color_view, depth_view, width, height, format }
+    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let tex = |label: &str, samples: u32, format: wgpu::TextureFormat, usage: wgpu::TextureUsages| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label:           Some(label),
+                size,
+                mip_level_count: 1,
+                sample_count:    samples,
+                dimension:       wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats:    &[],
+            })
+        };
+        let msaa = tex("Offscreen MSAA", SCENE_SAMPLES, HDR_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let depth = tex(
+            "Offscreen Depth", SCENE_SAMPLES, wgpu::TextureFormat::Depth32Float,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+        let resolve = tex(
+            "Offscreen Resolve", 1, HDR_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let output = tex(
+            "Offscreen Output", 1, wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        );
+        Self {
+            width,
+            height,
+            msaa_view:    msaa.create_view(&Default::default()),
+            depth_view:   depth.create_view(&Default::default()),
+            resolve_view: resolve.create_view(&Default::default()),
+            output_view:  output.create_view(&Default::default()),
+            output,
+        }
     }
 }
 
-/// Render SDF-instance geometry through the real scene pipeline (shader.wgsl)
-/// into `target`, with the default orbit camera looking at the origin and the
-/// default sun. This is the same draw the Main Pass makes for primitives.
-pub fn render_sdf_scene(gpu: &HeadlessGpu, target: &SceneTarget, instances: &[SdfInstance], clear: wgpu::Color) {
-    let device = &gpu.device;
+/// Directional light override for tests (defaults to the engine sun).
+#[derive(Clone, Copy)]
+pub struct TestLight {
+    pub direction: Vec3,
+    pub color:     Vec3,
+    /// IBL ambient scale (1.0 = environment as authored).
+    pub ambient:   f32,
+}
 
-    let camera = Camera::new(target.width as f32 / target.height as f32);
-    let (_cam_buf, _light_buf, camera_bgl, camera_bind_group) =
-        camera::create_gpu_resources(device, &camera);
+/// The full offscreen scene renderer: real pipeline factories, a swappable
+/// IBL environment, and the ACES tonemap — the same frame composition as
+/// RendererState, minus the window.
+pub struct OffscreenRenderer {
+    pub gpu:        HeadlessGpu,
+    camera_bgl:     wgpu::BindGroupLayout,
+    texture_bgl:    wgpu::BindGroupLayout,
+    material_bgl:   wgpu::BindGroupLayout,
+    env_bgl:        wgpu::BindGroupLayout,
+    sky_bgl:        wgpu::BindGroupLayout,
+    sdf_pipeline:   wgpu::RenderPipeline,
+    mesh_pipeline:  wgpu::RenderPipeline,
+    sky_pipeline:   wgpu::RenderPipeline,
+    tonemap:        TonemapPass,
+    environment:    Environment,
+    mipgen:         MipGenerator,
+    light_buffer:   wgpu::Buffer,
+    camera_buffer:  wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    vertex_buffer:  wgpu::Buffer,
+    index_buffer:   wgpu::Buffer,
+    white_bg:       wgpu::BindGroup,
+    _white:         texture::ColorTexture,
+    /// Sky pass on/off — off keeps the clear color as background so coverage
+    /// assertions stay simple.
+    pub draw_sky:   bool,
+}
 
-    let texture_bgl = pipeline::create_texture_bind_group_layout(device);
-    let white       = texture::create_default_white(device, &gpu.queue);
-    let white_bg    = texture::create_bind_group(device, &texture_bgl, &white);
+impl OffscreenRenderer {
+    /// `None` when no GPU adapter exists. Aspect is fixed per target at render
+    /// time via the default orbit camera.
+    pub fn new(aspect: f32) -> Option<Self> {
+        let gpu = HeadlessGpu::new()?;
+        let device = &gpu.device;
 
-    let render_pipeline = pipeline::create_pipeline(device, target.format, &camera_bgl, &texture_bgl);
-    let vertex_buffer   = pipeline::create_vertex_buffer(device);
-    let index_buffer    = pipeline::create_index_buffer(device);
-    let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label:    Some("Offscreen Instance Buffer"),
-        contents: bytemuck::cast_slice(instances),
-        usage:    wgpu::BufferUsages::VERTEX,
-    });
+        let camera = Camera::new(aspect);
+        let (camera_buffer, light_buffer, camera_bgl, camera_bind_group) =
+            camera::create_gpu_resources(device, &camera);
 
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("Offscreen Encoder"),
-    });
-    {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Offscreen Main Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view:           &target.color_view,
-                resolve_target: None,
-                depth_slice:    None,
-                ops: wgpu::Operations {
-                    load:  wgpu::LoadOp::Clear(clear),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &target.depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load:  wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            ..Default::default()
+        let texture_bgl  = pipeline::create_texture_bind_group_layout(device);
+        let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
+        let env_bgl      = crate::ibl::create_env_bind_group_layout(device);
+        let sky_bgl      = post::create_sky_bind_group_layout(device);
+        let environment  = Environment::default_gray(device, &gpu.queue, &env_bgl, &sky_bgl);
+        let mipgen       = MipGenerator::new(device);
+
+        let sdf_pipeline =
+            pipeline::create_pipeline(device, HDR_FORMAT, &camera_bgl, &texture_bgl, &env_bgl);
+        let mesh_pipeline =
+            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl);
+        let sky_pipeline = post::create_sky_pipeline(device, &camera_bgl, &sky_bgl);
+        let mut tonemap = TonemapPass::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        tonemap.set_exposure(&gpu.queue, 1.0);
+
+        let white    = texture::create_default_white(device, &gpu.queue);
+        let white_bg = texture::create_bind_group(device, &texture_bgl, &white);
+        let vertex_buffer = pipeline::create_vertex_buffer(device);
+        let index_buffer  = pipeline::create_index_buffer(device);
+
+        Some(Self {
+            vertex_buffer,
+            index_buffer,
+            camera_bgl,
+            texture_bgl,
+            material_bgl,
+            env_bgl,
+            sky_bgl,
+            sdf_pipeline,
+            mesh_pipeline,
+            sky_pipeline,
+            tonemap,
+            environment,
+            mipgen,
+            light_buffer,
+            camera_buffer,
+            camera_bind_group,
+            white_bg,
+            _white: white,
+            draw_sky: false,
+            gpu,
+        })
+    }
+
+    pub fn target(&self, width: u32, height: u32) -> SceneTarget {
+        SceneTarget::new(&self.gpu.device, width, height)
+    }
+
+    /// Swap in a uniform-radiance environment (the white-furnace seam).
+    pub fn set_uniform_environment(&mut self, rgb: [f32; 3]) {
+        let pixels: Vec<f32> = (0..4 * 2).flat_map(|_| [rgb[0], rgb[1], rgb[2], 1.0]).collect();
+        self.environment = Environment::from_equirect_pixels(
+            &self.gpu.device, &self.gpu.queue, &self.env_bgl, &self.sky_bgl, 4, 2, &pixels,
+        );
+    }
+
+    pub fn set_light(&self, light: TestLight) {
+        let uniform = LightUniform {
+            direction: light.direction.normalize().to_array(),
+            _pad:      0.0,
+            color:     light.color.to_array(),
+            ambient:   light.ambient,
+        };
+        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    pub fn set_exposure(&self, exposure: f32) {
+        self.tonemap.set_exposure(&self.gpu.queue, exposure);
+    }
+
+    /// Render SDF instances through the real primitive pipeline, then tonemap
+    /// into the target's readable LDR output.
+    pub fn render_sdf(&mut self, target: &SceneTarget, instances: &[SdfInstance], clear: wgpu::Color) {
+        let instance_buffer = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:    Some("Offscreen Instance Buffer"),
+            contents: if instances.is_empty() { &[0u8; 96] } else { bytemuck::cast_slice(instances) },
+            usage:    wgpu::BufferUsages::VERTEX,
         });
-        if !instances.is_empty() {
-            pass.set_pipeline(&render_pipeline);
-            pass.set_bind_group(0, &camera_bind_group, &[]);
-            pass.set_bind_group(1, &white_bg, &[]);
-            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        self.compose(target, clear, |pass, this| {
+            if !instances.is_empty() {
+                pass.set_pipeline(&this.sdf_pipeline);
+                pass.set_bind_group(0, &this.camera_bind_group, &[]);
+                pass.set_bind_group(1, &this.white_bg, &[]);
+                pass.set_bind_group(2, &this.environment.bind_group, &[]);
+                pass.set_vertex_buffer(0, this.vertex_buffer.slice(..));
+                pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                pass.set_index_buffer(this.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
+            }
+        });
+    }
+
+    /// Render static glTF mesh data through the real mesh pipeline (full PBR
+    /// material bind groups, mipped textures), then tonemap.
+    pub fn render_mesh(&mut self, target: &SceneTarget, data: MeshData, clear: wgpu::Color) {
+        assert!(data.skeleton.is_none(), "render_mesh drives the static mesh path only");
+        let gpu_mesh = mesh::upload_mesh(
+            &self.gpu.device, &self.gpu.queue, &self.material_bgl, &self.mipgen, data,
+        );
+        let instance = MeshInstance {
+            model: glam::Mat4::IDENTITY.to_cols_array_2d(),
+            tint:  [1.0; 4],
+        };
+        let instance_buffer = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:    Some("Offscreen Mesh Instance Buffer"),
+            contents: bytemuck::cast_slice(&[instance]),
+            usage:    wgpu::BufferUsages::VERTEX,
+        });
+        self.compose(target, clear, |pass, this| {
+            pass.set_pipeline(&this.mesh_pipeline);
+            pass.set_bind_group(0, &this.camera_bind_group, &[]);
+            pass.set_bind_group(2, &this.environment.bind_group, &[]);
             pass.set_vertex_buffer(1, instance_buffer.slice(..));
-            pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
-        }
-    }
-    gpu.queue.submit(std::iter::once(encoder.finish()));
-}
-
-/// Render static glTF mesh data through the real mesh pipeline
-/// (mesh_shader.wgsl, full PBR material bind groups, mipped textures) into
-/// `target` — one instance at the origin, white tint, default camera + sun.
-/// Skinned data is rejected (the harness drives the static path).
-pub fn render_mesh_scene(gpu: &HeadlessGpu, target: &SceneTarget, data: MeshData, clear: wgpu::Color) {
-    assert!(data.skeleton.is_none(), "render_mesh_scene drives the static mesh path only");
-    let device = &gpu.device;
-
-    let camera = Camera::new(target.width as f32 / target.height as f32);
-    let (_cam_buf, _light_buf, camera_bgl, camera_bind_group) =
-        camera::create_gpu_resources(device, &camera);
-
-    let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
-    let mipgen       = MipGenerator::new(device);
-    let gpu_mesh     = mesh::upload_mesh(device, &gpu.queue, &material_bgl, &mipgen, data);
-    let render_pipeline =
-        mesh_pipeline::create_mesh_pipeline(device, target.format, &camera_bgl, &material_bgl);
-
-    let instance = MeshInstance {
-        model: glam::Mat4::IDENTITY.to_cols_array_2d(),
-        tint:  [1.0; 4],
-    };
-    let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label:    Some("Offscreen Mesh Instance Buffer"),
-        contents: bytemuck::cast_slice(&[instance]),
-        usage:    wgpu::BufferUsages::VERTEX,
-    });
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("Offscreen Mesh Encoder"),
-    });
-    {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Offscreen Mesh Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view:           &target.color_view,
-                resolve_target: None,
-                depth_slice:    None,
-                ops: wgpu::Operations {
-                    load:  wgpu::LoadOp::Clear(clear),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &target.depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load:  wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            ..Default::default()
+            for prim in &gpu_mesh.primitives {
+                pass.set_bind_group(1, &prim.material_bind_group, &[]);
+                pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..prim.index_count, 0, 0..1);
+            }
         });
-        pass.set_pipeline(&render_pipeline);
-        pass.set_bind_group(0, &camera_bind_group, &[]);
-        pass.set_vertex_buffer(1, instance_buffer.slice(..));
-        for prim in &gpu_mesh.primitives {
-            pass.set_bind_group(1, &prim.material_bind_group, &[]);
-            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..prim.index_count, 0, 0..1);
-        }
     }
-    gpu.queue.submit(std::iter::once(encoder.finish()));
+
+    /// Shared frame skeleton: scene pass (MSAA→resolve, optional sky) then
+    /// the ACES tonemap into the LDR output.
+    fn compose(
+        &mut self,
+        target: &SceneTarget,
+        clear:  wgpu::Color,
+        draw:   impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
+    ) {
+        self.tonemap.set_source(&self.gpu.device, &target.resolve_view);
+        let mut encoder = self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Offscreen Encoder"),
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Offscreen Main Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view:           &target.msaa_view,
+                    resolve_target: Some(&target.resolve_view),
+                    depth_slice:    None,
+                    ops: wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(clear),
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load:  wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            draw(&mut pass, self);
+            if self.draw_sky {
+                pass.set_pipeline(&self.sky_pipeline);
+                pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                pass.set_bind_group(1, &self.environment.sky_bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+        self.tonemap.encode(&mut encoder, &target.output_view);
+        self.gpu.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    /// Read the target's tonemapped LDR output, rows unpadded.
+    pub fn read(&self, target: &SceneTarget) -> Vec<u8> {
+        read_texture_mip(&self.gpu, &target.output, 0)
+    }
 }
 
 /// Upload RGBA8 pixels and build the full mip chain through the real blit
@@ -268,10 +387,4 @@ pub fn read_texture_mip(gpu: &HeadlessGpu, texture: &wgpu::Texture, mip: u32) ->
     drop(mapped);
     readback.unmap();
     pixels
-}
-
-/// Read a 4-bytes-per-pixel `SceneTarget` back to CPU memory, rows unpadded
-/// (`width * height * 4` bytes, row-major). Blocks until the copy completes.
-pub fn read_rgba8(gpu: &HeadlessGpu, target: &SceneTarget) -> Vec<u8> {
-    read_texture_mip(gpu, &target.color, 0)
 }

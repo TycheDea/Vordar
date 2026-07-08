@@ -8,6 +8,7 @@ license, and where it is used. Add a row *when the asset lands*, not after.
 | KayKit Adventurers characters (Knight, Mage, Barbarian, Rogue) | Kay Lousberg — https://kaylousberg.itch.io/kaykit-adventurers | CC0 1.0 | Current placeholder player races — `content/source/characters/*.glb` → `content/models/{human,dwarf,elf,valkyrie}.glb`. Slated for replacement by Mixamo characters (AA visual upgrade, Phase 5); sources kept until the user signs off on the new look. |
 | DamagedHelmet glTF sample | Khronos glTF-Sample-Assets (model by theblueturtle_) — https://github.com/KhronosGroup/glTF-Sample-Assets | CC BY 4.0 | Renderer test fixture only (PBR/IBL verification) — `content/source/test/DamagedHelmet.glb`. Never shipped in game content. |
 | MetalRoughSpheres glTF sample | Khronos glTF-Sample-Assets (Analytical Graphics) — https://github.com/KhronosGroup/glTF-Sample-Assets | CC BY 4.0 | Renderer test fixture only (metallic-roughness verification) — `content/source/test/MetalRoughSpheres.glb`. Never shipped in game content. |
+| Evening Road 01 (Pure Sky) HDRI, 2k | Poly Haven (Jarod Guest / Sergej Majboroda) — https://polyhaven.com/a/evening_road_01_puresky | CC0 | Zone sky + IBL environment — `content/textures/env/evening_road_01_puresky_2k.hdr` |
 
 ## Incoming (planned, AA visual upgrade)
 

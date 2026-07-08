@@ -136,6 +136,9 @@ impl Camera {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    /// Inverse of view_proj — the skybox pass unprojects NDC to a world-space
+    /// view ray (WGSL has no inverse()).
+    inv_view_proj: [[f32; 4]; 4],
     right:     [f32; 4],
     up:        [f32; 4],
     /// World-space eye position — the PBR shaders' view vector origin.
@@ -145,11 +148,13 @@ pub(crate) struct CameraUniform {
 impl CameraUniform {
     pub(crate) fn from_camera(camera: &Camera) -> Self {
         let (right, up) = camera.basis();
+        let vp = camera.build_view_projection_matrix();
         Self {
-            view_proj: camera.build_view_projection_matrix().to_cols_array_2d(),
-            right:     [right.x, right.y, right.z, 0.0],
-            up:        [up.x, up.y, up.z, 0.0],
-            eye:       [camera.eye.x, camera.eye.y, camera.eye.z, 1.0],
+            view_proj:     vp.to_cols_array_2d(),
+            inv_view_proj: vp.inverse().to_cols_array_2d(),
+            right:         [right.x, right.y, right.z, 0.0],
+            up:            [up.x, up.y, up.z, 0.0],
+            eye:           [camera.eye.x, camera.eye.y, camera.eye.z, 1.0],
         }
     }
 }
@@ -160,7 +165,7 @@ pub(crate) struct LightUniform {
     pub(crate) direction: [f32; 3], // world-space, normalised, pointing TOWARD light
     pub(crate) _pad:      f32,
     pub(crate) color:     [f32; 3], // RGB light intensity
-    pub(crate) ambient:   f32,      // 0..1 base brightness
+    pub(crate) ambient:   f32,      // IBL ambient scale (1.0 = environment as authored)
 }
 
 impl LightUniform {
@@ -170,7 +175,7 @@ impl LightUniform {
             direction: dir.to_array(),
             _pad:      0.0,
             color:     [1.0, 0.95, 0.85],
-            ambient:   0.15,
+            ambient:   1.0,
         }
     }
 }

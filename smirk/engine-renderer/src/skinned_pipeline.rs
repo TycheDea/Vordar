@@ -68,12 +68,13 @@ pub(crate) fn create_skinned_pipeline(
     camera_bgl:     &BindGroupLayout,
     material_bgl:   &BindGroupLayout,
     joint_bgl:      &BindGroupLayout,
+    env_bgl:        &BindGroupLayout,
 ) -> RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("skinned_mesh_shader.wgsl"));
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label:              Some("Skinned Pipeline Layout"),
-        bind_group_layouts: &[Some(camera_bgl), Some(material_bgl), Some(joint_bgl)],
+        bind_group_layouts: &[Some(camera_bgl), Some(material_bgl), Some(joint_bgl), Some(env_bgl)],
         immediate_size:     0,
     });
 
@@ -122,7 +123,7 @@ pub(crate) fn create_skinned_pipeline(
             stencil:             Default::default(),
             bias:                Default::default(),
         }),
-        multisample: Default::default(),
+        multisample: wgpu::MultisampleState { count: crate::post::SCENE_SAMPLES, ..Default::default() },
         fragment: Some(wgpu::FragmentState {
             module:      &shader,
             entry_point: Some("frag_main"),

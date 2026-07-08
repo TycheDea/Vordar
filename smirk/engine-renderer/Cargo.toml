@@ -22,4 +22,7 @@ egui = { workspace = true }
 egui-wgpu = "0.34"
 egui-winit = "0.34"
 gltf = { version = "1.4.1", features = ["import", "KHR_materials_emissive_strength"] }
+# Radiance .hdr decode for IBL environments; f32→f16 for Rgba16Float upload
+image = { version = "0.25", default-features = false, features = ["hdr"] }
+half  = { version = "2", features = ["bytemuck"] }
 

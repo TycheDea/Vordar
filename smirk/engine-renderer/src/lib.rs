@@ -1,6 +1,7 @@
 pub mod anim;
 pub mod camera;
 pub mod dev_overlay;
+pub(crate) mod ibl;
 pub mod instance;
 pub mod menu;
 pub mod mesh;
@@ -8,6 +9,7 @@ pub(crate) mod mesh_pipeline;
 pub(crate) mod mipgen;
 pub mod offscreen;
 pub mod particle_pipeline;
+pub(crate) mod post;
 pub mod tangent;
 pub mod pipeline;
 pub(crate) mod skinned_pipeline;
@@ -87,8 +89,14 @@ pub(crate) struct RendererState {
     pub(crate) camera_buffer:     wgpu::Buffer,
     pub(crate) light_buffer:      wgpu::Buffer,
     pub(crate) camera_bind_group: wgpu::BindGroup,
-    pub(crate) depth_texture:     wgpu::Texture,
-    pub(crate) depth_view:        wgpu::TextureView,
+    // ── HDR + post (VQ-D1/D4) ──
+    pub(crate) hdr:     post::HdrTargets,
+    pub(crate) tonemap: post::TonemapPass,
+    // ── IBL environment (VQ-D2) ──
+    pub(crate) env_bgl:      wgpu::BindGroupLayout,
+    pub(crate) sky_bgl:      wgpu::BindGroupLayout,
+    pub(crate) sky_pipeline: wgpu::RenderPipeline,
+    pub(crate) environment:  ibl::Environment,
     // ── textures ──
     pub(crate) texture_bgl:          wgpu::BindGroupLayout,
     pub(crate) material_bgl:         wgpu::BindGroupLayout,
@@ -151,16 +159,30 @@ impl RendererState {
         let mipgen          = mipgen::MipGenerator::new(&device);
         let default_tex     = texture::create_default_white(&device, &queue);
         let default_bg      = texture::create_bind_group(&device, &texture_bgl, &default_tex);
-        let render_pipeline = pipeline::create_pipeline(&device, format, &camera_bgl, &texture_bgl);
+
+        // HDR scene targets + post chain (VQ-D1/D4): every scene pipeline
+        // renders MSAA into Rgba16Float; the tonemap pass owns the swapchain.
+        let env_bgl = ibl::create_env_bind_group_layout(&device);
+        let sky_bgl = post::create_sky_bind_group_layout(&device);
+        let environment = ibl::Environment::default_gray(&device, &queue, &env_bgl, &sky_bgl);
+        let sky_pipeline = post::create_sky_pipeline(&device, &camera_bgl, &sky_bgl);
+        let hdr = post::HdrTargets::new(&device, size.width, size.height);
+        let mut tonemap = post::TonemapPass::new(&device, format);
+        tonemap.set_source(&device, &hdr.resolve_view);
+        tonemap.set_exposure(&queue, 1.0);
+
+        let scene_format = post::HDR_FORMAT;
+        let render_pipeline =
+            pipeline::create_pipeline(&device, scene_format, &camera_bgl, &texture_bgl, &env_bgl);
         let mesh_render_pipeline =
-            mesh_pipeline::create_mesh_pipeline(&device, format, &camera_bgl, &material_bgl);
+            mesh_pipeline::create_mesh_pipeline(&device, scene_format, &camera_bgl, &material_bgl, &env_bgl);
 
         let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(&device);
         let skinned_render_pipeline = skinned_pipeline::create_skinned_pipeline(
-            &device, format, &camera_bgl, &material_bgl, &joint_bgl,
+            &device, scene_format, &camera_bgl, &material_bgl, &joint_bgl, &env_bgl,
         );
         let particle_render_pipeline =
-            particle_pipeline::create_particle_pipeline(&device, format, &camera_bgl);
+            particle_pipeline::create_particle_pipeline(&device, scene_format, &camera_bgl);
 
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label:              Some("Instance Buffer"),
@@ -204,9 +226,6 @@ impl RendererState {
                 resource: joint_buffer.as_entire_binding(),
             }],
         });
-
-        let (depth_texture, depth_view) =
-            texture::create_depth_texture(&device, size.width, size.height);
 
         // ── egui ──────────────────────────────────────────────────────────────
         let egui_ctx = egui::Context::default();
@@ -252,7 +271,8 @@ impl RendererState {
                 particle_pipeline: particle_render_pipeline,
                 particle_instance_buffer,
                 camera, camera_buffer, light_buffer, camera_bind_group,
-                depth_texture, depth_view,
+                hdr, tonemap,
+                env_bgl, sky_bgl, sky_pipeline, environment,
                 texture_bgl,
                 material_bgl,
                 mipgen,
@@ -272,8 +292,8 @@ impl RendererState {
         self.config.width  = w;
         self.config.height = h;
         self.surface.configure(&self.device, &self.config);
-        (self.depth_texture, self.depth_view) =
-            texture::create_depth_texture(&self.device, w, h);
+        self.hdr = post::HdrTargets::new(&self.device, w, h);
+        self.tonemap.set_source(&self.device, &self.hdr.resolve_view);
         self.camera.aspect = w as f32 / h as f32;
         let uniform = CameraUniform::from_camera(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
@@ -365,8 +385,34 @@ pub fn unproject_to_ground(view_proj: Mat4, ndc: glam::Vec2) -> Option<GlamVec3>
     (t >= 0.0).then(|| p0 + d * t)
 }
 
+/// Load a Radiance .hdr equirect as the zone's environment: IBL ambient for
+/// every lit pass and the visible sky (VQ-D2). Returns false (keeping the
+/// previous environment) when the file is missing or invalid.
+pub fn set_environment(path: &str, resources: &mut Resources) -> bool {
+    // Headless / pre-window: nothing to do (same contract as the sync systems).
+    let Some(state) = resources.get_mut::<RendererState>() else { return false };
+    match ibl::Environment::from_hdr(&state.device, &state.queue, &state.env_bgl, &state.sky_bgl, path) {
+        Ok(env) => {
+            state.environment = env;
+            true
+        }
+        Err(e) => {
+            log::error!("set_environment failed: {e}");
+            false
+        }
+    }
+}
+
+/// Exposure applied in the tonemap pass (VQ-D1). 1.0 is neutral; the
+/// day/night system may drive it.
+pub fn set_exposure(exposure: f32, resources: &mut Resources) {
+    let Some(state) = resources.get_mut::<RendererState>() else { return };
+    state.tonemap.set_exposure(&state.queue, exposure);
+}
+
 /// Override the directional light. dir is the world-space vector pointing TOWARD the light
-/// (will be normalised here). color is RGB intensity. ambient is 0..1 base brightness.
+/// (will be normalised here). color is RGB intensity. ambient scales the IBL
+/// ambient term (1.0 = the environment as authored — the day/night seam).
 pub fn set_light(dir: GlamVec3, color: GlamVec3, ambient: f32, resources: &mut Resources) {
     let state = resources.get_mut::<RendererState>()
         .expect("RendererState not in resources");
@@ -779,21 +825,21 @@ impl System for RenderSystem {
             &wgpu::CommandEncoderDescriptor { label: Some("Render Encoder") }
         );
 
-        // Main 3D pass
+        // Main 3D pass — MSAA HDR, resolved for the tonemap pass (VQ-D1/D4).
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view:           &view,
-                    resolve_target: None,
+                    view:           &state.hdr.msaa_view,
+                    resolve_target: Some(&state.hdr.resolve_view),
                     depth_slice:    None,
                     ops: wgpu::Operations {
-                        load:  wgpu::LoadOp::Clear(wgpu::Color { r: 0.05, g: 0.05, b: 0.05, a: 1.0 }),
-                        store: wgpu::StoreOp::Store,
+                        load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Discard, // resolve target keeps the frame
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &state.depth_view,
+                    view: &state.hdr.depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load:  wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -806,6 +852,7 @@ impl System for RenderSystem {
             pass.set_pipeline(&state.pipeline);
             pass.set_bind_group(0, &state.camera_bind_group, &[]);
             pass.set_bind_group(1, tex_bg, &[]);
+            pass.set_bind_group(2, &state.environment.bind_group, &[]);
             pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
             pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
             pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
@@ -817,6 +864,7 @@ impl System for RenderSystem {
             if let (Some(list), Some(store)) = (mesh_list.as_ref(), mesh_store.as_ref()) {
                 if !list.instances.is_empty() {
                     pass.set_pipeline(&state.mesh_pipeline);
+                    pass.set_bind_group(2, &state.environment.bind_group, &[]);
                     pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
                     for &(mesh_idx, first, count) in &list.ranges {
                         if first as usize >= MAX_MESH_INSTANCES { break; }
@@ -840,6 +888,7 @@ impl System for RenderSystem {
                     pass.set_pipeline(&state.skinned_pipeline);
                     pass.set_bind_group(0, &state.camera_bind_group, &[]);
                     pass.set_bind_group(2, &state.joint_bind_group, &[]);
+                    pass.set_bind_group(3, &state.environment.bind_group, &[]);
                     pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
                     for &(mesh_idx, first, count) in &list.ranges {
                         let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
@@ -853,8 +902,15 @@ impl System for RenderSystem {
                 }
             }
 
+            // Sky pass — the IBL cubemap as background, pinned to the far
+            // plane behind everything opaque (VQ-D2).
+            pass.set_pipeline(&state.sky_pipeline);
+            pass.set_bind_group(0, &state.camera_bind_group, &[]);
+            pass.set_bind_group(1, &state.environment.sky_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+
             // Particle pass — additive billboards, drawn last so the read-only
-            // depth test sees all opaque geometry.
+            // depth test sees all opaque geometry and they blend over the sky.
             if particle_count > 0 {
                 pass.set_pipeline(&state.particle_pipeline);
                 pass.set_bind_group(0, &state.camera_bind_group, &[]);
@@ -862,6 +918,9 @@ impl System for RenderSystem {
                 pass.draw(0..4, 0..particle_count as u32);
             }
         }
+
+        // Tonemap: HDR resolve → swapchain (ACES + exposure).
+        state.tonemap.encode(&mut encoder, &view);
 
         // Egui overlay pass (Load existing pixels — don't clear the 3D scene)
         if let (Some(prims), Some(sd)) = (egui_primitives.as_ref(), egui_screen.as_ref()) {

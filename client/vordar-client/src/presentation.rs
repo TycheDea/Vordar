@@ -56,6 +56,14 @@ impl System for ZoneDressingSystem {
         }
         self.applied = Some(zone.clone());
 
+        // Zone environment: the dusk HDRI drives IBL ambient + the visible
+        // sky (VQ-A5/D2). Per-zone HDRI paths arrive with the Phase 6 zone
+        // schema; until then every zone shares the dusk mood.
+        engine_renderer::set_environment(
+            "content/textures/env/evening_road_01_puresky_2k.hdr",
+            resources,
+        );
+
         // Tear down the previous zone's scenery.
         let old: Vec<Entity> = world.query::<(Entity, &ZoneDressing)>().iter().map(|(e, _)| e).collect();
         {

@@ -4,10 +4,11 @@
 // block of joint matrices indexed by `joint_base`, so instancing survives.
 
 struct Camera {
-    view_proj: mat4x4<f32>,
-    right:     vec4<f32>,
-    up:        vec4<f32>,
-    eye:       vec4<f32>,
+    view_proj:     mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
+    right:         vec4<f32>,
+    up:            vec4<f32>,
+    eye:           vec4<f32>,
 }
 @group(0) @binding(0)
 var<uniform> camera: Camera;
@@ -37,6 +38,15 @@ struct MaterialUniform {
 var<uniform> material: MaterialUniform;
 
 @group(2) @binding(0) var<storage, read> joints: array<mat4x4<f32>>;
+
+// ── Environment (group 3) — IBL ambient (VQ-D2) ─────────────────────────────
+
+@group(3) @binding(0) var t_irradiance: texture_cube<f32>;
+@group(3) @binding(1) var t_prefilter:  texture_cube<f32>;
+@group(3) @binding(2) var t_brdf:       texture_2d<f32>;
+@group(3) @binding(3) var s_env:        sampler;
+
+const PREFILTER_MAX_MIP: f32 = 4.0; // PREFILTER_MIPS - 1
 
 struct VertexOutput {
     @builtin(position) clip_pos:  vec4<f32>,
@@ -137,7 +147,16 @@ fn shade_pbr(
     let kd       = (vec3<f32>(1.0) - f) * (1.0 - metallic);
 
     let direct  = (kd * albedo + specular) * NdotL * light.color;
-    let ambient = light.ambient * albedo * ao;
+
+    // IBL ambient (same as mesh_shader.wgsl).
+    let irr     = textureSample(t_irradiance, s_env, N).rgb;
+    let diffuse = irr * albedo * (1.0 - metallic);
+    let R       = reflect(-V, N);
+    let pre     = textureSampleLevel(t_prefilter, s_env, R, rough * PREFILTER_MAX_MIP).rgb;
+    let ab      = textureSample(t_brdf, s_env, vec2<f32>(NdotV, rough)).rg;
+    let spec_ibl = pre * (f0 * ab.x + vec3<f32>(ab.y));
+    let ambient  = light.ambient * (diffuse + spec_ibl) * ao;
+
     return ambient + direct + emissive;
 }
 
