@@ -18,7 +18,7 @@ used only as an auto-rigging service plus the clip library.
    the build pipeline prunes to our 64-joint budget).
 3. When the rigged preview animates, **Download**:
    - Format: **FBX Binary (.fbx)**, Pose: **T-Pose**
-   - Save as: `content/source/characters/mixamo/human/Character.fbx`
+   - Save as: `content/source/characters/mixamo/Character.fbx`
 
 ## Step 2 — animation clips
 

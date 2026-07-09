@@ -1229,26 +1229,26 @@ mod tests {
         let data = load_gltf_data(path).unwrap();
         let skel = data.skeleton.as_ref().expect("human is skinned");
         assert!(skel.joint_count() > 20, "full humanoid skeleton");
-        // Every primitive is skinned — including the gear (sword/shield/helmet)
-        // rigid-bound to its bone by the preprocess step.
-        assert!(data.primitives.len() >= 2, "body plus gear primitives");
+        // Every primitive is skinned (body + face meshes).
+        assert!(data.primitives.len() >= 2, "body plus face primitives");
         assert!(
             data.primitives.iter().all(|p| p.skin.is_some()),
-            "all primitives (body + gear) carry skin bindings"
+            "all primitives carry skin bindings"
         );
-        // Locomotion, the per-ability attack clips, hit react, and death.
+        // Locomotion, the per-ability attack clips, hit react, and death
+        // (the Mixamo clip library merged by mixamo_to_glb.py).
         let names: Vec<&str> = data.clips.iter().map(|c| c.name.as_str()).collect();
         for want in [
-            "Idle",
-            "Walking_A",
-            "Running_A",
-            "1H_Melee_Attack_Chop",
-            "1H_Melee_Attack_Slice_Horizontal",
-            "2H_Melee_Attack_Spinning",
-            "Spellcast_Shoot",
-            "Spellcast_Long",
-            "Hit_A",
-            "Death_A",
+            "idle",
+            "walk",
+            "run",
+            "attack_slash",
+            "attack_heavy",
+            "attack_cast",
+            "hit",
+            "death",
+            "leap",
+            "dodge",
         ] {
             assert!(names.contains(&want), "expected clip {want:?}, got {names:?}");
         }
@@ -1277,7 +1277,7 @@ mod tests {
         }
         let data = load_gltf_data(path).unwrap();
         let skin = CpuSkin { skeleton: data.skeleton.unwrap(), clips: data.clips };
-        for clip in ["Idle", "Walking_A", "Running_A"] {
+        for clip in ["idle", "walk", "run"] {
             let mut player = AnimationPlayer { clip: clip.into(), ..Default::default() };
             let (a, _) = pose_player(&mut player, &skin, 0.0);
             let (b, _) = pose_player(&mut player, &skin, 0.25);
@@ -1305,7 +1305,7 @@ mod tests {
         let clip = data
             .clips
             .iter()
-            .find(|c| c.name == "1H_Melee_Attack_Chop")
+            .find(|c| c.name == "attack_slash")
             .unwrap();
         let at = |t: f32| {
             let pose = crate::anim::sample_pose(skel, clip, t);
