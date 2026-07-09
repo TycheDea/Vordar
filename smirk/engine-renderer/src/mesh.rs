@@ -1286,6 +1286,38 @@ mod tests {
         }
     }
 
+    /// DIAGNOSTIC (the "half under the field" report): with the armature's
+    /// baked ground offset applied, no clip may pose any joint meaningfully
+    /// below the floor plane (floor top = −0.5, joints sit above the sole).
+    /// Catches clips whose ground reference disagrees with the bind pose —
+    /// prime suspect for a character rendering half-sunk.
+    #[test]
+    fn human_clips_stay_above_the_floor() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.glb");
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+        const FLOOR: f32 = -0.5;
+        let data = load_gltf_data(path).unwrap();
+        let skel = data.skeleton.as_ref().unwrap();
+        for clip in &data.clips {
+            for i in 0..=4 {
+                let t = clip.duration * i as f32 / 4.0;
+                let pose = crate::anim::sample_pose(skel, clip, t);
+                let globals = crate::anim::global_transforms(skel, &pose);
+                let min_y = globals
+                    .iter()
+                    .map(|g| g.to_scale_rotation_translation().2.y)
+                    .fold(f32::INFINITY, f32::min);
+                assert!(
+                    min_y > FLOOR - 0.35,
+                    "clip {:?} at t={t:.2}s poses a joint at y={min_y:.2} — well below the floor",
+                    clip.name
+                );
+            }
+        }
+    }
+
     /// The weapon-hand socket: the human skeleton keeps its bone names, the
     /// hand bone's global transform is finite, and it travels during the swing
     /// clip — the position a cast burst spawns from.
