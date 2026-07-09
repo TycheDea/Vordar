@@ -67,6 +67,26 @@ pub struct AnimController {
     pub dead:    bool,
 }
 
+/// Brief facing override toward a cast's target point — stamped by the cast
+/// systems so the character turns toward the cursor even while standing still
+/// (FacingSystem otherwise keeps the current heading below MOVE_EPS). Expires
+/// by ttl; movement heading resumes afterwards.
+pub struct CastAim {
+    pub target: glam::Vec3,
+    pub ttl:    f32,
+}
+
+/// How long a cast holds the aim-at-cursor facing (≈ one swing).
+pub const CAST_AIM_SECS: f32 = 0.4;
+
+/// Stamp (or refresh) a CastAim on the caster. No-op for non-animated entities.
+pub fn aim_at(world: &mut World, entity: Entity, target: glam::Vec3) {
+    if world.get::<&LocomotionClips>(entity).is_err() {
+        return;
+    }
+    let _ = world.insert_one(entity, CastAim { target, ttl: CAST_AIM_SECS });
+}
+
 /// Estimated velocity for entities the local sim doesn't move (remote,
 /// snapshot-lerped players) — derived from snapshot position deltas in
 /// net.rs. Locomotion/facing fall back to it when the sim `Velocity` is
@@ -175,14 +195,30 @@ pub struct FacingSystem;
 impl System for FacingSystem {
     fn run(&mut self, world: &mut World, _resources: &mut Resources, delta: f32) {
         let max_step = TURN_RATE * delta;
-        for (transform, clips, vel, net) in
-            world.query::<(&mut Transform, &LocomotionClips, Option<&Velocity>, Option<&NetMotion>)>().iter()
+        for (transform, clips, vel, net, aim) in
+            world.query::<(&mut Transform, &LocomotionClips, Option<&Velocity>, Option<&NetMotion>, Option<&mut CastAim>)>().iter()
         {
-            let v = effective_velocity(vel.map(|v| v.linear), net.map(|n| n.velocity));
-            let heading = Vec2::new(v.x, v.z);
-            if heading.length() < MOVE_EPS {
-                continue; // standing still: keep the current heading
-            }
+            // An active cast aim wins over the movement heading — and unlike
+            // movement, it also turns a stationary character.
+            let heading = match aim.filter(|a| a.ttl > 0.0) {
+                Some(aim) => {
+                    aim.ttl -= delta;
+                    let to = aim.target - transform.position;
+                    let h = Vec2::new(to.x, to.z);
+                    if h.length() < MOVE_EPS {
+                        continue; // aiming at our own feet: keep heading
+                    }
+                    h
+                }
+                None => {
+                    let v = effective_velocity(vel.map(|v| v.linear), net.map(|n| n.velocity));
+                    let h = Vec2::new(v.x, v.z);
+                    if h.length() < MOVE_EPS {
+                        continue; // standing still: keep the current heading
+                    }
+                    h
+                }
+            };
             let target = heading_yaw(heading.x, heading.y) + clips.forward_offset;
             let current = transform.rotation.to_euler(glam::EulerRot::YXZ).0;
             let yaw = turn_toward_yaw(current, target, max_step);
@@ -343,6 +379,50 @@ mod tests {
         assert_eq!(world.get::<&AnimationPlayer>(e).unwrap().clip, "Default_Attack");
         let clips_secs = world.get::<&LocomotionClips>(e).unwrap().attack_secs;
         assert!((world.get::<&AnimController>(e).unwrap().oneshot - clips_secs).abs() < 1e-6);
+    }
+
+    /// A stationary caster with a CastAim must turn toward the target point —
+    /// the whole reason the override exists (movement heading alone early-outs
+    /// below MOVE_EPS and would leave the character facing away).
+    #[test]
+    fn cast_aim_turns_a_stationary_character_then_expires() {
+        use engine_core::components::Transform;
+        let mut world = World::new();
+        let mut res = Resources::new();
+        let e = world.spawn((
+            Transform::default(),
+            LocomotionClips::default(), // forward_offset 0, no velocity
+            AnimController::default(),
+        ));
+        aim_at(&mut world, e, glam::Vec3::new(5.0, 0.0, 0.0)); // target at +X
+
+        let mut facing = FacingSystem;
+        for _ in 0..40 {
+            facing.run(&mut world, &mut res, 0.016);
+        }
+        let fwd = world.get::<&Transform>(e).unwrap().rotation * glam::Vec3::NEG_Z;
+        assert!(fwd.x > 0.9, "should face the +X aim target, forward = {fwd}");
+
+        // 40 × 16 ms > CAST_AIM_SECS — the aim has expired; a later heading
+        // change must not be fought by the stale override.
+        let ttl = world.get::<&CastAim>(e).unwrap().ttl;
+        assert!(ttl <= 0.0, "aim expired, ttl = {ttl}");
+        world.insert_one(e, NetMotion { velocity: glam::Vec3::new(0.0, 0.0, 6.0) }).unwrap();
+        for _ in 0..40 {
+            facing.run(&mut world, &mut res, 0.016);
+        }
+        let fwd = world.get::<&Transform>(e).unwrap().rotation * glam::Vec3::NEG_Z;
+        assert!(fwd.z > 0.9, "movement heading resumes after expiry, forward = {fwd}");
+    }
+
+    /// aim_at is a no-op for entities without LocomotionClips (SDF bodies).
+    #[test]
+    fn aim_at_skips_non_animated_entities() {
+        use engine_core::components::Transform;
+        let mut world = World::new();
+        let e = world.spawn((Transform::default(),));
+        aim_at(&mut world, e, glam::Vec3::X);
+        assert!(world.get::<&CastAim>(e).is_err(), "no CastAim on a non-animated entity");
     }
 
     #[test]

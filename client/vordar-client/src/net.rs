@@ -96,6 +96,8 @@ impl Plugin for NetClientPlugin {
         .add_system(crate::locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
         .add_system(crate::locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
         .add_system(crate::vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
+        // Weapons glue to the freshly rebuilt hand sockets (same slot as VFX).
+        .add_system(crate::weapons::WeaponAttachSystem::default(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
         // Impact beats fire where despawning projectiles died (before the flush).
         .add_system(crate::vfx::ImpactBurstSystem, Phase::DespawnFlush, SystemOrder::First)
         .add_system(NetCameraFollowSystem, Phase::RenderSync, SystemOrder::First)
@@ -775,6 +777,8 @@ impl System for AbilityCastSystem {
                 crate::pose::trigger_swing(world, entity);
                 // Skinned-mesh cast animation (per-ability clip) — no-op if not animated.
                 crate::locomotion::trigger_attack_clip(world, entity, anim.as_deref(), *anim_secs);
+                // Turn toward the cast target (cosmetic, works while standing).
+                crate::locomotion::aim_at(world, entity, Vec3::new(target.x, 0.0, target.y));
                 let tint = crate::vfx::class_tint(resources, &class);
                 crate::vfx::cast_burst(world, resources, entity, id, tint);
             }

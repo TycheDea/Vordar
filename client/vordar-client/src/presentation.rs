@@ -250,6 +250,14 @@ impl System for SandboxCastSystem {
             crate::pose::trigger_swing(world, player);
             // Skinned-mesh cast animation (per-ability clip) — no-op on SDF bodies.
             crate::locomotion::trigger_attack_clip(world, player, ability.anim.as_deref(), ability.anim_secs);
+            // Turn toward the cursor's ground point (cosmetic, works standing).
+            if let Some(target) = resources
+                .get::<MouseState>()
+                .and_then(|m| m.cursor())
+                .and_then(|c| engine_renderer::screen_to_ground(c, resources))
+            {
+                crate::locomotion::aim_at(world, player, target);
+            }
             let tint = crate::vfx::class_tint(resources, &class);
             crate::vfx::cast_burst(world, resources, player, &ability.id, tint);
 
