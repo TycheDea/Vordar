@@ -14,7 +14,7 @@
             name: "Rend",
             cooldown_micros: 900000,
             anim: Some("attack_slash"),
-            anim_secs: Some(0.5),
+            anim_secs: Some(1.0), // clip is 1.53 s; release after the strike lands, skip the long recovery
             effect: Scheduled(
                 telegraph_prefab: "telegraph",
                 radius: 2.0,
@@ -31,7 +31,7 @@
             name: "Cleave",
             cooldown_micros: 3000000,
             anim: Some("attack_heavy"),
-            anim_secs: Some(1.0),
+            anim_secs: Some(1.6), // clip is 2.47 s; hold through the downward hit
             effect: Scheduled(
                 telegraph_prefab: "telegraph",
                 radius: 4.0,
@@ -46,7 +46,7 @@
             id: "onslaught",
             name: "Onslaught",
             cooldown_micros: 8000000,
-            anim: Some("leap"),
+            anim: Some("attack_slash"), // blades-out arrival; a real spin clip can join clips/ later
             anim_secs: Some(0.8),
             effect: Leap(
                 telegraph_prefab: "telegraph",

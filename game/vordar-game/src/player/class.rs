@@ -373,7 +373,7 @@ mod tests {
         );
         assert_eq!(
             classes.get("ravager", "onslaught").unwrap().anim.as_deref(),
-            Some("leap")
+            Some("attack_slash")
         );
         assert_eq!(
             classes.get("human", "bolt").unwrap().anim.as_deref(),

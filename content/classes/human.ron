@@ -12,7 +12,7 @@
             name: "Bolt",
             cooldown_micros: 600000,
             anim: Some("attack_cast"),
-            anim_secs: Some(0.4),
+            anim_secs: Some(0.8), // clip is 2.73 s; bolt is spammable, cut after the throw
             effect: Projectile(
                 prefab: "bolt",
                 speed: 18.0,
@@ -26,7 +26,7 @@
             name: "Blast",
             cooldown_micros: 3000000,
             anim: Some("attack_cast"),
-            anim_secs: Some(1.0),
+            anim_secs: Some(1.4),
             effect: Scheduled(
                 telegraph_prefab: "telegraph",
                 radius: 4.0,
