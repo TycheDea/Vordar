@@ -12,6 +12,7 @@ pub mod presentation;
 pub mod react;
 pub mod ui;
 pub mod vfx;
+pub mod weapons;
 
 use engine_app::app::App;
 use engine_app::events::EventBus;
@@ -223,6 +224,8 @@ impl Plugin for ClientPlugin {
             .add_system(locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
             .add_system(locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
             .add_system(vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
+            // Weapons glue to the freshly rebuilt hand sockets (same slot as VFX).
+            .add_system(weapons::WeaponAttachSystem::default(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
             .add_system(CameraFollowSystem, Phase::RenderSync, SystemOrder::First);
         ui::install(app);
     }
