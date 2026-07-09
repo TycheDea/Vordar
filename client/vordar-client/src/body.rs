@@ -216,7 +216,7 @@ mod tests {
         assert_ne!(mesh.tint, Vec3::ONE, "ravager tint applied");
         let clips = world.get::<&LocomotionClips>(player).expect("player must have locomotion");
         assert_eq!((clips.idle.as_str(), clips.run.as_str()), ("idle", "run"));
-        assert!((clips.forward_offset - std::f32::consts::PI).abs() < 1e-3, "π forward offset from race RON");
+        assert!(clips.forward_offset.abs() < 1e-3, "−Z-forward rig: no offset in the race RON");
         assert!(world.get::<&AnimController>(player).is_ok());
         assert!(world.get::<&ShapeGroup>(player).is_err(), "NOT the SDF fallback");
     }

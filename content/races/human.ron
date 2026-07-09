@@ -19,6 +19,6 @@
         hit:    "hit",
         walk_speed: 0.1,
         run_speed:  3.0,
-        forward_offset: 3.14159, // Mixamo rigs face +Z like KayKit; π turns them to face travel
+        forward_offset: 0.0, // the Mixamo-rigged VRoid body faces −Z (glTF convention) — no flip
     )),
 )

@@ -11,7 +11,7 @@
             id: "bolt",
             name: "Bolt",
             cooldown_micros: 600000,
-            anim: Some("Spellcast_Shoot"),
+            anim: Some("attack_cast"),
             anim_secs: Some(0.4),
             effect: Projectile(
                 prefab: "bolt",
@@ -25,7 +25,7 @@
             id: "blast",
             name: "Blast",
             cooldown_micros: 3000000,
-            anim: Some("Spellcast_Long"),
+            anim: Some("attack_cast"),
             anim_secs: Some(1.0),
             effect: Scheduled(
                 telegraph_prefab: "telegraph",

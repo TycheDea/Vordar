@@ -13,7 +13,7 @@
             id: "rend",
             name: "Rend",
             cooldown_micros: 900000,
-            anim: Some("1H_Melee_Attack_Chop"),
+            anim: Some("attack_slash"),
             anim_secs: Some(0.5),
             effect: Scheduled(
                 telegraph_prefab: "telegraph",
@@ -30,7 +30,7 @@
             id: "cleave",
             name: "Cleave",
             cooldown_micros: 3000000,
-            anim: Some("1H_Melee_Attack_Slice_Horizontal"),
+            anim: Some("attack_heavy"),
             anim_secs: Some(1.0),
             effect: Scheduled(
                 telegraph_prefab: "telegraph",
@@ -46,7 +46,7 @@
             id: "onslaught",
             name: "Onslaught",
             cooldown_micros: 8000000,
-            anim: Some("2H_Melee_Attack_Spinning"),
+            anim: Some("leap"),
             anim_secs: Some(0.8),
             effect: Leap(
                 telegraph_prefab: "telegraph",

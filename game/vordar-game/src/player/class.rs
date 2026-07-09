@@ -356,7 +356,7 @@ mod tests {
         races.load_dir(races_dir);
         let human = races.model("human").expect("human race has a skinned model");
         assert!(human.asset.contains("human.glb"));
-        assert_eq!(human.idle, "Idle");
+        assert_eq!(human.idle, "idle");
 
         let mut classes = ClassLibrary::new();
         classes.load_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/classes"));
@@ -369,16 +369,16 @@ mod tests {
         // clip that exists in the preprocessed rigs.
         assert_eq!(
             classes.get("ravager", "rend").unwrap().anim.as_deref(),
-            Some("1H_Melee_Attack_Chop")
+            Some("attack_slash")
         );
         assert_eq!(
             classes.get("ravager", "onslaught").unwrap().anim.as_deref(),
-            Some("2H_Melee_Attack_Spinning")
+            Some("leap")
         );
         assert_eq!(
             classes.get("human", "bolt").unwrap().anim.as_deref(),
-            Some("Spellcast_Shoot")
+            Some("attack_cast")
         );
-        assert_eq!(human.hit, "Hit_A", "races map a hit-react clip");
+        assert_eq!(human.hit, "hit", "races map a hit-react clip");
     }
 }
