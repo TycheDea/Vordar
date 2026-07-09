@@ -52,6 +52,10 @@ pub struct MaterialData {
     pub base_color_factor: [f32; 4],
     pub metallic_factor:   f32,
     pub roughness_factor:  f32,
+    /// Fragment-discard threshold from glTF alphaMode: 0.0 for OPAQUE (never
+    /// discards), the cutoff for MASK. BLEND is approximated as MASK at 0.5 —
+    /// there is no sorted transparency pass.
+    pub alpha_cutoff:      f32,
     pub emissive_factor:   [f32; 3],
     /// KHR_materials_emissive_strength (1.0 when absent) — HDR emissive for
     /// bloom (VQ-C3).
@@ -69,6 +73,7 @@ impl Default for MaterialData {
             base_color_factor: [1.0; 4],
             metallic_factor:   1.0,
             roughness_factor:  1.0,
+            alpha_cutoff:      0.0,
             emissive_factor:   [0.0; 3],
             emissive_strength: 1.0,
             base_color_image:         None,
@@ -419,6 +424,11 @@ fn read_material(
         base_color_factor: pbr.base_color_factor(),
         metallic_factor:   pbr.metallic_factor(),
         roughness_factor:  pbr.roughness_factor(),
+        alpha_cutoff: match mat.alpha_mode() {
+            gltf::material::AlphaMode::Opaque => 0.0,
+            gltf::material::AlphaMode::Mask => mat.alpha_cutoff().unwrap_or(0.5),
+            gltf::material::AlphaMode::Blend => 0.5,
+        },
         emissive_factor:   mat.emissive_factor(),
         emissive_strength: mat.emissive_strength().unwrap_or(1.0),
         base_color_image: pbr
@@ -564,7 +574,7 @@ pub(crate) fn upload_mesh(
                 m.emissive_factor[2] * m.emissive_strength,
                 0.0,
             ],
-            mr: [m.metallic_factor, m.roughness_factor, 0.0, 0.0],
+            mr: [m.metallic_factor, m.roughness_factor, m.alpha_cutoff, 0.0],
         };
         let material_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label:    Some("Material Uniform"),
@@ -961,7 +971,8 @@ mod tests {
                 "attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}},
                 "indices": 3, "material": 0
             }}]}}],
-            "materials": [{{"pbrMetallicRoughness": {{"baseColorFactor": [0.2, 0.4, 0.8, 1.0]}}}}],
+            "materials": [{{"pbrMetallicRoughness": {{"baseColorFactor": [0.2, 0.4, 0.8, 1.0]}},
+                            "alphaMode": "MASK", "alphaCutoff": 0.35}}],
             "buffers": [{{"byteLength": {bin_len}}}],
             "bufferViews": [
                 {{"buffer": 0, "byteOffset": 0,  "byteLength": 36}},
@@ -1015,6 +1026,8 @@ mod tests {
         // Solid-color material, no texture.
         assert_eq!(p.material.base_color_factor, [0.2, 0.4, 0.8, 1.0]);
         assert!(p.material.base_color_image.is_none());
+        // alphaMode MASK carries its cutoff (OPAQUE would read 0.0).
+        assert_eq!(p.material.alpha_cutoff, 0.35);
         // No TANGENT accessor in the file — generated from UVs. This
         // triangle's UVs map u to +X, so the tangent points along +X.
         assert_eq!(p.vertices[0].tangent, [1.0, 0.0, 0.0, 1.0]);

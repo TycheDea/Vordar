@@ -196,6 +196,13 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ao        = textureSample(t_ao, s_mat, in.uv).r;
     let emissive  = textureSample(t_emissive, s_mat, in.uv).rgb * material.emissive.rgb;
 
+    // Alpha cutoff (glTF MASK; BLEND approximated as MASK) — mr.z of 0 means
+    // opaque. Placed after all textureSample calls to keep them in trivially
+    // uniform control flow.
+    if albedo_s.a * material.base_color.a < material.mr.z {
+        discard;
+    }
+
     let Nv = normalize(in.normal);
     var N  = Nv;
     if (abs(in.tangent.w) > 0.5) {

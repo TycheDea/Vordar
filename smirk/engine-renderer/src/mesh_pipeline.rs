@@ -34,7 +34,7 @@ pub(crate) const MESH_INSTANCE_SIZE: usize = size_of::<MeshInstance>(); // 80
 pub(crate) struct MaterialUniform {
     pub(crate) base_color: [f32; 4], // baseColorFactor
     pub(crate) emissive:   [f32; 4], // emissiveFactor × KHR emissive_strength; w unused
-    pub(crate) mr:         [f32; 4], // x = metallicFactor, y = roughnessFactor
+    pub(crate) mr:         [f32; 4], // x = metallicFactor, y = roughnessFactor, z = alpha cutoff (0 = opaque)
 }
 
 fn texture_entry(binding: u32) -> BindGroupLayoutEntry {
