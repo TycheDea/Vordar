@@ -20,6 +20,9 @@
                 fog_density: 0.0055,
                 ground: Some((texture_dir: "content/textures/ground/mud_leaves", tile: 7.0)),
                 props: [
+                    // VRoid look-test statue (bind pose) near spawn, next to
+                    // the knight, for the character-direction A/B feel-check.
+                    (model: "content/models/vroid_test01.glb",                        pos: (3.0, -0.5, -3.0),   scale: 1.0, yaw: 150.0),
                     (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (14.0, -0.5, -19.0), scale: 3.0, yaw: 40.0),
                     (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-24.0, -0.5, 13.0), scale: 2.2, yaw: 205.0),
                     (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (-11.0, -0.5, 27.0), scale: 1.6, yaw: 118.0),

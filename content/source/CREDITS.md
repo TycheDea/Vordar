@@ -11,6 +11,7 @@ license, and where it is used. Add a row *when the asset lands*, not after.
 | Evening Road 01 (Pure Sky) HDRI, 2k | Poly Haven (Jarod Guest / Sergej Majboroda) — https://polyhaven.com/a/evening_road_01_puresky | CC0 | Zone sky + IBL environment — `content/textures/env/evening_road_01_puresky_2k.hdr` |
 | Brown Mud Leaves 01 texture set, 2k | Poly Haven (Rob Tuytel) — https://polyhaven.com/a/brown_mud_leaves_01 | CC0 | Zone ground PBR set — `content/textures/ground/mud_leaves/` |
 | Rock 07, Rock 09, Rock Face 01, Dead Quiver Trunk models, 1k | Poly Haven (Rico Cilliers / Dimitrios Savva) — https://polyhaven.com/models | CC0 | Zone props — `content/models/props/` (fetched via `scripts/asset-pipeline/fetch_polyhaven.mjs`) |
+| "Human - Male_" VRoid character (user-authored) | Created in VRoid Studio by the project owner | Owner's asset (VRoid Studio output belongs to its creator, commercial use allowed) | Character-direction look-test — `content/source/characters/vroid/Human - Male_.vrm` → `content/models/vroid_test01.glb` (via `scripts/asset-pipeline/vrm_to_glb.mjs`), placed as a start-zone statue |
 
 ## Incoming (planned, AA visual upgrade)
 
