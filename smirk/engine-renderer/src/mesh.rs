@@ -1318,6 +1318,48 @@ mod tests {
         }
     }
 
+    /// DIAGNOSTIC: CPU-skin the actual mesh vertices through the same palette
+    /// the GPU gets (root · global · inverse_bind) — the grounded-joints probe
+    /// above can't see an inverse-bind inconsistency, this can. The idle pose
+    /// must put the soles on the floor (−0.5) and the crown near +1.24.
+    #[test]
+    fn human_skinned_vertices_stand_on_the_floor() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.glb");
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+        let data = load_gltf_data(path).unwrap();
+        let skel = data.skeleton.as_ref().unwrap();
+        let clip = data.clips.iter().find(|c| c.name == "idle").unwrap();
+        let pose = crate::anim::sample_pose(skel, clip, 0.0);
+        let palette = crate::anim::joint_matrices(skel, &pose);
+
+        let (mut min_y, mut max_y) = (f32::INFINITY, f32::NEG_INFINITY);
+        for p in &data.primitives {
+            let skin = p.skin.as_ref().expect("human primitives are skinned");
+            for (v, s) in p.vertices.iter().zip(skin) {
+                let pos = glam::Vec3::from_array(v.position);
+                let mut out = glam::Vec3::ZERO;
+                for (j, w) in s.joints.iter().zip(s.weights) {
+                    if w > 0.0 {
+                        out += palette[*j as usize].transform_point3(pos) * w;
+                    }
+                }
+                min_y = min_y.min(out.y);
+                max_y = max_y.max(out.y);
+            }
+        }
+        println!("idle t=0 skinned vertices: y {min_y:.3} .. {max_y:.3}");
+        assert!(
+            (min_y - (-0.5)).abs() < 0.1,
+            "soles must touch the floor: min_y = {min_y:.3}"
+        );
+        assert!(
+            max_y > 0.9 && max_y < 1.5,
+            "crown around head height: max_y = {max_y:.3}"
+        );
+    }
+
     /// The weapon-hand socket: the human skeleton keeps its bone names, the
     /// hand bone's global transform is finite, and it travels during the swing
     /// clip — the position a cast burst spawns from.
