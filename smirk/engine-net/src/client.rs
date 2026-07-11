@@ -6,7 +6,8 @@ use crate::common::{
 };
 use crate::metrics::NetMetrics;
 use crate::NetError;
-use std::collections::VecDeque;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -36,6 +37,182 @@ const SYNC_WINDOW: Duration = Duration::from_secs(90);
 /// slew, never a step, so a reader mid-correction (telegraph countdowns,
 /// intent deadlines) never observes a jump.
 const MAX_SLEW_PPM: f64 = 2_000.0;
+
+/// Both-direction network conditioner knobs (networking audit 2026-07-11,
+/// finding 17): before this, the only impairment was a fixed symmetric
+/// latency plus receive-side (server→client) datagram loss — no
+/// client→server loss, no jitter/reorder, no simulated clock skew. Testing
+/// only; every field defaults to "no impairment".
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Impairment {
+    /// Simulated round-trip time; each direction is delayed `rtt / 2`.
+    pub rtt: Duration,
+    /// Probability (0.0–1.0) that a server→client datagram is dropped below
+    /// QUIC, exercising real retransmission (see `impair.rs`).
+    pub downstream_loss: f32,
+    /// Probability (0.0–1.0) that a client→server datagram is dropped below
+    /// QUIC — the direction that used to be untestable entirely.
+    pub upstream_loss: f32,
+    /// Extra, per-frame random delay drawn uniformly from `[0, jitter]` and
+    /// added on top of the fixed one-way latency, in both directions. Unlike
+    /// the fixed latency, jitter can reorder frames relative to each other
+    /// (see `delay_reorder`).
+    pub jitter: Duration,
+    /// Simulated client clock drift, in parts-per-million of real elapsed
+    /// time. Feeds every "local now" this client reports or times against
+    /// (`Ping.t_client`, `local_micros()`), so `ClockSync`'s drift-rate
+    /// estimate (finding 6) has something real to track under a live
+    /// connection instead of only in `ClockSync`'s own unit tests.
+    pub clock_skew_ppm: f64,
+}
+
+impl Impairment {
+    /// Fixed symmetric latency only — no loss, jitter, or skew.
+    pub fn latency(rtt: Duration) -> Self {
+        Self { rtt, ..Default::default() }
+    }
+
+    /// Named WAN profiles (finding 17, path step 5): representative combined
+    /// latency/jitter/loss/skew shapes so client-feel and clock-sync claims
+    /// have a headless test at recognizable real-world conditions, not just
+    /// hand-picked individual numbers.
+    pub fn wifi() -> Self {
+        Self {
+            rtt: Duration::from_millis(20),
+            downstream_loss: 0.001,
+            upstream_loss: 0.001,
+            jitter: Duration::from_millis(5),
+            clock_skew_ppm: 5.0,
+        }
+    }
+
+    pub fn four_g() -> Self {
+        Self {
+            rtt: Duration::from_millis(70),
+            downstream_loss: 0.01,
+            upstream_loss: 0.01,
+            jitter: Duration::from_millis(25),
+            clock_skew_ppm: 20.0,
+        }
+    }
+
+    pub fn satellite() -> Self {
+        Self {
+            rtt: Duration::from_millis(600),
+            downstream_loss: 0.02,
+            upstream_loss: 0.02,
+            jitter: Duration::from_millis(40),
+            clock_skew_ppm: 50.0,
+        }
+    }
+}
+
+/// Local-clock scaling for the `clock_skew_ppm` harness: a real client's
+/// crystal doesn't tick at exactly the server's rate, by tens of ppm over a
+/// long session (finding 6's evidence). Scaling real elapsed time by
+/// `1 + skew_ppm/1e6` gives clock-sync a genuine, growing offset to correct
+/// for instead of a step outside the simulation entirely.
+fn skewed_micros(elapsed: Duration, skew_ppm: f64) -> u64 {
+    if skew_ppm == 0.0 {
+        return elapsed.as_micros() as u64;
+    }
+    (elapsed.as_micros() as f64 * (1.0 + skew_ppm / 1_000_000.0)).max(0.0) as u64
+}
+
+/// Deterministic per-connection jitter source (same LCG technique as
+/// `impair.rs`): draws an extra delay in `[0, max]` for each frame passing
+/// through `delay_reorder`.
+struct Jitter {
+    rng: u64,
+    max: Duration,
+}
+
+impl Jitter {
+    /// A distinct seed per pipeline (writer app frames, writer ctrl frames,
+    /// reader) keeps each independently deterministic without sharing a
+    /// mutex-guarded RNG across tasks.
+    fn with_seed(max: Duration, seed: u64) -> Self {
+        Self { rng: seed, max }
+    }
+
+    fn sample(&mut self) -> Duration {
+        if self.max.is_zero() {
+            return Duration::ZERO;
+        }
+        self.rng = self.rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let frac = (self.rng >> 40) as f64 / (1u64 << 24) as f64; // [0, 1)
+        self.max.mul_f64(frac)
+    }
+}
+
+/// One item in `delay_reorder`'s pending set: ordered by delivery deadline
+/// only (ties broken by arrival order) so the payload itself need not be `Ord`.
+struct Pending<T> {
+    at: tokio::time::Instant,
+    seq: u64,
+    item: T,
+}
+
+impl<T> PartialEq for Pending<T> {
+    fn eq(&self, other: &Self) -> bool {
+        (self.at, self.seq) == (other.at, other.seq)
+    }
+}
+impl<T> Eq for Pending<T> {}
+impl<T> PartialOrd for Pending<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<T> Ord for Pending<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reversed: `BinaryHeap` is a max-heap, but delivery must pop the
+        // *earliest* deadline first.
+        (other.at, other.seq).cmp(&(self.at, self.seq))
+    }
+}
+
+/// Delay pipeline stage for latency/jitter simulation (finding 17): items
+/// arrive tagged with their intended delivery instant and are released in
+/// *deadline* order, not enqueue order. That distinction is what makes jitter
+/// able to reorder frames — under a plain delayed FIFO channel (the pre-
+/// finding-17 behavior), a later item drawing a smaller delay than an
+/// earlier one still waits behind it; here it legitimately overtakes, the
+/// way real jitter reorders packets on the wire.
+async fn delay_reorder<T: Send + 'static>(
+    mut rx: UnboundedReceiver<(tokio::time::Instant, T)>,
+    tx: UnboundedSender<T>,
+) {
+    let mut pending: BinaryHeap<Pending<T>> = BinaryHeap::new();
+    let mut next_seq = 0u64;
+    loop {
+        match pending.peek() {
+            Some(next) => {
+                tokio::select! {
+                    biased;
+                    _ = tokio::time::sleep_until(next.at) => {
+                        if let Some(p) = pending.pop() {
+                            if tx.send(p.item).is_err() { return; }
+                        }
+                    }
+                    maybe = rx.recv() => match maybe {
+                        Some((at, item)) => { pending.push(Pending { at, seq: next_seq, item }); next_seq += 1; }
+                        None => break,
+                    },
+                }
+            }
+            None => match rx.recv().await {
+                Some((at, item)) => { pending.push(Pending { at, seq: next_seq, item }); next_seq += 1; }
+                None => return,
+            },
+        }
+    }
+    // Channel closed: drain whatever is left, still in deadline order.
+    while let Some(p) = pending.pop() {
+        tokio::time::sleep_until(p.at).await;
+        let _ = tx.send(p.item);
+    }
+}
 
 /// One clock-sync ping/pong round-trip.
 struct ClockSample {
@@ -137,6 +314,9 @@ pub struct NetClient {
     out: UnboundedSender<Vec<u8>>,
     clock: Arc<Mutex<ClockSync>>,
     epoch: Instant,
+    /// Simulated clock drift applied to every reading of `epoch` (finding 17's
+    /// clock-skew harness) — zero for every non-impaired connection.
+    clock_skew_ppm: f64,
     metrics: Arc<NetMetrics>,
 }
 
@@ -144,7 +324,7 @@ impl NetClient {
     /// Connect to a server and start the network thread. Returns once the
     /// connection attempt is underway; `ClientEvent::Connected` confirms it.
     pub fn connect(addr: SocketAddr, version: u8) -> Result<Self, NetError> {
-        Self::connect_with_latency(addr, version, Duration::ZERO)
+        Self::connect_impaired(addr, version, Impairment::default())
     }
 
     /// Like [`connect`](Self::connect), but artificially delays every frame
@@ -158,20 +338,14 @@ impl NetClient {
         version: u8,
         simulated_rtt: Duration,
     ) -> Result<Self, NetError> {
-        Self::connect_impaired(addr, version, simulated_rtt, 0.0)
+        Self::connect_impaired(addr, version, Impairment::latency(simulated_rtt))
     }
 
-    /// Like [`connect_with_latency`](Self::connect_with_latency), but also
-    /// drops received datagrams below QUIC with probability `loss` — dropped
-    /// stream frames stall until QUIC retransmits them, so head-of-line
-    /// behavior under loss is the real thing (see `impair.rs`). Testing only.
-    pub fn connect_impaired(
-        addr: SocketAddr,
-        version: u8,
-        simulated_rtt: Duration,
-        loss: f32,
-    ) -> Result<Self, NetError> {
-        let one_way = simulated_rtt / 2;
+    /// Full network conditioner (finding 17): latency, both-direction datagram
+    /// loss, jitter/reorder, and simulated clock skew — see [`Impairment`].
+    /// Testing only.
+    pub fn connect_impaired(addr: SocketAddr, version: u8, impairment: Impairment) -> Result<Self, NetError> {
+        let one_way = impairment.rtt / 2;
         let epoch = Instant::now();
         let (event_tx, event_rx) = unbounded_channel();
         let (out_tx, out_rx) = unbounded_channel();
@@ -189,7 +363,7 @@ impl NetClient {
                 };
                 rt.block_on(async move {
                     match client_main(
-                        addr, version, epoch, event_tx.clone(), out_rx, thread_clock, one_way, loss,
+                        addr, version, epoch, event_tx.clone(), out_rx, thread_clock, one_way, impairment,
                         thread_metrics,
                     ).await {
                         Ok(()) => log::info!("net: connection closed"),
@@ -200,7 +374,14 @@ impl NetClient {
             })
             .map_err(NetError::Io)?;
 
-        Ok(Self { events: event_rx, out: out_tx, clock, epoch, metrics })
+        Ok(Self {
+            events: event_rx,
+            out: out_tx,
+            clock,
+            epoch,
+            clock_skew_ppm: impairment.clock_skew_ppm,
+            metrics,
+        })
     }
 
     /// Drain all pending network events. Call once per Input tick.
@@ -216,9 +397,10 @@ impl NetClient {
         let _ = self.out.send(data);
     }
 
-    /// Microseconds since this client started — the local monotonic clock.
+    /// Microseconds since this client started — the local monotonic clock
+    /// (skewed by `clock_skew_ppm` under the finding-17 harness).
     pub fn local_micros(&self) -> u64 {
-        self.epoch.elapsed().as_micros() as u64
+        skewed_micros(self.epoch.elapsed(), self.clock_skew_ppm)
     }
 
     /// local → server clock offset, once at least one sync sample landed.
@@ -253,12 +435,14 @@ async fn client_main(
     mut out_rx: UnboundedReceiver<Vec<u8>>,
     clock: Arc<Mutex<ClockSync>>,
     one_way: Duration,
-    loss: f32,
+    impairment: Impairment,
     metrics: Arc<NetMetrics>,
 ) -> Result<(), NetError> {
+    let jitter = impairment.jitter;
+    let skew_ppm = impairment.clock_skew_ppm;
     let bind: SocketAddr = if addr.is_ipv4() { "0.0.0.0:0".parse().unwrap() } else { "[::]:0".parse().unwrap() };
-    let mut endpoint = if loss > 0.0 {
-        crate::impair::lossy_client_endpoint(bind, loss)?
+    let mut endpoint = if impairment.downstream_loss > 0.0 || impairment.upstream_loss > 0.0 {
+        crate::impair::lossy_client_endpoint(bind, impairment.downstream_loss, impairment.upstream_loss)?
     } else {
         quinn::Endpoint::client(bind)?
     };
@@ -293,15 +477,18 @@ async fn client_main(
     let _ = events.send(ClientEvent::Connected);
     log::info!("net: connected to {addr}");
 
-    // Writer task — merges app sends and clock pings; sole owner of the stream.
-    // Frames carry a delivery deadline (enqueue time + one_way): deadlines are
-    // monotonic, so FIFO delivery simulates latency without throttling
-    // throughput (sleeping per frame inside a loop would compound the delay).
-    let (write_tx, mut write_rx) = unbounded_channel::<(tokio::time::Instant, u8, Vec<u8>)>();
+    // Writer task — merges app sends and clock pings; sole owner of the
+    // stream. Frames carry a delivery deadline (enqueue time + one_way, plus
+    // a jitter draw); `delay_reorder` releases them in deadline order rather
+    // than enqueue order, so under jitter a frame can legitimately overtake
+    // one queued ahead of it (finding 17 — previously a strictly monotonic
+    // FIFO delay, which could never reorder anything).
+    let (write_tx, write_rx) = unbounded_channel::<(tokio::time::Instant, (u8, Vec<u8>))>();
+    let (ordered_tx, mut ordered_rx) = unbounded_channel::<(u8, Vec<u8>)>();
+    tokio::spawn(delay_reorder(write_rx, ordered_tx));
     let writer_metrics = metrics.clone();
     let writer = tokio::spawn(async move {
-        while let Some((at, tag, payload)) = write_rx.recv().await {
-            tokio::time::sleep_until(at).await;
+        while let Some((tag, payload)) = ordered_rx.recv().await {
             if write_frame(&mut send, tag, &payload).await.is_err() {
                 break;
             }
@@ -311,8 +498,10 @@ async fn client_main(
     let app_tx = write_tx.clone();
     let conn_for_forward = connection.clone();
     let forward = tokio::spawn(async move {
+        let mut app_jitter = Jitter::with_seed(jitter, 0xD1B5_4A32_D192_ED03);
         while let Some(data) = out_rx.recv().await {
-            if app_tx.send((tokio::time::Instant::now() + one_way, TAG_APP, data)).is_err() { break; }
+            let at = tokio::time::Instant::now() + one_way + app_jitter.sample();
+            if app_tx.send((at, (TAG_APP, data))).is_err() { break; }
         }
         // The simulation dropped its NetClient — close so the server notices.
         conn_for_forward.close(0u32.into(), b"client closed");
@@ -321,42 +510,49 @@ async fn client_main(
     // Clock-sync pinger: a fast burst, then occasional re-checks.
     let ping_tx = write_tx.clone();
     let pinger = tokio::spawn(async move {
+        let mut ping_jitter = Jitter::with_seed(jitter, 0xA5A5_5A5A_1234_5678);
         for _ in 0..SYNC_BURST_PINGS {
-            let ping = Ctrl::Ping { t_client: epoch.elapsed().as_micros() as u64 };
-            if ping_tx.send((tokio::time::Instant::now() + one_way, TAG_CTRL, encode_ctrl(&ping))).is_err() { return; }
+            let ping = Ctrl::Ping { t_client: skewed_micros(epoch.elapsed(), skew_ppm) };
+            let at = tokio::time::Instant::now() + one_way + ping_jitter.sample();
+            if ping_tx.send((at, (TAG_CTRL, encode_ctrl(&ping)))).is_err() { return; }
             tokio::time::sleep(SYNC_BURST_INTERVAL).await;
         }
         loop {
             tokio::time::sleep(SYNC_INTERVAL).await;
-            let ping = Ctrl::Ping { t_client: epoch.elapsed().as_micros() as u64 };
-            if ping_tx.send((tokio::time::Instant::now() + one_way, TAG_CTRL, encode_ctrl(&ping))).is_err() { return; }
+            let ping = Ctrl::Ping { t_client: skewed_micros(epoch.elapsed(), skew_ppm) };
+            let at = tokio::time::Instant::now() + one_way + ping_jitter.sample();
+            if ping_tx.send((at, (TAG_CTRL, encode_ctrl(&ping)))).is_err() { return; }
         }
     });
 
-    // Raw reader stamps each frame on arrival; processing happens one_way later.
-    let (in_tx, mut in_rx) =
+    // Raw reader stamps each frame on arrival; delay_reorder releases it
+    // one_way (+ jitter) later, possibly out of arrival order.
+    let (in_tx, in_rx) =
         unbounded_channel::<(tokio::time::Instant, Result<(u8, Vec<u8>), NetError>)>();
+    let (ordered_in_tx, mut ordered_in_rx) = unbounded_channel::<Result<(u8, Vec<u8>), NetError>>();
+    tokio::spawn(delay_reorder(in_rx, ordered_in_tx));
     let reader_metrics = metrics.clone();
     let reader = tokio::spawn(async move {
+        let mut read_jitter = Jitter::with_seed(jitter, 0x1234_5678_9ABC_DEF0);
         loop {
             let frame = read_frame_out(&mut recv).await;
             if let Ok((_, ref payload)) = frame {
                 reader_metrics.record_frame_in(payload.len());
             }
             let failed = frame.is_err();
-            if in_tx.send((tokio::time::Instant::now() + one_way, frame)).is_err() || failed {
+            let at = tokio::time::Instant::now() + one_way + read_jitter.sample();
+            if in_tx.send((at, frame)).is_err() || failed {
                 break;
             }
         }
     });
 
     let result = loop {
-        let Some((at, frame)) = in_rx.recv().await else { break Err(NetError::Closed) };
-        tokio::time::sleep_until(at).await;
+        let Some(frame) = ordered_in_rx.recv().await else { break Err(NetError::Closed) };
         match frame {
             Ok((TAG_CTRL, payload)) => {
                 if let Some(Ctrl::Pong { t_client, t_server }) = decode_ctrl(&payload) {
-                    let now = epoch.elapsed().as_micros() as u64;
+                    let now = skewed_micros(epoch.elapsed(), skew_ppm);
                     let rtt = now.saturating_sub(t_client);
                     let mut c = clock.lock().unwrap();
                     c.on_pong(now, t_server, rtt);

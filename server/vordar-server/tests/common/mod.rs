@@ -6,7 +6,7 @@ use engine_app::scheduler::System;
 use engine_core::prefab::queue_prefab_spawn;
 use engine_core::traits::Resources;
 use engine_core::World;
-use engine_net::{ClientEvent, NetClient};
+use engine_net::{ClientEvent, Impairment, NetClient};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -82,11 +82,32 @@ impl Bot {
         Self::connect_impaired_as(addr, name, simulated_rtt, 0.0)
     }
 
-    /// Latency plus receive-side datagram loss below QUIC (see engine-net's
-    /// `connect_impaired`) — the loss-probe constructor.
+    /// Latency plus receive-side (server→client) datagram loss below QUIC
+    /// (see engine-net's `connect_impaired`) — the downstream loss-probe
+    /// constructor.
     pub fn connect_impaired_as(addr: SocketAddr, name: &str, simulated_rtt: Duration, loss: f32) -> Self {
-        let client = NetClient::connect_impaired(addr, PROTOCOL_VERSION, simulated_rtt, loss)
-            .expect("connect failed");
+        Self::connect_full_as(
+            addr,
+            name,
+            Impairment { rtt: simulated_rtt, downstream_loss: loss, ..Default::default() },
+        )
+    }
+
+    /// Latency plus send-side (client→server) datagram loss below QUIC — the
+    /// upstream loss-probe constructor (networking audit 2026-07-11, finding
+    /// 17: before this, only downstream loss could be simulated at all).
+    pub fn connect_upstream_impaired_as(addr: SocketAddr, name: &str, simulated_rtt: Duration, loss: f32) -> Self {
+        Self::connect_full_as(
+            addr,
+            name,
+            Impairment { rtt: simulated_rtt, upstream_loss: loss, ..Default::default() },
+        )
+    }
+
+    /// General constructor for the full network conditioner (latency, both-
+    /// direction loss, jitter/reorder, clock skew — see `Impairment`).
+    pub fn connect_full_as(addr: SocketAddr, name: &str, impairment: Impairment) -> Self {
+        let client = NetClient::connect_impaired(addr, PROTOCOL_VERSION, impairment).expect("connect failed");
         Self {
             client,
             name: name.to_owned(),

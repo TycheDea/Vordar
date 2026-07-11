@@ -86,3 +86,100 @@ fn loss_probe_inter_snapshot_gaps() {
         );
     }
 }
+
+/// Upstream (client→server) counterpart of the probe above — the loss
+/// direction engine-net could not simulate at all before finding 17.
+/// MoveIntents, CastIntent, and Login all share the one reliable QUIC stream
+/// (finding 9); a lost datagram stalls every later intent on that stream
+/// until QUIC retransmits it. This probe sends a steady stream of
+/// MoveIntents and measures how far the server's applied-intent ack
+/// (`Snapshot::last_processed_seq`, mirrored client-side as `Bot::last_ack`)
+/// falls behind the bot's own send counter (`Bot::seq`) — the head-of-line
+/// stall made observable purely through the real protocol, no server-internal
+/// hook required.
+///
+/// Calibration run (see git history of this comment) measured p50/p99/max
+/// lag of roughly 6/9/10 ticks at realistic WAN loss (0-5%, unresolvable
+/// from the 0% baseline within this window — QUIC's retransmission recovers
+/// well inside one snapshot period at these rates) versus 8/13/15 at 30% and
+/// 17/27/29 at 60%: the stall is real, it just needs sustained heavy loss to
+/// clear this probe's resolution floor. `EXTREME_LOSS` exists to prove the
+/// mechanism (finding 17 path steps 1-2) actually works; 0/1/3/5% are
+/// printed for realistic-WAN reference, same as the downstream probe above.
+const UPSTREAM_WINDOW: Duration = Duration::from_secs(8);
+/// Below the server's 60 Hz per-tick intent-apply rate, so at 0% loss the
+/// applied ack tracks the send counter almost exactly — any lag beyond that
+/// baseline under loss is the real stall, not queueing backlog.
+const UPSTREAM_SEND_INTERVAL: Duration = Duration::from_millis(20);
+const EXTREME_LOSS: f32 = 0.6;
+
+#[test]
+#[ignore = "loss probe — run with --release --ignored"]
+fn loss_probe_upstream_intent_lag() {
+    common::workspace_root();
+    if cfg!(debug_assertions) {
+        eprintln!("WARNING: loss probe running in debug — results will not be representative");
+    }
+    let addr: SocketAddr = "127.0.0.1:25182".parse().unwrap();
+    std::thread::spawn(move || {
+        let mut app = vordar_server::build_server_app(addr, ":memory:");
+        app.run_headless(60.0, Some(60 * 200));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    println!(
+        "upstream loss probe: {} s window per rate, simulated rtt {} ms",
+        UPSTREAM_WINDOW.as_secs(),
+        RTT.as_millis()
+    );
+    let mut baseline_max: Option<u32> = None;
+    for loss in [0.0f32, 0.01, 0.03, 0.05, EXTREME_LOSS] {
+        let name = format!("upstreamer-{}", (loss * 100.0).round() as u32);
+        let mut bot = Bot::connect_upstream_impaired_as(addr, &name, RTT, loss);
+        bot.wait_for("bot welcomed", Duration::from_secs(30), |b| b.player_id.is_some());
+        common::settle(&mut bot, Duration::from_secs(2));
+
+        let mut dir = glam::Vec2::X;
+        let mut lags: Vec<u32> = Vec::new();
+        let end = Instant::now() + UPSTREAM_WINDOW;
+        let mut ticks = 0u32;
+        while Instant::now() < end {
+            ticks += 1;
+            if ticks % 100 == 0 {
+                dir = -dir;
+            }
+            bot.send_move(dir);
+            bot.pump();
+            lags.push(bot.seq.saturating_sub(bot.last_ack));
+            std::thread::sleep(UPSTREAM_SEND_INTERVAL);
+        }
+
+        assert!(lags.len() > 50, "bot at {loss} upstream loss only sampled {} ticks", lags.len());
+        lags.sort_unstable();
+        let p50 = lags[lags.len() / 2];
+        let p99 = lags[(lags.len() * 99 / 100).min(lags.len() - 1)];
+        let max = *lags.last().unwrap();
+        println!(
+            "upstream loss={:>2.0}%  sent={}  samples={}  lag p50={} p99={} max={}",
+            loss * 100.0,
+            bot.seq,
+            lags.len(),
+            p50,
+            p99,
+            max,
+        );
+
+        if loss == 0.0 {
+            baseline_max = Some(max);
+        }
+        if loss == EXTREME_LOSS {
+            let baseline = baseline_max.expect("0% loss rate must run first to establish a baseline");
+            assert!(
+                max > baseline * 2,
+                "upstream loss={loss} should clearly worsen applied-intent lag vs the 0%-loss \
+                 baseline ({baseline} ticks) — got max={max}; try_send drop not reaching the \
+                 reliable stream"
+            );
+        }
+    }
+}
