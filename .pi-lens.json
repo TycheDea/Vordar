@@ -1,0 +1,13 @@
+{
+  "ignore": [
+    "target/**",
+    "content/**",
+    "docs/**",
+    "tasks/**",
+    "**/*.svg",
+    "**/*.png"
+  ],
+  "rules": {
+    "high-complexity": { "threshold": 25 }
+  }
+}
