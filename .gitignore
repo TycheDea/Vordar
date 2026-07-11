@@ -26,7 +26,9 @@ node_modules/
 Thumbs.db
 
 # Claude Code / AI config + local design notes & task lists (kept local)
-.claude/
+# — except .claude/skills/, which is versioned project config
+.claude/*
+!.claude/skills/
 /tasks/
 
 # Runtime data — server SQLite character database (+ WAL/SHM sidecars)
