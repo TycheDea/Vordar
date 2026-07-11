@@ -55,9 +55,11 @@ pub enum ServerMsg {
         states: Vec<EntityPos>,
     },
     /// A mechanic was scheduled (DESIGN.md §3): area `radius` at `pos`,
-    /// resolving at absolute server time `resolve_at_micros`. Broadcast
-    /// IDENTICALLY to every client — countdowns anchor to the synced clock,
-    /// so receive time never matters. T = telegraph visual completion.
+    /// resolving at absolute server time `resolve_at_micros`. Sent IDENTICALLY
+    /// to every AOI-scoped recipient — countdowns anchor to the synced clock,
+    /// so receive time never matters. T = telegraph visual completion. Sent
+    /// only to connections within AOI range of `pos` (Finding 5: this used to
+    /// broadcast zone-wide, leaking telegraph positions to distant clients).
     MechanicScheduled {
         id: u64,
         telegraph_prefab: String,
@@ -66,7 +68,8 @@ pub enum ServerMsg {
         resolve_at_micros: u64,
         duration_micros: u64,
     },
-    /// Outcome of a resolved mechanic: which entities were inside at T.
+    /// Outcome of a resolved mechanic: which entities were inside at T. Sent
+    /// only to connections within AOI range of the mechanic's position.
     HitResult { mechanic: u64, hits: Vec<u64> },
     /// World-clock sample: world time `world_micros` corresponded to server
     /// time `at_server_micros`. Combined with clock sync, clients evaluate

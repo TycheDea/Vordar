@@ -227,6 +227,30 @@ fn spawn_position(conn: ConnId) -> Vec3 {
     Vec3::new(angle.cos() * 3.0, 0.0, angle.sin() * 3.0)
 }
 
+/// Connections whose player is within AOI range of `center` — the interest-
+/// management filter for the mechanic sends below (Finding 5 of
+/// docs/reviews/audit-networking-2026-07-11.md: `state.server.broadcast` used
+/// to fan MechanicScheduled/HitResult out to EVERY connection, including
+/// pre-login ones, which both wasted O(players × casts) bandwidth and gave a
+/// cheating client a zone-wide radar off telegraph positions). Uses the same
+/// `AOI_RADIUS` as snapshot replication so a telegraph/hit result reaches
+/// exactly the clients who could plausibly see it. A client that walks into
+/// range only after the message already went out simply misses that one
+/// telegraph/hit notification: telegraphs last seconds and `HitResult` still
+/// resolves hits correctly regardless of who was told about the schedule, so
+/// the miss is cosmetic — accepted rather than adding re-send bookkeeping.
+fn aoi_conns(conns: &HashMap<ConnId, PlayerConn>, world: &World, center: Vec3) -> Vec<ConnId> {
+    conns
+        .iter()
+        .filter(|(_, pc)| {
+            world
+                .get::<&Transform>(pc.entity)
+                .is_ok_and(|tr| tr.position.distance_squared(center) <= AOI_RADIUS * AOI_RADIUS)
+        })
+        .map(|(&conn, _)| conn)
+        .collect()
+}
+
 pub struct NetReceiveSystem;
 
 impl System for NetReceiveSystem {
@@ -405,14 +429,17 @@ impl System for NetReceiveSystem {
                                             caster,
                                         },
                                     ));
-                                    state.server.broadcast(encode(&ServerMsg::MechanicScheduled {
+                                    let frame = encode(&ServerMsg::MechanicScheduled {
                                         id,
                                         telegraph_prefab,
                                         pos: target,
                                         radius,
                                         resolve_at_micros,
                                         duration_micros: cast_micros,
-                                    }));
+                                    });
+                                    for c in aoi_conns(&state.conns, world, target) {
+                                        state.server.send(c, frame.clone());
+                                    }
                                     log::info!("conn {conn}: mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
                                 }
                                 AbilityEffect::Projectile { prefab, speed, damage, damage_type, ttl_secs, spawn_offset } => {
@@ -469,14 +496,17 @@ impl System for NetReceiveSystem {
                                         velocity: leap_velocity(caster_pos, target, cast_secs),
                                         remaining: cast_secs,
                                     });
-                                    state.server.broadcast(encode(&ServerMsg::MechanicScheduled {
+                                    let frame = encode(&ServerMsg::MechanicScheduled {
                                         id,
                                         telegraph_prefab,
                                         pos: target,
                                         radius,
                                         resolve_at_micros,
                                         duration_micros: cast_micros,
-                                    }));
+                                    });
+                                    for c in aoi_conns(&state.conns, world, target) {
+                                        state.server.send(c, frame.clone());
+                                    }
                                     log::info!("conn {conn}: leap mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
                                 }
                             }
@@ -716,7 +746,10 @@ impl System for MechanicResolveSystem {
 
             log::info!("mechanic {} resolved: {} hit", mech.id, hit_entities.len());
             let state = resources.get::<NetServerState>().unwrap();
-            state.server.broadcast(encode(&ServerMsg::HitResult { mechanic: mech.id, hits }));
+            let frame = encode(&ServerMsg::HitResult { mechanic: mech.id, hits });
+            for c in aoi_conns(&state.conns, world, center) {
+                state.server.send(c, frame.clone());
+            }
             let _ = world.despawn(mech_entity);
         }
     }

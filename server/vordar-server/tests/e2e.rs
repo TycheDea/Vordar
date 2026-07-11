@@ -262,6 +262,52 @@ fn phase4_scheduled_aoe() {
     assert_eq!(b.mechanics.len(), count_before, "backdated cast must be rejected");
 }
 
+// Regression test for Finding 5 of docs/reviews/audit-networking-2026-07-11.md:
+// MechanicScheduled/HitResult used to `broadcast` to EVERY connection
+// regardless of distance — a cheating client got a zone-wide radar off
+// telegraph positions, and aggregate mechanic traffic scaled O(players ×
+// casts). The fix scopes both sends to the same AOI_RADIUS the snapshot
+// system already uses, so a bot far outside the caster's AOI must never
+// receive either message for that mechanic.
+#[test]
+fn far_bot_never_sees_out_of_aoi_mechanic() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25164".parse().unwrap();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut a = Bot::connect(addr);
+    a.wait_for("A welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    a.wait_for("A clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    a.wait_for("A first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+
+    let mut far = Bot::connect_as(addr, "far-observer");
+    far.wait_for("far welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    far.wait_for("far clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    far.wait_for("far first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+
+    // Both bots ring-spawn within 3 units of the origin; walk the observer
+    // well past AOI_RADIUS (40) so it can no longer see A at all.
+    far.walk_until("far bot clears A's AOI", glam::Vec2::new(1.0, 0.0), Duration::from_secs(15), |b| {
+        b.own_pos().is_some_and(|p| p.x > 55.0)
+    });
+
+    // A casts "cleave" centered on itself — well inside A's own AOI, and far
+    // outside the observer's.
+    let a_pos = a.own_pos().unwrap();
+    a.send_cast("cleave", glam::Vec2::new(a_pos.x, a_pos.z));
+    a.wait_for("A gets its own mechanic schedule", Duration::from_secs(3), |bot| !bot.mechanics.is_empty());
+    let (mech, _) = a.mechanics[0];
+    a.wait_for("A gets the hit result", Duration::from_secs(4), |bot| bot.hit_results.contains_key(&mech));
+
+    // The far bot must never receive either message for this mechanic.
+    settle(&mut far, Duration::from_millis(500));
+    assert!(far.mechanics.is_empty(), "far bot must not see an out-of-AOI MechanicScheduled");
+    assert!(far.hit_results.is_empty(), "far bot must not see an out-of-AOI HitResult");
+}
+
 // Phase 5: world clock + scripted world event. The blood moon fires at world
 // time 2 s; every connected client carries the same world-clock mapping; the
 // event's spawns replicate to everyone, including a client that joins
