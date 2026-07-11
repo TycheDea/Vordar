@@ -7,8 +7,10 @@
 //   PostUpdate phase — broadcast full entity snapshots at SNAPSHOT_HZ
 //
 // Anti-cheat caps live in intent validation here, from protocol v1 on
-// (DESIGN.md §3): monotonic timestamps, arrival deadline bounded by
-// min(RTT, MAX_REWIND), and positions only ever computed from intents.
+// (DESIGN.md §3): monotonic timestamps, arrival deadline bounded below by
+// max(RTT, MAX_REWIND) — MAX_REWIND is a floor while RTT estimates settle,
+// contained by the separate resolve-time rewind cap — and positions only
+// ever computed from intents.
 
 pub mod db;
 pub mod net_plugin;

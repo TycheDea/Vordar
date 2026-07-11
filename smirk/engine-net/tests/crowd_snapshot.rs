@@ -56,6 +56,7 @@ fn client_survives_crowd_snapshot_waves() {
                     panic!("client disconnected during snapshot waves ({received}/{WAVES} received)")
                 }
                 ClientEvent::Connected => {}
+                ClientEvent::Rejected(reason) => panic!("handshake rejected: {reason}"),
             }
         }
         assert!(Instant::now() < deadline, "timed out with {received}/{WAVES} waves received");

@@ -649,8 +649,15 @@ impl System for NetReceiveSystem {
 
 /// Anti-cheat caps from DESIGN.md §3, in the protocol from v1.
 fn validate_intent(pc: &PlayerConn, seq: u32, t: u64, recv_micros: u64, rtt: u64) -> Result<(), &'static str> {
+    // seq=0 is PlayerConn::last_seq's "nothing received yet" sentinel, never a
+    // value a genuine client sends (the client's own seq counter starts at 1)
+    // — reject it outright first, so a spoofed/replayed seq=0 intent can't
+    // hide behind the sentinel and pass monotonicity forever.
+    if seq == 0 {
+        return Err("stale seq");
+    }
     // Monotonic, stream-consistent: replays and backdated contradictions are free rejects.
-    if pc.last_seq != 0 && seq <= pc.last_seq {
+    if seq <= pc.last_seq {
         return Err("stale seq");
     }
     if t < pc.last_t {
@@ -1173,5 +1180,35 @@ mod tests {
         let (sel, _) = select_states(&e, 31, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
         let unique: HashSet<usize> = sel.iter().copied().collect();
         assert_eq!(unique.len(), sel.len());
+    }
+
+    /// Regression test for the seq=0 replay wedge (networking audit
+    /// 2026-07-11, finding 16). `last_seq: 0` is the connection's "nothing
+    /// received yet" sentinel; before this fix, `pc.last_seq != 0 && seq <=
+    /// pc.last_seq` skipped the monotonicity check entirely whenever seq was
+    /// 0, so a spoofed/replayed seq=0 intent passed validation every single
+    /// time instead of ever advancing past the sentinel. A genuine client's
+    /// own seq counter starts at 1, so seq=0 should never be a legitimate
+    /// value on the wire.
+    #[test]
+    fn zero_seq_is_always_rejected() {
+        let mut world = World::new();
+        let entity = world.spawn(());
+        let pc = PlayerConn {
+            entity,
+            name: "victim".into(),
+            queue: VecDeque::new(),
+            applied_seq: 0,
+            last_seq: 0,
+            last_t: 0,
+            known: HashSet::new(),
+            history: VecDeque::new(),
+            last_cast: HashMap::new(),
+            rr_cursor: 0,
+        };
+        // Otherwise-well-formed intent (monotonic t, arrives on time) —
+        // the only thing wrong with it is seq == 0.
+        let result = validate_intent(&pc, 0, 1_000, 1_000, 0);
+        assert_eq!(result, Err("stale seq"), "seq=0 must never pass validation");
     }
 }

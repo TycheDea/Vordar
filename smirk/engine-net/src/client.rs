@@ -17,6 +17,10 @@ pub enum ClientEvent {
     Connected,
     Disconnected,
     Message(Vec<u8>),
+    /// The server rejected the handshake with a reason (e.g. version
+    /// mismatch) instead of just closing the connection silently (networking
+    /// audit 2026-07-11, finding 16). `Disconnected` still follows.
+    Rejected(String),
 }
 
 /// Initial sync burst: enough samples to find a low-RTT one fast.
@@ -472,6 +476,10 @@ async fn client_main(
         .map_err(|_| NetError::Handshake("timed out waiting for HelloAck".into()))??;
     match (ack.0, decode_ctrl(&ack.1)) {
         (TAG_CTRL, Some(Ctrl::HelloAck)) => {}
+        (TAG_CTRL, Some(Ctrl::Reject { reason })) => {
+            let _ = events.send(ClientEvent::Rejected(reason.clone()));
+            return Err(NetError::Handshake(format!("rejected by server: {reason}")));
+        }
         _ => return Err(NetError::Handshake("expected HelloAck".into())),
     }
     let _ = events.send(ClientEvent::Connected);

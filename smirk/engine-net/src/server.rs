@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub type ConnId = u64;
@@ -324,7 +324,21 @@ async fn handle_connection(
     match (tag, decode_ctrl(&payload)) {
         (TAG_CTRL, Some(Ctrl::Hello { version: v })) if v == version => {}
         (TAG_CTRL, Some(Ctrl::Hello { version: v })) => {
-            return Err(NetError::Handshake(format!("version mismatch: client {v}, server {version}")));
+            // A version mismatch used to be a silent close: no reason ever
+            // reached the client (networking audit 2026-07-11, finding 16).
+            // Send a Reject frame with the reason before dropping the
+            // connection so the client can surface it instead of guessing.
+            let reason = format!("version mismatch: client {v}, server {version}");
+            if write_frame(&mut send, TAG_CTRL, &encode_ctrl(&Ctrl::Reject { reason: reason.clone() })).await.is_ok() {
+                // A bare `return` here would drop `connection`/`send` with no
+                // other handle left, which quinn treats as an implicit close
+                // that can discard the frame just queued above before it
+                // actually reaches the wire. `finish()` + `stopped()` waits
+                // for the peer to receive it first.
+                let _ = send.finish();
+                let _ = tokio::time::timeout(Duration::from_secs(2), send.stopped()).await;
+            }
+            return Err(NetError::Handshake(reason));
         }
         _ => return Err(NetError::Handshake("expected Hello".into())),
     }

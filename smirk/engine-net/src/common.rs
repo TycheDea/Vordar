@@ -21,6 +21,10 @@ pub(crate) const ALPN: &[u8] = b"vordar/1";
 pub(crate) enum Ctrl {
     Hello { version: u8 },
     HelloAck,
+    /// Handshake failure with a reason the client can surface (e.g. version
+    /// mismatch) — sent in place of `HelloAck` instead of just closing the
+    /// connection silently (networking audit 2026-07-11, finding 16).
+    Reject { reason: String },
     Ping { t_client: u64 },
     Pong { t_client: u64, t_server: u64 },
 }

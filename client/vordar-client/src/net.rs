@@ -248,6 +248,10 @@ impl System for NetReceiveSystem {
                     log::info!("connected to server, logging in as '{name}'");
                 }
                 ClientEvent::Disconnected => handle_disconnected(world, resources),
+                // A hard handshake rejection (e.g. version mismatch) — log it
+                // distinctly from an ordinary drop; `Disconnected` still
+                // follows and drives the existing teardown/reconnect path.
+                ClientEvent::Rejected(reason) => log::error!("connection rejected by server: {reason}"),
                 ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
                     Some(ServerMsg::Welcome { player_id }) => {
                         log::info!("welcome: our player id is {player_id}");
@@ -1185,6 +1189,7 @@ mod tests {
                         }
                     }
                     ClientEvent::Disconnected => {}
+                    ClientEvent::Rejected(_) => {}
                 }
             }
             if got_welcome {
