@@ -25,6 +25,13 @@ verifiable headless under simulated latency, loss, and jitter in both directions
 
 ## Findings (ranked by impact)
 
+> **Implementation order for the remaining fixes** (1–8 done; 9/10/12/15 moved to
+> `reworks-networking-2026-07-11.md`): **17 → 16 → 11 → 13 → 14 → 18 → 19.**
+> 17 first because its impairment knobs are what several later tests assert
+> against (and it unblocks finding 6's deferred skewed-clock test); the rest
+> are independent, ordered by impact. Numbers are stable — findings are never
+> renumbered, so `/implement-finding N` and cross-references stay valid.
+
 ### 1. REGRESSION: `MAX_FRAME` cut to 1 KiB — but it is the shared cap for BOTH directions; snapshots over ~1 KiB now disconnect the client
 
 - **Evidence:** `smirk/engine-net/src/common.rs:10` now reads

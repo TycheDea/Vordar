@@ -38,7 +38,7 @@ Find improvements and suggestions — of any kind, at any scale — in the asset
 1. Check `docs/reviews/` for the most recent `audit-content-pipeline-*.md` and `reworks-content-pipeline-*.md` reports. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
 2. Walk the full pipeline in order, source asset → preprocess → glTF → engine import → in-game socket/animation binding, and write down every manual step, unvalidated assumption, and quality loss you pass.
 3. For each finding, define the ideal end state first, then measure the gap.
-4. Rank findings by impact on final content quality and production throughput, not by ease of fixing.
+4. Weigh findings by impact on final content quality and production throughput — but ORDER them in the report by implementation order: a finding goes before another when implementing it first makes the other easier, safer, or properly testable (test/tooling infrastructure and prerequisite mechanisms first, dependents after). Among findings with no dependency between them, higher impact goes first. Never order by ease of fixing. State the reason inline (e.g. "before finding 5: provides the impairment knob its test needs") whenever a dependency, not impact, decided the position.
 5. Headless verification only — inspect files and scripts; do not launch the game. Where a claim needs a visual check, say exactly what to look at in-game.
 
 ## Report
@@ -64,7 +64,7 @@ the other. Number findings independently within each file. Both files use this s
 ## Ideal end state
 <2–5 sentences: what "top of the top" looks like for this pipeline at full production scale>
 
-## Findings (ranked by impact)
+## Findings (implementation order)
 ### 1. <title>
 - **Evidence:** file/script references and what you observed
 - **Ideal:** what the best possible version looks like

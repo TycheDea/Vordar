@@ -39,7 +39,7 @@ Find improvements and suggestions — of any kind, at any scale — in the docum
 1. Check `docs/reviews/` for the most recent `audit-project-meta-*.md` and `reworks-project-meta-*.md` reports. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
 2. Sweep the full scope. For doc drift specifically: open each doc/diagram and verify its claims against the code, item by item — do not skim.
 3. For each finding, define the ideal end state first, then measure the gap.
-4. Rank findings by impact on the project's long-term velocity and correctness, not by ease of fixing.
+4. Weigh findings by impact on the project's long-term velocity and correctness — but ORDER them in the report by implementation order: a finding goes before another when implementing it first makes the other easier, safer, or properly testable (test/tooling infrastructure and prerequisite mechanisms first, dependents after). Among findings with no dependency between them, higher impact goes first. Never order by ease of fixing. State the reason inline (e.g. "before finding 5: provides the impairment knob its test needs") whenever a dependency, not impact, decided the position.
 5. Headless verification only — never launch the game.
 
 ## Report
@@ -65,7 +65,7 @@ the other. Number findings independently within each file. Both files use this s
 ## Ideal end state
 <2–5 sentences: what "top of the top" looks like for this project's infrastructure>
 
-## Findings (ranked by impact)
+## Findings (implementation order)
 ### 1. <title>
 - **Evidence:** file references and what you observed
 - **Ideal:** what the best possible version looks like

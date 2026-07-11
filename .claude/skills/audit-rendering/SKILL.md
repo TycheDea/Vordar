@@ -37,7 +37,7 @@ Find improvements and suggestions — of any kind, at any scale — in the rende
 1. Check `docs/reviews/` for the most recent `audit-rendering-*.md` and `reworks-rendering-*.md` reports. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
 2. Sweep the full scope: every pipeline, every WGSL file, the full import path. Trace one frame end-to-end (what happens between `render()` entry and queue submit) and write down every inefficiency you pass.
 3. For each finding, define the ideal end state first, then measure the gap.
-4. Rank findings by impact on final visual quality and frame budget, not by ease of fixing.
+4. Weigh findings by impact on final visual quality and frame budget — but ORDER them in the report by implementation order: a finding goes before another when implementing it first makes the other easier, safer, or properly testable (test/tooling infrastructure and prerequisite mechanisms first, dependents after). Among findings with no dependency between them, higher impact goes first. Never order by ease of fixing. State the reason inline (e.g. "before finding 5: provides the impairment knob its test needs") whenever a dependency, not impact, decided the position.
 5. Headless verification only — do not launch the game or expect to see pixels; reason from code, and where a claim needs runtime confirmation, say exactly what measurement would confirm it.
 
 ## Report
@@ -63,7 +63,7 @@ the other. Number findings independently within each file. Both files use this s
 ## Ideal end state
 <2–5 sentences: what "top of the top" looks like for this renderer given the AA dark-fantasy target>
 
-## Findings (ranked by impact)
+## Findings (implementation order)
 ### 1. <title>
 - **Evidence:** file:line references and what you observed
 - **Ideal:** what the best possible version looks like

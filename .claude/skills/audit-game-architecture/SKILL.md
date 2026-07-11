@@ -38,7 +38,7 @@ Find improvements and suggestions — of any kind, at any scale — in the ECS u
 1. Check `docs/reviews/` for the most recent `audit-game-architecture-*.md` and `reworks-game-architecture-*.md` reports. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
 2. Sweep the full scope. Trace one full tick end-to-end (input → simulation systems in order → state handed to renderer) and write down every structural weakness you pass.
 3. For each finding, define the ideal end state first, then measure the gap.
-4. Rank findings by impact on the final architecture's ability to carry the full game, not by ease of fixing.
+4. Weigh findings by impact on the final architecture's ability to carry the full game — but ORDER them in the report by implementation order: a finding goes before another when implementing it first makes the other easier, safer, or properly testable (test/tooling infrastructure and prerequisite mechanisms first, dependents after). Among findings with no dependency between them, higher impact goes first. Never order by ease of fixing. State the reason inline (e.g. "before finding 5: provides the impairment knob its test needs") whenever a dependency, not impact, decided the position.
 5. Headless verification only — reason from code; where a claim needs runtime confirmation, say exactly what test or benchmark would confirm it.
 
 ## Report
@@ -64,7 +64,7 @@ the other. Number findings independently within each file. Both files use this s
 ## Ideal end state
 <2–5 sentences: what "top of the top" looks like for this simulation at full MMO scale>
 
-## Findings (ranked by impact)
+## Findings (implementation order)
 ### 1. <title>
 - **Evidence:** file:line references and what you observed
 - **Ideal:** what the best possible version looks like

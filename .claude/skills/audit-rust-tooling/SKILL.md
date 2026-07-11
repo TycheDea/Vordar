@@ -37,7 +37,7 @@ Find improvements and suggestions — of any kind, at any scale — in the Rust 
 1. Check `docs/reviews/` for the most recent `audit-rust-tooling-*.md` and `reworks-rust-tooling-*.md` reports. Carry forward every unresolved finding (re-verify each still applies; drop resolved ones and say so).
 2. Sweep the full scope. Use `cargo clippy`, `cargo tree -d`, and targeted reads — but verify every tool-reported issue by reading the code before reporting it.
 3. For each finding, define the ideal end state first, then measure the gap.
-4. Rank findings by impact on the final quality of the project, not by ease of fixing.
+4. Weigh findings by impact on the final quality of the project — but ORDER them in the report by implementation order: a finding goes before another when implementing it first makes the other easier, safer, or properly testable (test/tooling infrastructure and prerequisite mechanisms first, dependents after). Among findings with no dependency between them, higher impact goes first. Never order by ease of fixing. State the reason inline (e.g. "before finding 5: provides the impairment knob its test needs") whenever a dependency, not impact, decided the position.
 
 ## Report
 
@@ -62,7 +62,7 @@ the other. Number findings independently within each file. Both files use this s
 ## Ideal end state
 <2–5 sentences: what "top of the top" looks like for this domain in this repo>
 
-## Findings (ranked by impact)
+## Findings (implementation order)
 ### 1. <title>
 - **Evidence:** file:line references and what you observed
 - **Ideal:** what the best possible version looks like
