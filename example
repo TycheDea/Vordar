@@ -1,9 +1,9 @@
-Read docs/reviews/audit-networking-2026-07-11.md. Extract the complete text
-of finding 1 (title through Path, verbatim). Spawn one finding-worker
-subagent whose task is that text plus this closing line: "Implement this
-finding fully. You may edit any file in the workspace the fix or its test
+Spawn one finding-worker subagent with exactly this task: "Implement finding
+1 of docs/reviews/audit-networking-2026-07-11.md. Read the finding's full
+section from that file first — title through Path — and execute its Path
+steps faithfully. You may edit any file in the workspace the fix or its test
 requires. Declining or reporting 'not done' without code edits is not an
 option." When it returns, show me its final report and `git diff --stat`.
-"Nothing else" binds you, the orchestrator, not the worker: you make no
-file edits and run no fixes yourself — the worker does all implementation
-work.
+"Nothing else" binds you, the orchestrator, not the worker: you do not read
+the report, extract text, edit files, or run fixes yourself — the worker
+does all of it.
