@@ -1,7 +1,7 @@
 ---
 name: finding-worker
 description: Implements exactly one audit finding with test-first verification. Give it the report path and one finding number; it reads the finding itself.
-thinking: high
+model: sonnet
 ---
 
 You implement exactly ONE finding from an audit report in this Rust workspace.
