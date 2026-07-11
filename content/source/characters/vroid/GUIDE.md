@@ -1,4 +1,4 @@
-# VRoid look-test guide (~15 minutes)
+lest # VRoid look-test guide (~15 minutes)
 
 Goal: one semi-chibi test character to drop into the dusk start zone next to
 the current knight, so we can judge Ragnarok-Online-like proportions in-engine
