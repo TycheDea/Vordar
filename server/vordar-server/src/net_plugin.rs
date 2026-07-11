@@ -559,6 +559,21 @@ impl System for NetReceiveSystem {
                     if let Ok(mut hp) = world.get::<&mut Health>(entity) {
                         hp.current = record.health;
                     }
+                    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md:
+                    // cooldowns live only in this connection's `last_cast` map,
+                    // which relogging used to recreate empty — burn a cooldown,
+                    // disconnect, relog, cast again for free. Pessimistically
+                    // start every ability of the character's class on full
+                    // cooldown as of spawn: relog is never an advantage even
+                    // though the true remaining cooldown isn't persisted yet.
+                    let class_id = world.get::<&ClassId>(entity)
+                        .map(|c| c.id.clone())
+                        .unwrap_or_else(|_| DEFAULT_CLASS.to_owned());
+                    let spawn_now = state.server.now_micros();
+                    let last_cast: HashMap<String, u64> = class_library.abilities_of(&class_id)
+                        .iter()
+                        .map(|a| (a.id.clone(), spawn_now))
+                        .collect();
                     state.conns.insert(conn, PlayerConn {
                         entity,
                         name: name.clone(),
@@ -568,7 +583,7 @@ impl System for NetReceiveSystem {
                         last_t: 0,
                         known: HashSet::new(),
                         history: VecDeque::new(),
-                        last_cast: HashMap::new(),
+                        last_cast,
                         rr_cursor: 0,
                     });
                     state.server.send(conn, encode(&ServerMsg::Welcome { player_id: entity.to_bits().get() }));

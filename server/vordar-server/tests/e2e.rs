@@ -196,6 +196,11 @@ fn phase4_scheduled_aoe() {
     let b_id = b.player_id.unwrap();
     a.wait_for("A sees B", Duration::from_secs(5), |bot| bot.last_snapshot.contains_key(&b_id));
 
+    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: every fresh
+    // spawn now pessimistically starts its abilities on full cooldown, so
+    // "cleave" isn't castable in the instant after login — clear it first.
+    std::thread::sleep(Duration::from_millis(3200));
+
     // ── Cast 1: B stands still inside the area → hit (caster A excluded). ──
     // "cleave" (the Ravager's heavy Scheduled hit) shares blast's choreography
     // numbers: radius 4.0, 2 s cast, 3 s cooldown.
@@ -569,6 +574,13 @@ fn ravager_onslaught_dashes_and_resolves() {
     let start = a.own_pos().unwrap();
     let target = *a.last_snapshot.get(&b_id).unwrap();
     let start_dist = (glam::Vec2::new(start.x, start.z) - glam::Vec2::new(target.x, target.z)).length();
+
+    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: every fresh
+    // spawn now pessimistically starts its abilities on full cooldown, so
+    // "onslaught" (8 s cooldown) isn't castable in the instant after login —
+    // clear it first.
+    std::thread::sleep(Duration::from_millis(8200));
+
     a.send_cast("onslaught", glam::Vec2::new(target.x, target.z));
 
     a.wait_for("dash schedule broadcast", Duration::from_secs(3), |bot| !bot.mechanics.is_empty());
@@ -653,6 +665,11 @@ fn phase6_health_persists_in_db() {
     victim.wait_for("victim welcome", Duration::from_secs(5), |b| b.player_id.is_some());
     let victim_id = victim.player_id.unwrap();
     atk.wait_for("atk sees victim", Duration::from_secs(5), |b| b.last_snapshot.contains_key(&victim_id));
+
+    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: every fresh
+    // spawn now pessimistically starts its abilities on full cooldown, so
+    // "cleave" isn't castable in the instant after login — clear it first.
+    std::thread::sleep(Duration::from_millis(3200));
 
     // Cleave the stationary victim (30 base + the Ravager's power, possibly a
     // crit — resolves 2 s after the cast).
@@ -765,4 +782,83 @@ fn phase6_restart_durability() {
         restored.distance(saved) < 1.0,
         "restart must restore the saved position: saved {saved}, got {restored}"
     );
+}
+
+// Finding 8 of docs/reviews/audit-networking-2026-07-11.md: cooldowns lived
+// only in the connection's in-memory `PlayerConn.last_cast`, which a fresh
+// login recreated empty — burn an ability's cooldown, disconnect, relog, and
+// the same ability was instantly castable again. The fix pessimistically
+// starts every ability of the character's class on full cooldown as of
+// spawn (Path step 1), so a relog is never an advantage even though the
+// "true" remaining cooldown from before disconnect isn't persisted.
+#[test]
+fn finding8_relog_does_not_reset_cooldown() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25165".parse().unwrap();
+    let db = temp_db("cooldown-relog");
+    let server_db = db.clone();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, &server_db).run_headless(60.0, Some(2400));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut alice = Bot::connect_as(addr, "alice");
+    alice.wait_for("alice welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    alice.wait_for("alice clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    alice.wait_for("alice first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+
+    // The very first spawn also starts on the pessimistic cooldown, so wait
+    // it out before burning "rend" (900 ms, 2.5 m range) targeting herself —
+    // well within range — for real.
+    let pos = alice.own_pos().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        alice.send_cast("rend", glam::Vec2::new(pos.x, pos.z));
+        alice.pump();
+        if !alice.mechanics.is_empty() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "'rend' never became castable after the initial spawn cooldown elapsed");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    drop(alice);
+    // Give the server a moment to process the disconnect and save.
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Relog as the same character and immediately retry "rend". Before the
+    // fix, the freshly-recreated PlayerConn's `last_cast` map was empty, so
+    // this went through instantly — a free cooldown reset via relog.
+    let mut alice2 = Bot::connect_as(addr, "alice");
+    alice2.wait_for("alice re-welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    alice2.wait_for("alice re-clock-sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    alice2.wait_for("alice re-snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+    let pos2 = alice2.own_pos().unwrap();
+    alice2.send_cast("rend", glam::Vec2::new(pos2.x, pos2.z));
+
+    // Pump for well under the 900 ms cooldown; the pessimistic full-cooldown-
+    // on-spawn must reject this cast just like a continuously-connected
+    // player's repeat cast would be.
+    let settle_until = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < settle_until {
+        alice2.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        alice2.mechanics.is_empty(),
+        "relog must not reset the cooldown: 'rend' was accepted immediately after respawn"
+    );
+
+    // Not a permanent lock — once the pessimistic cooldown set at spawn
+    // elapses, the same ability casts normally.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        alice2.send_cast("rend", glam::Vec2::new(pos2.x, pos2.z));
+        alice2.pump();
+        if !alice2.mechanics.is_empty() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "'rend' never became castable after the pessimistic cooldown elapsed");
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

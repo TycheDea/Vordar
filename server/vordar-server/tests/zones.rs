@@ -259,6 +259,10 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
         bot.pump();
         std::thread::sleep(Duration::from_millis(16));
     }
+    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: the zone
+    // transfer re-spawned this connection's PlayerConn, which now
+    // pessimistically starts abilities on full cooldown — clear it first.
+    std::thread::sleep(Duration::from_millis(3200));
     bot.send_cast("cleave", glam::Vec2::new(npc.x, npc.z));
     bot.wait_for("cleave schedules", Duration::from_secs(3), |b| !b.mechanics.is_empty());
     let (mech, _) = *bot.mechanics.last().unwrap();
