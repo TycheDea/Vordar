@@ -94,6 +94,9 @@ impl NetServer {
         let _ = self.out.send(Outgoing::All(Arc::new(data)));
     }
 
+    /// Bounded writer queue policy: drop connection when backlog exceeds this.
+    pub const WRITER_QUEUE_CAP: usize = 128;
+
     /// Close a connection from the server side (e.g. session takeover).
     /// Cleanup runs the normal path, so `Disconnected` still fires.
     pub fn disconnect(&self, conn: ConnId) {

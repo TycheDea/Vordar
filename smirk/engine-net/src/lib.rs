@@ -24,6 +24,7 @@
 mod common;
 mod client;
 mod impair;
+mod metrics;
 mod server;
 
 pub use client::{ClientEvent, NetClient};

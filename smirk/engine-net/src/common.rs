@@ -7,7 +7,7 @@ pub(crate) const TAG_CTRL: u8 = 0;
 pub(crate) const TAG_APP: u8 = 1;
 
 /// Hard cap on a single frame — anything larger is a protocol violation.
-pub(crate) const MAX_FRAME: usize = 1024 * 1024;
+pub(crate) const MAX_FRAME: usize = 1024; // client→server: ~1 KiB is ample for all intents
 
 /// ALPN identifier — QUIC requires one; both sides must agree.
 pub(crate) const ALPN: &[u8] = b"vordar/1";

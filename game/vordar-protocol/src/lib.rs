@@ -32,7 +32,7 @@ pub enum ClientMsg {
     /// First message after connect: which character this connection plays.
     /// Identity without authentication during development — accounts and
     /// passwords land later. The server gates spawn + Welcome on this.
-    Login { name: String },
+    Login { name: String }, // validated ≤ 32 printable ASCII
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

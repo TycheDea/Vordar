@@ -278,6 +278,10 @@ impl System for NetReceiveSystem {
                     // Login comes from a connection that has no PlayerConn
                     // yet — handle it before the guard below.
                     if let ClientMsg::Login { name } = &msg {
+                        if name.len() > 32 || !name.chars().all(|c| c.is_ascii_graphic() && c != ' ') {
+                            log::warn!("conn {conn}: invalid login name");
+                            continue;
+                        }
                         if state.conns.contains_key(&conn) || state.loading.contains_key(&conn) {
                             log::debug!("conn {conn}: duplicate login ignored");
                             continue;
@@ -336,7 +340,7 @@ impl System for NetReceiveSystem {
                             pc.last_seq = seq;
                             pc.last_t = t;
                             // Max-speed validation: direction can never exceed unit length.
-                            let dir = if dir.length_squared() > 1.0 { dir.normalize() } else { dir };
+                            if !dir.is_finite() || dir.length_squared() > 1.0 { continue; }
                             pc.queue.push_back((seq, t, dir));
                             if pc.queue.len() > INTENT_QUEUE_CAP {
                                 pc.queue.pop_front();
@@ -368,6 +372,7 @@ impl System for NetReceiveSystem {
                                 continue;
                             };
                             let target = Vec3::new(target.x, 0.0, target.y);
+                            if !target.is_finite() { continue; }
                             match &def.effect {
                                 AbilityEffect::Scheduled { telegraph_prefab, radius, damage, damage_type, cast_micros, max_range } => {
                                     let (telegraph_prefab, radius, damage, damage_type, cast_micros, max_range) =
