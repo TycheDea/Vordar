@@ -340,7 +340,13 @@ impl System for NetReceiveSystem {
                             pc.last_seq = seq;
                             pc.last_t = t;
                             // Max-speed validation: direction can never exceed unit length.
-                            if !dir.is_finite() || dir.length_squared() > 1.0 { continue; }
+                            // Reject only genuine violations (NaN/Inf, or well past unit
+                            // length); tolerate epsilon-scale float noise from the client's
+                            // f32 `normalize()` and clamp it — same rule as the shared
+                            // `movement_velocity` the client replays, so validation and
+                            // simulation agree instead of forking.
+                            if !dir.is_finite() || dir.length_squared() > 1.0 + 1e-3 { continue; }
+                            let dir = if dir.length_squared() > 1.0 { dir.normalize() } else { dir };
                             pc.queue.push_back((seq, t, dir));
                             if pc.queue.len() > INTENT_QUEUE_CAP {
                                 pc.queue.pop_front();

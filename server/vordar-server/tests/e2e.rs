@@ -114,6 +114,45 @@ fn phase2_simulated_latency() {
     });
 }
 
+// Regression test for Finding 2 of docs/reviews/audit-networking-2026-07-11.md:
+// an honest client's direction that lands a few ULP over unit length (exactly
+// what glam's f32 `normalize()` produces for ordinary camera-yaw inputs) must
+// still move the player. A strict `> 1.0` reject silently drops every one of
+// these intents (misprediction-causing rubber-banding); the fix tolerates
+// epsilon-scale excess and clamps it, like the shared `movement_velocity` rule.
+#[test]
+fn epsilon_over_unit_direction_still_moves_player() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25167".parse().unwrap();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1200));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    bot.wait_for("first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+
+    // A direction whose length² lands a few ULP over 1.0 — not malicious, just
+    // ordinary f32 normalize() noise.
+    let dir = glam::Vec2::new(1.0 + f32::EPSILON, 0.0);
+    assert!(dir.length_squared() > 1.0, "test setup: dir must be over-unit");
+    assert!(dir.length_squared() <= 1.0 + 1e-3, "test setup: dir must be within tolerance");
+
+    let start = bot.own_pos().unwrap();
+    let run_until = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < run_until {
+        bot.send_move(dir);
+        bot.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    bot.send_move(glam::Vec2::ZERO);
+    bot.wait_for("epsilon-over-unit direction moved the player", Duration::from_secs(2), |b| {
+        b.own_pos().unwrap().x - start.x > 4.0
+    });
+}
+
 // Phase 3: the server-side chapter (waves) spawns NPCs and they replicate to
 // clients through AOI enters with their prefab identity.
 #[test]
