@@ -225,38 +225,13 @@ verifiable headless under simulated latency, loss, and jitter in both directions
 
 ### 9. Every message class rides one reliable ordered stream — head-of-line blocking by design (carried, unchanged)
 
-- **Evidence:** One bidirectional stream per connection (`server.rs:198-201`,
-  `client.rs:171-174`); intents, snapshots, mechanics, world clock, deaths,
-  redirects, and clock pings share it (tags at `common.rs:6-7`). The loss probe
-  measured 164 ms worst gap at 5 % loss / 50 ms RTT and
-  `docs/benchmarks/BASELINE.md:204-209` recorded the deferral (WEAKPOINTS #4).
-- **Ideal:** Snapshots and clock pings on QUIC datagrams (superseded state should be
-  skipped, not retransmitted); intents on datagrams with last-N redundancy; reliable
-  streams for identity/transactional messages only. Datagram pings also remove
-  writer-queue delay from RTT samples (`server.rs:237` stamps `t_server` before
-  queuing behind snapshot frames).
-- **Gap:** The measurement's envelope is narrow: 50 ms RTT, downstream loss only.
-  At 150–250 ms RTT one retransmit cycle exceeds the 250 ms gate by arithmetic;
-  upstream loss stalling the intent stream (client-felt rubber-banding) has never
-  been measured because the impairment layer can't express it (Finding 17).
-- **Suggestion / Path:** (1) both-direction impairment; (2) re-probe at WAN RTTs;
-  (3) clock pings to datagrams; (4) `Snapshot.states` to datagrams (tick-stamped
-  latest-wins — `states` are already order-independent; only `enters`/`leaves` need
-  the stream); (5) input redundancy.
+- **Moved:** rework-scale, needs a design pass first - now finding 3 of
+  `reworks-networking-2026-07-11.md` (implement via /plan-rework, not /implement-finding).
 
 ### 10. No jitter buffer or extrapolation — remote entities freeze at every late snapshot (carried, unchanged)
 
-- **Evidence:** `client/net.rs:833-842` — `NetLerpSystem` completes in exactly one
-  snapshot interval then holds; `apply_snapshot` restarts lerps from the displayed
-  position (`net.rs:393-397`), converting jitter into speed warble. Measured gaps up
-  to 164 ms against a 100 ms budget (`BASELINE.md:204-206`) = visible freezes today.
-- **Ideal:** Fixed interpolation delay (~1.5–2 intervals behind newest) over a
-  tick-indexed buffer, with capped extrapolation from `NetMotion.velocity`
-  (`net.rs:394`) when the buffer runs dry. Snapshot `tick` is already on the wire
-  (`vordar-protocol/src/lib.rs:48`) and currently unused for timing.
-- **Suggestion / Path:** (1) tick-indexed buffer; (2) fixed-delay interpolation
-  clocked off synced server time; (3) capped extrapolation; (4) loss-probe assertion
-  on rendered-position smoothness.
+- **Moved:** rework-scale, needs a design pass first - now finding 4 of
+  `reworks-networking-2026-07-11.md` (implement via /plan-rework, not /implement-finding).
 
 ### 11. Prediction replay models plain movement only — leaps and collisions produce snaps at real latency (carried, unchanged)
 
@@ -272,22 +247,14 @@ verifiable headless under simulated latency, loss, and jitter in both directions
 - **Suggestion / Path:** (1) leap-aware replay; (2) static-geometry collision in
   replay (or suppress corrections during dashes as a stopgap); (3) 150 ms e2e
   Onslaught test asserting corrections stay under `SNAP_DISTANCE`.
+- **Split:** the full collision-in-replay ideal moved to `reworks-networking-2026-07-11.md`
+  finding 7. Implementable here: leap-aware replay, the dash correction-suppression stopgap,
+  and the 150 ms e2e Onslaught test.
 
 ### 12. Wire format waste: 5-byte-minimum entity ids, repeated prefab strings, unquantized absolute states (carried, unchanged)
 
-- **Evidence:** Wire ids are hecs entity bits ≥ 2³² (`net_plugin.rs:884`) →
-  5+ byte varints; `EntityPos` is raw 3×f32 + i32 hp (`vordar-protocol/src/lib.rs:102-108`);
-  `EntityState.prefab` is a `String` per AOI entry (`lib.rs:94`); `hp: 0` conflates
-  "no Health" with "dead" (`lib.rs:98-99`). Note this waste is also what pushed
-  snapshots over the new 1 KiB cap (Finding 1) — id compaction and quantization
-  shrink the same frames that are currently killing connections.
-- **Ideal:** Zone-local u16/u32 replication ids bound at AOI entry; positions
-  quantized to zone-local fixed point; prefab u16 registry pinned by content hash;
-  hp as an explicit optional. Delta-vs-baseline only if numbers still bind after.
-- **Suggestion / Path:** (1) compact ids bound in `enters`; (2) position
-  quantization (protocol bump); (3) prefab registry + hash check at login;
-  (4) measure via the bot `bytes` counter (`tests/common/mod.rs:44`); (5) delta
-  compression last.
+- **Moved:** rework-scale, needs a design pass first - now finding 5 of
+  `reworks-networking-2026-07-11.md` (implement via /plan-rework, not /implement-finding).
 
 ### 13. Persistence engineering: per-row autocommit, no WAL, autosave bursts ahead of logins, no migration or shutdown story (carried, unchanged)
 
@@ -309,6 +276,9 @@ verifiable headless under simulated latency, loss, and jitter in both directions
   worker loop; (3) staggered autosave (same trick as snapshot STAGGER,
   `net_plugin.rs:68-71`); (4) migration runner; (5) SIGINT/SIGTERM → graceful
   shutdown; (6) durability taxonomy with inventory.
+- **Split:** steps (4)-(6) - migration runner, graceful shutdown, durability classes - moved to
+  `reworks-networking-2026-07-11.md` finding 8. Implementable here: steps (1)-(3)
+  (PRAGMAs, batched-transaction worker loop, staggered autosave).
 
 ### 14. The entire network stack runs on one single-threaded runtime per endpoint (carried, unchanged)
 
@@ -324,22 +294,13 @@ verifiable headless under simulated latency, loss, and jitter in both directions
 - **Suggestion / Path:** (1) instrument network-thread busy time in the soak (ties
   into Finding 3's metrics, once real); (2) per-conn atomic RTT; (3) runtime
   sharding when the probe shows >50 % of a core at target load.
+- **Split:** step (3), runtime sharding, moved to `reworks-networking-2026-07-11.md` finding 9.
+  Implementable here: steps (1)-(2) (network-thread busy-time instrumentation, per-conn atomic RTT).
 
 ### 15. Certificate story and `Redirect { addr: SocketAddr }` — the final trust model can't be swapped in without a protocol change (carried, unchanged)
 
-- **Evidence:** Fresh self-signed cert for `"localhost"` per boot
-  (`common.rs:64-83`); client disables verification (`SkipServerVerification`,
-  `common.rs:101-137`) and hardcodes SNI `"localhost"` (`client.rs:167`);
-  `Redirect` carries a bare `SocketAddr` (`vordar-protocol/src/lib.rs:82`);
-  directory is IP:port math (`main.rs:39-44`). Hostname-validated TLS needs names
-  the protocol doesn't speak.
-- **Ideal:** Zone directory and `Redirect` carry hostnames; client verifies against
-  a real chain (public CA or pinned private game CA); skip-verification
-  feature-gated out of release builds.
-- **Suggestion / Path:** (1) hostname in `Redirect` + directory (protocol bump);
-  (2) SNI parameter on `NetClient::connect`; (3) feature-gate the dev verifier;
-  (4) real CA + pinned root at deployment; (5) handshake reason codes (Finding 16)
-  so cert/version failures are distinguishable.
+- **Moved:** rework-scale, needs a design pass first - now finding 6 of
+  `reworks-networking-2026-07-11.md` (implement via /plan-rework, not /implement-finding).
 
 ### 16. Validation and handshake hardening: seq=0 replay wedge, `min` vs `max` doc drift, version mismatch is a silent close (carried, unchanged)
 

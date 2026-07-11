@@ -48,3 +48,128 @@ retroactively from the deferred remainders of implemented findings 7 and 8.
 - **Path:** (1) design: quinn migration config + security analysis against the finding-4
   flood controls; (2) impairment-layer knob for mid-session address switching (relates to
   audit finding 17); (3) e2e test migrating a session mid-combat with no relogin.
+
+### 3. Every message class rides one reliable ordered stream — head-of-line blocking by design (moved from audit finding 9)
+
+- **Evidence:** One bidirectional stream per connection (`server.rs:198-201`,
+  `client.rs:171-174`); intents, snapshots, mechanics, world clock, deaths,
+  redirects, and clock pings share it (tags at `common.rs:6-7`). The loss probe
+  measured 164 ms worst gap at 5 % loss / 50 ms RTT and
+  `docs/benchmarks/BASELINE.md:204-209` recorded the deferral (WEAKPOINTS #4).
+- **Ideal:** Snapshots and clock pings on QUIC datagrams (superseded state should be
+  skipped, not retransmitted); intents on datagrams with last-N redundancy; reliable
+  streams for identity/transactional messages only. Datagram pings also remove
+  writer-queue delay from RTT samples (`server.rs:237` stamps `t_server` before
+  queuing behind snapshot frames).
+- **Gap:** The measurement's envelope is narrow: 50 ms RTT, downstream loss only.
+  At 150–250 ms RTT one retransmit cycle exceeds the 250 ms gate by arithmetic;
+  upstream loss stalling the intent stream (client-felt rubber-banding) has never
+  been measured because the impairment layer can't express it (Finding 17).
+- **Suggestion / Path:** (1) both-direction impairment; (2) re-probe at WAN RTTs;
+  (3) clock pings to datagrams; (4) `Snapshot.states` to datagrams (tick-stamped
+  latest-wins — `states` are already order-independent; only `enters`/`leaves` need
+  the stream); (5) input redundancy.
+
+### 4. No jitter buffer or extrapolation — remote entities freeze at every late snapshot (moved from audit finding 10)
+
+- **Evidence:** `client/net.rs:833-842` — `NetLerpSystem` completes in exactly one
+  snapshot interval then holds; `apply_snapshot` restarts lerps from the displayed
+  position (`net.rs:393-397`), converting jitter into speed warble. Measured gaps up
+  to 164 ms against a 100 ms budget (`BASELINE.md:204-206`) = visible freezes today.
+- **Ideal:** Fixed interpolation delay (~1.5–2 intervals behind newest) over a
+  tick-indexed buffer, with capped extrapolation from `NetMotion.velocity`
+  (`net.rs:394`) when the buffer runs dry. Snapshot `tick` is already on the wire
+  (`vordar-protocol/src/lib.rs:48`) and currently unused for timing.
+- **Suggestion / Path:** (1) tick-indexed buffer; (2) fixed-delay interpolation
+  clocked off synced server time; (3) capped extrapolation; (4) loss-probe assertion
+  on rendered-position smoothness.
+
+### 5. Wire format waste: 5-byte-minimum entity ids, repeated prefab strings, unquantized absolute states (moved from audit finding 12)
+
+- **Evidence:** Wire ids are hecs entity bits ≥ 2³² (`net_plugin.rs:884`) →
+  5+ byte varints; `EntityPos` is raw 3×f32 + i32 hp (`vordar-protocol/src/lib.rs:102-108`);
+  `EntityState.prefab` is a `String` per AOI entry (`lib.rs:94`); `hp: 0` conflates
+  "no Health" with "dead" (`lib.rs:98-99`). Note this waste is also what pushed
+  snapshots over the new 1 KiB cap (Finding 1) — id compaction and quantization
+  shrink the same frames that are currently killing connections.
+- **Ideal:** Zone-local u16/u32 replication ids bound at AOI entry; positions
+  quantized to zone-local fixed point; prefab u16 registry pinned by content hash;
+  hp as an explicit optional. Delta-vs-baseline only if numbers still bind after.
+- **Suggestion / Path:** (1) compact ids bound in `enters`; (2) position
+  quantization (protocol bump); (3) prefab registry + hash check at login;
+  (4) measure via the bot `bytes` counter (`tests/common/mod.rs:44`); (5) delta
+  compression last.
+
+### 6. Certificate story and `Redirect { addr: SocketAddr }` — the final trust model can't be swapped in without a protocol change (moved from audit finding 15)
+
+- **Evidence:** Fresh self-signed cert for `"localhost"` per boot
+  (`common.rs:64-83`); client disables verification (`SkipServerVerification`,
+  `common.rs:101-137`) and hardcodes SNI `"localhost"` (`client.rs:167`);
+  `Redirect` carries a bare `SocketAddr` (`vordar-protocol/src/lib.rs:82`);
+  directory is IP:port math (`main.rs:39-44`). Hostname-validated TLS needs names
+  the protocol doesn't speak.
+- **Ideal:** Zone directory and `Redirect` carry hostnames; client verifies against
+  a real chain (public CA or pinned private game CA); skip-verification
+  feature-gated out of release builds.
+- **Suggestion / Path:** (1) hostname in `Redirect` + directory (protocol bump);
+  (2) SNI parameter on `NetClient::connect`; (3) feature-gate the dev verifier;
+  (4) real CA + pinned root at deployment; (5) handshake reason codes (Finding 16)
+  so cert/version failures are distinguishable.
+
+### 7. Collision-aware prediction replay (split from audit finding 11)
+
+- **Evidence:** `replay_position` (`client/net.rs:451-457`) folds pending intents as pure
+  `movement_velocity` steps; the simulation also applies collision response
+  (`PhysicsPlugin`). Wall contact at latency causes constant correction tug. The
+  fix-sized parts of audit finding 11 (leap-aware replay, dash correction suppression,
+  150 ms e2e test) address the dash snap but not collision.
+- **Ideal:** Client replay runs the full movement rule including static-geometry
+  collision, so prediction error at a wall is zero and the shared-rule contract
+  (`docs/online-play.mmd:48-50`) holds everywhere.
+- **Gap:** Running collision inside replay means giving the client's reconciliation
+  loop access to physics queries per replayed intent - an architectural decision about
+  what the replay context owns, not a bounded diff.
+- **Suggestion:** Design pass on exposing static collision to replay (shared collision
+  rule crate-side, like `movement_velocity`?), its cost per reconciliation, and whether
+  dynamic obstacles are in or out of the predicted set.
+- **Path:** (1) design: replay-accessible collision query; (2) implement replay
+  collision; (3) extend the 150 ms e2e test with a wall-hug scenario asserting
+  corrections stay under `SNAP_DISTANCE`.
+
+### 8. Persistence lifecycle: schema migrations, graceful shutdown, durability classes (split from audit finding 13, steps 4-6)
+
+- **Evidence:** Schema evolution is `CREATE TABLE IF NOT EXISTS` only (`db.rs:24-34`),
+  no `user_version`. Shutdown is `Drop`-join only (`db.rs:127-137`) while `main` runs
+  forever with no signal handling (`main.rs:77-79`); a panicked zone thread dies
+  silently. `NetServer` has no shutdown path at all (noted during the finding-7 work:
+  its accept loop runs forever, the listening socket is never released).
+- **Ideal:** `user_version`-driven migration runner; deliberate
+  drain-save-flush-exit shutdown spanning zone threads, net threads, and the DbWorker;
+  durability classes once items/trades exist (some writes synchronous-confirmed).
+- **Gap:** Any schema change now requires hand-editing databases; any process stop is
+  an unclean kill mid-save; every write shares one durability level.
+- **Suggestion:** One design pass over process lifecycle ownership: who initiates
+  shutdown, the ordering across zones/net/db, how `NetServer` gains a close path, then
+  migrations and the durability taxonomy on top.
+- **Path:** (1) design: shutdown ownership and ordering; (2) `NetServer` shutdown path;
+  (3) SIGINT/SIGTERM -> drain-save-flush-exit; (4) migration runner with `user_version`;
+  (5) durability classes with the first transactional feature. Fix-sized steps (1)-(3)
+  of the original finding (PRAGMAs, batched transactions, staggered autosave) stay in
+  the audit file.
+
+### 9. Multi-core network runtime sharding (split from audit finding 14, step 3)
+
+- **Evidence:** `server.rs:64` - `new_current_thread()`; all connections' TLS, packet
+  processing, and framing share one OS thread per endpoint.
+- **Ideal:** Network capacity scales with cores: runtime pool sharded by `ConnId`,
+  no cross-shard locks on the per-frame paths.
+- **Gap:** One core of QUIC crypto is the zone's hard vertical ceiling. Sharding is
+  deliberately gated on measurement: audit finding 14's fix-sized steps (busy-time
+  instrumentation, per-conn atomic RTT) produce the numbers first.
+- **Suggestion:** Only design this once instrumentation shows >50% of a core at target
+  load; then decide sharding boundary (per-connection vs per-endpoint), what state
+  crosses shards, and how the sim-thread channel model changes.
+- **Path:** (1) prerequisite: finding 14 steps (1)-(2) landed and soak numbers gathered;
+  (2) design: shard boundary + state ownership; (3) implement behind the same public
+  `NetServer` API; (4) soak comparison proving scaling.
+
