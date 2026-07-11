@@ -4,6 +4,7 @@
 use crate::common::{
     client_crypto, decode_ctrl, encode_ctrl, read_frame_out, write_frame, Ctrl, TAG_APP, TAG_CTRL,
 };
+use crate::metrics::NetMetrics;
 use crate::NetError;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
@@ -38,6 +39,7 @@ pub struct NetClient {
     out: UnboundedSender<Vec<u8>>,
     clock: Arc<Clock>,
     epoch: Instant,
+    metrics: Arc<NetMetrics>,
 }
 
 impl NetClient {
@@ -81,8 +83,10 @@ impl NetClient {
             best_rtt: AtomicU64::new(u64::MAX),
             synced: AtomicBool::new(false),
         });
+        let metrics = NetMetrics::new();
 
         let thread_clock = clock.clone();
+        let thread_metrics = metrics.clone();
         std::thread::Builder::new()
             .name("engine-net-client".into())
             .spawn(move || {
@@ -91,7 +95,10 @@ impl NetClient {
                     Err(e) => { log::error!("net: tokio runtime failed: {e}"); return; }
                 };
                 rt.block_on(async move {
-                    match client_main(addr, version, epoch, event_tx.clone(), out_rx, thread_clock, one_way, loss).await {
+                    match client_main(
+                        addr, version, epoch, event_tx.clone(), out_rx, thread_clock, one_way, loss,
+                        thread_metrics,
+                    ).await {
                         Ok(()) => log::info!("net: connection closed"),
                         Err(e) => log::warn!("net: connection ended: {e}"),
                     }
@@ -100,7 +107,7 @@ impl NetClient {
             })
             .map_err(NetError::Io)?;
 
-        Ok(Self { events: event_rx, out: out_tx, clock, epoch })
+        Ok(Self { events: event_rx, out: out_tx, clock, epoch, metrics })
     }
 
     /// Drain all pending network events. Call once per Input tick.
@@ -137,6 +144,11 @@ impl NetClient {
     pub fn rtt_micros(&self) -> Option<u64> {
         self.clock.synced.load(Ordering::Acquire).then(|| self.clock.rtt.load(Ordering::Acquire))
     }
+
+    /// Frame/byte counters for this connection (observability only).
+    pub fn metrics(&self) -> Arc<NetMetrics> {
+        self.metrics.clone()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -149,6 +161,7 @@ async fn client_main(
     clock: Arc<Clock>,
     one_way: Duration,
     loss: f32,
+    metrics: Arc<NetMetrics>,
 ) -> Result<(), NetError> {
     let bind: SocketAddr = if addr.is_ipv4() { "0.0.0.0:0".parse().unwrap() } else { "[::]:0".parse().unwrap() };
     let mut endpoint = if loss > 0.0 {
@@ -192,12 +205,14 @@ async fn client_main(
     // monotonic, so FIFO delivery simulates latency without throttling
     // throughput (sleeping per frame inside a loop would compound the delay).
     let (write_tx, mut write_rx) = unbounded_channel::<(tokio::time::Instant, u8, Vec<u8>)>();
+    let writer_metrics = metrics.clone();
     let writer = tokio::spawn(async move {
         while let Some((at, tag, payload)) = write_rx.recv().await {
             tokio::time::sleep_until(at).await;
             if write_frame(&mut send, tag, &payload).await.is_err() {
                 break;
             }
+            writer_metrics.record_frame_out(payload.len());
         }
     });
     let app_tx = write_tx.clone();
@@ -228,9 +243,13 @@ async fn client_main(
     // Raw reader stamps each frame on arrival; processing happens one_way later.
     let (in_tx, mut in_rx) =
         unbounded_channel::<(tokio::time::Instant, Result<(u8, Vec<u8>), NetError>)>();
+    let reader_metrics = metrics.clone();
     let reader = tokio::spawn(async move {
         loop {
             let frame = read_frame_out(&mut recv).await;
+            if let Ok((_, ref payload)) = frame {
+                reader_metrics.record_frame_in(payload.len());
+            }
             let failed = frame.is_err();
             if in_tx.send((tokio::time::Instant::now() + one_way, frame)).is_err() || failed {
                 break;

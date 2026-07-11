@@ -16,6 +16,7 @@ use glam::{Vec2, Vec3};
 use hecs::Entity;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 use vordar_game::combat::buff::{ravager_mods, RavagerRageSystem};
 use vordar_game::combat::leap::{leap_velocity, LeapImpulse};
@@ -847,6 +848,19 @@ impl System for SnapshotBroadcastSystem {
                 let at_server_micros = state.server.now_micros();
                 let world_micros = state.world_at(at_server_micros);
                 state.server.broadcast(encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
+
+                // Periodic net metrics dump — the operational visibility the
+                // dead NetMetrics facade claimed but never provided.
+                let m = state.server.metrics();
+                log::info!(
+                    "net metrics: frames_in={} frames_out={} bytes_in={} bytes_out={} rejects={} writer_queue_depth={}",
+                    m.frames_in.load(Ordering::Relaxed),
+                    m.frames_out.load(Ordering::Relaxed),
+                    m.bytes_in.load(Ordering::Relaxed),
+                    m.bytes_out.load(Ordering::Relaxed),
+                    m.rejects.load(Ordering::Relaxed),
+                    m.writer_queue_depth.load(Ordering::Relaxed),
+                );
             }
             // Stagger: only this tick's slice of connections is served — each
             // conn still gets exactly SNAPSHOT_HZ snapshots per second.
