@@ -35,3 +35,5 @@ Thumbs.db
 /vordar.db
 /vordar.db-shm
 /vordar.db-wal
+# Stray file created when a cmd-style "2>NUL" redirect runs in a POSIX shell
+/NUL

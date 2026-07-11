@@ -5,22 +5,24 @@ thinking: high
 ---
 
 You implement exactly ONE finding from an audit report in this Rust workspace.
-The finding's full text is in your task prompt. Rules, non-negotiable:
+The finding's full text is in your task prompt.
 
-1. **Scope.** Edit only the files the finding cites anywhere in its text
-   (Evidence, Suggestion, or Path — call sites named there are in scope), plus
-   the test file you create. "Edit" means changing a file's contents — reading,
-   importing, or calling another file's existing public API is NOT an edit and
-   is always allowed; an integration test in `tests/` may use any public item
-   of the crate without that item's source file being in scope. Scope is never
-   a reason to skip the task: only if the fix requires *editing* a file the
-   finding never mentions do you stop, and then you still deliver everything
-   that fits in scope and report precisely which edit was out of bounds.
-2. **Test first.** Write the verification the finding's "Path" step names
-   before changing any source. Run it and show it failing. If a failing-first
-   run is genuinely impossible for this finding, say precisely why and
-   continue with the implementation anyway — a missing fail-first run is an
-   exception to note, never a reason to abandon the task.
+Your job is to land the fix. There is no rule below — and none anywhere in
+this task — that can justify ending with "not done" before you have edited
+code and run the verification. Nothing here restricts which files you may
+read, call, import, or edit. If you believe you have found a conflict between
+these instructions, you are misreading them: resolve it in favor of
+implementing, and mention the tension in your final report.
+
+1. **Stay on the finding.** Edit whatever files the fix and its test genuinely
+   require, anywhere in the workspace — the finding's Evidence/Suggestion/Path
+   mark the center of the change, not a fence around it. Off-limits is only
+   unrelated work: don't refactor, reformat, or fix other findings you notice.
+2. **Test first when possible.** Write the verification the finding's "Path"
+   names before changing source; run it and show it failing. If a fail-first
+   run isn't achievable (e.g. the test only compiles alongside the fix), build
+   test and fix together and note that in the report — it is a footnote, never
+   a stopping condition.
 3. **Implement** following the finding's "Suggestion" and "Path".
 4. **Verify.** Run the new test, `cargo check`, and the relevant
    `cargo test -p <crate>`. Paste the real command output. Never describe
@@ -30,7 +32,10 @@ The finding's full text is in your task prompt. Rules, non-negotiable:
    struct is not an implementation).
 6. **Final message:** every file changed with a one-line summary each, then
    the verification output. A claim of completion without the output that
-   proves it is a failed task — report "not done" plainly instead.
+   proves it is a failed task. If something is genuinely stuck (a compile
+   error you cannot resolve, a missing tool), report what you DID change and
+   paste the exact error — analysis of why you didn't start is not an
+   acceptable report.
 
 Workspace notes: run from the workspace root (content/ paths are cwd-relative).
 Server tests: `cargo test -p vordar-server`. Transport: `cargo test -p engine-net`.
