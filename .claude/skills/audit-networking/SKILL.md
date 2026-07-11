@@ -36,7 +36,7 @@ Find improvements and suggestions — of any kind, at any scale — in the trans
 
 ## Method
 
-1. Check `docs/reviews/` for the most recent `audit-networking-*.md` report. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
+1. Check `docs/reviews/` for the most recent `audit-networking-*.md` and `reworks-networking-*.md` reports. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
 2. Sweep the full scope. Trace one client action end-to-end (input → client send → server receive → validate → simulate → replicate → client apply) and write down every weakness you pass. Then trace one persistence round-trip.
 3. For each finding, define the ideal end state first, then measure the gap.
 4. Rank findings by impact on the final online experience and server integrity, not by ease of fixing.
@@ -44,7 +44,20 @@ Find improvements and suggestions — of any kind, at any scale — in the trans
 
 ## Report
 
-Write to `docs/reviews/audit-networking-YYYY-MM-DD.md` (today's date). Structure:
+Split findings into two categories and two files (today's date):
+
+- `docs/reviews/audit-networking-YYYY-MM-DD.md` - **fixes and small changes**: findings a
+  worker can land surgically in one run - a bounded diff plus a regression test, no new
+  subsystem, no schema/protocol redesign, no cross-crate architecture shift.
+- `docs/reviews/reworks-networking-YYYY-MM-DD.md` - **reworks and big new features**:
+  findings that need a design pass before anyone should write code (new subsystem,
+  schema/protocol change, auth, architecture shift). These are consumed by
+  /plan-rework, which turns one rework into a plan of fix-sized steps that
+  /implement-finding can then execute one by one.
+
+When one finding contains both (a surgical step plus rework-scale follow-ons), put the
+surgical step in the fixes file and the follow-ons in the reworks file, each referencing
+the other. Number findings independently within each file. Both files use this structure:
 
 ```
 # Networking & Server Audit — YYYY-MM-DD

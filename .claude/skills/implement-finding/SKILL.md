@@ -9,7 +9,9 @@ fixes yourself.
 
 The arguments give a finding number N and optionally a report path REPORT.
 When no path is given, use the newest `docs/reviews/audit-*.md` by filename
-date (list the directory to find it — do not open the file).
+date (list the directory to find it — do not open the file). REPORT may also
+be a plan file produced by /plan-rework (`docs/reviews/plan-*.md`) — its
+"Findings (execution order)" section uses the same finding format.
 
 Spawn ONE finding-worker subagent (Agent tool, subagent_type
 "finding-worker") with exactly this task, substituting N and REPORT:
@@ -23,6 +25,10 @@ When it returns:
 1. Show the user the worker's final report verbatim.
 2. Run `git status --short` and `git diff --stat` and show both — the status
    catches new untracked files that the diff stat alone misses.
+
+A modified or new `docs/reviews/reworks-*.md` in that status is legitimate:
+workers move rework-scale remainders of their finding there (their agent rules
+require it). Point it out so the user knows a rework was queued.
 
 Nothing else: no edits, no commits, no fixes of your own, no review beyond
 the two commands above unless the user asks.

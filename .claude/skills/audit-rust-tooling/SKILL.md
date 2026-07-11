@@ -34,14 +34,27 @@ Find improvements and suggestions — of any kind, at any scale — in the Rust 
 
 ## Method
 
-1. Check `docs/reviews/` for the most recent `audit-rust-tooling-*.md` report. Carry forward every unresolved finding (re-verify each still applies; drop resolved ones and say so).
+1. Check `docs/reviews/` for the most recent `audit-rust-tooling-*.md` and `reworks-rust-tooling-*.md` reports. Carry forward every unresolved finding (re-verify each still applies; drop resolved ones and say so).
 2. Sweep the full scope. Use `cargo clippy`, `cargo tree -d`, and targeted reads — but verify every tool-reported issue by reading the code before reporting it.
 3. For each finding, define the ideal end state first, then measure the gap.
 4. Rank findings by impact on the final quality of the project, not by ease of fixing.
 
 ## Report
 
-Write to `docs/reviews/audit-rust-tooling-YYYY-MM-DD.md` (today's date). Structure:
+Split findings into two categories and two files (today's date):
+
+- `docs/reviews/audit-rust-tooling-YYYY-MM-DD.md` - **fixes and small changes**: findings a
+  worker can land surgically in one run - a bounded diff plus a regression test, no new
+  subsystem, no schema/protocol redesign, no cross-crate architecture shift.
+- `docs/reviews/reworks-rust-tooling-YYYY-MM-DD.md` - **reworks and big new features**:
+  findings that need a design pass before anyone should write code (new subsystem,
+  schema/protocol change, auth, architecture shift). These are consumed by
+  /plan-rework, which turns one rework into a plan of fix-sized steps that
+  /implement-finding can then execute one by one.
+
+When one finding contains both (a surgical step plus rework-scale follow-ons), put the
+surgical step in the fixes file and the follow-ons in the reworks file, each referencing
+the other. Number findings independently within each file. Both files use this structure:
 
 ```
 # Rust & Tooling Audit — YYYY-MM-DD

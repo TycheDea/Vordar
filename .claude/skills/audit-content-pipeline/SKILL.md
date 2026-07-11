@@ -35,7 +35,7 @@ Find improvements and suggestions — of any kind, at any scale — in the asset
 
 ## Method
 
-1. Check `docs/reviews/` for the most recent `audit-content-pipeline-*.md` report. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
+1. Check `docs/reviews/` for the most recent `audit-content-pipeline-*.md` and `reworks-content-pipeline-*.md` reports. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
 2. Walk the full pipeline in order, source asset → preprocess → glTF → engine import → in-game socket/animation binding, and write down every manual step, unvalidated assumption, and quality loss you pass.
 3. For each finding, define the ideal end state first, then measure the gap.
 4. Rank findings by impact on final content quality and production throughput, not by ease of fixing.
@@ -43,7 +43,20 @@ Find improvements and suggestions — of any kind, at any scale — in the asset
 
 ## Report
 
-Write to `docs/reviews/audit-content-pipeline-YYYY-MM-DD.md` (today's date). Structure:
+Split findings into two categories and two files (today's date):
+
+- `docs/reviews/audit-content-pipeline-YYYY-MM-DD.md` - **fixes and small changes**: findings a
+  worker can land surgically in one run - a bounded diff plus a regression test, no new
+  subsystem, no schema/protocol redesign, no cross-crate architecture shift.
+- `docs/reviews/reworks-content-pipeline-YYYY-MM-DD.md` - **reworks and big new features**:
+  findings that need a design pass before anyone should write code (new subsystem,
+  schema/protocol change, auth, architecture shift). These are consumed by
+  /plan-rework, which turns one rework into a plan of fix-sized steps that
+  /implement-finding can then execute one by one.
+
+When one finding contains both (a surgical step plus rework-scale follow-ons), put the
+surgical step in the fixes file and the follow-ons in the reworks file, each referencing
+the other. Number findings independently within each file. Both files use this structure:
 
 ```
 # Content Pipeline Audit — YYYY-MM-DD

@@ -29,6 +29,14 @@ implementing, and mention the tension in your final report.
    unrelated work: don't refactor, reformat, or fix other findings you notice.
    Never run a whole-file formatter; your diff must contain only lines the fix
    and its test require.
+   If part of the finding turns out to be rework-scale (a new subsystem, a
+   schema/protocol redesign, an auth or architecture decision), implement the
+   surgical part and move the rework-scale remainder out: append it as a new
+   finding — same Evidence/Ideal/Gap/Suggestion/Path format, next free number —
+   to the newest `docs/reviews/reworks-*.md` for this domain (create
+   `reworks-<domain>-<today>.md` if none exists), reference the origin finding,
+   and say so in your final report. Deferring in prose alone is not enough —
+   deferred work that isn't in the reworks file is lost.
 2. **Test first when possible.** Write the verification the finding's "Path"
    names before changing source; run it and show it failing. If a fail-first
    run isn't achievable (e.g. the test only compiles alongside the fix), build
