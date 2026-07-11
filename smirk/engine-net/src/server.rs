@@ -7,7 +7,7 @@ use crate::common::{
 use crate::metrics::NetMetrics;
 use crate::NetError;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -38,6 +38,11 @@ type ConnMap = Arc<
     Mutex<HashMap<ConnId, (UnboundedSender<(u8, Arc<Vec<u8>>)>, quinn::Connection, Arc<AtomicU64>)>>,
 >;
 type RttMap = Arc<Mutex<HashMap<ConnId, u64>>>;
+/// Live connection count per source IP — reserved the instant a connection
+/// is accepted (before its handshake even completes) and released when it
+/// ends, so `NetServer::MAX_CONNECTIONS_PER_IP` holds even against a burst of
+/// near-simultaneous connection attempts from one address.
+type IpCounts = Arc<Mutex<HashMap<IpAddr, usize>>>;
 
 pub struct NetServer {
     events: UnboundedReceiver<ServerEvent>,
@@ -127,6 +132,28 @@ impl NetServer {
     /// Bounded writer queue policy: drop connection when backlog exceeds this.
     pub const WRITER_QUEUE_CAP: usize = 128;
 
+    /// Hard cap on total simultaneous connections this endpoint will hold
+    /// open — without it, a connection flood grows `ConnMap` (and every
+    /// per-connection task/channel/queue) without bound (networking audit
+    /// 2026-07-11, finding 4).
+    pub const MAX_CONNECTIONS: usize = 4096;
+    /// Hard cap on simultaneous connections from a single source IP — bounds
+    /// one hostile or misconfigured client from exhausting `MAX_CONNECTIONS`
+    /// alone.
+    pub const MAX_CONNECTIONS_PER_IP: usize = 8;
+
+    /// Reader-side token-bucket rate limit (finding 4): the number of app
+    /// frames a connection may have queued as burst headroom above its
+    /// steady refill rate. Starts full so a legitimate opening burst isn't
+    /// penalized.
+    pub const MSG_BUCKET_CAPACITY: f64 = 128.0;
+    /// Steady-state refill rate of the token bucket above, in tokens/sec.
+    /// 2x the 60 Hz sim tick rate: generous headroom for a real client's
+    /// intent stream (one message per tick plus occasional casts) while
+    /// still bounding a flooding client's rate into the `ServerEvent`
+    /// channel, which the simulation drains only once per Input tick.
+    pub const MSG_REFILL_PER_SEC: f64 = 120.0;
+
     /// Close a connection from the server side (e.g. session takeover).
     /// Cleanup runs the normal path, so `Disconnected` still fires.
     pub fn disconnect(&self, conn: ConnId) {
@@ -205,12 +232,42 @@ async fn server_main(
     });
 
     let next_id = Arc::new(AtomicU64::new(1));
+    let ip_counts: IpCounts = Arc::new(Mutex::new(HashMap::new()));
+    let total_conns = Arc::new(AtomicU64::new(0));
     while let Some(incoming) = endpoint.accept().await {
+        // QUIC address validation (finding 4): force a retry round-trip
+        // before spending any handshake work on a connection whose source
+        // address hasn't been proven yet — closes the UDP amplification
+        // vector where a spoofed source gets a bigger reply than it sent.
+        if !incoming.remote_address_validated() {
+            let _ = incoming.retry();
+            continue;
+        }
+
+        // Connection caps (finding 4): reserve a slot before the handshake
+        // even starts, so a burst of near-simultaneous attempts can't slip
+        // past the cap while earlier ones are still mid-handshake.
+        let remote_ip = incoming.remote_address().ip();
+        {
+            let mut counts = ip_counts.lock().unwrap();
+            let per_ip = *counts.get(&remote_ip).unwrap_or(&0);
+            if total_conns.load(Ordering::Relaxed) as usize >= NetServer::MAX_CONNECTIONS
+                || per_ip >= NetServer::MAX_CONNECTIONS_PER_IP
+            {
+                incoming.refuse();
+                continue;
+            }
+            *counts.entry(remote_ip).or_insert(0) += 1;
+        }
+        total_conns.fetch_add(1, Ordering::Relaxed);
+
         let id = next_id.fetch_add(1, Ordering::Relaxed);
         let events = events.clone();
         let conns = conns.clone();
         let rtts = rtts.clone();
         let metrics = metrics.clone();
+        let ip_counts = ip_counts.clone();
+        let total_conns = total_conns.clone();
         tokio::spawn(async move {
             match handle_connection(
                 incoming, id, version, epoch, events.clone(), conns.clone(), rtts.clone(), metrics.clone(),
@@ -230,6 +287,16 @@ async fn server_main(
                     metrics.writer_queue_depth.fetch_sub(leftover, Ordering::Relaxed);
                 }
                 let _ = events.send(ServerEvent::Disconnected(id));
+            }
+            // Release the connection-cap reservation taken before this task
+            // was spawned, regardless of whether the handshake ever finished.
+            total_conns.fetch_sub(1, Ordering::Relaxed);
+            let mut counts = ip_counts.lock().unwrap();
+            if let Some(c) = counts.get_mut(&remote_ip) {
+                *c -= 1;
+                if *c == 0 {
+                    counts.remove(&remote_ip);
+                }
             }
         });
     }
@@ -286,6 +353,13 @@ async fn handle_connection(
         }
     });
 
+    // Reader-side token bucket (finding 4): refills continuously, drained one
+    // token per app frame. Bounds how fast this connection's frames turn
+    // into `ServerEvent`s — without it, a client sending faster than the
+    // sim's poll cadence grows the event channel without bound.
+    let mut msg_tokens = NetServer::MSG_BUCKET_CAPACITY;
+    let mut last_refill = Instant::now();
+
     // Reader loop — control frames answered here, app frames surfaced.
     let result = loop {
         match read_frame_in(&mut recv).await {
@@ -299,9 +373,23 @@ async fn handle_connection(
                         }
                     }
                     TAG_APP => {
-                        rtts.lock().unwrap().insert(id, connection.rtt().as_micros() as u64);
-                        let recv_micros = epoch.elapsed().as_micros() as u64;
-                        let _ = events.send(ServerEvent::Message { conn: id, data: payload, recv_micros });
+                        let now = Instant::now();
+                        msg_tokens = (msg_tokens
+                            + now.duration_since(last_refill).as_secs_f64() * NetServer::MSG_REFILL_PER_SEC)
+                            .min(NetServer::MSG_BUCKET_CAPACITY);
+                        last_refill = now;
+                        if msg_tokens < 1.0 {
+                            // Over budget: drop the frame instead of queuing it. This
+                            // is what keeps a flooding client from growing the
+                            // ServerEvent channel without bound; the sim never even
+                            // sees the frame existed.
+                            metrics.record_reject();
+                        } else {
+                            msg_tokens -= 1.0;
+                            rtts.lock().unwrap().insert(id, connection.rtt().as_micros() as u64);
+                            let recv_micros = epoch.elapsed().as_micros() as u64;
+                            let _ = events.send(ServerEvent::Message { conn: id, data: payload, recv_micros });
+                        }
                     }
                     _ => break Err(NetError::Handshake(format!("unknown frame tag {tag}"))),
                 }

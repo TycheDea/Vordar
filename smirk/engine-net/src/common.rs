@@ -92,7 +92,26 @@ pub(crate) fn server_crypto() -> Result<quinn::ServerConfig, NetError> {
 
     let quic = quinn::crypto::rustls::QuicServerConfig::try_from(tls)
         .map_err(|e| NetError::Tls(e.to_string()))?;
-    Ok(quinn::ServerConfig::with_crypto(Arc::new(quic)))
+    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic));
+
+    // Explicit transport limits (networking audit 2026-07-11, finding 4):
+    // quinn's defaults allow up to 100 concurrent bidi + 100 uni streams per
+    // connection, each able to buffer a stream's receive window of unread
+    // data — a client that opens extra streams the server never reads from
+    // (it only ever accepts the one bidi stream at `accept_bi()`) could hold
+    // up to ~100x that memory per connection. The protocol uses exactly one
+    // bidirectional stream and no unidirectional ones, so cap both at what
+    // is actually used.
+    let mut transport = quinn::TransportConfig::default();
+    transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(1));
+    transport.max_concurrent_uni_streams(quinn::VarInt::from_u32(0));
+    transport.max_idle_timeout(Some(
+        quinn::IdleTimeout::try_from(std::time::Duration::from_secs(30))
+            .expect("30s fits in the idle-timeout VarInt"),
+    ));
+    server_config.transport_config(Arc::new(transport));
+
+    Ok(server_config)
 }
 
 /// Client TLS config that accepts any server certificate — DEV ONLY, pairs with
