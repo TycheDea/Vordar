@@ -196,6 +196,7 @@ impl System for HudSyncSystem {
             .unwrap_or_default();
 
         let heading = engine_renderer::camera_yaw(resources);
+        let reconnecting = crate::net::reconnect_attempt(resources);
 
         let Some(hud) = resources.get_mut::<HudState>() else { return };
         hud.open = center.is_some();
@@ -205,6 +206,7 @@ impl System for HudSyncSystem {
         hud.markers = markers;
         hud.range = 45.0;
         hud.label = zone;
+        hud.reconnecting = reconnecting;
     }
 }
 

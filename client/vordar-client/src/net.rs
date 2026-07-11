@@ -23,7 +23,7 @@ use glam::{Vec2, Vec3};
 use hecs::Entity;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use vordar_game::events::MoveIntent;
 use vordar_game::motion::MovementSystem;
 use vordar_game::player::{movement_velocity, PlayerMovementSystem};
@@ -47,6 +47,35 @@ const CORRECTION_HALF_LIFE: f32 = 0.15;
 /// the server stopped acking; predicting further is pointless.
 const MAX_PENDING_INTENTS: usize = 240;
 
+/// Initial wait before the first redial after an unexpected disconnect — an
+/// ordinary blip (brief loss, a moment of server-side hiccup) clears fast.
+const RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(500);
+/// Backoff cap so a genuinely dead server doesn't spin the network thread,
+/// while still retrying at a steady cadence (networking audit 2026-07-11,
+/// finding 7: disconnect used to be a log line with no recovery at all).
+const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(8);
+/// How long a redial is given to resolve (Connected or Disconnected) before
+/// the backoff timer is allowed to fire again — must clear engine-net's own
+/// handshake timeout (`client::HANDSHAKE_TIMEOUT`, 5 s) with margin.
+const RECONNECT_ATTEMPT_GRACE: Duration = Duration::from_secs(6);
+
+/// Backoff before reconnect attempt `attempt` (1-indexed): doubles each
+/// attempt, capped at `RECONNECT_MAX_BACKOFF`.
+fn reconnect_backoff(attempt: u32) -> Duration {
+    let doublings = attempt.saturating_sub(1).min(8);
+    RECONNECT_INITIAL_BACKOFF.saturating_mul(1u32 << doublings).min(RECONNECT_MAX_BACKOFF)
+}
+
+/// Reconnect-in-progress bookkeeping: which attempt is current, and when to
+/// act next — either "redial now" (waiting out the backoff) or "give up
+/// waiting on the in-flight redial and reconsider" (`RECONNECT_ATTEMPT_GRACE`
+/// after issuing it). `Some` for as long as the connection is down; cleared
+/// the moment `ClientEvent::Connected` fires again.
+struct Reconnect {
+    attempt: u32,
+    retry_at: Instant,
+}
+
 pub struct NetClientPlugin {
     pub server_addr: SocketAddr,
     /// Predict own movement locally; off reproduces the Phase 1 server-driven
@@ -61,10 +90,23 @@ pub struct NetClientPlugin {
 
 impl Plugin for NetClientPlugin {
     fn build(&self, app: &mut App) {
-        let client = NetClient::connect_with_latency(self.server_addr, PROTOCOL_VERSION, self.simulated_rtt)
-            .unwrap_or_else(|e| panic!("failed to start network client: {e}"));
+        // A failed first connect no longer panics (networking audit
+        // 2026-07-11, finding 7): fall back to the same reconnect state
+        // machine that handles a later drop, so a transient failure (server
+        // not up yet, brief DNS/route hiccup) resolves in the background
+        // instead of crashing the client before a single frame renders.
+        let (client, reconnect) =
+            match NetClient::connect_with_latency(self.server_addr, PROTOCOL_VERSION, self.simulated_rtt) {
+                Ok(client) => (Some(client), None),
+                Err(e) => {
+                    log::error!("net: failed to start network client: {e} — retrying in the background");
+                    (None, Some(Reconnect { attempt: 1, retry_at: Instant::now() + reconnect_backoff(1) }))
+                }
+            };
         app.insert_resource(NetClientState {
             client,
+            server_addr: self.server_addr,
+            reconnect,
             user: self.user.clone(),
             own_id: None,
             entities: HashMap::new(),
@@ -127,7 +169,13 @@ struct PendingIntent {
 }
 
 pub struct NetClientState {
-    client: NetClient,
+    /// None while the connection is down (initial connect failure, or an
+    /// unexpected drop awaiting a redial) — networking audit 2026-07-11,
+    /// finding 7.
+    client: Option<NetClient>,
+    /// Address to redial after an unexpected disconnect. A zone Redirect
+    /// overwrites this with the new zone's address.
+    server_addr: SocketAddr,
     user: String,
     own_id: Option<u64>,
     /// server entity id → local entity
@@ -138,8 +186,12 @@ pub struct NetClientState {
     /// Outstanding reconciliation error, folded into the predicted position a
     /// little each Update tick by NetCorrectionSystem.
     correction: Vec3,
-    /// Kept so a zone Redirect reconnects with the same latency knob.
+    /// Kept so a zone Redirect (or a reconnect) redials with the same
+    /// latency knob.
     simulated_rtt: Duration,
+    /// Set while disconnected and a redial is scheduled/in flight; read by
+    /// the UI to show a "reconnecting" indicator (`reconnect_attempt`).
+    reconnect: Option<Reconnect>,
 }
 
 impl NetClientState {
@@ -154,6 +206,13 @@ pub(crate) fn own_entity(resources: &Resources) -> Option<Entity> {
     resources.get::<NetClientState>().and_then(|s| s.own_entity())
 }
 
+/// Current reconnect attempt number, for the UI banner. None while connected
+/// (or offline — no NetClientState at all): networking audit 2026-07-11,
+/// finding 7.
+pub(crate) fn reconnect_attempt(resources: &Resources) -> Option<u32> {
+    resources.get::<NetClientState>().and_then(|s| s.reconnect.as_ref().map(|r| r.attempt))
+}
+
 /// Interpolation between the last two snapshot positions (component on every
 /// replicated entity except a predicted own player; drives Transform).
 struct NetLerp {
@@ -166,7 +225,14 @@ pub struct NetReceiveSystem;
 
 impl System for NetReceiveSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let events = resources.get_mut::<NetClientState>().unwrap().client.poll();
+        // A due redial happens on its own clock, independent of any event
+        // arriving this tick (networking audit 2026-07-11, finding 7).
+        maybe_reconnect(resources);
+
+        let events = {
+            let state = resources.get_mut::<NetClientState>().unwrap();
+            state.client.as_mut().map(|c| c.poll()).unwrap_or_default()
+        };
 
         for event in events {
             match event {
@@ -174,11 +240,14 @@ impl System for NetReceiveSystem {
                     // Identity first: the server spawns us and sends Welcome
                     // only after Login (loads the character's saved state).
                     let state = resources.get_mut::<NetClientState>().unwrap();
+                    state.reconnect = None;
                     let name = state.user.clone();
-                    state.client.send(encode(&ClientMsg::Login { name: name.clone() }));
+                    if let Some(client) = &state.client {
+                        client.send(encode(&ClientMsg::Login { name: name.clone() }));
+                    }
                     log::info!("connected to server, logging in as '{name}'");
                 }
-                ClientEvent::Disconnected => log::warn!("disconnected from server"),
+                ClientEvent::Disconnected => handle_disconnected(world, resources),
                 ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
                     Some(ServerMsg::Welcome { player_id }) => {
                         log::info!("welcome: our player id is {player_id}");
@@ -221,21 +290,18 @@ impl System for NetReceiveSystem {
         }
 
         // Publish the synced clock for anything that schedules in server time.
-        let offset = resources.get::<NetClientState>().unwrap().client.server_offset_micros();
+        let offset = resources.get::<NetClientState>().unwrap().client.as_ref().and_then(|c| c.server_offset_micros());
         if let Some(offset) = offset {
             resources.get_mut::<Time>().unwrap().server_offset_micros = offset;
         }
     }
 }
 
-/// Tear down the old zone's replicated world and reconnect to the new one.
-/// The fresh connection's Connected event re-triggers Login; the server
-/// spawns us at the position the transfer (or login routing) persisted.
-fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, addr: SocketAddr) {
-    log::info!("redirected to zone '{zone}' at {addr}");
-
-    // Everything replicated belongs to the old zone, as do telegraph visuals
-    // (their mechanics resolve in a world we just left).
+/// Despawns every replicated entity and telegraph visual and resets the
+/// per-connection reconciliation state. Shared by a zone Redirect and an
+/// unexpected disconnect (networking audit 2026-07-11, finding 7): both leave
+/// the client needing a fresh AOI rebuild off the next Welcome.
+fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     let telegraphs: Vec<Entity> = world.query::<(Entity, &TelegraphVisual)>().iter().map(|(e, _)| e).collect();
     let replicated: Vec<Entity> = resources.get::<NetClientState>().unwrap().entities.values().copied().collect();
     {
@@ -252,14 +318,82 @@ fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, add
     state.correction = Vec3::ZERO;
     // Fresh connection, fresh validation stream (per-connection on the server).
     state.seq = 0;
-    // Dropping the old NetClient closes the QUIC connection — the server sees
-    // a normal Disconnected (which finds no PlayerConn and does nothing).
-    state.client = NetClient::connect_with_latency(addr, PROTOCOL_VERSION, state.simulated_rtt)
-        .unwrap_or_else(|e| panic!("failed to connect to zone '{zone}' at {addr}: {e}"));
     resources.get_mut::<WorldTime>().unwrap().synced = false;
+}
+
+/// Tear down the old zone's replicated world and reconnect to the new one.
+/// The fresh connection's Connected event re-triggers Login; the server
+/// spawns us at the position the transfer (or login routing) persisted.
+fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, addr: SocketAddr) {
+    log::info!("redirected to zone '{zone}' at {addr}");
+    teardown_replicated_world(world, resources);
+
+    let state = resources.get_mut::<NetClientState>().unwrap();
+    state.server_addr = addr;
+    // Any in-flight backoff belonged to the old zone's address.
+    state.reconnect = None;
+    // Dropping the old NetClient closes the QUIC connection — the server sees
+    // a normal Disconnected (which finds no PlayerConn and does nothing). A
+    // failed redial here no longer panics: it falls into the same reconnect
+    // state machine an unexpected drop uses (networking audit 2026-07-11,
+    // finding 7) instead of crashing with the character already persisted
+    // into the target zone.
+    match NetClient::connect_with_latency(addr, PROTOCOL_VERSION, state.simulated_rtt) {
+        Ok(client) => state.client = Some(client),
+        Err(e) => {
+            log::error!("net: failed to connect to zone '{zone}' at {addr}: {e} — retrying in the background");
+            state.client = None;
+            state.reconnect = Some(Reconnect { attempt: 1, retry_at: Instant::now() + reconnect_backoff(1) });
+        }
+    }
     // ZoneDressingSystem rebuilds the floor/portals for the new zone.
     if let Some(current) = resources.get_mut::<crate::presentation::CurrentZone>() {
         current.0 = zone.to_owned();
+    }
+}
+
+/// An unexpected disconnect (server killed, brief network loss, redial
+/// failure): tear down the replicated world exactly like a zone Redirect,
+/// then schedule (or advance) a backoff-retried redial of the same address.
+/// Networking audit 2026-07-11, finding 7 — this used to be a bare log line
+/// with no recovery.
+fn handle_disconnected(world: &mut World, resources: &mut Resources) {
+    teardown_replicated_world(world, resources);
+    let state = resources.get_mut::<NetClientState>().unwrap();
+    state.client = None;
+    let attempt = state.reconnect.as_ref().map_or(1, |r| r.attempt + 1);
+    let backoff = reconnect_backoff(attempt);
+    log::warn!("net: disconnected from server — reconnect attempt {attempt} in {backoff:?}");
+    state.reconnect = Some(Reconnect { attempt, retry_at: Instant::now() + backoff });
+}
+
+/// Redials `state.server_addr` once the current backoff/grace window has
+/// elapsed. Runs every Input tick regardless of which events (if any) were
+/// just drained — a due retry has nothing to do with the last message
+/// received. Networking audit 2026-07-11, finding 7.
+fn maybe_reconnect(resources: &mut Resources) {
+    let state = resources.get_mut::<NetClientState>().unwrap();
+    let Some(reconnect) = &state.reconnect else { return };
+    if Instant::now() < reconnect.retry_at {
+        return;
+    }
+    let attempt = reconnect.attempt;
+    let addr = state.server_addr;
+    let simulated_rtt = state.simulated_rtt;
+    match NetClient::connect_with_latency(addr, PROTOCOL_VERSION, simulated_rtt) {
+        Ok(client) => {
+            log::info!("net: reconnect attempt {attempt} dialing {addr}");
+            state.client = Some(client);
+            // Give this attempt a chance to resolve (Connected clears
+            // `reconnect`; Disconnected reschedules with the real backoff)
+            // before the timer is allowed to fire again.
+            state.reconnect = Some(Reconnect { attempt, retry_at: Instant::now() + RECONNECT_ATTEMPT_GRACE });
+        }
+        Err(e) => {
+            let next = attempt + 1;
+            log::warn!("net: reconnect attempt {attempt} failed to start: {e}");
+            state.reconnect = Some(Reconnect { attempt: next, retry_at: Instant::now() + reconnect_backoff(next) });
+        }
     }
 }
 
@@ -530,7 +664,7 @@ impl System for DayNightSystem {
                 return;
             }
             let state = resources.get::<NetClientState>().unwrap();
-            let Some(server_now) = state.client.server_now_micros() else { return };
+            let Some(server_now) = state.client.as_ref().and_then(|c| c.server_now_micros()) else { return };
             (server_now as i64 + wt.offset_micros).max(0) as u64
         };
         let world_seconds = world_now as f64 * 1e-6;
@@ -595,7 +729,7 @@ pub struct TelegraphFillSystem;
 
 impl System for TelegraphFillSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let Some(now) = resources.get::<NetClientState>().unwrap().client.server_now_micros() else {
+        let Some(now) = resources.get::<NetClientState>().unwrap().client.as_ref().and_then(|c| c.server_now_micros()) else {
             return;
         };
         let mut finished: Vec<Entity> = Vec::new();
@@ -762,14 +896,18 @@ impl System for AbilityCastSystem {
             }
             let (own, predict) = {
                 let state = resources.get_mut::<NetClientState>().unwrap();
-                let Some(t_server_micros) = state.client.server_now_micros() else { return };
+                let Some(t_server_micros) = state.client.as_ref().and_then(|c| c.server_now_micros()) else {
+                    return;
+                };
                 state.seq += 1;
-                state.client.send(encode(&ClientMsg::CastIntent {
-                    seq: state.seq,
-                    t_server_micros,
-                    skill: id.clone(),
-                    target,
-                }));
+                if let Some(client) = &state.client {
+                    client.send(encode(&ClientMsg::CastIntent {
+                        seq: state.seq,
+                        t_server_micros,
+                        skill: id.clone(),
+                        target,
+                    }));
+                }
                 (state.own_entity(), state.predict)
             };
             resources.get_mut::<crate::CastState>().unwrap().fire(slot);
@@ -808,9 +946,13 @@ impl System for NetSendInputSystem {
         let dir = read_move_dir(resources);
         let predicted_entity = {
             let state = resources.get_mut::<NetClientState>().unwrap();
-            let Some(t_server_micros) = state.client.server_now_micros() else { return };
+            let Some(t_server_micros) = state.client.as_ref().and_then(|c| c.server_now_micros()) else {
+                return;
+            };
             state.seq += 1;
-            state.client.send(encode(&ClientMsg::MoveIntent { seq: state.seq, t_server_micros, dir }));
+            if let Some(client) = &state.client {
+                client.send(encode(&ClientMsg::MoveIntent { seq: state.seq, t_server_micros, dir }));
+            }
 
             let entity = if state.predict { state.own_entity() } else { None };
             if entity.is_some() {
@@ -869,9 +1011,12 @@ pub mod bench {
     /// attempt fails in the background while the benched paths only read
     /// and write the state fields.
     pub fn state_for_bench(own_id: Option<u64>, predict: bool) -> NetClientState {
+        let server_addr = "127.0.0.1:9".parse().unwrap();
         NetClientState {
-            client: NetClient::connect("127.0.0.1:9".parse().unwrap(), PROTOCOL_VERSION)
-                .expect("bench NetClient"),
+            client: Some(
+                NetClient::connect(server_addr, PROTOCOL_VERSION).expect("bench NetClient"),
+            ),
+            server_addr,
             user: "bench".into(),
             own_id,
             entities: HashMap::new(),
@@ -880,6 +1025,7 @@ pub mod bench {
             pending: VecDeque::new(),
             correction: Vec3::ZERO,
             simulated_rtt: Duration::ZERO,
+            reconnect: None,
         }
     }
 
@@ -964,5 +1110,121 @@ mod tests {
         // Every nudge stays below one tick of run-speed movement — corrections
         // must read as motion, not teleports.
         assert!(largest_step < 6.0 * DT, "step too large: {largest_step}");
+    }
+
+    /// Networking audit 2026-07-11, finding 7: "disconnect is a log line, no
+    /// reconnect, no teardown" — this drives a real server, a real
+    /// `NetClient` connection, and the real `NetReceiveSystem` (no
+    /// reimplemented logic). A second login under the same character name
+    /// makes the server's existing session-takeover kick the first
+    /// connection (mirrors `phase6_login_takeover` in vordar-server's e2e
+    /// suite) — a genuine, unannounced disconnect. engine-net's listening
+    /// socket is never released once bound (findings 13/14/18 — no shutdown
+    /// story), so an in-process bind/drop/rebind on the same port isn't
+    /// possible; kicking the connection is the closest headless equivalent
+    /// of "the server process restarted" that exercises the same
+    /// Disconnected → teardown → backoff-redial → relogin path. The victim
+    /// must notice, tear down, and relogin entirely on its own.
+    #[test]
+    fn kicked_connection_reconnects_and_relogs_in() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::env::set_current_dir(root).unwrap();
+
+        let addr: SocketAddr = "127.0.0.1:25400".parse().unwrap();
+        std::thread::spawn(move || {
+            vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1800));
+        });
+        std::thread::sleep(Duration::from_millis(300));
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(DespawnQueue::new());
+        resources.insert(Time::new());
+        resources.insert(WorldTime { offset_micros: 0, synced: false });
+        resources.insert(NetClientState {
+            client: Some(NetClient::connect(addr, PROTOCOL_VERSION).expect("victim connect")),
+            server_addr: addr,
+            user: "reconnect-victim".into(),
+            own_id: None,
+            entities: HashMap::new(),
+            seq: 0,
+            predict: false,
+            pending: VecDeque::new(),
+            correction: Vec3::ZERO,
+            simulated_rtt: Duration::ZERO,
+            reconnect: None,
+        });
+
+        let mut recv = NetReceiveSystem;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while resources.get::<NetClientState>().unwrap().own_id.is_none() {
+            assert!(Instant::now() < deadline, "victim never received its first Welcome");
+            recv.run(&mut world, &mut resources, DT);
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        let first_id = resources.get::<NetClientState>().unwrap().own_id.unwrap();
+
+        // Kick it: a second login under the same name takes over the
+        // session server-side, closing the victim's connection out from
+        // under it. Wait for the kicker's own Welcome before dropping it —
+        // `Connection::close` tears the connection down immediately,
+        // without flushing pending stream writes, so dropping right after
+        // `send` can race the Login frame right off the wire.
+        let mut kicker = NetClient::connect(addr, PROTOCOL_VERSION).expect("kicker connect");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut got_welcome = false;
+            for ev in kicker.poll() {
+                match ev {
+                    ClientEvent::Connected => {
+                        kicker.send(encode(&ClientMsg::Login { name: "reconnect-victim".into() }));
+                    }
+                    ClientEvent::Message(data) => {
+                        if let Some(ServerMsg::Welcome { .. }) = decode::<ServerMsg>(&data) {
+                            got_welcome = true;
+                        }
+                    }
+                    ClientEvent::Disconnected => {}
+                }
+            }
+            if got_welcome {
+                break;
+            }
+            assert!(Instant::now() < deadline, "kicker never got its own Welcome");
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        drop(kicker);
+
+        // The victim must notice on its own — no test code touches its
+        // NetClientState between here and full reconnection.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            recv.run(&mut world, &mut resources, DT);
+            if reconnect_attempt(&resources).is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the kick was never detected as a disconnect");
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        // Torn down immediately, not left dangling — the frozen-world half
+        // of this finding's gap.
+        assert!(
+            resources.get::<NetClientState>().unwrap().own_id.is_none(),
+            "an unexpected disconnect must clear own_id right away"
+        );
+
+        // Entirely automatic from here: backoff, redial, Connected, Login, Welcome.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            recv.run(&mut world, &mut resources, DT);
+            let state = resources.get::<NetClientState>().unwrap();
+            if state.own_id.is_some() && state.reconnect.is_none() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the client never reconnected on its own");
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        let second_id = resources.get::<NetClientState>().unwrap().own_id.unwrap();
+        assert_ne!(first_id, second_id, "reconnect must relogin into a fresh body");
     }
 }

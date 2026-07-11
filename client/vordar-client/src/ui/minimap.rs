@@ -27,6 +27,10 @@ pub struct HudState {
     pub range: f32,
     /// Caption under the disc (e.g. zone name).
     pub label: String,
+    /// Set while the network connection is down and a redial is being
+    /// retried in the background (networking audit 2026-07-11, finding 7).
+    /// None when connected, or offline (no NetClientState at all).
+    pub reconnecting: Option<u32>,
 }
 
 const DISC_RADIUS: f32 = 90.0;
@@ -43,6 +47,21 @@ pub(crate) fn to_color32(c: [f32; 3]) -> egui::Color32 {
 /// North-up: world −Z is the top of the disc, world +X is right.
 pub fn draw(ctx: &egui::Context, resources: &engine_core::traits::Resources) {
     use egui::{Align2, Area, Color32, Id, Pos2, Stroke, Vec2};
+
+    // Independent of `open`: the reconnect banner must show even when there
+    // is no local player yet (e.g. still relogging after a redial).
+    if let Some(attempt) = resources.get::<HudState>().and_then(|h| h.reconnecting) {
+        Area::new(Id::new("hud_reconnecting"))
+            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 12.0))
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .show(ctx, |ui| {
+                ui.colored_label(
+                    Color32::from_rgb(235, 90, 90),
+                    format!("Reconnecting to server… (attempt {attempt})"),
+                );
+            });
+    }
 
     let Some(hud) = resources.get::<HudState>().filter(|h| h.open) else { return };
     let Some(center) = hud.center else { return };

@@ -39,3 +39,6 @@ egui            = { workspace = true }
 # Offscreen render tests (tests/ground_render.rs) pass wgpu types to the
 # engine's headless harness.
 wgpu = "29"
+# net.rs's reconnect test (networking audit 2026-07-11, finding 7) drives a
+# real headless server the same way vordar-server's own e2e suite does.
+vordar-server = { path = "../../server/vordar-server" }

@@ -4238,6 +4238,7 @@ dependencies = [
  "log",
  "vordar-game",
  "vordar-protocol",
+ "vordar-server",
  "wgpu",
  "winit",
 ]
