@@ -29,6 +29,7 @@ mod server;
 
 pub use client::{ClientEvent, NetClient};
 pub use server::{ConnId, NetServer, ServerEvent};
+pub use common::{MAX_FRAME_IN, MAX_FRAME_OUT};
 
 /// Errors surfaced to the simulation thread. Network-thread internals log and
 /// translate into Disconnected events instead of bubbling errors per call.

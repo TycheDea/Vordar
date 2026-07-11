@@ -6,8 +6,11 @@ use std::sync::Arc;
 pub(crate) const TAG_CTRL: u8 = 0;
 pub(crate) const TAG_APP: u8 = 1;
 
-/// Hard cap on a single frame — anything larger is a protocol violation.
-pub(crate) const MAX_FRAME: usize = 1024; // client→server: ~1 KiB is ample for all intents
+/// Hard cap on inbound frames (client→server). ~1 KiB is ample.
+pub const MAX_FRAME_IN: usize = 1024;
+/// Hard cap on outbound / client-read frames (server→client).
+/// Sized for worst-case snapshot (64 entities) with headroom.
+pub const MAX_FRAME_OUT: usize = 64 * 1024;
 
 /// ALPN identifier — QUIC requires one; both sides must agree.
 pub(crate) const ALPN: &[u8] = b"vordar/1";
@@ -28,17 +31,27 @@ pub(crate) async fn write_frame(
     payload: &[u8],
 ) -> Result<(), quinn::WriteError> {
     let len = (payload.len() + 1) as u32;
+    debug_assert!((len as usize) <= MAX_FRAME_OUT, "outbound frame exceeds MAX_FRAME_OUT");
     send.write_all(&len.to_le_bytes()).await?;
     send.write_all(&[tag]).await?;
     send.write_all(payload).await?;
     Ok(())
 }
 
-pub(crate) async fn read_frame(recv: &mut quinn::RecvStream) -> Result<(u8, Vec<u8>), NetError> {
+/// Server reader (client→server) uses the small inbound cap.
+pub(crate) async fn read_frame_in(recv: &mut quinn::RecvStream) -> Result<(u8, Vec<u8>), NetError> {
+    read_frame_cap(recv, MAX_FRAME_IN).await
+}
+/// Client reader (server→client) uses the large outbound cap.
+pub(crate) async fn read_frame_out(recv: &mut quinn::RecvStream) -> Result<(u8, Vec<u8>), NetError> {
+    read_frame_cap(recv, MAX_FRAME_OUT).await
+}
+
+async fn read_frame_cap(recv: &mut quinn::RecvStream, max: usize) -> Result<(u8, Vec<u8>), NetError> {
     let mut len_buf = [0u8; 4];
     recv.read_exact(&mut len_buf).await.map_err(|_| NetError::Closed)?;
     let len = u32::from_le_bytes(len_buf) as usize;
-    if len == 0 || len > MAX_FRAME {
+    if len == 0 || len > max {
         return Err(NetError::Handshake(format!("bad frame length {len}")));
     }
     let mut tag = [0u8; 1];

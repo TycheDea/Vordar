@@ -2,7 +2,7 @@
 // owns the clock-sync state machine.
 
 use crate::common::{
-    client_crypto, decode_ctrl, encode_ctrl, read_frame, write_frame, Ctrl, TAG_APP, TAG_CTRL,
+    client_crypto, decode_ctrl, encode_ctrl, read_frame_out, write_frame, Ctrl, TAG_APP, TAG_CTRL,
 };
 use crate::NetError;
 use std::net::SocketAddr;
@@ -177,7 +177,7 @@ async fn client_main(
     write_frame(&mut send, TAG_CTRL, &encode_ctrl(&Ctrl::Hello { version }))
         .await
         .map_err(|e| NetError::Handshake(e.to_string()))?;
-    let ack = tokio::time::timeout(HANDSHAKE_TIMEOUT, read_frame(&mut recv))
+    let ack = tokio::time::timeout(HANDSHAKE_TIMEOUT, read_frame_out(&mut recv))
         .await
         .map_err(|_| NetError::Handshake("timed out waiting for HelloAck".into()))??;
     match (ack.0, decode_ctrl(&ack.1)) {
@@ -230,7 +230,7 @@ async fn client_main(
         unbounded_channel::<(tokio::time::Instant, Result<(u8, Vec<u8>), NetError>)>();
     let reader = tokio::spawn(async move {
         loop {
-            let frame = read_frame(&mut recv).await;
+            let frame = read_frame_out(&mut recv).await;
             let failed = frame.is_err();
             if in_tx.send((tokio::time::Instant::now() + one_way, frame)).is_err() || failed {
                 break;

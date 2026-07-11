@@ -2,7 +2,7 @@
 // simulation polls events and pushes sends through unbounded channels.
 
 use crate::common::{
-    decode_ctrl, encode_ctrl, read_frame, server_crypto, write_frame, Ctrl, TAG_APP, TAG_CTRL,
+    decode_ctrl, encode_ctrl, read_frame_in, server_crypto, write_frame, Ctrl, TAG_APP, TAG_CTRL,
 };
 use crate::NetError;
 use std::collections::HashMap;
@@ -200,7 +200,7 @@ async fn handle_connection(
         .map_err(|e| NetError::Handshake(e.to_string()))?;
 
     // Handshake: first frame must be Hello with a matching version.
-    let (tag, payload) = read_frame(&mut recv).await?;
+    let (tag, payload) = read_frame_in(&mut recv).await?;
     match (tag, decode_ctrl(&payload)) {
         (TAG_CTRL, Some(Ctrl::Hello { version: v })) if v == version => {}
         (TAG_CTRL, Some(Ctrl::Hello { version: v })) => {
@@ -229,7 +229,7 @@ async fn handle_connection(
 
     // Reader loop — control frames answered here, app frames surfaced.
     let result = loop {
-        match read_frame(&mut recv).await {
+        match read_frame_in(&mut recv).await {
             Ok((TAG_CTRL, payload)) => {
                 if let Some(Ctrl::Ping { t_client }) = decode_ctrl(&payload) {
                     let pong = Ctrl::Pong { t_client, t_server: epoch.elapsed().as_micros() as u64 };
