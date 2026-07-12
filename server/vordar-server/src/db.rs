@@ -81,6 +81,17 @@ impl DbWorker {
     /// Opening happens on the calling thread so startup failure is synchronous.
     pub fn spawn(path: &str) -> rusqlite::Result<DbWorker> {
         let db = Connection::open(path)?;
+        // WAL lets a save's writer transaction run without blocking a
+        // concurrent load's reader; NORMAL syncs at WAL checkpoints instead
+        // of every commit; busy_timeout absorbs a checkpoint briefly holding
+        // the file instead of returning SQLITE_BUSY. `:memory:` databases
+        // (tests, throwaway runs) have no WAL file, so SQLite silently keeps
+        // the in-memory journal — harmless.
+        db.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA busy_timeout = 5000;",
+        )?;
         db.execute_batch(SCHEMA)?;
         let (req_tx, req_rx) = mpsc::channel::<DbRequest>();
         let handle = std::thread::Builder::new()
@@ -136,26 +147,54 @@ impl Drop for DbWorker {
     }
 }
 
-fn worker(db: Connection, rx: mpsc::Receiver<DbRequest>) {
-    for req in rx {
-        match req {
-            DbRequest::LoadOrCreate { conn, name, defaults, reply } => {
-                match load_or_create(&db, &name, defaults) {
-                    Ok(record) => {
-                        let _ = reply.send(DbLoaded { conn, name, record });
+fn worker(mut db: Connection, rx: mpsc::Receiver<DbRequest>) {
+    loop {
+        // Block for the first request of a wave, then drain whatever else is
+        // already queued without blocking — a burst (staggered autosaves,
+        // several logins) becomes one transaction instead of one autocommit
+        // statement — and, in the old rollback-journal mode, one fsync — per
+        // request.
+        let Ok(first) = rx.recv() else { return };
+        let mut batch = vec![first];
+        batch.extend(rx.try_iter());
+
+        let tx = match db.transaction() {
+            Ok(tx) => tx,
+            Err(e) => {
+                log::error!("db: failed to start transaction: {e}");
+                continue;
+            }
+        };
+
+        // Replies are collected and sent only after the batch commits, so a
+        // load result is never handed out before it is durable.
+        let mut loaded: Vec<(mpsc::Sender<DbLoaded>, DbLoaded)> = Vec::new();
+        for req in batch {
+            match req {
+                DbRequest::LoadOrCreate { conn, name, defaults, reply } => {
+                    match load_or_create(&tx, &name, defaults) {
+                        Ok(record) => loaded.push((reply, DbLoaded { conn, name, record })),
+                        Err(e) => log::error!("db: load '{name}' failed: {e}"),
                     }
-                    Err(e) => log::error!("db: load '{name}' failed: {e}"),
+                }
+                DbRequest::Save { name, zone, pos, health } => {
+                    let result = tx.execute(
+                        "UPDATE characters SET zone = ?1, pos_x = ?2, pos_y = ?3, pos_z = ?4, health = ?5 WHERE name = ?6",
+                        rusqlite::params![zone, pos.x as f64, pos.y as f64, pos.z as f64, health, name],
+                    );
+                    if let Err(e) = result {
+                        log::error!("db: save '{name}' failed: {e}");
+                    }
                 }
             }
-            DbRequest::Save { name, zone, pos, health } => {
-                let result = db.execute(
-                    "UPDATE characters SET zone = ?1, pos_x = ?2, pos_y = ?3, pos_z = ?4, health = ?5 WHERE name = ?6",
-                    rusqlite::params![zone, pos.x as f64, pos.y as f64, pos.z as f64, health, name],
-                );
-                if let Err(e) = result {
-                    log::error!("db: save '{name}' failed: {e}");
-                }
-            }
+        }
+
+        if let Err(e) = tx.commit() {
+            log::error!("db: transaction commit failed: {e}");
+            continue;
+        }
+        for (reply, msg) in loaded {
+            let _ = reply.send(msg);
         }
     }
 }
@@ -280,5 +319,67 @@ mod tests {
         assert_eq!(loaded.record.zone, "east");
         assert_eq!(loaded.record.pos, moved);
         assert_eq!(loaded.record.health, 80);
+    }
+
+    /// Regression test for finding 13 of the networking audit: `db.rs` had
+    /// no `journal_mode` PRAGMA at all, so SQLite defaulted to a rollback
+    /// journal (fsync per commit, writers block readers). `journal_mode` is
+    /// recorded in the database file header, not per-connection, so a fresh,
+    /// independent connection opened after the worker started must also see
+    /// "wal".
+    #[test]
+    fn spawn_enables_wal_journal_mode() {
+        let path = temp_db("wal");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let check = Connection::open(&path).unwrap();
+        let mode: String = check.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+        drop(worker);
+    }
+
+    /// Regression test for finding 13's batched-transaction worker loop: a
+    /// wave of heterogeneous requests (three saves for existing characters
+    /// plus a load-or-create for a new one) enqueued back-to-back, before
+    /// the worker thread can drain them one at a time, must all land — not
+    /// just the first request the old per-request-autocommit loop happened
+    /// to see first.
+    #[test]
+    fn a_burst_of_saves_and_loads_all_land_from_one_wave() {
+        let path = temp_db("batch");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        for n in ["ann", "bob", "cleo"] {
+            // Seeded one at a time: `poll`/`wait_loaded` return whatever
+            // replies have arrived as a batch, and `wait_loaded` only keeps
+            // the last — waiting after each send keeps this seeding loop
+            // (not the fix under test) from losing replies.
+            handle.load_or_create(0, n.into(), defaults());
+            wait_loaded(&handle);
+        }
+
+        // Fire the burst without waiting between sends.
+        handle.save("ann".into(), "east".into(), Vec3::new(1.0, 0.0, 0.0), 10);
+        handle.save("bob".into(), "east".into(), Vec3::new(2.0, 0.0, 0.0), 20);
+        handle.save("cleo".into(), "east".into(), Vec3::new(3.0, 0.0, 0.0), 30);
+        handle.load_or_create(9, "dana".into(), defaults());
+        let dana = wait_loaded(&handle);
+        assert_eq!(dana.name, "dana");
+        assert_eq!(dana.record, defaults());
+
+        drop(handle);
+        drop(worker);
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        for (name, pos, health) in [
+            ("ann", Vec3::new(1.0, 0.0, 0.0), 10),
+            ("bob", Vec3::new(2.0, 0.0, 0.0), 20),
+            ("cleo", Vec3::new(3.0, 0.0, 0.0), 30),
+        ] {
+            handle.load_or_create(1, name.into(), defaults());
+            let loaded = wait_loaded(&handle);
+            assert_eq!(loaded.record.zone, "east", "{name} zone not saved");
+            assert_eq!(loaded.record.pos, pos, "{name} pos not saved");
+            assert_eq!(loaded.record.health, health, "{name} health not saved");
+        }
     }
 }

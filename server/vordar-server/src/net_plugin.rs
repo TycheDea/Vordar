@@ -1044,21 +1044,34 @@ impl System for DeathBroadcastSystem {
     }
 }
 
-/// Periodic character persistence: every AUTOSAVE_TICKS PostUpdate runs
-/// (~30 s), hand each connected player's position + health to the DB worker.
-/// Fire-and-forget — disconnect-save covers the gap on clean exits.
+/// Whether `conn`'s autosave falls due on this PostUpdate `tick` — spreads a
+/// crowd's saves across the whole AUTOSAVE_TICKS window (same trick as
+/// SnapshotBroadcastSystem's STAGGER, `conn % STAGGER == tick % STAGGER`
+/// above) instead of every connection landing on the exact same tick and
+/// bursting the DB worker's FIFO request channel, queuing any relogin load
+/// behind the whole wave (networking audit 2026-07-11, finding 13).
+fn autosave_due(conn: ConnId, tick: u64) -> bool {
+    conn % AUTOSAVE_TICKS == tick % AUTOSAVE_TICKS
+}
+
+/// Periodic character persistence: over each AUTOSAVE_TICKS window (~30 s),
+/// hand each connected player's position + health to the DB worker — one
+/// save per connection per window, staggered by `autosave_due` so a crowd's
+/// saves don't all land on the same tick. Fire-and-forget — disconnect-save
+/// covers the gap on clean exits.
 pub struct AutosaveSystem {
     ticks: u64,
 }
 
 impl System for AutosaveSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        let tick = self.ticks;
         self.ticks += 1;
-        if self.ticks % AUTOSAVE_TICKS != 0 {
-            return;
-        }
         let state = resources.get_mut::<NetServerState>().unwrap();
-        for pc in state.conns.values() {
+        for (&conn, pc) in &state.conns {
+            if !autosave_due(conn, tick) {
+                continue;
+            }
             if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
                 state.db.save(pc.name.clone(), state.zone.name.clone(), tr.position, hp.current);
             }
@@ -1210,5 +1223,35 @@ mod tests {
         // the only thing wrong with it is seq == 0.
         let result = validate_intent(&pc, 0, 1_000, 1_000, 0);
         assert_eq!(result, Err("stale seq"), "seq=0 must never pass validation");
+    }
+
+    /// Regression test for the autosave burst (networking audit
+    /// 2026-07-11, finding 13). Before this fix, `AutosaveSystem` gated on
+    /// the global tick alone (`self.ticks % AUTOSAVE_TICKS != 0`), so every
+    /// connected player was handed to the DB worker on the exact same tick —
+    /// a crowd's worth of saves bursting the FIFO request channel and
+    /// queuing any relogin load behind the whole wave. `autosave_due` must
+    /// give each connection exactly one due tick per window, but spread a
+    /// crowd's due ticks across more than one tick of the window.
+    #[test]
+    fn autosave_spreads_a_crowd_across_the_window_instead_of_bursting() {
+        let conns: Vec<ConnId> = (1..=50).collect();
+        let mut due_ticks: HashSet<u64> = HashSet::new();
+        let mut due_count: HashMap<ConnId, u32> = HashMap::new();
+        for tick in 0..AUTOSAVE_TICKS {
+            for &conn in &conns {
+                if autosave_due(conn, tick) {
+                    due_ticks.insert(tick);
+                    *due_count.entry(conn).or_insert(0) += 1;
+                }
+            }
+        }
+        // Every connection autosaves exactly once per window.
+        for &conn in &conns {
+            assert_eq!(due_count.get(&conn).copied().unwrap_or(0), 1, "conn {conn} did not save exactly once");
+        }
+        // The 50-strong crowd's saves land on more than one tick — not a
+        // single-tick burst.
+        assert!(due_ticks.len() > 1, "all autosaves landed on the same tick: {due_ticks:?}");
     }
 }
