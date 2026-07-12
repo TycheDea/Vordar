@@ -28,6 +28,12 @@ flowchart TB
       R4 -->|large| R7
     end
 
+    subgraph CDEATH["on EntityDied / re-Welcome"]
+      direction TB
+      D1["EntityDied → corpse + burst<br/>(any tracked entity, not just our own)"]
+      D2["re-Welcome → death + respawn:<br/>clear pending intents and correction,<br/>rebind prediction to the new body"]
+    end
+
     subgraph CVIS["presentation (pure functions of the synced clock)"]
       direction TB
       V1["day / night and world-event tint"]
@@ -38,18 +44,45 @@ flowchart TB
 
   subgraph SERVER["Server — single source of truth (per zone)"]
     direction TB
+
+    subgraph SLOGIN["login (per new connection)"]
+      direction TB
+      SL["identify connection by name<br/>(session takeover: same name already<br/>connected → save + disconnect the old conn)"]
+      SD[("load character record from DB<br/>(async, off the tick loop)")]
+      SG{"record's zone ==<br/>this zone?"}
+      SX["send Redirect to the owning zone<br/>(login routing)"]
+      SW["spawn + Welcome<br/>(saved position/health, or new-character defaults)"]
+      SL --> SD --> SG
+      SG -->|no| SX
+      SG -->|yes| SW
+    end
+
     SV["validate intents<br/>(sequence, timing, speed caps)"]
     SM["run shared simulation<br/>one intent per player per tick"]
     SR["resolve mechanics<br/>(rewind hit test at intent time)"]
     SB["broadcast area-of-interest snapshots"]
+    SW --> SV
     SV --> SM --> SR --> SB
+
+    SPERSIST[("autosave, staggered across the save<br/>window · save-then-despawn on disconnect")]
+    SW -.-> SPERSIST
+
+    SDEATH["health depleted this tick:<br/>broadcast EntityDied; if it was a<br/>connection's own player, respawn at<br/>spawn point and re-Welcome"]
+    SM -.-> SDEATH
+    SR -.-> SDEATH
+
+    SPORTAL["zone-portal handoff (ZoneTransferSystem):<br/>save into target zone → despawn → Redirect"]
+    SM -.-> SPORTAL
   end
 
   SHARED(["shared movement rule<br/>same math on client and server"])
   CP -.-> SHARED
   SM -.-> SHARED
 
-  CS ==>|"login · move · cast intents"| SV
+  CS ==>|"login"| SL
+  CS ==>|"move · cast intents"| SV
   SB ==>|"snapshots · welcome · hit results"| CRECV
   SB ==>|"world clock (synced time)"| CVIS
-  SR ==>|"redirect at zone portal"| CLIENT
+  SDEATH ==>|"EntityDied · re-Welcome (respawn)"| CDEATH
+  SX ==>|"redirect: wrong zone at login"| CLIENT
+  SPORTAL ==>|"redirect: zone portal"| CLIENT
