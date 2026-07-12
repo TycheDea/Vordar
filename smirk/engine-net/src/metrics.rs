@@ -12,6 +12,13 @@ pub struct NetMetrics {
     pub bytes_out: AtomicU64,
     pub rejects: AtomicU64,
     pub writer_queue_depth: AtomicU64,
+    /// Cumulative microseconds the network thread's busy-time canary (see
+    /// `server::server_main`) woke up late by — on the single-threaded
+    /// runtime, lateness is time the thread spent running other tasks
+    /// (handshakes, frame codec, accept loop) instead of idling, so this is
+    /// a proxy for how saturated the network thread is (networking audit
+    /// 2026-07-11, finding 14 step 1).
+    pub busy_micros: AtomicU64,
 }
 
 impl NetMetrics {

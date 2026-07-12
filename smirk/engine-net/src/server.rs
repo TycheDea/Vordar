@@ -37,7 +37,12 @@ enum Outgoing {
 type ConnMap = Arc<
     Mutex<HashMap<ConnId, (UnboundedSender<(u8, Arc<Vec<u8>>)>, quinn::Connection, Arc<AtomicU64>)>>,
 >;
-type RttMap = Arc<Mutex<HashMap<ConnId, u64>>>;
+/// Per-connection smoothed RTT, as an atomic handle owned directly by that
+/// connection's reader task — writes never take the map lock (networking
+/// audit 2026-07-11, finding 14 step 2). The map itself is only touched at
+/// connect (insert) and disconnect (remove), so the sim thread's reads
+/// essentially never contend with the network thread.
+type RttMap = Arc<Mutex<HashMap<ConnId, Arc<AtomicU64>>>>;
 /// Live connection count per source IP — reserved the instant a connection
 /// is accepted (before its handshake even completes) and released when it
 /// ends, so `NetServer::MAX_CONNECTIONS_PER_IP` holds even against a burst of
@@ -167,7 +172,7 @@ impl NetServer {
 
     /// Smoothed path RTT to a client (from QUIC), if connected.
     pub fn rtt_micros(&self, conn: ConnId) -> Option<u64> {
-        self.rtts.lock().unwrap().get(&conn).copied()
+        self.rtts.lock().unwrap().get(&conn).map(|a| a.load(Ordering::Relaxed))
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -230,6 +235,25 @@ async fn server_main(
             }
         }
     });
+
+    // Busy-time instrumentation (networking audit 2026-07-11, finding 14
+    // step 1): a canary task wakes on a fixed cadence. On this current-
+    // thread runtime nothing else can run while this task is asleep, so any
+    // lateness on wakeup is exactly the time the thread spent running other
+    // tasks (handshakes, frame codec, the accept loop) — accumulated into
+    // `NetMetrics::busy_micros` as a busy-time proxy.
+    {
+        let metrics = metrics.clone();
+        tokio::spawn(async move {
+            const TICK: Duration = Duration::from_millis(20);
+            loop {
+                let before = Instant::now();
+                tokio::time::sleep(TICK).await;
+                let late = before.elapsed().saturating_sub(TICK);
+                metrics.busy_micros.fetch_add(late.as_micros() as u64, Ordering::Relaxed);
+            }
+        });
+    }
 
     let next_id = Arc::new(AtomicU64::new(1));
     let ip_counts: IpCounts = Arc::new(Mutex::new(HashMap::new()));
@@ -350,6 +374,10 @@ async fn handle_connection(
     let (write_tx, mut write_rx) = unbounded_channel::<(u8, Arc<Vec<u8>>)>();
     let depth = Arc::new(AtomicU64::new(0));
     conns.lock().unwrap().insert(id, (write_tx.clone(), connection.clone(), depth.clone()));
+    // Own RTT atomic, registered once at connect: the reader loop below
+    // writes through this handle directly, with no map lock per frame.
+    let rtt = Arc::new(AtomicU64::new(0));
+    rtts.lock().unwrap().insert(id, rtt.clone());
     let _ = events.send(ServerEvent::Connected(id));
     log::info!("net: conn {id} from {}", connection.remote_address());
 
@@ -400,7 +428,7 @@ async fn handle_connection(
                             metrics.record_reject();
                         } else {
                             msg_tokens -= 1.0;
-                            rtts.lock().unwrap().insert(id, connection.rtt().as_micros() as u64);
+                            rtt.store(connection.rtt().as_micros() as u64, Ordering::Relaxed);
                             let recv_micros = epoch.elapsed().as_micros() as u64;
                             let _ = events.send(ServerEvent::Message { conn: id, data: payload, recv_micros });
                         }

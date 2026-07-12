@@ -13,9 +13,10 @@ use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::Resources;
 use engine_core::World;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use vordar_server::net_plugin::NetServerState;
 
 /// Bot count — override with VORDAR_SOAK_BOTS (default 200) for scaling runs.
 fn soak_bots() -> usize {
@@ -46,6 +47,23 @@ impl System for PhaseMeter {
             self.intervals.lock().unwrap().push((now - prev).as_secs_f64());
         }
         self.last = Some(now);
+    }
+}
+
+/// Mirrors the network thread's cumulative busy-time counter (see
+/// `engine_net::NetMetrics::busy_micros`) into a plain atomic every tick —
+/// systems can't return values, so this smuggles the live count out to the
+/// harness, which samples it directly around the measurement window
+/// (networking audit 2026-07-11, finding 14 step 1: network-thread busy-time
+/// instrumentation).
+struct BusyMirror {
+    dest: Arc<AtomicU64>,
+}
+
+impl System for BusyMirror {
+    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
+        let state = resources.get::<NetServerState>().expect("NetServerState not installed");
+        self.dest.store(state.metrics().busy_micros.load(Ordering::Relaxed), Ordering::Relaxed);
     }
 }
 
@@ -112,10 +130,12 @@ fn phase7_soak_200_bots_hold_tick_budget() {
     let recording = Arc::new(AtomicBool::new(false));
     let input_intervals: Arc<Mutex<Vec<f64>>> = Arc::default();
     let post_intervals: Arc<Mutex<Vec<f64>>> = Arc::default();
+    let busy_micros: Arc<AtomicU64> = Arc::default();
     {
         let recording = recording.clone();
         let input_intervals = input_intervals.clone();
         let post_intervals = post_intervals.clone();
+        let busy_micros = busy_micros.clone();
         std::thread::spawn(move || {
             let mut app = vordar_server::build_server_app(addr, ":memory:");
             app.add_system(
@@ -128,6 +148,7 @@ fn phase7_soak_200_bots_hold_tick_budget() {
                 Phase::PostUpdate,
                 SystemOrder::Last,
             );
+            app.add_system(BusyMirror { dest: busy_micros }, Phase::Input, SystemOrder::Default);
             // ≥90 s of sim at 60 Hz — covers ramp-up + window + walk + slack;
             // scaled with the bot count so bigger runs get a longer ramp.
             app.run_headless(60.0, Some(5400.max(total_bots as u64 * 27)));
@@ -190,6 +211,7 @@ fn phase7_soak_200_bots_hold_tick_budget() {
         let _ = i;
     }
     recording.store(true, Ordering::Relaxed);
+    let busy_before = busy_micros.load(Ordering::Relaxed);
     let mut wanders: Vec<Wander> = (0..SAMPLED).map(|i| Wander::new(1000 + i as u64)).collect();
     let window_end = Instant::now() + WINDOW;
     while Instant::now() < window_end {
@@ -201,6 +223,7 @@ fn phase7_soak_200_bots_hold_tick_budget() {
         std::thread::sleep(Duration::from_millis(16));
     }
     recording.store(false, Ordering::Relaxed);
+    let busy_after = busy_micros.load(Ordering::Relaxed);
 
     // ── Stats first (a scaling probe past the budget must still report),
     // then the budget assertions. ──
@@ -212,11 +235,19 @@ fn phase7_soak_200_bots_hold_tick_budget() {
     let post_hz = post.len() as f64 / WINDOW.as_secs_f64();
     eprintln!("postupdate: {} runs ({post_hz:.1} Hz), p99 interval {:.1} ms", post.len(), p99(&mut post) * 1e3);
 
+    // Network-thread busy time (networking audit 2026-07-11, finding 14 step
+    // 1): the crowd's connection handling, frame codec, and broadcast fan-out
+    // all run on engine-net's single network thread — this is the first real
+    // measurement of how much of that thread's capacity the soak's crowd
+    // consumes.
+    let busy_pct = (busy_after - busy_before) as f64 / 1e6 / WINDOW.as_secs_f64() * 100.0;
+    eprintln!("network thread: {busy_pct:.1}% busy over the {:.0}s window", WINDOW.as_secs_f64());
+
     // Machine-readable summary for docs/benchmarks/BASELINE.md.
     let avg_kb_s = sampled.iter().map(|b| b.bytes as f64).sum::<f64>()
         / sampled.len() as f64 / WINDOW.as_secs_f64() / 1024.0;
     println!(
-        "soak: bots={total_bots} input_hz={input_hz:.1} input_p99_ms={:.2} post_hz={post_hz:.1} post_p99_ms={:.2} kb_s_per_client={avg_kb_s:.1}",
+        "soak: bots={total_bots} input_hz={input_hz:.1} input_p99_ms={:.2} post_hz={post_hz:.1} post_p99_ms={:.2} kb_s_per_client={avg_kb_s:.1} net_busy_pct={busy_pct:.1}",
         p99(&mut input) * 1e3,
         p99(&mut post) * 1e3,
     );
@@ -227,6 +258,11 @@ fn phase7_soak_200_bots_hold_tick_budget() {
     );
     assert!(p99(&mut input) < 0.025, "input p99 interval {:.1} ms ≥ 25 ms", p99(&mut input) * 1e3);
     assert!(post_hz >= 9.0, "snapshot phase rate out of budget: {post_hz:.1} Hz");
+    assert!(
+        busy_after > busy_before,
+        "network-thread busy_micros did not advance during the load window \
+         ({busy_before} -> {busy_after}) — busy-time instrumentation not wired"
+    );
 
     for (i, bot) in sampled.iter().enumerate() {
         let snap_hz = bot.snapshot_ticks.len() as f64 / WINDOW.as_secs_f64();
