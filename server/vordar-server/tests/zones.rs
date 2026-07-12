@@ -3,46 +3,15 @@
 
 mod common;
 
-use common::{temp_db, workspace_root, Bot, PopulateSystem};
+use common::{temp_db, test_zones, walk_into_portal, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, SystemOrder};
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use vordar_game::zones::{validate_zones, PortalDef, ZoneDef, ZonesDef};
+use vordar_game::zones::validate_zones;
 use vordar_server::db::DbWorker;
 use vordar_server::build_zone_app;
-
-/// Compact two-zone topology so walks stay short: start's portal at x=10
-/// drops you at x=-6 in east; east's portal at x=-10 sends you back to x=6.
-fn test_zones() -> Vec<ZoneDef> {
-    let zones = vec![
-        ZoneDef {
-            name: "start".into(),
-            chapter: None,
-            portals: vec![PortalDef {
-                pos: Vec3::new(10.0, 0.0, 0.0),
-                radius: 2.0,
-                target_zone: "east".into(),
-                target_pos: Vec3::new(-6.0, 0.0, 0.0),
-            }],
-            visuals: Default::default(),
-        },
-        ZoneDef {
-            name: "east".into(),
-            chapter: None,
-            portals: vec![PortalDef {
-                pos: Vec3::new(-10.0, 0.0, 0.0),
-                radius: 2.0,
-                target_zone: "start".into(),
-                target_pos: Vec3::new(6.0, 0.0, 0.0),
-            }],
-            visuals: Default::default(),
-        },
-    ];
-    validate_zones(&ZonesDef { zones: zones.clone() }).unwrap();
-    zones
-}
 
 /// Spawn one zone App per thread (built ON its thread — Apps don't move),
 /// sharing one DB worker and one world-time origin, exactly like main.rs.
@@ -65,27 +34,6 @@ fn spawn_zone_server(start_addr: SocketAddr, east_addr: SocketAddr, db_path: &st
     // and no Phase 7 test depends on it.
     std::mem::forget(worker);
     std::thread::sleep(Duration::from_millis(300));
-}
-
-/// Steer toward `portal` (spawn points sit on a ring, so a straight east
-/// walk can miss the 2-unit radius) until the server redirects us.
-fn walk_into_portal(bot: &mut Bot, portal: Vec3, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        bot.pump();
-        if bot.redirect.is_some() {
-            return;
-        }
-        if let Some(pos) = bot.own_pos() {
-            let d = portal - pos;
-            let dir = Vec2::new(d.x, d.z);
-            if dir.length_squared() > 1e-6 {
-                bot.send_move(dir.normalize());
-            }
-        }
-        std::thread::sleep(Duration::from_millis(16));
-    }
-    panic!("timed out walking into the portal");
 }
 
 // The shipped topology must satisfy the same structural rules the test

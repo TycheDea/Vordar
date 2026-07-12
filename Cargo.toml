@@ -38,6 +38,11 @@ postcard = { version = "1", features = ["use-std"] }
 # (unstable cfg_select on 1.94) — bump when the toolchain moves.
 rusqlite = { version = "0.37", features = ["bundled"] }
 
+# Signal handling (server only): SIGINT/SIGTERM on Unix, Ctrl+C/console-close
+# on Windows, in one `set_handler` call (networking rework plan 2026-07-12,
+# finding 4).
+ctrlc = { version = "3", features = ["termination"] }
+
 # Benchmarks only (vordar-benches). No plotters/HTML — headless, faster builds.
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 

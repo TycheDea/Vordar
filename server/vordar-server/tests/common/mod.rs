@@ -7,9 +7,11 @@ use engine_core::prefab::queue_prefab_spawn;
 use engine_core::traits::Resources;
 use engine_core::World;
 use engine_net::{ClientEvent, Impairment, NetClient};
+use glam::{Vec2, Vec3};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
+use vordar_game::zones::{validate_zones, PortalDef, ZoneDef, ZonesDef};
 use vordar_protocol::{decode, encode, ClientMsg, ServerMsg, PROTOCOL_VERSION};
 
 pub fn workspace_root() {
@@ -23,6 +25,61 @@ pub fn temp_db(tag: &str) -> String {
     let path = std::env::temp_dir().join(format!("vordar-e2e-{tag}-{}.db", std::process::id()));
     let _ = std::fs::remove_file(&path);
     path.to_str().unwrap().to_owned()
+}
+
+/// Compact two-zone topology so walks stay short: start's portal at x=10
+/// drops you at x=-6 in east; east's portal at x=-10 sends you back to x=6.
+/// Shared by `zones.rs` (multi-zone e2e) and `shutdown.rs` (networking
+/// rework plan 2026-07-12, finding 4: the shutdown wiring test mirrors this
+/// exact topology).
+pub fn test_zones() -> Vec<ZoneDef> {
+    let zones = vec![
+        ZoneDef {
+            name: "start".into(),
+            chapter: None,
+            portals: vec![PortalDef {
+                pos: Vec3::new(10.0, 0.0, 0.0),
+                radius: 2.0,
+                target_zone: "east".into(),
+                target_pos: Vec3::new(-6.0, 0.0, 0.0),
+            }],
+            visuals: Default::default(),
+        },
+        ZoneDef {
+            name: "east".into(),
+            chapter: None,
+            portals: vec![PortalDef {
+                pos: Vec3::new(-10.0, 0.0, 0.0),
+                radius: 2.0,
+                target_zone: "start".into(),
+                target_pos: Vec3::new(6.0, 0.0, 0.0),
+            }],
+            visuals: Default::default(),
+        },
+    ];
+    validate_zones(&ZonesDef { zones: zones.clone() }).unwrap();
+    zones
+}
+
+/// Steer toward `portal` (spawn points sit on a ring, so a straight east
+/// walk can miss the 2-unit radius) until the server redirects us.
+pub fn walk_into_portal(bot: &mut Bot, portal: Vec3, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        bot.pump();
+        if bot.redirect.is_some() {
+            return;
+        }
+        if let Some(pos) = bot.own_pos() {
+            let d = portal - pos;
+            let dir = Vec2::new(d.x, d.z);
+            if dir.length_squared() > 1e-6 {
+                bot.send_move(dir.normalize());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    panic!("timed out walking into the portal");
 }
 
 /// Distinct auto-names: a login for a name that is already online takes over

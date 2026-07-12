@@ -15,9 +15,12 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use vordar_game::chapter::ChapterRegistry;
 use vordar_server::db::DbWorker;
+use vordar_server::net_plugin::ShutdownFlag;
 use vordar_server::{build_zone_app, join_zone_threads, TICK_HZ};
 
 /// Every chapter this binary can host. Linking a new chapter crate +
@@ -47,6 +50,23 @@ fn main() {
     let db = DbWorker::spawn(&db_path).unwrap_or_else(|e| panic!("failed to open db '{db_path}': {e}"));
     let world_origin = Instant::now();
 
+    // SIGINT/SIGTERM (Unix) or Ctrl+C/console-close (Windows): every zone
+    // observes the same flag via its ShutdownFlag resource (finding 3) and
+    // drains itself in-simulation. A second signal force-exits for the
+    // stuck-shutdown case.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let signal_shutdown = shutdown.clone();
+    let already_signaled = AtomicBool::new(false);
+    ctrlc::set_handler(move || {
+        if already_signaled.swap(true, Ordering::Relaxed) {
+            log::error!("second shutdown signal received — forcing exit");
+            std::process::exit(1);
+        }
+        log::info!("shutdown signal received — draining zones");
+        signal_shutdown.store(true, Ordering::Relaxed);
+    })
+    .expect("failed to install signal handler");
+
     let handles: Vec<(String, _)> = zones
         .zones
         .into_iter()
@@ -55,6 +75,7 @@ fn main() {
             let directory = directory.clone();
             let handle = db.handle();
             let name = zone.name.clone();
+            let zone_shutdown = shutdown.clone();
             let join = std::thread::Builder::new()
                 .name(format!("zone-{}", zone.name))
                 .spawn(move || {
@@ -68,6 +89,7 @@ fn main() {
                             .unwrap_or_else(|e| panic!("zones.ron: {e}"));
                     }
                     app.insert_resource(vordar_game::world::load_world_events("content/world/events.ron"));
+                    app.insert_resource(ShutdownFlag(zone_shutdown));
                     log::info!("zone listening on {addr}");
                     app.run_headless(TICK_HZ, None);
                 })
