@@ -161,11 +161,16 @@ impl Plugin for NetClientPlugin {
 }
 
 /// An intent sent to the server but not yet covered by `last_processed_seq`.
-/// Replayed on top of each snapshot of our own player.
+/// Replayed on top of each snapshot of our own player. `leap` mirrors a
+/// LeapImpulse active on the entity when this tick's intent was recorded —
+/// replay reproduces the dash's straight-line displacement instead of
+/// dead-reckoning plain WASD movement through it (networking audit
+/// 2026-07-11, finding 11).
 struct PendingIntent {
     seq: u32,
     dir: Vec2,
     dt: f32,
+    leap: Option<Vec3>,
 }
 
 pub struct NetClientState {
@@ -561,11 +566,27 @@ fn reconcile_own(
     last_processed_seq: u32,
 ) {
     let speed = world.get::<&Player>(entity).map(|p| p.speed).unwrap_or(0.0);
-    let replayed = {
+    let (replayed, still_reconciling_a_dash) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
         state.pending.retain(|p| p.seq > last_processed_seq);
-        replay_position(server_pos, speed, state.pending.iter())
+        // Not just "is the local LeapImpulse still active": the server mirrors
+        // the same cast only after its own one-way network delay, so its copy
+        // of the dash finishes strictly later than the local one, and the
+        // MoveIntent queue it drains at one-per-tick can lag further behind
+        // still. Any unacked intent recorded during the dash means the
+        // server hasn't caught up on the dash yet.
+        let still_reconciling_a_dash = state.pending.iter().any(|p| p.leap.is_some());
+        (replay_position(server_pos, speed, state.pending.iter()), still_reconciling_a_dash)
     };
+    // Collision response isn't replayed (finding 11 — full collision-in-replay
+    // is rework-scale, `reworks-networking-2026-07-11.md` finding 7): mid-dash
+    // the free-flight `replayed` position and a wall-clamped real one can
+    // differ for reasons that aren't mispredictions, so corrections stay
+    // suppressed until the server has caught up on the whole dash instead of
+    // tugging every snapshot.
+    if still_reconciling_a_dash {
+        return;
+    }
     let Ok(mut transform) = world.get::<&mut Transform>(entity) else { return };
     let error = replayed - transform.position;
     let correction = match classify_error(error) {
@@ -585,13 +606,19 @@ fn reconcile_own(
 }
 
 /// Position after replaying pending intents on top of the server's
-/// authoritative position — the same movement rule the simulation runs.
+/// authoritative position — the same movement rule the simulation runs,
+/// including a leap override where one was active (finding 11) — collision
+/// response is the one part of the shared rule still unreplayed (rework-scale,
+/// `reworks-networking-2026-07-11.md` finding 7).
 fn replay_position<'a>(
     server_pos: Vec3,
     speed: f32,
     pending: impl Iterator<Item = &'a PendingIntent>,
 ) -> Vec3 {
-    pending.fold(server_pos, |pos, p| pos + movement_velocity(p.dir, speed) * p.dt)
+    pending.fold(server_pos, |pos, p| {
+        let velocity = p.leap.unwrap_or_else(|| movement_velocity(p.dir, speed));
+        pos + velocity * p.dt
+    })
 }
 
 /// What to do about a reconciliation error.
@@ -930,11 +957,23 @@ impl System for AbilityCastSystem {
             if let (Some(cast_micros), Some(entity), true) = (leap_micros, own, predict) {
                 let cast_secs = *cast_micros as f32 / 1e6;
                 let to = Vec3::new(target.x, 0.0, target.y);
-                let _ = world.insert_one(entity, vordar_game::combat::LeapImpulse {
-                    velocity: vordar_game::combat::leap::leap_velocity(origin, to, cast_secs),
-                    remaining: cast_secs,
-                });
+                let velocity = vordar_game::combat::leap::leap_velocity(origin, to, cast_secs);
+                start_predicted_leap(world, resources, entity, velocity, cast_secs);
             }
+        }
+    }
+}
+
+/// Inserts the client-predicted LeapImpulse for a dash cast and retags this
+/// tick's already-recorded PendingIntent (NetSendInputSystem runs earlier in
+/// the same Input phase, before the dash existed) so replay reproduces the
+/// dash from its very first tick too, not just the ticks after — networking
+/// audit 2026-07-11, finding 11.
+fn start_predicted_leap(world: &mut World, resources: &mut Resources, entity: Entity, velocity: Vec3, cast_secs: f32) {
+    let _ = world.insert_one(entity, vordar_game::combat::LeapImpulse { velocity, remaining: cast_secs });
+    if let Some(state) = resources.get_mut::<NetClientState>() {
+        if let Some(pending) = state.pending.back_mut() {
+            pending.leap = Some(velocity);
         }
     }
 }
@@ -946,7 +985,7 @@ impl System for AbilityCastSystem {
 pub struct NetSendInputSystem;
 
 impl System for NetSendInputSystem {
-    fn run(&mut self, _world: &mut World, resources: &mut Resources, delta: f32) {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
         let dir = read_move_dir(resources);
         let predicted_entity = {
             let state = resources.get_mut::<NetClientState>().unwrap();
@@ -959,8 +998,17 @@ impl System for NetSendInputSystem {
             }
 
             let entity = if state.predict { state.own_entity() } else { None };
-            if entity.is_some() {
-                state.pending.push_back(PendingIntent { seq: state.seq, dir, dt: delta });
+            if let Some(entity) = entity {
+                // A LeapImpulse already on the entity when this tick's intent
+                // is recorded means the Update-phase LeapSystem (later this
+                // same tick) will override this tick's velocity too — mirror
+                // that into the pending record so replay reconstructs the
+                // dash instead of dead-reckoning plain movement (networking
+                // audit 2026-07-11, finding 11). A dash that starts THIS tick
+                // is retagged onto this same entry by `start_predicted_leap`,
+                // called later in this same Input phase.
+                let leap = world.get::<&vordar_game::combat::leap::LeapImpulse>(entity).ok().map(|l| l.velocity);
+                state.pending.push_back(PendingIntent { seq: state.seq, dir, dt: delta, leap });
                 if state.pending.len() > MAX_PENDING_INTENTS {
                     state.pending.pop_front();
                 }
@@ -1039,7 +1087,7 @@ pub mod bench {
     }
 
     pub fn push_pending(state: &mut NetClientState, seq: u32, dir: Vec2, dt: f32) {
-        state.pending.push_back(PendingIntent { seq, dir, dt });
+        state.pending.push_back(PendingIntent { seq, dir, dt, leap: None });
     }
 
     pub fn apply_snapshot(
@@ -1071,7 +1119,7 @@ mod tests {
     const DT: f32 = 1.0 / 60.0;
 
     fn intent(seq: u32, dir: Vec2) -> PendingIntent {
-        PendingIntent { seq, dir, dt: DT }
+        PendingIntent { seq, dir, dt: DT, leap: None }
     }
 
     #[test]
@@ -1091,6 +1139,38 @@ mod tests {
         let a = replay_position(Vec3::ZERO, 6.0, cheat.iter());
         let b = replay_position(Vec3::ZERO, 6.0, fair.iter());
         assert!((a - b).length() < 1e-6);
+    }
+
+    /// Networking audit 2026-07-11, finding 11: at 150 ms RTT an Onslaught
+    /// (cast_secs 0.4 s, content/classes/ravager.ron) replays ~9 unacked
+    /// intents while the dash is in flight. Folding plain WASD movement
+    /// through them (the pre-fix behaviour, `leap: None` throughout) misses
+    /// the dash's real displacement by more than SNAP_DISTANCE — exactly the
+    /// mid-dash teleport the finding describes. Leap-aware replay
+    /// (`leap: Some(velocity)`) must instead land exactly where the dash
+    /// actually went.
+    #[test]
+    fn replay_reconstructs_a_dash_leap_instead_of_dead_reckoning_wasd() {
+        let dash_velocity = Vec3::new(30.0, 0.0, 0.0); // 12 units over a 0.4 s cast
+        let ticks: u32 = 9;
+        // `dir` is deliberately non-zero and irrelevant: a LeapImpulse
+        // overrides velocity outright, so replay must ignore `dir` too.
+        let leaping: Vec<PendingIntent> = (1..=ticks)
+            .map(|seq| PendingIntent { seq, dir: Vec2::new(0.0, 1.0), dt: DT, leap: Some(dash_velocity) })
+            .collect();
+        let dashed = replay_position(Vec3::ZERO, 6.0, leaping.iter());
+        let expected = dash_velocity * DT * ticks as f32;
+        assert!((dashed - expected).length() < 1e-4, "leap-aware replay must follow the dash exactly: {dashed:?}");
+
+        let plain: Vec<PendingIntent> = (1..=ticks)
+            .map(|seq| PendingIntent { seq, dir: Vec2::new(0.0, 1.0), dt: DT, leap: None })
+            .collect();
+        let dead_reckoned = replay_position(Vec3::ZERO, 6.0, plain.iter());
+        assert!(
+            (dashed - dead_reckoned).length() > SNAP_DISTANCE,
+            "dead-reckoned WASD must diverge from the real dash past SNAP_DISTANCE, got {:.2}",
+            (dashed - dead_reckoned).length()
+        );
     }
 
     #[test]
@@ -1231,5 +1311,194 @@ mod tests {
         }
         let second_id = resources.get::<NetClientState>().unwrap().own_id.unwrap();
         assert_ne!(first_id, second_id, "reconnect must relogin into a fresh body");
+    }
+
+    /// Networking audit 2026-07-11, finding 11: "Prediction replay models
+    /// plain movement only — leaps ... produce snaps at real latency." A real
+    /// headless server plus a real predicting `NetClient` (150 ms simulated
+    /// RTT, the finding's own number) cast a real Onslaught (the Ravager's
+    /// gap-closer, `content/classes/ravager.ron`: 0.4 s dash, 8 s cooldown,
+    /// 12-unit range) and drive exactly the systems `NetClientPlugin`
+    /// registers for a predicting player (`NetReceiveSystem`,
+    /// `NetSendInputSystem`, `PlayerMovementSystem`, `LeapSystem`,
+    /// `MovementSystem`, `NetCorrectionSystem`) — no reimplemented logic.
+    ///
+    /// `reconcile_own` (invoked from inside `NetReceiveSystem::run` via
+    /// `apply_snapshot`) snaps `transform.position` straight to `replayed`
+    /// whenever the reconciliation error exceeds SNAP_DISTANCE; every other
+    /// path (Trust, Smooth) leaves `transform.position` untouched. So a snap
+    /// shows up as a position jump bigger than SNAP_DISTANCE measured across a
+    /// single `NetReceiveSystem::run` call — that must never happen, during
+    /// the dash or right after it.
+    #[test]
+    fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::env::set_current_dir(&root).unwrap();
+
+        let addr: SocketAddr = "127.0.0.1:25402".parse().unwrap();
+        std::thread::spawn(move || {
+            vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
+        });
+        std::thread::sleep(Duration::from_millis(300));
+
+        // Real ability data (cast time, range) instead of hardcoded numbers —
+        // the same content the server and a real client both load.
+        let mut classes = vordar_game::class::ClassLibrary::new();
+        classes.load_dir("content/classes");
+        let onslaught = classes.get("ravager", "onslaught").expect("ravager has onslaught");
+        let (cast_secs, max_range) = match &onslaught.effect {
+            vordar_game::skills::AbilityEffect::Leap { cast_micros, max_range, .. } => {
+                (*cast_micros as f32 / 1e6, *max_range)
+            }
+            _ => panic!("onslaught must be a Leap effect"),
+        };
+
+        // Component/prefab setup mirrors engine_app::prefab_plugin::PrefabPlugin
+        // + vordar_game::plugin::GameComponentsPlugin without a full App — this
+        // test drives systems directly, same as `kicked_connection_reconnects_and_relogs_in` above.
+        let mut registry = engine_core::prefab::ComponentRegistry::new();
+        engine_core::prefab::register_core_components(&mut registry);
+        registry.register::<Player>("Player");
+        registry.register::<vordar_game::enemies::Enemy>("Enemy");
+        registry.register::<vordar_game::ContactDamage>("ContactDamage");
+        registry.register::<vordar_game::CombatStats>("CombatStats");
+        registry.register::<vordar_game::class::ClassId>("Class");
+        registry.register::<vordar_game::class::RaceId>("Race");
+        registry.register::<vordar_game::vfx::VfxTrail>("VfxTrail");
+        let mut prefabs = engine_core::prefab::PrefabLibrary::new();
+        prefabs.load_dir("content/prefabs");
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(registry);
+        resources.insert(prefabs);
+        resources.insert(DespawnQueue::new());
+        resources.insert(Time::new());
+        resources.insert(WorldTime { offset_micros: 0, synced: false });
+        resources.insert(EventBus::new());
+        resources.insert(engine_app::input::KeyboardState::new());
+        resources.insert(NetClientState {
+            client: Some(
+                NetClient::connect_with_latency(addr, PROTOCOL_VERSION, Duration::from_millis(150))
+                    .expect("dasher connect"),
+            ),
+            server_addr: addr,
+            user: "onslaught-dasher".into(),
+            own_id: None,
+            entities: HashMap::new(),
+            seq: 0,
+            predict: true,
+            pending: VecDeque::new(),
+            correction: Vec3::ZERO,
+            simulated_rtt: Duration::from_millis(150),
+            reconnect: None,
+        });
+
+        let mut recv = NetReceiveSystem;
+        let mut send = NetSendInputSystem;
+        let mut player_move = PlayerMovementSystem;
+        let mut leap_sys = vordar_game::combat::leap::LeapSystem;
+        let mut move_sys = MovementSystem;
+        let mut correction_sys = NetCorrectionSystem;
+        let mut max_recv_jump = 0.0f32;
+
+        // Input-phase half of one tick (NetReceiveSystem, NetSendInputSystem)
+        // — watches every NetReceiveSystem call for a snap-sized position jump.
+        let mut run_input = |world: &mut World, resources: &mut Resources| {
+            resources.get_mut::<EventBus>().unwrap().clear();
+            let before = own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position));
+            recv.run(world, resources, DT);
+            if let Some(before) = before {
+                if let Some(after) =
+                    own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
+                {
+                    max_recv_jump = max_recv_jump.max((after - before).length());
+                }
+            }
+            send.run(world, resources, DT);
+        };
+        // Update-phase half (PlayerMovementSystem, LeapSystem, MovementSystem,
+        // NetCorrectionSystem) — same order NetClientPlugin registers them in.
+        let mut run_update = |world: &mut World, resources: &mut Resources| {
+            player_move.run(world, resources, DT);
+            leap_sys.run(world, resources, DT);
+            move_sys.run(world, resources, DT);
+            correction_sys.run(world, resources, DT);
+        };
+
+        // Welcome + clock sync.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            run_input(&mut world, &mut resources);
+            run_update(&mut world, &mut resources);
+            let ready = {
+                let state = resources.get::<NetClientState>().unwrap();
+                state.own_id.is_some() && state.client.as_ref().unwrap().server_now_micros().is_some()
+            };
+            if ready {
+                break;
+            }
+            assert!(Instant::now() < deadline, "never got Welcome + clock sync");
+            std::thread::sleep(Duration::from_millis(16));
+        }
+
+        // Finding 8: a fresh spawn starts every ability on full cooldown —
+        // clear onslaught's 8 s cooldown before casting it (same wait
+        // `ravager_onslaught_dashes_and_resolves` uses server-side, in
+        // server/vordar-server/tests/e2e.rs).
+        let clear_cooldown = Instant::now() + Duration::from_millis(8300);
+        while Instant::now() < clear_cooldown {
+            run_input(&mut world, &mut resources);
+            run_update(&mut world, &mut resources);
+            std::thread::sleep(Duration::from_millis(16));
+        }
+
+        let entity = own_entity(&resources).expect("predicted entity must exist by now");
+        let origin = world.get::<&Transform>(entity).unwrap().position;
+        let target = origin + Vec3::new(max_range * 0.5, 0.0, 0.0);
+        let cast_target = Vec2::new(target.x, target.z);
+        let velocity = vordar_game::combat::leap::leap_velocity(origin, target, cast_secs);
+
+        // The cast tick: Input phase first (the real wire CastIntent, so the
+        // server mirrors the identical dash, same as NetSendInputSystem's own
+        // MoveIntent send moments earlier), then the client-predicted
+        // insertion `start_predicted_leap` — exactly what AbilityCastSystem
+        // calls for a Leap ability, invoked directly here because
+        // AbilityCastSystem itself needs a renderer (mouse-cursor ground
+        // projection) this headless test has none of — then Update phase, so
+        // the dash begins immediately this same tick like the real system.
+        run_input(&mut world, &mut resources);
+        {
+            let state = resources.get_mut::<NetClientState>().unwrap();
+            let t_server_micros = state.client.as_ref().unwrap().server_now_micros().unwrap();
+            state.seq += 1;
+            let seq = state.seq;
+            state.client.as_ref().unwrap().send(encode(&ClientMsg::CastIntent {
+                seq,
+                t_server_micros,
+                skill: "onslaught".into(),
+                target: cast_target,
+            }));
+        }
+        start_predicted_leap(&mut world, &mut resources, entity, velocity, cast_secs);
+        run_update(&mut world, &mut resources);
+
+        // Run through the dash and settle afterward, watching every tick's
+        // NetReceiveSystem call for a snap.
+        let dash_deadline = Instant::now() + Duration::from_secs(4);
+        let mut elapsed = 0.0f32;
+        while elapsed < cast_secs + 1.0 {
+            assert!(Instant::now() < dash_deadline, "test loop stalled mid-dash");
+            std::thread::sleep(Duration::from_millis(16));
+            run_input(&mut world, &mut resources);
+            run_update(&mut world, &mut resources);
+            elapsed += DT;
+        }
+
+        assert!(
+            max_recv_jump < SNAP_DISTANCE,
+            "reconciliation snapped {max_recv_jump:.2} units mid-dash — leap-aware replay must keep \
+             corrections under SNAP_DISTANCE ({SNAP_DISTANCE})"
+        );
     }
 }
