@@ -30,6 +30,13 @@ use engine_core::prefab::{ComponentRegistry, PrefabLibrary};
 use engine_core::traits::{DespawnQueue, Resources, SpawnQueue};
 use engine_core::World;
 
+/// Resource a system can set to end `run_headless`'s loop after the current
+/// tick — e.g. a shutdown system that must finish saving before the loop
+/// exits. `App::new` inserts `AppExit(false)`; only the fixed-step system
+/// that flips it decides when, so save-and-exit stay causally ordered within
+/// the same tick.
+pub struct AppExit(pub bool);
+
 pub struct App {
     pub(crate) world:          World,
     pub(crate) resources:      Resources,
@@ -66,6 +73,7 @@ impl App {
         resources.insert(MouseState::new());
         resources.insert(InterpolationAlpha(0.0));
         resources.insert(DevStats::new());
+        resources.insert(AppExit(false));
 
         let mut scheduler = Scheduler::new();
         scheduler.add(ClearEventsSystem,  Phase::Input,        SystemOrder::First);
@@ -266,6 +274,7 @@ impl App {
 
             ticks += 1;
             if max_ticks.is_some_and(|max| ticks >= max) { break; }
+            if self.resources.get::<AppExit>().is_some_and(|e| e.0) { break; }
 
             let now = std::time::Instant::now();
             if next_tick > now {
@@ -288,5 +297,46 @@ impl App {
         self.resources.get_mut::<Time>().unwrap().frame_dt = frame_delta;
         self.resources.get_mut::<DevStats>().unwrap().record_frame(frame_delta);
         self.scheduler.run_tick(&mut self.world, &mut self.resources, frame_delta);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scheduler::SystemOrder;
+    use engine_core::World;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    // A system that counts its own runs and requests app exit on the 5th run.
+    struct ExitOnFifthTick {
+        counter: Arc<AtomicU64>,
+    }
+
+    impl System for ExitOnFifthTick {
+        fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
+            let n = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if n == 5 {
+                resources.get_mut::<AppExit>().unwrap().0 = true;
+            }
+        }
+    }
+
+    #[test]
+    fn run_headless_returns_after_appexit_set_and_stops_exactly_on_that_tick() {
+        let counter = Arc::new(AtomicU64::new(0));
+
+        let mut app = App::new();
+        app.add_system(
+            ExitOnFifthTick { counter: counter.clone() },
+            Phase::Update,
+            SystemOrder::Default,
+        );
+
+        // High hz so the fixed-step Update phase advances rapidly and the test
+        // is fast; max_ticks is None — only AppExit can end this loop.
+        app.run_headless(1000.0, None);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 5);
     }
 }
