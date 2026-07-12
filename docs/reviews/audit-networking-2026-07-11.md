@@ -25,12 +25,12 @@ verifiable headless under simulated latency, loss, and jitter in both directions
 
 ## Findings (ranked by impact)
 
-> **Implementation order for the remaining fixes** (1–8, 11, 13, 14, 16, 17 done;
-> 9/10/12/15 moved to `reworks-networking-2026-07-11.md`): **20 → 18 → 19.**
-> 20 first because it restores the 200-bot soak scenario that finding 18's
-> metrics work verifies against and that rework 9's measurement gate needs;
-> 18 and 19 are independent, ordered by impact. Numbers are stable — findings
-> are never renumbered, so `/implement-finding N` and cross-references stay valid.
+> **All fix-sized findings in this file are implemented** (1–8, 11, 13, 14,
+> 16–20 done; 9/10/12/15 moved to `reworks-networking-2026-07-11.md`). The
+> remaining queue is rework-scale and lives in the reworks file, ordered
+> cross-type there: **rework 8 → 10 → 1 → 5 → 3 → 4 → 7 → 2 → 6** (9 parked,
+> gated on measurement). Numbers are stable — findings are never renumbered,
+> so `/implement-finding N` and cross-references stay valid.
 
 ### 1. REGRESSION: `MAX_FRAME` cut to 1 KiB — but it is the shared cap for BOTH directions; snapshots over ~1 KiB now disconnect the client
 

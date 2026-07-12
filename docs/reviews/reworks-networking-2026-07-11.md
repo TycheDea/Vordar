@@ -5,7 +5,27 @@ design pass before implementation. Consumed by /plan-rework, which turns one
 rework into a plan of fix-sized steps for /implement-finding. Created
 retroactively from the deferred remainders of implemented findings 7 and 8.
 
-## Findings (ranked by impact)
+## Findings (implementation order)
+
+> **Cross-type queue** (all 20 fix-sized findings of
+> `audit-networking-2026-07-11.md` are done, so this file is the whole
+> remaining queue): **8 → 10 → 1 → 5 → 3 → 4 → 7 → 2 → 6.**
+> 8 first because two entries depend on it: 10 is blocked on its `NetServer`
+> shutdown path, and 1's schema changes (accounts table, cooldown columns) need
+> its `user_version` migration runner. 10 right after 8 while the shutdown work
+> is fresh. 5 before 3 despite lower impact rank: QUIC datagrams carry ~1.2 KB
+> and crowd snapshots are ~2.2 KB today, so 3's snapshots-on-datagrams step is
+> physically impossible until 5's compaction shrinks them under the MTU.
+> 4 after 3 because moving snapshots to lossy datagrams changes exactly the
+> arrival pattern the jitter buffer is designed around. 2 and 6 after 1: both
+> interact with its tokens (a migrated path or redirect must not become a
+> session-hijack vector). 7 is fully independent — its slot is impact-based and
+> it can be interleaved anywhere. **9 is parked, not ordered:** its own gate is
+> ">50% of a core at target load" and the restored 200-bot soak measured
+> `net_busy_pct=13.6`. Every plan produced from this queue must include a
+> `docs/online-play.mmd` + SVG update step when it changes the online-play
+> flow, so the diagram converged by audit finding 19 stays true. Numbers are
+> stable — findings are never renumbered.
 
 ### 1. Account identity, auth tokens, and combat-state persistence (deferred from audit finding 8, Path steps 2–6)
 

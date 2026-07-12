@@ -54,7 +54,14 @@ Split findings into two categories and two files (today's date):
 
 When one finding contains both (a surgical step plus rework-scale follow-ons), put the
 surgical step in the fixes file and the follow-ons in the reworks file, each referencing
-the other. Number findings independently within each file. Both files use this structure:
+the other. Number findings independently within each file. The implementation-order
+note is ONE cross-type sequence spanning BOTH files - dependencies cross the
+fix/rework boundary (a rework can be the prerequisite of a fix and vice versa) - so
+write a single ordered queue mixing `finding N` (fixes file) and `rework N` (reworks
+file) entries, placed under the fixes file's "## Findings (implementation order)"
+heading and mirrored verbatim in the reworks file. A rework whose own gate is unmet
+(e.g. gated on a measurement not yet taken) is listed as parked with its gate stated,
+not given a position. Both files use this structure:
 
 ```
 # Rust & Tooling Audit — YYYY-MM-DD
