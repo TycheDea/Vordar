@@ -25,12 +25,12 @@ verifiable headless under simulated latency, loss, and jitter in both directions
 
 ## Findings (ranked by impact)
 
-> **Implementation order for the remaining fixes** (1–8 done; 9/10/12/15 moved to
-> `reworks-networking-2026-07-11.md`): **17 → 16 → 11 → 13 → 14 → 18 → 19.**
-> 17 first because its impairment knobs are what several later tests assert
-> against (and it unblocks finding 6's deferred skewed-clock test); the rest
-> are independent, ordered by impact. Numbers are stable — findings are never
-> renumbered, so `/implement-finding N` and cross-references stay valid.
+> **Implementation order for the remaining fixes** (1–8, 11, 13, 14, 16, 17 done;
+> 9/10/12/15 moved to `reworks-networking-2026-07-11.md`): **20 → 18 → 19.**
+> 20 first because it restores the 200-bot soak scenario that finding 18's
+> metrics work verifies against and that rework 9's measurement gate needs;
+> 18 and 19 are independent, ordered by impact. Numbers are stable — findings
+> are never renumbered, so `/implement-finding N` and cross-references stay valid.
 
 ### 1. REGRESSION: `MAX_FRAME` cut to 1 KiB — but it is the shared cap for BOTH directions; snapshots over ~1 KiB now disconnect the client
 
@@ -372,6 +372,34 @@ verifiable headless under simulated latency, loss, and jitter in both directions
 - **Suggestion / Path:** (1) add persistence lane, death/re-Welcome edge, correct
   redirect origin, takeover note; (2) regenerate `online-play.svg`; (3) reconverge
   wording once Finding 5 closes.
+
+### 20. NEW: `MAX_CONNECTIONS_PER_IP = 8` makes the 200-bot soak scenario unrunnable — the flood cap and the soak harness disagree about what one IP means
+
+- **Evidence:** `NetServer::MAX_CONNECTIONS_PER_IP = 8` (`smirk/engine-net/src/server.rs:148`,
+  added by finding 4's flood-control work) refuses the 9th connection from one
+  source IP (`server.rs:279`). `server/vordar-server/tests/soak.rs` drives all its
+  bots from localhost, so the default 200-bot run gets 8 accepted and 192 refused
+  and fails at "only 8/200 bots welcomed in 60s". Discovered during finding 14:
+  its busy-time verification had to run at `VORDAR_SOAK_BOTS=8`, under the cap —
+  the soak's stated purpose (tick budget at crowd scale) is currently untestable.
+- **Ideal:** Production keeps the per-IP cap at its hostile-client default, and
+  capacity tests can still model a real crowd (many clients, distinct identities)
+  from one machine. Neither goal is sacrificed to the other, and the knob is a
+  deliberate part of the transport's public configuration, not a test backdoor.
+- **Gap:** The caps are hard associated consts on `NetServer` — there is no way
+  for any embedder (soak harness today, a stress CLI or LAN deployment tomorrow)
+  to state a different trust model for source IPs.
+- **Suggestion:** Promote the connection caps into bind-time configuration with
+  the current values as defaults: e.g. `NetServer::bind` keeps today's signature
+  and defaults, plus a `bind_with_limits` (or small `NetLimits` struct) the soak
+  harness uses to raise `max_connections_per_ip` to its bot count. The flood
+  test keeps asserting the default; the soak states its single-IP-crowd reality
+  explicitly. No env-var special case inside the transport, no weakened default.
+- **Path:** (1) introduce the limits struct with today's consts as `Default`;
+  (2) thread it through `bind` → accept-loop check (`server.rs:279`); (3) soak
+  harness passes `max_connections_per_ip: BOT_COUNT`; (4) run the full 200-bot
+  soak and record the restored baseline (including the new `net_busy_pct`);
+  (5) flood-control test unchanged, still pinning the default at 8.
 
 ## Carried forward from previous report
 
