@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 use std::time::Instant;
 use vordar_game::chapter::ChapterRegistry;
 use vordar_server::db::DbWorker;
-use vordar_server::{build_zone_app, TICK_HZ};
+use vordar_server::{build_zone_app, join_zone_threads, TICK_HZ};
 
 /// Every chapter this binary can host. Linking a new chapter crate +
 /// one line here is the entire integration.
@@ -47,14 +47,15 @@ fn main() {
     let db = DbWorker::spawn(&db_path).unwrap_or_else(|e| panic!("failed to open db '{db_path}': {e}"));
     let world_origin = Instant::now();
 
-    let handles: Vec<_> = zones
+    let handles: Vec<(String, _)> = zones
         .zones
         .into_iter()
         .map(|zone| {
             let addr = directory[&zone.name];
             let directory = directory.clone();
             let handle = db.handle();
-            std::thread::Builder::new()
+            let name = zone.name.clone();
+            let join = std::thread::Builder::new()
                 .name(format!("zone-{}", zone.name))
                 .spawn(move || {
                     // Built on this thread: a built App cannot move (systems
@@ -70,11 +71,12 @@ fn main() {
                     log::info!("zone listening on {addr}");
                     app.run_headless(TICK_HZ, None);
                 })
-                .expect("spawn zone thread")
+                .expect("spawn zone thread");
+            (name, join)
         })
         .collect();
 
-    for handle in handles {
-        let _ = handle.join();
-    }
+    // A panicked zone thread used to be silently swallowed here (networking
+    // audit 2026-07-11, finding 18) — see `join_zone_threads`'s doc comment.
+    join_zone_threads(handles);
 }

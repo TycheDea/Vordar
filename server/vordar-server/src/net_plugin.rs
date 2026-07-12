@@ -373,6 +373,11 @@ impl System for NetReceiveSystem {
                         ClientMsg::MoveIntent { seq, t_server_micros: t, dir } => {
                             if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
                                 log::debug!("conn {conn}: intent rejected ({reason})");
+                                // Operational visibility (networking audit 2026-07-11,
+                                // finding 18): validate_intent's callers used to only
+                                // log::debug!, so a client spamming invalid intents was
+                                // as invisible to NetMetrics as one behaving normally.
+                                state.server.metrics().record_reject();
                                 continue;
                             }
                             pc.last_seq = seq;
@@ -393,6 +398,8 @@ impl System for NetReceiveSystem {
                         ClientMsg::CastIntent { seq, t_server_micros: t, skill: skill_id, target } => {
                             if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
                                 log::warn!("conn {conn}: cast rejected ({reason})");
+                                // See the MoveIntent arm above (finding 18).
+                                state.server.metrics().record_reject();
                                 continue;
                             }
                             pc.last_seq = seq;

@@ -18,8 +18,11 @@ use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
 use hecs::Entity;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vordar_protocol::{encode, ClientMsg};
+use vordar_server::net_plugin::NetServerState;
 
 #[test]
 fn phase1_end_to_end() {
@@ -861,4 +864,61 @@ fn finding8_relog_does_not_reset_cooldown() {
         assert!(Instant::now() < deadline, "'rend' never became castable after the pessimistic cooldown elapsed");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Mirrors the network-layer reject counter (`engine_net::NetMetrics::rejects`)
+/// into a plain atomic every tick — same smuggling trick as the soak harness's
+/// `BusyMirror`, since a running `App` never hands values back across the
+/// thread boundary it runs on.
+struct RejectMirror {
+    dest: Arc<AtomicU64>,
+}
+
+impl System for RejectMirror {
+    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
+        let state = resources.get::<NetServerState>().expect("NetServerState not installed");
+        self.dest.store(state.metrics().rejects.load(Ordering::Relaxed), Ordering::Relaxed);
+    }
+}
+
+// Finding 18 of docs/reviews/audit-networking-2026-07-11.md: validate_intent's
+// callers only `log::debug!`/`log::warn!` a rejected intent — nothing fed the
+// `NetMetrics` the operational-blindness fix (finding 3) claims to expose, so
+// a client sending invalid intents was as invisible to metrics as one behaving
+// normally. The fix records every validate_intent rejection into
+// `NetMetrics::rejects`.
+#[test]
+fn finding18_invalid_intent_increments_reject_counter() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25168".parse().unwrap();
+    let rejects: Arc<AtomicU64> = Arc::default();
+    {
+        let rejects = rejects.clone();
+        std::thread::spawn(move || {
+            let mut app = vordar_server::build_server_app(addr, ":memory:");
+            app.add_system(RejectMirror { dest: rejects }, Phase::Input, SystemOrder::Default);
+            app.run_headless(60.0, Some(1200));
+        });
+    }
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+
+    assert_eq!(rejects.load(Ordering::Relaxed), 0, "reject counter must start at zero");
+
+    // seq=0 is PlayerConn::last_seq's sentinel — validate_intent rejects it
+    // outright regardless of an otherwise well-formed intent (finding 16), so
+    // this is a guaranteed, deterministic reject with no need for any prior
+    // legitimate traffic to go stale first.
+    let t_server_micros = bot.client.server_now_micros().expect("clock synced");
+    bot.client.send(encode(&ClientMsg::MoveIntent { seq: 0, t_server_micros, dir: glam::Vec2::ZERO }));
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && rejects.load(Ordering::Relaxed) == 0 {
+        bot.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert!(rejects.load(Ordering::Relaxed) >= 1, "an invalid intent must be counted in NetMetrics::rejects");
 }

@@ -173,3 +173,36 @@ retroactively from the deferred remainders of implemented findings 7 and 8.
   (2) design: shard boundary + state ownership; (3) implement behind the same public
   `NetServer` API; (4) soak comparison proving scaling.
 
+### 10. Zone-thread watchdog recovery (restart or directory pull) blocked on `NetServer` shutdown path (deferred from audit finding 18, Path step 3)
+
+- **Evidence:** Finding 18's visibility half is fixed: `main.rs` no longer discards a
+  panicked zone thread's result (`join_zone_threads` in `lib.rs` logs it loudly). Actual
+  recovery was investigated and found unsafe to build today: `NetServer::bind_with_limits`
+  (`smirk/engine-net/src/server.rs`) spawns a detached network thread that owns the
+  `quinn::Endpoint` and loops in `server_main` forever — there is no shutdown signal and
+  no `Drop` impl on `NetServer`. When a zone's App panics, that background thread is
+  never told to stop, so it keeps the port bound; a same-address restart attempt's
+  `NetServer::bind` fails immediately ("address in use") and panics again, crash-looping
+  instead of recovering. This is the identical prerequisite already named in rework 8's
+  Path step (2) ("`NetServer` shutdown path"). The alternative — pulling the dead zone
+  out of the shared directory so other zones stop redirecting into it — needs the
+  per-thread-owned immutable `directory: HashMap<String, SocketAddr>` (`main.rs:39-44`,
+  cloned once per zone thread; `net_plugin.rs` `NetServerState.directory`) to become
+  shared mutable state read at both redirect sites (`net_plugin.rs` login-routing and
+  `ZoneTransferSystem`) — also a real architecture decision, not a bounded diff.
+- **Ideal:** `NetServer` exposes a real shutdown path (close the endpoint, join the
+  network thread, release the port) so a watchdog can safely tear down and rebuild a
+  panicked zone's App on the same address; a panicked zone recovers without operator
+  intervention and without any redirect ever landing on a dead address.
+- **Gap:** Neither recovery path is safe to build today: restart crash-loops on the
+  still-bound port; directory-pull has no shared-state carrier yet. Only the visibility
+  half of finding 18 was bounded, fix-sized work.
+- **Suggestion:** Fold into rework 8's design pass — it already owns "how `NetServer`
+  gains a close path." Once that lands, restart-on-same-address is very likely the
+  simpler recovery model of the two, since it needs no protocol or redirect-routing
+  change once `NetServer` can shut down cleanly.
+- **Path:** (1) prerequisite: rework 8 step (2), `NetServer` shutdown path; (2) zone-
+  thread supervisor that uses that shutdown path to rebuild a panicked zone's App on the
+  same address, with a bounded restart count; (3) e2e test: a zone panics, the watchdog
+  restarts it, and a fresh connection to the same address succeeds afterward.
+

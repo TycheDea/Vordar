@@ -74,3 +74,82 @@ pub fn build_zone_app(
     net_plugin::install(&mut app, server, db, None, zone, directory, world_origin);
     app
 }
+
+/// Join every zone thread, logging loudly if one panicked instead of exiting
+/// cleanly (networking audit 2026-07-11, finding 18). `main` used to discard
+/// `handle.join()`'s `Result` outright (`let _ = handle.join();`), so a
+/// panicked zone died with no trace at all: its listener stayed bound but
+/// dead, and every other zone kept redirecting players into that now-dead
+/// address forever. This closes the visibility gap; actually recovering the
+/// zone (restart, or pulling it from the shared directory so other zones stop
+/// redirecting into it) needs `NetServer` to gain a shutdown path first — see
+/// `reworks-networking-2026-07-11.md` finding 10.
+pub fn join_zone_threads(handles: Vec<(String, std::thread::JoinHandle<()>)>) {
+    for (name, handle) in handles {
+        if let Err(payload) = handle.join() {
+            log::error!(
+                "zone '{name}' thread panicked and exited ({}); its listener is now dead — \
+                 other zones will keep redirecting players into a stale address until the \
+                 process is restarted",
+                panic_message(&payload),
+            );
+        }
+    }
+}
+
+/// Best-effort human-readable text from a caught panic payload — `panic!`
+/// with a literal yields `&'static str`, `panic!("...{}...")` yields `String`;
+/// anything else (a custom payload via `panic_any`) has no reliable `Display`.
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "<non-string panic payload>".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn panic_message_extracts_string_literal_payload() {
+        let handle = std::thread::spawn(|| panic!("zone exploded"));
+        let payload = handle.join().unwrap_err();
+        assert_eq!(panic_message(&payload), "zone exploded");
+    }
+
+    #[test]
+    fn panic_message_extracts_formatted_string_payload() {
+        let cause = "bad zones.ron";
+        let handle = std::thread::spawn(move || panic!("startup failed: {cause}"));
+        let payload = handle.join().unwrap_err();
+        assert_eq!(panic_message(&payload), "startup failed: bad zones.ron");
+    }
+
+    /// Regression test for finding 18: a panicked zone thread must not
+    /// prevent `join_zone_threads` from joining (and thus not silently
+    /// dropping) the other zone threads behind it, and must not itself
+    /// propagate the panic and take the whole process down with it.
+    #[test]
+    fn a_panicked_zone_does_not_stop_the_others_from_being_joined() {
+        let joined = Arc::new(AtomicUsize::new(0));
+        let healthy_before = {
+            let joined = joined.clone();
+            std::thread::Builder::new().spawn(move || { joined.fetch_add(1, Ordering::SeqCst); }).unwrap()
+        };
+        let panicking = std::thread::Builder::new().spawn(|| panic!("zone crashed")).unwrap();
+        let healthy_after = {
+            let joined = joined.clone();
+            std::thread::Builder::new().spawn(move || { joined.fetch_add(1, Ordering::SeqCst); }).unwrap()
+        };
+        join_zone_threads(vec![
+            ("start".to_owned(), healthy_before),
+            ("east".to_owned(), panicking),
+            ("west".to_owned(), healthy_after),
+        ]);
+        assert_eq!(joined.load(Ordering::SeqCst), 2, "both healthy zone threads must still be joined despite the panic in between");
+    }
+}
