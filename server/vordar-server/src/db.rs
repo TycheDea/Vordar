@@ -21,7 +21,13 @@ use rusqlite::Connection;
 use std::sync::{mpsc, Mutex};
 use std::thread::JoinHandle;
 
-const SCHEMA: &str = "
+// Append-only schema history: entry i brings a database from user_version i
+// to i+1. Entry 0 is the original baseline schema — deliberately kept as
+// `CREATE TABLE IF NOT EXISTS` so every pre-versioning database in the wild
+// (user_version == 0, table already present) adopts the ladder losslessly;
+// later entries use plain DDL. Never edit an already-shipped entry — append
+// a new one instead, the same discipline as any other migration ladder.
+const MIGRATIONS: &[&str] = &["
 CREATE TABLE IF NOT EXISTS characters (
     id     INTEGER PRIMARY KEY,
     name   TEXT NOT NULL UNIQUE,
@@ -31,7 +37,33 @@ CREATE TABLE IF NOT EXISTS characters (
     pos_z  REAL NOT NULL,
     health INTEGER NOT NULL
 );
-";
+"];
+
+/// Bring `db` up to the latest schema version. Each pending migration runs in
+/// its own transaction with the `user_version` bump committed atomically
+/// alongside its DDL (`user_version` is header state, so it commits with the
+/// transaction). A `user_version` beyond the known ladder means the file was
+/// written by a newer build; refuse it rather than run against an unknown
+/// schema.
+fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
+    let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version < 0 || version as usize > MIGRATIONS.len() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some(format!(
+                "database schema version {version} is newer than this build supports (known migrations: 0..={})",
+                MIGRATIONS.len()
+            )),
+        ));
+    }
+    for (i, ddl) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+        let tx = db.transaction()?;
+        tx.execute_batch(ddl)?;
+        tx.pragma_update(None, "user_version", (i + 1) as i64)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterRecord {
@@ -80,7 +112,7 @@ impl DbWorker {
     /// Open the database (creating the schema) and start the worker thread.
     /// Opening happens on the calling thread so startup failure is synchronous.
     pub fn spawn(path: &str) -> rusqlite::Result<DbWorker> {
-        let db = Connection::open(path)?;
+        let mut db = Connection::open(path)?;
         // WAL lets a save's writer transaction run without blocking a
         // concurrent load's reader; NORMAL syncs at WAL checkpoints instead
         // of every commit; busy_timeout absorbs a checkpoint briefly holding
@@ -92,7 +124,7 @@ impl DbWorker {
              PRAGMA synchronous = NORMAL;
              PRAGMA busy_timeout = 5000;",
         )?;
-        db.execute_batch(SCHEMA)?;
+        migrate(&mut db)?;
         let (req_tx, req_rx) = mpsc::channel::<DbRequest>();
         let handle = std::thread::Builder::new()
             .name("vordar-db".into())
@@ -335,6 +367,81 @@ mod tests {
         let mode: String = check.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
         assert_eq!(mode.to_lowercase(), "wal");
         drop(worker);
+    }
+
+    /// Regression test for finding 5 of the networking rework-8 plan: a
+    /// fresh database has no schema history at all — `spawn` must stamp
+    /// `user_version` to the latest migration it applied, not leave it at
+    /// SQLite's default of 0. Read through an independent connection since
+    /// `user_version` is header state, not per-connection.
+    #[test]
+    fn fresh_db_stamps_user_version_to_latest_migration() {
+        let path = temp_db("migrate-fresh");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let check = Connection::open(&path).unwrap();
+        let version: i64 = check.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64, "fresh db should be stamped to the latest known migration");
+        drop(worker);
+    }
+
+    /// Regression test for finding 5: every database that exists today looks
+    /// like this — the characters table present, data in it, no
+    /// `user_version` stamp (defaults to 0). Opening it through `DbWorker`
+    /// must adopt the ladder losslessly (the row's data survives) and stamp
+    /// the version, not leave the file's history ambiguous forever.
+    #[test]
+    fn legacy_db_without_version_stamp_adopts_the_ladder() {
+        let path = temp_db("migrate-legacy");
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.execute_batch(
+                "CREATE TABLE characters (
+                    id     INTEGER PRIMARY KEY,
+                    name   TEXT NOT NULL UNIQUE,
+                    zone   TEXT NOT NULL DEFAULT 'start',
+                    pos_x  REAL NOT NULL,
+                    pos_y  REAL NOT NULL,
+                    pos_z  REAL NOT NULL,
+                    health INTEGER NOT NULL
+                );",
+            )
+            .unwrap();
+            raw.execute(
+                "INSERT INTO characters (name, zone, pos_x, pos_y, pos_z, health) VALUES ('legacy', 'east', 1.0, 2.0, 3.0, 55)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        handle.load_or_create(1, "legacy".into(), defaults());
+        let loaded = wait_loaded(&handle);
+        assert_eq!(loaded.record.zone, "east");
+        assert_eq!(loaded.record.pos, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(loaded.record.health, 55);
+
+        let check = Connection::open(&path).unwrap();
+        let version: i64 = check.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64, "legacy adoption should stamp the version too");
+        // handle is dropped before worker (reverse declaration order) so its
+        // sender clone is gone before the worker thread is joined — the same
+        // ordering `save_then_reload_roundtrips_across_reopen` relies on.
+    }
+
+    /// Regression test for finding 5: a database stamped with a `user_version`
+    /// beyond this build's known migration ladder was written by a newer
+    /// build. Running against it blind (today's behavior) risks corrupting an
+    /// unknown schema; `spawn` must refuse it instead.
+    #[test]
+    fn newer_schema_version_is_refused_not_silently_run() {
+        let path = temp_db("migrate-future");
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.pragma_update(None, "user_version", 99i64).unwrap();
+        }
+        let result = DbWorker::spawn(path.to_str().unwrap());
+        assert!(result.is_err(), "a database from a newer build must be refused, not silently run");
     }
 
     /// Regression test for finding 13's batched-transaction worker loop: a
