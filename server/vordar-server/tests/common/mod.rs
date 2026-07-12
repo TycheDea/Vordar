@@ -62,6 +62,9 @@ pub struct Bot {
     pub last_hp: HashMap<u64, i32>,
     /// EntityDied messages as (id, pos), in arrival order (v8)
     pub deaths: Vec<(u64, glam::Vec3)>,
+    /// Set once `ClientEvent::Disconnected` is observed (networking rework 8,
+    /// finding 3: proves a server-side shutdown actually closed the wire).
+    pub disconnected: bool,
 }
 
 impl Bot {
@@ -126,6 +129,7 @@ impl Bot {
             last_states: Vec::new(),
             last_hp: HashMap::new(),
             deaths: Vec::new(),
+            disconnected: false,
         }
     }
 
@@ -144,6 +148,10 @@ impl Bot {
             // after Login.
             if let ClientEvent::Connected = event {
                 self.client.send(encode(&ClientMsg::Login { name: self.name.clone() }));
+                continue;
+            }
+            if let ClientEvent::Disconnected = event {
+                self.disconnected = true;
                 continue;
             }
             if let ClientEvent::Message(data) = event {
