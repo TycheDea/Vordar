@@ -18,7 +18,7 @@ pub mod net_plugin;
 use db::DbHandle;
 use engine_app::app::App;
 use engine_app::prefab_plugin::PrefabPlugin;
-use engine_net::NetServer;
+use engine_net::{NetLimits, NetServer};
 use engine_physics::PhysicsPlugin;
 use net_plugin::NetServerPlugin;
 use std::collections::HashMap;
@@ -33,13 +33,24 @@ pub const TICK_HZ: f64 = 60.0;
 /// Assemble a single-zone server App listening on `addr`, persisting
 /// characters to the SQLite database at `db_path` (`:memory:` for throwaway).
 /// Panics if the QUIC endpoint cannot bind or the database cannot open —
-/// the server is useless without either.
+/// the server is useless without either. Uses the transport's hostile-client
+/// default connection caps — see [`build_server_app_with_limits`] to override
+/// them.
 pub fn build_server_app(addr: SocketAddr, db_path: &str) -> App {
+    build_server_app_with_limits(addr, db_path, NetLimits::default())
+}
+
+/// Like [`build_server_app`], but with explicit connection-cap configuration
+/// (networking audit 2026-07-11, finding 20) — e.g. a soak harness modeling
+/// many distinct bot clients from one source IP raises
+/// `max_connections_per_ip` to its bot count here instead of the transport
+/// weakening its own default.
+pub fn build_server_app_with_limits(addr: SocketAddr, db_path: &str, limits: NetLimits) -> App {
     let mut app = App::new();
     app.add_plugin(PhysicsPlugin)
         .add_plugin(PrefabPlugin)
         .add_plugin(CoreGamePlugin)
-        .add_plugin(NetServerPlugin { addr, db_path: db_path.to_owned() });
+        .add_plugin(NetServerPlugin { addr, db_path: db_path.to_owned(), limits });
     app
 }
 

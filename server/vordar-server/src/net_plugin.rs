@@ -11,7 +11,7 @@ use engine_core::prefab::{spawn_prefab, PrefabId};
 use engine_core::spatial::SpatialGrid;
 use engine_core::traits::{DespawnQueue, Resources, SpawnContext};
 use engine_core::World;
-use engine_net::{ConnId, NetMetrics, NetServer, ServerEvent};
+use engine_net::{ConnId, NetLimits, NetMetrics, NetServer, ServerEvent};
 use glam::{Vec2, Vec3};
 use hecs::Entity;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -78,6 +78,11 @@ pub struct NetServerPlugin {
     pub addr: SocketAddr,
     /// SQLite path for character persistence (`:memory:` for throwaway).
     pub db_path: String,
+    /// Bind-time connection-cap configuration (networking audit 2026-07-11,
+    /// finding 20). `NetLimits::default()` for production; a soak harness
+    /// modeling many distinct clients from one source IP raises
+    /// `max_connections_per_ip` here instead.
+    pub limits: NetLimits,
 }
 
 impl Plugin for NetServerPlugin {
@@ -85,7 +90,7 @@ impl Plugin for NetServerPlugin {
         // Single-zone convenience: a lone "start" zone with no portals that
         // owns its DbWorker. Multi-zone servers call `install` directly with
         // a shared worker and the real topology.
-        let server = NetServer::bind(self.addr, PROTOCOL_VERSION)
+        let server = NetServer::bind_with_limits(self.addr, PROTOCOL_VERSION, self.limits)
             .unwrap_or_else(|e| panic!("failed to bind {}: {e}", self.addr));
         let db_owner = DbWorker::spawn(&self.db_path)
             .unwrap_or_else(|e| panic!("failed to open db '{}': {e}", self.db_path));

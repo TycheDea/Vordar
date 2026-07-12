@@ -58,6 +58,28 @@ pub struct NetServer {
     metrics: Arc<NetMetrics>,
 }
 
+/// Bind-time connection-cap configuration (networking audit 2026-07-11,
+/// finding 20). `NetServer::bind`'s hard-coded caps and this struct's
+/// `Default` are the same hostile-client values — production keeps them
+/// untouched. An embedder that models a real crowd of distinct clients from
+/// one source IP (a soak harness, a stress CLI, a LAN deployment) states that
+/// trust model explicitly through `NetServer::bind_with_limits` instead of
+/// the transport weakening its own default.
+#[derive(Clone, Copy, Debug)]
+pub struct NetLimits {
+    pub max_connections: usize,
+    pub max_connections_per_ip: usize,
+}
+
+impl Default for NetLimits {
+    fn default() -> Self {
+        Self {
+            max_connections: NetServer::MAX_CONNECTIONS,
+            max_connections_per_ip: NetServer::MAX_CONNECTIONS_PER_IP,
+        }
+    }
+}
+
 /// Enqueue a frame onto a connection's writer queue, tracking backlog depth.
 /// A stalled reader (a client that stops draining its stream) otherwise grows
 /// this queue without bound; once depth crosses `NetServer::WRITER_QUEUE_CAP`
@@ -81,8 +103,19 @@ fn enqueue(
 
 impl NetServer {
     /// Bind a QUIC endpoint and start the network thread. `version` is the
-    /// application protocol version checked during the handshake.
+    /// application protocol version checked during the handshake. Uses the
+    /// hostile-client default connection caps — see [`NetServer::bind_with_limits`]
+    /// to override them.
     pub fn bind(addr: SocketAddr, version: u8) -> Result<Self, NetError> {
+        Self::bind_with_limits(addr, version, NetLimits::default())
+    }
+
+    /// Like [`NetServer::bind`], but with explicit connection-cap configuration
+    /// (networking audit 2026-07-11, finding 20) instead of the transport's
+    /// hostile-client defaults — e.g. a soak harness modeling many distinct
+    /// clients from one source IP raises `max_connections_per_ip` to its bot
+    /// count here rather than the transport weakening its own default.
+    pub fn bind_with_limits(addr: SocketAddr, version: u8, limits: NetLimits) -> Result<Self, NetError> {
         let epoch = Instant::now();
         let (event_tx, event_rx) = unbounded_channel();
         let (out_tx, out_rx) = unbounded_channel();
@@ -105,7 +138,7 @@ impl NetServer {
                 };
                 rt.block_on(server_main(
                     addr, version, epoch, event_tx, out_rx, thread_conns, thread_rtts,
-                    thread_metrics, ready_tx,
+                    thread_metrics, ready_tx, limits,
                 ));
             })
             .map_err(NetError::Io)?;
@@ -137,14 +170,18 @@ impl NetServer {
     /// Bounded writer queue policy: drop connection when backlog exceeds this.
     pub const WRITER_QUEUE_CAP: usize = 128;
 
-    /// Hard cap on total simultaneous connections this endpoint will hold
-    /// open — without it, a connection flood grows `ConnMap` (and every
+    /// Default hard cap on total simultaneous connections this endpoint will
+    /// hold open — without it, a connection flood grows `ConnMap` (and every
     /// per-connection task/channel/queue) without bound (networking audit
-    /// 2026-07-11, finding 4).
+    /// 2026-07-11, finding 4). This is `NetLimits::default().max_connections`;
+    /// override via `bind_with_limits` (finding 20).
     pub const MAX_CONNECTIONS: usize = 4096;
-    /// Hard cap on simultaneous connections from a single source IP — bounds
-    /// one hostile or misconfigured client from exhausting `MAX_CONNECTIONS`
-    /// alone.
+    /// Default hard cap on simultaneous connections from a single source IP —
+    /// bounds one hostile or misconfigured client from exhausting
+    /// `MAX_CONNECTIONS` alone. This is
+    /// `NetLimits::default().max_connections_per_ip`; an embedder modeling
+    /// many distinct clients from one IP (a soak harness) overrides it via
+    /// `bind_with_limits` (finding 20).
     pub const MAX_CONNECTIONS_PER_IP: usize = 8;
 
     /// Reader-side token-bucket rate limit (finding 4): the number of app
@@ -196,6 +233,7 @@ async fn server_main(
     rtts: RttMap,
     metrics: Arc<NetMetrics>,
     ready: std::sync::mpsc::Sender<Result<SocketAddr, NetError>>,
+    limits: NetLimits,
 ) {
     let endpoint = match server_crypto()
         .and_then(|cfg| quinn::Endpoint::server(cfg, addr).map_err(NetError::Io))
@@ -275,8 +313,8 @@ async fn server_main(
         {
             let mut counts = ip_counts.lock().unwrap();
             let per_ip = *counts.get(&remote_ip).unwrap_or(&0);
-            if total_conns.load(Ordering::Relaxed) as usize >= NetServer::MAX_CONNECTIONS
-                || per_ip >= NetServer::MAX_CONNECTIONS_PER_IP
+            if total_conns.load(Ordering::Relaxed) as usize >= limits.max_connections
+                || per_ip >= limits.max_connections_per_ip
             {
                 incoming.refuse();
                 continue;

@@ -12,6 +12,7 @@ use common::Bot;
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::Resources;
 use engine_core::World;
+use engine_net::NetLimits;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -137,7 +138,12 @@ fn phase7_soak_200_bots_hold_tick_budget() {
         let post_intervals = post_intervals.clone();
         let busy_micros = busy_micros.clone();
         std::thread::spawn(move || {
-            let mut app = vordar_server::build_server_app(addr, ":memory:");
+            // All bots dial in from localhost — one source IP standing in for
+            // a real crowd of distinct clients. State that explicitly instead
+            // of raising the transport's hostile-client default (networking
+            // audit 2026-07-11, finding 20).
+            let limits = NetLimits { max_connections_per_ip: total_bots, ..NetLimits::default() };
+            let mut app = vordar_server::build_server_app_with_limits(addr, ":memory:", limits);
             app.add_system(
                 PhaseMeter { last: None, recording: recording.clone(), intervals: input_intervals },
                 Phase::Input,
