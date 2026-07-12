@@ -56,6 +56,11 @@ pub struct NetServer {
     local_addr: SocketAddr,
     rtts: RttMap,
     metrics: Arc<NetMetrics>,
+    /// Signals `server_main`'s accept loop to stop; taken and sent on Drop.
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// The network thread's handle; taken and joined on Drop, bounded by
+    /// `server_main`'s `wait_idle` timeout so Drop cannot hang.
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 /// Bind-time connection-cap configuration (networking audit 2026-07-11,
@@ -125,11 +130,12 @@ impl NetServer {
 
         // Report bind success/failure synchronously before the thread detaches.
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<SocketAddr, NetError>>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
         let thread_conns = conns.clone();
         let thread_rtts = rtts.clone();
         let thread_metrics = metrics.clone();
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name("engine-net-server".into())
             .spawn(move || {
                 let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
@@ -138,7 +144,7 @@ impl NetServer {
                 };
                 rt.block_on(server_main(
                     addr, version, epoch, event_tx, out_rx, thread_conns, thread_rtts,
-                    thread_metrics, ready_tx, limits,
+                    thread_metrics, ready_tx, limits, shutdown_rx,
                 ));
             })
             .map_err(NetError::Io)?;
@@ -147,7 +153,16 @@ impl NetServer {
             .recv()
             .map_err(|_| NetError::Handshake("network thread died during bind".into()))??;
 
-        Ok(Self { events: event_rx, out: out_tx, epoch, local_addr, rtts, metrics })
+        Ok(Self {
+            events: event_rx,
+            out: out_tx,
+            epoch,
+            local_addr,
+            rtts,
+            metrics,
+            shutdown_tx: Some(shutdown_tx),
+            thread: Some(thread),
+        })
     }
 
     /// Drain all pending network events. Call once per Input tick.
@@ -222,6 +237,21 @@ impl NetServer {
     }
 }
 
+impl Drop for NetServer {
+    /// Deterministically stops the accept loop, closes the QUIC endpoint
+    /// (every connected client sees a close with reason "server shutdown"),
+    /// and joins the network thread — bounded by `server_main`'s
+    /// `wait_idle` timeout, so this cannot hang.
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn server_main(
     addr: SocketAddr,
@@ -234,6 +264,7 @@ async fn server_main(
     metrics: Arc<NetMetrics>,
     ready: std::sync::mpsc::Sender<Result<SocketAddr, NetError>>,
     limits: NetLimits,
+    mut shutdown: tokio::sync::oneshot::Receiver<()>,
 ) {
     let endpoint = match server_crypto()
         .and_then(|cfg| quinn::Endpoint::server(cfg, addr).map_err(NetError::Io))
@@ -296,7 +327,14 @@ async fn server_main(
     let next_id = Arc::new(AtomicU64::new(1));
     let ip_counts: IpCounts = Arc::new(Mutex::new(HashMap::new()));
     let total_conns = Arc::new(AtomicU64::new(0));
-    while let Some(incoming) = endpoint.accept().await {
+    loop {
+        let incoming = tokio::select! {
+            incoming = endpoint.accept() => incoming,
+            // A dropped sender also completes the receiver, so a leaked or
+            // forgotten `NetServer` can never wedge this thread the other way.
+            _ = &mut shutdown => break,
+        };
+        let Some(incoming) = incoming else { break };
         // QUIC address validation (finding 4): force a retry round-trip
         // before spending any handshake work on a connection whose source
         // address hasn't been proven yet — closes the UDP amplification
@@ -362,6 +400,13 @@ async fn server_main(
             }
         });
     }
+
+    // Shutdown (finding 1, networking rework plan 2026-07-12): stop accepting,
+    // close every open connection with a reason the client can surface, then
+    // give close frames a brief window to reach the wire before the thread
+    // exits and the socket is released.
+    endpoint.close(0u32.into(), b"server shutdown");
+    let _ = tokio::time::timeout(Duration::from_secs(3), endpoint.wait_idle()).await;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -564,5 +609,50 @@ mod tests {
         assert_eq!(depth_after_kick, 0, "writer queue depth did not drain after the stalled connection was kicked");
 
         drop(connection);
+    }
+
+    /// Regression test for `NetServer` having no real close path (networking
+    /// rework plan 2026-07-12, finding 1). Before this fix dropping a
+    /// `NetServer` closed the event/outgoing channels but left the accept
+    /// loop running forever on a detached thread — the client was never told
+    /// the server was gone, and the listening socket stayed bound so an
+    /// immediate rebind on the same address would fail.
+    #[tokio::test]
+    async fn drop_closes_endpoint_notifies_client_and_releases_port() {
+        let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
+        let addr = server.local_addr();
+
+        let mut client = crate::NetClient::connect(addr, 1).expect("connect");
+
+        // Wait for the server to register the connection.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if server.poll().into_iter().any(|ev| matches!(ev, ServerEvent::Connected(_))) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "server never saw the connection");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        drop(server);
+
+        // (a) The client must observe Disconnected within a deadline — the
+        // server's close(reason) must actually reach the wire.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let disconnected = loop {
+            if client.poll().into_iter().any(|ev| matches!(ev, crate::ClientEvent::Disconnected)) {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert!(disconnected, "client never observed Disconnected after the server was dropped");
+
+        // (b) The listening socket must be released immediately — before the
+        // fix the leaked endpoint still owned the port and this rebind failed.
+        let _rebound = NetServer::bind(addr, 1)
+            .expect("rebind on the same address should succeed immediately after drop");
     }
 }
