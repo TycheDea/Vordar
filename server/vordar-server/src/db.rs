@@ -144,6 +144,23 @@ impl DbWorker {
 }
 
 impl DbHandle {
+    /// Mint a sibling handle for the same worker: shares `self`'s request
+    /// channel (saves and loads still flow to, and are ordered by, the one
+    /// `DbWorker`) but owns a fresh, private reply channel. Deliberately not
+    /// `impl Clone` — a clone that silently shared the reply channel would be
+    /// a semantic trap: a load issued through the fork must reply only to the
+    /// fork, never to `self`, so a supervisor rebuilding a panicked zone's
+    /// App can mint a new handle without in-flight replies addressed to the
+    /// dead App's reply channel leaking into the rebuilt one.
+    pub fn fork(&self) -> DbHandle {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        DbHandle {
+            tx: self.tx.clone(),
+            reply_tx,
+            reply_rx: Mutex::new(reply_rx),
+        }
+    }
+
     /// Load `name`'s character, inserting `defaults` first if it doesn't
     /// exist. The result arrives via `poll` on THIS handle.
     pub fn load_or_create(&self, conn: ConnId, name: String, defaults: CharacterRecord) {
@@ -442,6 +459,54 @@ mod tests {
         }
         let result = DbWorker::spawn(path.to_str().unwrap());
         assert!(result.is_err(), "a database from a newer build must be refused, not silently run");
+    }
+
+    /// Regression test for finding 1 of the zone-watchdog rework: a
+    /// supervisor rebuilding a panicked zone's App needs a fresh `DbHandle`
+    /// without reaching back to the main-thread `DbWorker`. `fork()` must
+    /// share the worker's request channel (same end-to-end persistence) but
+    /// keep its own reply channel private — a load issued through the fork
+    /// must never be visible on the handle it was forked from.
+    #[test]
+    fn fork_routes_replies_only_to_the_fork() {
+        let path = temp_db("fork");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let h1 = worker.handle();
+        let h2 = h1.fork();
+
+        h2.load_or_create(1, "forked".into(), defaults());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let loaded = loop {
+            assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle");
+            if let Some(loaded) = h2.poll().pop() {
+                break loaded;
+            }
+            assert!(std::time::Instant::now() < deadline, "fork load timed out");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(loaded.name, "forked");
+        assert_eq!(loaded.record, defaults());
+        assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle after completion");
+
+        let moved = Vec3::new(5.0, 0.0, -1.0);
+        h2.save("forked".into(), "east".into(), moved, 77);
+        drop(h1);
+        drop(h2);
+        drop(worker);
+
+        let check = Connection::open(&path).unwrap();
+        let (zone, pos_x, pos_y, pos_z, health): (String, f64, f64, f64, i32) = check
+            .query_row(
+                "SELECT zone, pos_x, pos_y, pos_z, health FROM characters WHERE name = 'forked'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(zone, "east");
+        assert_eq!(pos_x, moved.x as f64);
+        assert_eq!(pos_y, moved.y as f64);
+        assert_eq!(pos_z, moved.z as f64);
+        assert_eq!(health, 77);
     }
 
     /// Regression test for finding 13's batched-transaction worker loop: a
