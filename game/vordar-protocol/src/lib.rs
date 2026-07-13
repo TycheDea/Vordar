@@ -13,7 +13,7 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 13;
+pub const PROTOCOL_VERSION: u8 = 14;
 
 /// A client's account credential: a random 32-byte token, presented on every
 /// `Login` and verified server-side against `sha256(token)` stored in the
@@ -59,18 +59,35 @@ pub enum ServerMsg {
     /// zone installs only its own, so the table is authoritative rather than
     /// independently derived on each side.
     PrefabTable { names: Vec<String> },
-    /// Per-client area-of-interest snapshot. Entity identity (prefab) is sent
-    /// once on AOI entry; afterward only positions flow. `last_processed_seq`
-    /// is the highest intent seq the server had applied when the snapshot was
-    /// taken: the client drops acknowledged pending intents and replays the
-    /// rest on top of its own position (prediction reconciliation).
-    Snapshot {
+    /// Per-client area-of-interest identity delta: entities entering or
+    /// leaving your AOI this tick. Entity identity (prefab) is sent once on
+    /// AOI entry; afterward only positions flow via `Snapshot`. Rides the
+    /// reliable stream (protocol v14, networking rework 3 finding 4) —
+    /// ordering with `PrefabTable`/`Welcome` is what makes the enter/leave
+    /// diff protocol sound — and is sent only when `enters`/`leaves` is
+    /// non-empty, so steady state sends no stream traffic at all.
+    AoiDelta {
         tick: u64,
-        last_processed_seq: u32,
         /// Entities that entered your AOI (or spawned inside it) — spawn these.
         enters: Vec<EntityState>,
         /// Entities that left your AOI (or despawned) — despawn these.
         leaves: Vec<u32>,
+    },
+    /// Per-client state update: current position (+hp) of every entity in
+    /// your AOI, plus the intent ack. Rides an unreliable QUIC datagram every
+    /// snapshot interval (protocol v14, networking rework 3 finding 4) — a
+    /// lost datagram is simply skipped, because the next cadence supersedes
+    /// it. `last_processed_seq` is the highest intent seq the server had
+    /// applied when the snapshot was taken: the client drops acknowledged
+    /// pending intents and replays the rest on top of its own position
+    /// (prediction reconciliation). Datagrams can arrive out of order, so a
+    /// `Snapshot` whose `tick` is not strictly newer than the last one
+    /// applied must be dropped before any field is read (ack included) —
+    /// per-connection ticks are strictly increasing, so this never drops a
+    /// legitimate update.
+    Snapshot {
+        tick: u64,
+        last_processed_seq: u32,
         /// Current position of every entity in your AOI.
         states: Vec<EntityPos>,
     },
@@ -276,11 +293,6 @@ mod tests {
         let msg = ServerMsg::Snapshot {
             tick: 42,
             last_processed_seq: 17,
-            enters: vec![
-                EntityState { id: 9, prefab: 3, pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: Some(100) },
-                EntityState { id: 11, prefab: 7, pos: WirePos(Vec3::ZERO), hp: None },
-            ],
-            leaves: vec![4],
             states: vec![
                 EntityPos { id: 9, pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: Some(100) },
                 EntityPos { id: 11, pos: WirePos(Vec3::ZERO), hp: None },
@@ -288,17 +300,39 @@ mod tests {
         };
         let bytes = encode(&msg);
         match decode::<ServerMsg>(&bytes).unwrap() {
-            ServerMsg::Snapshot { tick, last_processed_seq, enters, leaves, states } => {
+            ServerMsg::Snapshot { tick, last_processed_seq, states } => {
                 assert_eq!(tick, 42);
                 assert_eq!(last_processed_seq, 17);
-                assert_eq!(enters.len(), 2);
-                assert_eq!(enters[0].prefab, 3);
-                assert!((enters[0].pos.0 - Vec3::new(1.0, 0.0, -3.0)).length() < 1.0 / 256.0);
-                assert_eq!(leaves, vec![4]);
                 assert_eq!(states[0].id, 9);
                 assert!((states[0].pos.0 - Vec3::new(1.0, 0.0, -3.0)).length() < 1.0 / 256.0);
                 assert_eq!(states[0].hp, Some(100), "hp rides in every state (v8) as Some when Health exists");
                 assert_eq!(states[1].hp, None, "a Health-less entity's hp is None (v12), not 0");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn aoi_delta_roundtrip() {
+        // Protocol v14, networking rework 3 finding 4: the identity delta
+        // split off Snapshot onto its own stream-only message.
+        let msg = ServerMsg::AoiDelta {
+            tick: 42,
+            enters: vec![
+                EntityState { id: 9, prefab: 3, pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: Some(100) },
+                EntityState { id: 11, prefab: 7, pos: WirePos(Vec3::ZERO), hp: None },
+            ],
+            leaves: vec![4],
+        };
+        let bytes = encode(&msg);
+        match decode::<ServerMsg>(&bytes).unwrap() {
+            ServerMsg::AoiDelta { tick, enters, leaves } => {
+                assert_eq!(tick, 42);
+                assert_eq!(enters.len(), 2);
+                assert_eq!(enters[0].prefab, 3);
+                assert!((enters[0].pos.0 - Vec3::new(1.0, 0.0, -3.0)).length() < 1.0 / 256.0);
+                assert_eq!(enters[1].hp, None, "a Health-less entity's hp is None (v12), not 0");
+                assert_eq!(leaves, vec![4]);
             }
             _ => panic!("wrong variant"),
         }
@@ -352,23 +386,36 @@ mod tests {
     fn snapshot_position_quantization_roundtrip() {
         // Awkward coordinates (negative, fractional) through the real
         // encode/decode path: quantization error must stay within half a
-        // 1/256 m quantum (plus float slop) per axis.
+        // 1/256 m quantum (plus float slop) per axis. Covers both messages
+        // WirePos rides on (protocol v14 split): AoiDelta's enters and
+        // Snapshot's states.
         let awkward = Vec3::new(-37.123, 0.0, 81.987);
-        let msg = ServerMsg::Snapshot {
+        let tol = 1.0 / 512.0 + 1e-4;
+
+        let enters_msg = ServerMsg::AoiDelta {
             tick: 1,
-            last_processed_seq: 0,
             enters: vec![EntityState { id: 1, prefab: 0, pos: WirePos(awkward), hp: Some(100) }],
             leaves: vec![],
-            states: vec![EntityPos { id: 1, pos: WirePos(awkward), hp: Some(100) }],
         };
-        let bytes = encode(&msg);
+        let bytes = encode(&enters_msg);
         match decode::<ServerMsg>(&bytes).unwrap() {
-            ServerMsg::Snapshot { enters, states, .. } => {
-                let tol = 1.0 / 512.0 + 1e-4;
+            ServerMsg::AoiDelta { enters, .. } => {
                 let e = enters[0].pos.0;
                 assert!((e.x - awkward.x).abs() < tol, "x off by {}", (e.x - awkward.x).abs());
                 assert!((e.y - awkward.y).abs() < tol, "y off by {}", (e.y - awkward.y).abs());
                 assert!((e.z - awkward.z).abs() < tol, "z off by {}", (e.z - awkward.z).abs());
+            }
+            _ => panic!("wrong variant"),
+        }
+
+        let states_msg = ServerMsg::Snapshot {
+            tick: 1,
+            last_processed_seq: 0,
+            states: vec![EntityPos { id: 1, pos: WirePos(awkward), hp: Some(100) }],
+        };
+        let bytes = encode(&states_msg);
+        match decode::<ServerMsg>(&bytes).unwrap() {
+            ServerMsg::Snapshot { states, .. } => {
                 let s = states[0].pos.0;
                 assert!((s.x - awkward.x).abs() < tol);
                 assert!((s.y - awkward.y).abs() < tol);

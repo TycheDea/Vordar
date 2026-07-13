@@ -1231,9 +1231,10 @@ fn crowd_snapshot_fits_datagram_budget() {
     });
 
     // Let the initial `enters` wave (all 101 identities) finish landing
-    // before measuring — a first-join snapshot legitimately carries the full
-    // enters wave and stays on the reliable stream in rework 3, so it's
-    // allowed to exceed this steady-state gate.
+    // before measuring — a first-join identity wave rides `AoiDelta` on the
+    // reliable stream (protocol v14, networking rework 3 finding 4), entirely
+    // separate from the `Snapshot` datagram this gate measures, but settling
+    // first still avoids racing the AOI-entry seeding against steady state.
     settle(&mut bot, Duration::from_secs(1));
     bot.snapshot_bytes.clear();
     settle(&mut bot, Duration::from_secs(1)); // ~10 snapshots at SNAPSHOT_HZ
@@ -1244,6 +1245,11 @@ fn crowd_snapshot_fits_datagram_budget() {
         64,
         "the worst case (full states budget) must still be in effect when measured"
     );
+    // Since rework 3 finding 4, `snapshot_bytes` measures only the datagram
+    // `Snapshot { tick, last_processed_seq, states }` payload — identity
+    // (enters/leaves) moved to the separate stream-only `AoiDelta` message, so
+    // this 1100-byte gate is now literally the datagram-budget measurement
+    // rework 3 needed, not an approximation of it.
     let max = *bot.snapshot_bytes.iter().max().unwrap();
     assert!(
         max <= 1100,

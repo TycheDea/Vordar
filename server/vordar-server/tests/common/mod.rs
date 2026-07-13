@@ -150,6 +150,11 @@ pub struct Bot {
     /// Latest `LoginDenied` reason received, if any (networking rework 1,
     /// finding 3).
     pub denied: Option<LoginDenyReason>,
+    /// Highest `ServerMsg::Snapshot.tick` applied so far — mirrors the
+    /// client's tick guard (protocol v14, networking rework 3 finding 4):
+    /// `Snapshot` rides an unreliable datagram, so a stale/reordered copy
+    /// must be dropped before any field is read (ack included).
+    pub latest_state_tick: u64,
 }
 
 impl Bot {
@@ -230,6 +235,7 @@ impl Bot {
             deaths: Vec::new(),
             disconnected: false,
             denied: None,
+            latest_state_tick: 0,
         })
     }
 
@@ -286,6 +292,7 @@ impl Bot {
             deaths: Vec::new(),
             disconnected: false,
             denied: None,
+            latest_state_tick: 0,
         }
     }
 
@@ -315,13 +322,10 @@ impl Bot {
                 match decode::<ServerMsg>(&data) {
                     Some(ServerMsg::Welcome { player_id }) => self.player_id = Some(player_id),
                     Some(ServerMsg::PrefabTable { names }) => self.prefab_names = names,
-                    Some(ServerMsg::Snapshot { tick, last_processed_seq, enters, leaves, states }) => {
-                        self.last_ack = last_processed_seq;
-                        if self.snapshot_ticks.last() != Some(&tick) {
-                            self.snapshot_ticks.push(tick);
-                        }
-                        self.snapshot_at.push(Instant::now());
-                        self.snapshot_bytes.push(data.len());
+                    // Reliable-stream identity delta (protocol v14, networking
+                    // rework 3 finding 4): AOI enters/leaves, sent only when
+                    // non-empty. Stream ordering means no tick guard is needed.
+                    Some(ServerMsg::AoiDelta { enters, leaves, .. }) => {
                         for e in enters {
                             self.last_snapshot.insert(e.id, e.pos.0);
                             // None (v12) = no Health component — record only
@@ -346,6 +350,22 @@ impl Bot {
                             self.last_hp.remove(&id);
                             self.prefabs.remove(&id);
                         }
+                    }
+                    // Datagram state update (protocol v14, networking rework 3
+                    // finding 4): a stale/reordered copy is dropped before any
+                    // field is read (ack included) — mirrors the client's
+                    // `apply_states` tick guard.
+                    Some(ServerMsg::Snapshot { tick, last_processed_seq, states }) => {
+                        if tick <= self.latest_state_tick {
+                            continue;
+                        }
+                        self.latest_state_tick = tick;
+                        self.last_ack = last_processed_seq;
+                        if self.snapshot_ticks.last() != Some(&tick) {
+                            self.snapshot_ticks.push(tick);
+                        }
+                        self.snapshot_at.push(Instant::now());
+                        self.snapshot_bytes.push(data.len());
                         self.last_states = states.iter().map(|s| s.id).collect();
                         for s in states {
                             self.last_snapshot.insert(s.id, s.pos.0);

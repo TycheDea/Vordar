@@ -59,17 +59,24 @@ fn bench_apply_states(c: &mut Criterion) {
             .enumerate()
             .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: 0, pos: WirePos(pos), hp: None })
             .collect();
-        seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
+        seam::apply_aoi_delta(&mut world, &mut resources, enters, Vec::new());
 
         let states: Vec<EntityPos> = spots
             .iter()
             .enumerate()
             .map(|(i, &pos)| EntityPos { id: i as u32 + 1, pos: WirePos(pos + Vec3::X), hp: None })
             .collect();
+        // Snapshot ticks must strictly increase (protocol v14's tick guard,
+        // networking rework 3 finding 4) — a monotonic counter mirrors the
+        // server's per-connection tick.
+        let mut tick = 0u64;
         group.bench_function(format!("states_a{a}"), |b| {
             b.iter_batched(
                 || states.clone(),
-                |s| seam::apply_snapshot(&mut world, &mut resources, 0, Vec::new(), Vec::new(), s),
+                |s| {
+                    tick += 1;
+                    seam::apply_states(&mut world, &mut resources, tick, 0, s)
+                },
                 BatchSize::SmallInput,
             );
         });
@@ -99,12 +106,12 @@ fn bench_apply_enters(c: &mut Criterion) {
                     .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: 0, pos: WirePos(pos), hp: None })
                     .collect();
                 let t = Instant::now();
-                seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
+                seam::apply_aoi_delta(&mut world, &mut resources, enters, Vec::new());
                 total += t.elapsed();
                 // Untimed: leave + flush so the map stays small and ids fresh.
                 let leaves: Vec<u32> = (next_id..next_id + 64).collect();
                 next_id += 64;
-                seam::apply_snapshot(&mut world, &mut resources, 0, Vec::new(), leaves, Vec::new());
+                seam::apply_aoi_delta(&mut world, &mut resources, Vec::new(), leaves);
                 let pairs: Vec<_> = resources.get_mut::<DespawnQueue>().unwrap().0.drain(..).collect();
                 for (entity, _) in pairs {
                     world.despawn(entity).ok();

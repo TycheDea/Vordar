@@ -122,6 +122,7 @@ impl Plugin for NetClientPlugin {
             pending: VecDeque::new(),
             correction: Vec3::ZERO,
             simulated_rtt: self.simulated_rtt,
+            latest_state_tick: 0,
         })
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         .add_system(NetSendInputSystem, Phase::Input, SystemOrder::after::<NetReceiveSystem>())
@@ -217,6 +218,13 @@ pub struct NetClientState {
     /// Set while disconnected and a redial is scheduled/in flight; read by
     /// the UI to show a "reconnecting" indicator (`reconnect_attempt`).
     reconnect: Option<Reconnect>,
+    /// Highest `ServerMsg::Snapshot.tick` applied so far. `Snapshot` rides an
+    /// unreliable datagram (protocol v14, networking rework 3 finding 4), so
+    /// a copy can arrive late or out of order; any snapshot whose tick is not
+    /// strictly greater is dropped before any field is read (ack included).
+    /// Reset in `teardown_replicated_world` so a redirect/reconnect doesn't
+    /// compare against the old zone's ticks.
+    latest_state_tick: u64,
 }
 
 impl NetClientState {
@@ -292,8 +300,11 @@ impl System for NetReceiveSystem {
                         log::info!("prefab table received: {} prefabs", names.len());
                         resources.get_mut::<NetClientState>().unwrap().prefab_names = names;
                     }
-                    Some(ServerMsg::Snapshot { last_processed_seq, enters, leaves, states, .. }) => {
-                        apply_snapshot(world, resources, last_processed_seq, enters, leaves, states);
+                    Some(ServerMsg::AoiDelta { enters, leaves, .. }) => {
+                        apply_aoi_delta(world, resources, enters, leaves);
+                    }
+                    Some(ServerMsg::Snapshot { tick, last_processed_seq, states }) => {
+                        apply_states(world, resources, tick, last_processed_seq, states);
                     }
                     Some(ServerMsg::MechanicScheduled {
                         telegraph_prefab, pos, radius, resolve_at_micros, duration_micros, ..
@@ -369,6 +380,10 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     state.prefab_names.clear();
     // Fresh connection, fresh validation stream (per-connection on the server).
     state.seq = 0;
+    // The new connection's tick sequence starts over — comparing against the
+    // old zone's ticks would drop every snapshot until it catches up
+    // (protocol v14, networking rework 3 finding 4).
+    state.latest_state_tick = 0;
     resources.get_mut::<WorldTime>().unwrap().synced = false;
 }
 
@@ -504,25 +519,22 @@ fn handle_entity_died(world: &mut World, resources: &mut Resources, id: u32, pos
     }
 }
 
-fn apply_snapshot(
-    world: &mut World,
-    resources: &mut Resources,
-    last_processed_seq: u32,
-    enters: Vec<EntityState>,
-    leaves: Vec<u32>,
-    states: Vec<EntityPos>,
-) {
+/// Reliable-stream half of a snapshot (`ServerMsg::AoiDelta`, protocol v14,
+/// networking rework 3 finding 4): entities entering or leaving the AOI.
+/// Identity (prefab) is sent once here; `apply_states` keeps positions
+/// current afterward. Stream ordering means this never needs a tick guard.
+fn apply_aoi_delta(world: &mut World, resources: &mut Resources, enters: Vec<EntityState>, leaves: Vec<u32>) {
     // Take the map instead of cloning it — nothing below reads it through
     // NetClientState, and it is written back at the end of this function.
     // prefab_names is small (a handful of short strings) and cloned once per
-    // snapshot — see ServerMsg::PrefabTable (protocol v13, networking rework
+    // delta — see ServerMsg::PrefabTable (protocol v13, networking rework
     // 5 finding 4).
     let (mut known, own_id, predict, prefab_names) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
         (std::mem::take(&mut state.entities), state.own_id, state.predict, state.prefab_names.clone())
     };
 
-    // Enters first, so this snapshot's states can address the new entities.
+    // Enters first, so a same-tick Snapshot's states can address the new entities.
     for enter in enters {
         if known.contains_key(&enter.id) {
             continue;
@@ -558,6 +570,33 @@ fn apply_snapshot(
             resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
         }
     }
+
+    resources.get_mut::<NetClientState>().unwrap().entities = known;
+}
+
+/// Datagram half of a snapshot (`ServerMsg::Snapshot`, protocol v14,
+/// networking rework 3 finding 4): current position (+hp) of every entity in
+/// the AOI, plus the intent ack. Datagrams can arrive out of order, so any
+/// `tick` not strictly newer than the last one applied is dropped before any
+/// field is read (ack included) — the tick guard is what makes an
+/// unreliable, unordered lane safe to apply directly.
+fn apply_states(
+    world: &mut World,
+    resources: &mut Resources,
+    tick: u64,
+    last_processed_seq: u32,
+    states: Vec<EntityPos>,
+) {
+    // Take the map instead of cloning it — nothing below reads it through
+    // NetClientState, and it is written back at the end of this function.
+    let (known, own_id, predict) = {
+        let state = resources.get_mut::<NetClientState>().unwrap();
+        if tick <= state.latest_state_tick {
+            return;
+        }
+        state.latest_state_tick = tick;
+        (std::mem::take(&mut state.entities), state.own_id, state.predict)
+    };
 
     // Own-player state is handled by reconciliation, which needs &mut World —
     // pull it out before the view below borrows the world.
@@ -1142,6 +1181,7 @@ pub mod bench {
             correction: Vec3::ZERO,
             simulated_rtt: Duration::ZERO,
             reconnect: None,
+            latest_state_tick: 0,
         }
     }
 
@@ -1162,15 +1202,18 @@ pub mod bench {
         state.pending.push_back(PendingIntent { seq, dir, dt, leap: None });
     }
 
-    pub fn apply_snapshot(
+    pub fn apply_aoi_delta(world: &mut World, resources: &mut Resources, enters: Vec<EntityState>, leaves: Vec<u32>) {
+        super::apply_aoi_delta(world, resources, enters, leaves);
+    }
+
+    pub fn apply_states(
         world: &mut World,
         resources: &mut Resources,
+        tick: u64,
         last_processed_seq: u32,
-        enters: Vec<EntityState>,
-        leaves: Vec<u32>,
         states: Vec<EntityPos>,
     ) {
-        super::apply_snapshot(world, resources, last_processed_seq, enters, leaves, states);
+        super::apply_states(world, resources, tick, last_processed_seq, states);
     }
 
     pub fn reconcile_own(
@@ -1187,6 +1230,7 @@ pub mod bench {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vordar_protocol::WirePos;
 
     const DT: f32 = 1.0 / 60.0;
 
@@ -1205,6 +1249,96 @@ mod tests {
         let n = bytes.len().min(32);
         token[..n].copy_from_slice(&bytes[..n]);
         token
+    }
+
+    /// Networking rework 3, finding 4: `Snapshot` now rides an unreliable
+    /// datagram, so a stale/reordered copy must never regress state. This
+    /// drives the real `apply_states` receive path directly (no
+    /// reimplemented logic, no network): a fresh snapshot at tick 20 puts a
+    /// remote entity at P2, then a stale snapshot at tick 10 (a LOWER
+    /// `last_processed_seq` too) tries to put it at P1. Without the tick
+    /// guard, the remote entity's `NetLerp` target would regress to P1 and
+    /// `reconcile_own` would re-run against the stale ack.
+    #[test]
+    fn apply_states_drops_a_stale_snapshot_tick() {
+        let mut world = World::new();
+        let mut resources = Resources::new();
+
+        // A remote (non-own) replicated entity — the general states-apply path.
+        let remote = world.spawn((Transform::new(Vec3::ZERO), NetLerp { from: Vec3::ZERO, to: Vec3::ZERO, t: 1.0 }));
+        // Our own predicted player — exercises reconcile_own in the same call.
+        let own = world.spawn((Transform::new(Vec3::ZERO), Player { speed: 6.0 }));
+
+        let mut entities = HashMap::new();
+        entities.insert(1u32, remote);
+        entities.insert(2u32, own);
+
+        resources.insert(NetClientState {
+            client: None,
+            server_addr: "127.0.0.1:9".parse().unwrap(),
+            user: "unit-test".into(),
+            token: [0u8; 32],
+            login_denied: false,
+            own_id: Some(2),
+            entities,
+            prefab_names: Vec::new(),
+            seq: 0,
+            predict: true,
+            pending: VecDeque::from(vec![intent(48, Vec2::X), intent(49, Vec2::X)]),
+            correction: Vec3::ZERO,
+            simulated_rtt: Duration::ZERO,
+            reconnect: None,
+            latest_state_tick: 0,
+        });
+
+        let p2 = Vec3::new(5.0, 0.0, 0.0);
+        apply_states(
+            &mut world,
+            &mut resources,
+            20,
+            50,
+            vec![
+                EntityPos { id: 1, pos: WirePos(p2), hp: None },
+                EntityPos { id: 2, pos: WirePos(Vec3::ZERO), hp: None },
+            ],
+        );
+
+        let lerp_after_20 = world.get::<&NetLerp>(remote).unwrap().to;
+        assert!((lerp_after_20 - p2).length() < 1e-6, "tick 20 must land at P2: {lerp_after_20:?}");
+        assert_eq!(
+            resources.get::<NetClientState>().unwrap().pending.len(),
+            0,
+            "ack 50 must have trimmed both already-applied pending intents (seq 48/49 <= 50)"
+        );
+
+        // A new local intent sent AFTER the tick-20 snapshot was applied.
+        resources.get_mut::<NetClientState>().unwrap().pending.push_back(intent(53, Vec2::X));
+
+        // A stale, reordered datagram: lower tick, lower ack, wrong position.
+        let p1 = Vec3::new(-5.0, 0.0, 0.0);
+        apply_states(
+            &mut world,
+            &mut resources,
+            10,
+            5,
+            vec![
+                EntityPos { id: 1, pos: WirePos(p1), hp: None },
+                EntityPos { id: 2, pos: WirePos(Vec3::ZERO), hp: None },
+            ],
+        );
+
+        let lerp_after_stale = world.get::<&NetLerp>(remote).unwrap().to;
+        assert!(
+            (lerp_after_stale - p2).length() < 1e-6,
+            "stale snapshot must not move the lerp target off P2: {lerp_after_stale:?}"
+        );
+        let pending_seqs: Vec<u32> =
+            resources.get::<NetClientState>().unwrap().pending.iter().map(|p| p.seq).collect();
+        assert_eq!(
+            pending_seqs,
+            vec![53],
+            "the stale snapshot's ack must never be applied — pending must not be re-derived from it"
+        );
     }
 
     #[test]
@@ -1325,6 +1459,7 @@ mod tests {
             correction: Vec3::ZERO,
             simulated_rtt: Duration::ZERO,
             reconnect: None,
+            latest_state_tick: 0,
         });
 
         let mut recv = NetReceiveSystem;
@@ -1491,6 +1626,7 @@ mod tests {
             correction: Vec3::ZERO,
             simulated_rtt: Duration::from_millis(150),
             reconnect: None,
+            latest_state_tick: 0,
         });
 
         let mut recv = NetReceiveSystem;

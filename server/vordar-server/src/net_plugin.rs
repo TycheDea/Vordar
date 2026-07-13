@@ -1283,12 +1283,21 @@ impl System for SnapshotBroadcastSystem {
             // The old known set becomes next conn's current_ids scratch.
             std::mem::swap(&mut pc.known, &mut self.current_ids);
 
+            // Identity delta rides the reliable stream (ordering with
+            // PrefabTable/Welcome is what makes the diff protocol sound) and
+            // only when non-empty — steady state then sends no stream
+            // traffic at all (protocol v14, networking rework 3 finding 4).
+            if !enters.is_empty() || !leaves.is_empty() {
+                state.server.send(conn, encode(&ServerMsg::AoiDelta { tick, enters, leaves }));
+            }
+            // State update rides an unreliable datagram every snapshot
+            // interval: a lost one is simply skipped, since the next cadence
+            // supersedes it — this is the head-of-line blocking this rework
+            // exists to remove.
             let last_processed_seq = pc.applied_seq;
-            state.server.send(conn, encode(&ServerMsg::Snapshot {
+            state.server.send_datagram(conn, encode(&ServerMsg::Snapshot {
                 tick,
                 last_processed_seq,
-                enters,
-                leaves,
                 states,
             }));
         }
