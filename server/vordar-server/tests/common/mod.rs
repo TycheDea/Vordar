@@ -122,6 +122,9 @@ pub struct Bot {
     pub last_ack: u32,
     /// total bytes received in app messages (bandwidth measurement)
     pub bytes: usize,
+    /// per-frame byte size of every `Snapshot` message received, in arrival
+    /// order (networking rework 5 finding 5: the crowd-snapshot size gate).
+    pub snapshot_bytes: Vec<usize>,
     /// scheduled mechanics as (id, resolve_at_micros), in arrival order
     pub mechanics: Vec<(u64, u64)>,
     /// mechanic id → entity ids hit
@@ -215,6 +218,7 @@ impl Bot {
             seq: 0,
             last_ack: 0,
             bytes: 0,
+            snapshot_bytes: Vec::new(),
             mechanics: Vec::new(),
             hit_results: HashMap::new(),
             world_offset: None,
@@ -270,6 +274,7 @@ impl Bot {
             seq: 0,
             last_ack: 0,
             bytes: 0,
+            snapshot_bytes: Vec::new(),
             mechanics: Vec::new(),
             hit_results: HashMap::new(),
             world_offset: None,
@@ -316,6 +321,7 @@ impl Bot {
                             self.snapshot_ticks.push(tick);
                         }
                         self.snapshot_at.push(Instant::now());
+                        self.snapshot_bytes.push(data.len());
                         for e in enters {
                             self.last_snapshot.insert(e.id, e.pos.0);
                             // None (v12) = no Health component — record only

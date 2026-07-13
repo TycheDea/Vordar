@@ -1186,3 +1186,67 @@ fn prefab_table_binds_u16_refs() {
         "own enter must resolve to the PLAYER_PREFAB via the u16 table index"
     );
 }
+
+// Finding 5 of docs/reviews/plan-networking-rework-5-2026-07-13.md: a
+// permanent size gate on steady-state snapshot frames. Findings 1-4 compacted
+// wire entity ids (u32, not raw hecs bits), quantized positions (WirePos),
+// made hp an explicit Option (no more 0-as-"no Health"), and replaced a
+// repeated prefab name string with a u16 table index — together meant to
+// bring a full 64-entry `states` frame (MAX_SNAPSHOT_STATES, net_plugin.rs)
+// comfortably under the ~1.2 KB QUIC datagram budget that rework 3
+// (snapshots on datagrams) is physically blocked on today. Against the
+// pre-rework wire format this exact scenario (a 100-entity crowd, steady
+// state, the full 64-entry states budget) measures ~1.25 KB+ per frame and
+// this test fails; it passes only because findings 1-4 landed first.
+#[test]
+fn crowd_snapshot_fits_datagram_budget() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25192".parse().unwrap();
+
+    // 100 "player" NPCs on rings of radius 5-25 around the origin — all
+    // comfortably inside the bot's AOI_RADIUS (40, net_plugin.rs).
+    let mut positions: Vec<glam::Vec3> = Vec::new();
+    for ring in 0..10 {
+        let radius = 5.0 + ring as f32 * (20.0 / 9.0); // 10 rings, 5.0..=25.0
+        for spot in 0..10 {
+            let angle = (spot as f32 / 10.0) * std::f32::consts::TAU;
+            positions.push(glam::Vec3::new(radius * angle.cos(), 0.0, radius * angle.sin()));
+        }
+    }
+
+    std::thread::spawn(move || {
+        let mut app = vordar_server::build_server_app(addr, ":memory:");
+        app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
+        app.run_headless(60.0, Some(2500));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    // MAX_SNAPSHOT_STATES = 64 (net_plugin.rs): with 101 entities in the AOI
+    // (100 NPCs + the bot's own player), the crowd-throttle round-robin caps
+    // `states` at the full budget — the worst case this gate must measure.
+    bot.wait_for("crowd throttle budget reached", Duration::from_secs(10), |b| {
+        b.last_states.len() == 64
+    });
+
+    // Let the initial `enters` wave (all 101 identities) finish landing
+    // before measuring — a first-join snapshot legitimately carries the full
+    // enters wave and stays on the reliable stream in rework 3, so it's
+    // allowed to exceed this steady-state gate.
+    settle(&mut bot, Duration::from_secs(1));
+    bot.snapshot_bytes.clear();
+    settle(&mut bot, Duration::from_secs(1)); // ~10 snapshots at SNAPSHOT_HZ
+
+    assert!(!bot.snapshot_bytes.is_empty(), "no steady-state snapshots were measured");
+    assert_eq!(
+        bot.last_states.len(),
+        64,
+        "the worst case (full states budget) must still be in effect when measured"
+    );
+    let max = *bot.snapshot_bytes.iter().max().unwrap();
+    assert!(
+        max <= 1100,
+        "steady-state snapshot frame is {max} bytes, over the 1100-byte datagram-budget gate"
+    );
+}
