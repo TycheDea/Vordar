@@ -507,8 +507,14 @@ fn phase7_5_rend_kills_camped_enemy() {
 
     // Fight at rend's edge: close to ~2.2, back off under 1.6 (the grunt's
     // 2.5 speed can't catch the bot's 6.0 — face-tanking a 10-per-contact
-    // charger at the Ravager's zero defense loses), rend whenever in range
-    // and off cooldown. Two clean hits (16 + 4 power) beat 30 HP.
+    // charger at the Ravager's zero defense loses). Two clean hits (16 + 4
+    // power) beat 30 HP. Cast attempts go out every 250 ms once well inside
+    // max_range (2.0 vs 2.5): the server silently drops out-of-range and
+    // on-cooldown casts and its own 900 ms cooldown paces the real ones, so
+    // a rejected attempt costs 250 ms — the old edge-of-range gate (2.4,
+    // 0.1 slack at up to 8.5 u/s closing speed) burned a full second per
+    // stale-snapshot miss and flaked past the deadline under parallel-test
+    // CPU load.
     let mut last_cast = Instant::now() - Duration::from_secs(2);
     let deadline = Instant::now() + Duration::from_secs(25);
     let mut hp_seen: Vec<i32> = Vec::new();
@@ -524,7 +530,7 @@ fn phase7_5_rend_kills_camped_enemy() {
             } else {
                 bot.send_move(glam::Vec2::ZERO);
             }
-            if dist <= 2.4 && last_cast.elapsed() > Duration::from_millis(1000) {
+            if dist <= 2.0 && last_cast.elapsed() > Duration::from_millis(250) {
                 bot.send_cast("rend", glam::Vec2::new(grunt.x, grunt.z));
                 last_cast = Instant::now();
             }
