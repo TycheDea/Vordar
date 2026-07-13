@@ -55,14 +55,14 @@ fn bench_apply_states(c: &mut Criterion) {
         let enters: Vec<EntityState> = spots
             .iter()
             .enumerate()
-            .map(|(i, &pos)| EntityState { id: i as u64 + 1, prefab: "bolt".into(), pos, hp: 0 })
+            .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: "bolt".into(), pos, hp: 0 })
             .collect();
         seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
 
         let states: Vec<EntityPos> = spots
             .iter()
             .enumerate()
-            .map(|(i, &pos)| EntityPos { id: i as u64 + 1, pos: pos + Vec3::X, hp: 0 })
+            .map(|(i, &pos)| EntityPos { id: i as u32 + 1, pos: pos + Vec3::X, hp: 0 })
             .collect();
         group.bench_function(format!("states_a{a}"), |b| {
             b.iter_batched(
@@ -87,18 +87,18 @@ fn bench_apply_enters(c: &mut Criterion) {
     c.bench_function("client/apply_snapshot/enters_64", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::ZERO;
-            let mut next_id = 1u64;
+            let mut next_id = 1u32;
             for _ in 0..iters {
                 let enters: Vec<EntityState> = spots
                     .iter()
                     .enumerate()
-                    .map(|(i, &pos)| EntityState { id: next_id + i as u64, prefab: "bolt".into(), pos, hp: 0 })
+                    .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: "bolt".into(), pos, hp: 0 })
                     .collect();
                 let t = Instant::now();
                 seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
                 total += t.elapsed();
                 // Untimed: leave + flush so the map stays small and ids fresh.
-                let leaves: Vec<u64> = (next_id..next_id + 64).collect();
+                let leaves: Vec<u32> = (next_id..next_id + 64).collect();
                 next_id += 64;
                 seam::apply_snapshot(&mut world, &mut resources, 0, Vec::new(), leaves, Vec::new());
                 let pairs: Vec<_> = resources.get_mut::<DespawnQueue>().unwrap().0.drain(..).collect();

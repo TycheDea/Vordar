@@ -11,7 +11,7 @@ use vordar_protocol::{decode, encode, ClientMsg, EntityPos, EntityState, ServerM
 /// states budget plus a few AOI enters/leaves.
 fn snapshot_64() -> ServerMsg {
     let mut rng = Lcg::new(7);
-    let mut pos = |i: u64| Vec3::new(rng.next_f32() * 80.0 - 40.0, 0.0, i as f32);
+    let mut pos = |i: u32| Vec3::new(rng.next_f32() * 80.0 - 40.0, 0.0, i as f32);
     ServerMsg::Snapshot {
         tick: 123_456,
         last_processed_seq: 7_890,

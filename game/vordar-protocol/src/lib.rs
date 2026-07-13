@@ -13,7 +13,7 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 9;
+pub const PROTOCOL_VERSION: u8 = 10;
 
 /// A client's account credential: a random 32-byte token, presented on every
 /// `Login` and verified server-side against `sha256(token)` stored in the
@@ -44,8 +44,10 @@ pub enum ClientMsg {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerMsg {
-    /// Sent once after connect: which replicated entity is yours.
-    Welcome { player_id: u64 },
+    /// Sent once after connect: which replicated entity is yours. `player_id`
+    /// is a zone-local wire id (protocol v10, networking rework 5 finding 1) —
+    /// small and monotonic, not raw hecs `Entity` bits.
+    Welcome { player_id: u32 },
     /// Per-client area-of-interest snapshot. Entity identity (prefab) is sent
     /// once on AOI entry; afterward only positions flow. `last_processed_seq`
     /// is the highest intent seq the server had applied when the snapshot was
@@ -57,7 +59,7 @@ pub enum ServerMsg {
         /// Entities that entered your AOI (or spawned inside it) — spawn these.
         enters: Vec<EntityState>,
         /// Entities that left your AOI (or despawned) — despawn these.
-        leaves: Vec<u64>,
+        leaves: Vec<u32>,
         /// Current position of every entity in your AOI.
         states: Vec<EntityPos>,
     },
@@ -77,7 +79,9 @@ pub enum ServerMsg {
     },
     /// Outcome of a resolved mechanic: which entities were inside at T. Sent
     /// only to connections within AOI range of the mechanic's position.
-    HitResult { mechanic: u64, hits: Vec<u64> },
+    /// `hits` are zone-local wire ids (protocol v10); `mechanic` is a
+    /// separate id space (server's `next_mechanic_id`), unaffected.
+    HitResult { mechanic: u64, hits: Vec<u32> },
     /// World-clock sample: world time `world_micros` corresponded to server
     /// time `at_server_micros`. Combined with clock sync, clients evaluate
     /// world time (day/night, world events) as a pure local function — the
@@ -93,8 +97,8 @@ pub enum ServerMsg {
     /// An entity in your AOI died at `pos` (v8). Snapshots stop mentioning it
     /// the same tick, so this is the client's only death signal — it drives
     /// the cosmetic corpse + death burst. Sent only to clients whose known
-    /// set contains the entity.
-    EntityDied { id: u64, pos: Vec3 },
+    /// set contains the entity. `id` is a zone-local wire id (protocol v10).
+    EntityDied { id: u32, pos: Vec3 },
     /// The presented `Login` was rejected (v9, networking rework 1 finding
     /// 3): invalid/mismatched token (`BadCredentials`), or — once finding 4
     /// wires it — too many recent failures from this IP (`RateLimited`,
@@ -116,8 +120,11 @@ pub enum LoginDenyReason {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntityState {
-    /// Server-side entity id (hecs Entity bits) — stable for the entity's lifetime.
-    pub id: u64,
+    /// Zone-local wire id (protocol v10, networking rework 5 finding 1):
+    /// small and monotonic, assigned by the server's `ReplIds` allocator on
+    /// first reference — never raw hecs `Entity` bits. Stable for the
+    /// entity's lifetime, never reused.
+    pub id: u32,
     /// Prefab to spawn client-side for this entity.
     pub prefab: String,
     pub pos: Vec3,
@@ -128,7 +135,8 @@ pub struct EntityState {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntityPos {
-    pub id: u64,
+    /// Zone-local wire id (protocol v10) — see `EntityState::id`.
+    pub id: u32,
     pub pos: Vec3,
     /// Current health (v8); 0 for entities without a Health component.
     pub hp: i32,

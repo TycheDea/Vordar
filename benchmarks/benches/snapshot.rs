@@ -58,7 +58,7 @@ fn bench_select_states(c: &mut Criterion) {
     let mut group = c.benchmark_group("snapshot/select_states");
     for a in [64usize, 200, 1000] {
         let mut rng = Lcg::new(7);
-        let entries: Vec<(u64, f32)> = (0..a as u64).map(|id| (id, rng.next_f32() * 1600.0)).collect();
+        let entries: Vec<(u32, f32)> = (0..a as u32).map(|id| (id, rng.next_f32() * 1600.0)).collect();
         group.bench_function(format!("a{a}"), |b| {
             b.iter(|| seam::select_states(&entries, 0, seam::MAX_STATES, seam::NEAREST));
         });

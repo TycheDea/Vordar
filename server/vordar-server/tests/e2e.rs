@@ -1049,3 +1049,39 @@ fn login_failures_are_rate_limited() {
     assert!(!keeper.disconnected, "rate-limited probing of another name must never touch the connected victim");
     assert!(keeper.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
 }
+
+// Finding 1 of docs/reviews/plan-networking-rework-5-2026-07-13.md: every
+// wire entity id used to be raw hecs `Entity` bits (`entity.to_bits().get()`
+// at net_plugin.rs's Welcome/HitResult/EntityDied/snapshot-gather sites) —
+// always >= 2^32 because of the generation bits packed into the upper half,
+// hence a 5+ byte postcard varint on every single reference. A zone-local
+// `ReplIds` allocator now hands out small, monotonic `u32` ids instead. This
+// documents the compactness contract directly: against the pre-fix wire
+// format every one of these ids is in the billions and this test fails;
+// after the fix every id is small by construction.
+#[test]
+fn replication_ids_are_compact() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25179".parse().unwrap();
+
+    let positions: Vec<glam::Vec3> = (0..10).map(|i| glam::Vec3::new(i as f32 * 2.0, 0.0, 0.0)).collect();
+    std::thread::spawn(move || {
+        let mut app = vordar_server::build_server_app(addr, ":memory:");
+        app.add_system(PopulateSystem { done: false, positions }, Phase::PreUpdate, SystemOrder::First);
+        app.run_headless(60.0, Some(1200));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("the 10 NPCs replicate", Duration::from_secs(5), |b| b.prefabs.len() >= 10);
+
+    let player_id = bot.player_id.unwrap();
+    assert!((player_id as u64) < 100_000, "Welcome's player_id {player_id} is not a compact zone-local id");
+    for &id in bot.prefabs.keys() {
+        assert!((id as u64) < 100_000, "an AOI-enter id ({id}) is not a compact zone-local id");
+    }
+    for &id in bot.last_snapshot.keys() {
+        assert!((id as u64) < 100_000, "an enters/states id ({id}) is not a compact zone-local id");
+    }
+}

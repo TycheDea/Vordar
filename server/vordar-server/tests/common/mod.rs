@@ -106,11 +106,11 @@ pub struct Bot {
     /// Account token sent alongside `name` — `name_token(&name)` (networking
     /// rework 1, finding 3).
     pub token: AccountToken,
-    pub player_id: Option<u64>,
+    pub player_id: Option<u32>,
     /// id → position, maintained from enter/leave/state messages
-    pub last_snapshot: HashMap<u64, glam::Vec3>,
+    pub last_snapshot: HashMap<u32, glam::Vec3>,
     /// id → prefab, learned from AOI enters
-    pub prefabs: HashMap<u64, String>,
+    pub prefabs: HashMap<u32, String>,
     pub seq: u32,
     /// last_processed_seq from the latest snapshot — the server's intent ack
     pub last_ack: u32,
@@ -119,7 +119,7 @@ pub struct Bot {
     /// scheduled mechanics as (id, resolve_at_micros), in arrival order
     pub mechanics: Vec<(u64, u64)>,
     /// mechanic id → entity ids hit
-    pub hit_results: HashMap<u64, Vec<u64>>,
+    pub hit_results: HashMap<u64, Vec<u32>>,
     /// world − server clock offset from the latest WorldClock sample
     pub world_offset: Option<i64>,
     /// pending zone redirect as (zone, addr) — follow with `follow_redirect`
@@ -130,11 +130,11 @@ pub struct Bot {
     /// measurement for the loss probes)
     pub snapshot_at: Vec<Instant>,
     /// ids that appeared in the latest snapshot's `states` list
-    pub last_states: Vec<u64>,
+    pub last_states: Vec<u32>,
     /// latest replicated hp per entity (v8)
-    pub last_hp: HashMap<u64, i32>,
+    pub last_hp: HashMap<u32, i32>,
     /// EntityDied messages as (id, pos), in arrival order (v8)
-    pub deaths: Vec<(u64, glam::Vec3)>,
+    pub deaths: Vec<(u32, glam::Vec3)>,
     /// Set once `ClientEvent::Disconnected` is observed (networking rework 8,
     /// finding 3: proves a server-side shutdown actually closed the wire).
     pub disconnected: bool,

@@ -161,7 +161,7 @@ struct PlayerConn {
     last_t: u64,
     /// Entity ids currently inside this client's AOI — diffed each snapshot
     /// to produce enter/leave messages.
-    known: HashSet<u64>,
+    known: HashSet<u32>,
     /// Recently APPLIED intents as (client stamp, dir) — each entry is exactly
     /// one tick of integration. Mechanic resolution rewinds through these to
     /// evaluate "position at T" by stamp time (favor-the-defender).
@@ -175,6 +175,45 @@ struct PlayerConn {
     /// Round-robin cursor for snapshot `states` throttling — where the
     /// non-nearest rotation resumes next snapshot.
     rr_cursor: usize,
+}
+
+/// Zone-local wire ids for hecs entities (protocol v10, networking rework 5
+/// finding 1): hecs `Entity` bits are always ≥ 2³² (the generation packed
+/// into the upper half), forcing a 5+ byte postcard varint on every wire
+/// reference. `id_for` assigns a small monotonic `u32` the first time any
+/// wire message references an entity; ids are shared zone-wide (not per
+/// connection) since some frames — `HitResult`, `EntityDied` — are encoded
+/// once and cloned to many connections. Ids are never reused: hecs
+/// generations mean a reused `Entity` slot compares unequal to the old one
+/// stored here, so `sweep` can drop a despawned entity's entry without any
+/// risk of a stale id later aliasing a new entity.
+struct ReplIds {
+    by_entity: HashMap<Entity, u32>,
+    next: u32,
+}
+
+impl ReplIds {
+    fn new() -> Self {
+        Self { by_entity: HashMap::new(), next: 1 }
+    }
+
+    /// The existing wire id for `entity`, or a freshly assigned one.
+    fn id_for(&mut self, entity: Entity) -> u32 {
+        if let Some(&id) = self.by_entity.get(&entity) {
+            return id;
+        }
+        let id = self.next;
+        self.next += 1;
+        self.by_entity.insert(entity, id);
+        id
+    }
+
+    /// Drop entries for entities no longer alive — bolts and dead enemies
+    /// despawn continuously, so without this the map would grow unboundedly
+    /// over a zone's lifetime.
+    fn sweep(&mut self, world: &World) {
+        self.by_entity.retain(|&entity, _| world.contains(entity));
+    }
 }
 
 pub struct NetServerState {
@@ -208,6 +247,9 @@ pub struct NetServerState {
     login_failures: LoginFailures,
     tick: u64,
     next_mechanic_id: u64,
+    /// Zone-local wire id allocator (protocol v10, networking rework 5
+    /// finding 1) — see `ReplIds`.
+    repl_ids: ReplIds,
 }
 
 impl NetServerState {
@@ -232,6 +274,7 @@ impl NetServerState {
             login_failures: LoginFailures::new(),
             tick: 0,
             next_mechanic_id: 0,
+            repl_ids: ReplIds::new(),
         }
     }
 
@@ -756,7 +799,8 @@ impl System for NetReceiveSystem {
                         cooldown_ready,
                         rr_cursor: 0,
                     });
-                    state.server.send(conn, encode(&ServerMsg::Welcome { player_id: entity.to_bits().get() }));
+                    let player_id = state.repl_ids.id_for(entity);
+                    state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
                     let at_server_micros = state.server.now_micros();
                     let world_micros = state.world_at(at_server_micros);
                     state.server.send(conn, encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
@@ -785,7 +829,8 @@ impl System for NetReceiveSystem {
                 Ok(entity) => {
                     pc.entity = entity;
                     pc.queue.clear();
-                    state.server.send(conn, encode(&ServerMsg::Welcome { player_id: entity.to_bits().get() }));
+                    let player_id = state.repl_ids.id_for(entity);
+                    state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
                     log::info!("conn {conn}: player died — respawned as {entity:?}");
                 }
                 Err(e) => log::error!("conn {conn}: respawn failed: {e}"),
@@ -895,7 +940,6 @@ impl System for MechanicResolveSystem {
                 .map(|(e, t, _)| (e, t.position))
                 .collect();
 
-            let mut hits: Vec<u64> = Vec::new();
             let mut hit_entities: Vec<Entity> = Vec::new();
             {
                 let state = resources.get::<NetServerState>().unwrap();
@@ -908,7 +952,6 @@ impl System for MechanicResolveSystem {
                         None => pos,
                     };
                     if pos_at_t.distance_squared(center) <= mech.radius * mech.radius {
-                        hits.push(entity.to_bits().get());
                         hit_entities.push(entity);
                     }
                 }
@@ -937,7 +980,8 @@ impl System for MechanicResolveSystem {
             }
 
             log::info!("mechanic {} resolved: {} hit", mech.id, hit_entities.len());
-            let state = resources.get::<NetServerState>().unwrap();
+            let state = resources.get_mut::<NetServerState>().unwrap();
+            let hits: Vec<u32> = hit_entities.iter().map(|&e| state.repl_ids.id_for(e)).collect();
             let frame = encode(&ServerMsg::HitResult { mechanic: mech.id, hits });
             for c in aoi_conns(&state.conns, world, center) {
                 state.server.send(c, frame.clone());
@@ -1031,7 +1075,7 @@ impl System for ZoneTransferSystem {
 /// the crowd fits the budget, else the `nearest` closest entries (by dist²,
 /// id-tiebroken) plus a round-robin rotation over the rest. Returns selected
 /// indices into `entries` and the advanced cursor. Pure — unit-tested.
-fn select_states(entries: &[(u64, f32)], cursor: usize, max: usize, nearest: usize) -> (Vec<usize>, usize) {
+fn select_states(entries: &[(u32, f32)], cursor: usize, max: usize, nearest: usize) -> (Vec<usize>, usize) {
     if entries.len() <= max {
         return ((0..entries.len()).collect(), cursor);
     }
@@ -1058,7 +1102,7 @@ pub struct SnapshotBroadcastSystem {
     /// and the id set swapped with each conn's `known` (no per-conn realloc).
     aoi_scratch: Vec<Entity>,
     seen: HashSet<Entity>,
-    current_ids: HashSet<u64>,
+    current_ids: HashSet<u32>,
 }
 
 impl SnapshotBroadcastSystem {
@@ -1074,6 +1118,9 @@ impl System for SnapshotBroadcastSystem {
             state.tick += 1;
             // Periodic world-clock re-sync (every ~10 s at POST_HZ).
             if state.tick % 600 == 0 {
+                // Same cadence sweeps ReplIds: entities despawned since the
+                // last sweep (bolts, dead enemies) stop holding a wire id.
+                state.repl_ids.sweep(world);
                 let at_server_micros = state.server.now_micros();
                 let world_micros = state.world_at(at_server_micros);
                 state.server.broadcast(encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
@@ -1108,7 +1155,7 @@ impl System for SnapshotBroadcastSystem {
         // Per-client AOI: grid cells are coarse and multi-cell entities appear
         // more than once, so dedupe and apply the exact radius test — a fuzzy
         // border would make entities flap in and out between snapshots.
-        let mut per_conn: Vec<(ConnId, Vec<(u64, Entity, Vec3, i32, f32)>)> = Vec::with_capacity(conn_players.len());
+        let mut per_conn: Vec<(ConnId, Vec<(Entity, Vec3, i32, f32)>)> = Vec::with_capacity(conn_players.len());
         {
             let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
             // One view for the whole gather: the replication filter (PrefabId),
@@ -1120,7 +1167,7 @@ impl System for SnapshotBroadcastSystem {
                 self.aoi_scratch.clear();
                 grid.query_radius_into(center, AOI_RADIUS, &mut self.aoi_scratch);
                 self.seen.clear();
-                let mut current: Vec<(u64, Entity, Vec3, i32, f32)> = Vec::with_capacity(self.aoi_scratch.len());
+                let mut current: Vec<(Entity, Vec3, i32, f32)> = Vec::with_capacity(self.aoi_scratch.len());
                 for &entity in &self.aoi_scratch {
                     if !self.seen.insert(entity) {
                         continue;
@@ -1131,7 +1178,7 @@ impl System for SnapshotBroadcastSystem {
                         continue;
                     }
                     let hp = hp.map(|h| h.current).unwrap_or(0);
-                    current.push((entity.to_bits().get(), entity, t.position, hp, dist_sq));
+                    current.push((entity, t.position, hp, dist_sq));
                 }
                 per_conn.push((conn, current));
             }
@@ -1139,11 +1186,22 @@ impl System for SnapshotBroadcastSystem {
 
         let state = resources.get_mut::<NetServerState>().unwrap();
         for (conn, current) in per_conn {
+            // Resolve each AOI candidate's zone-local wire id (assigning a
+            // fresh monotonic one on first reference) before touching this
+            // connection's PlayerConn — done here, not in the gather block
+            // above, because that block only holds an immutable SpatialGrid
+            // borrow of `resources`, not the `&mut NetServerState` id_for needs.
+            let ids: Vec<u32> = current.iter().map(|&(entity, ..)| state.repl_ids.id_for(entity)).collect();
+            let current: Vec<(u32, Entity, Vec3, i32, f32)> = ids
+                .into_iter()
+                .zip(current)
+                .map(|(id, (entity, pos, hp, dist_sq))| (id, entity, pos, hp, dist_sq))
+                .collect();
             let Some(pc) = state.conns.get_mut(&conn) else { continue };
 
             self.current_ids.clear();
             self.current_ids.extend(current.iter().map(|&(id, ..)| id));
-            let leaves: Vec<u64> = pc.known.difference(&self.current_ids).copied().collect();
+            let leaves: Vec<u32> = pc.known.difference(&self.current_ids).copied().collect();
             let enters: Vec<EntityState> = current
                 .iter()
                 .filter(|(id, ..)| !pc.known.contains(id))
@@ -1154,7 +1212,7 @@ impl System for SnapshotBroadcastSystem {
                 .collect();
             // Crowd throttling: only `states` is budgeted — identity (enters/
             // leaves/known) must track the full AOI or the diff corrupts.
-            let entries: Vec<(u64, f32)> = current.iter().map(|&(id, _, _, _, d)| (id, d)).collect();
+            let entries: Vec<(u32, f32)> = current.iter().map(|&(id, _, _, _, d)| (id, d)).collect();
             let (selected, cursor) = select_states(&entries, pc.rr_cursor, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
             pc.rr_cursor = cursor;
             let states: Vec<EntityPos> = selected
@@ -1189,13 +1247,13 @@ pub struct DeathBroadcastSystem;
 
 impl System for DeathBroadcastSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let deaths: Vec<(u64, Vec3)> = resources
+        let deaths: Vec<(Entity, Vec3)> = resources
             .get::<EventBus>()
             .map(|bus| {
                 bus.read::<HealthDepleted>()
                     .filter_map(|e| {
                         let pos = world.get::<&Transform>(e.entity).ok()?.position;
-                        Some((e.entity.to_bits().get(), pos))
+                        Some((e.entity, pos))
                     })
                     .collect()
             })
@@ -1204,7 +1262,8 @@ impl System for DeathBroadcastSystem {
             return;
         }
         let state = resources.get_mut::<NetServerState>().unwrap();
-        for (id, pos) in deaths {
+        for (entity, pos) in deaths {
+            let id = state.repl_ids.id_for(entity);
             let msg = encode(&ServerMsg::EntityDied { id, pos });
             let targets: Vec<ConnId> = state
                 .conns
@@ -1312,7 +1371,7 @@ pub mod bench {
     pub const STAGGER_TICKS: u64 = STAGGER;
 
     pub fn select_states(
-        entries: &[(u64, f32)],
+        entries: &[(u32, f32)],
         cursor: usize,
         max: usize,
         nearest: usize,
@@ -1365,8 +1424,8 @@ mod tests {
     use super::*;
 
     /// `n` entries with id = index and distance growing with the index.
-    fn entries(n: usize) -> Vec<(u64, f32)> {
-        (0..n).map(|i| (i as u64, i as f32)).collect()
+    fn entries(n: usize) -> Vec<(u32, f32)> {
+        (0..n).map(|i| (i as u32, i as f32)).collect()
     }
 
     #[test]
@@ -1522,5 +1581,46 @@ mod tests {
             !failures.by_ip.contains_key(&ip),
             "an IP with no failures left in the window must be dropped, not merely zeroed"
         );
+    }
+
+    /// Finding 1 of docs/reviews/plan-networking-rework-5-2026-07-13.md:
+    /// `ReplIds` must hand back the SAME id on every subsequent lookup of an
+    /// entity, and assign distinct, monotonically increasing ids to distinct
+    /// entities — the wire-compactness contract the whole finding rests on.
+    #[test]
+    fn repl_ids_assign_stable_monotonic_ids() {
+        let mut world = World::new();
+        let e1 = world.spawn(());
+        let e2 = world.spawn(());
+        let mut ids = ReplIds::new();
+
+        let id1_first = ids.id_for(e1);
+        let id1_again = ids.id_for(e1);
+        assert_eq!(id1_first, id1_again, "the same entity must always get the same wire id");
+
+        let id2 = ids.id_for(e2);
+        assert_ne!(id1_first, id2, "distinct entities must get distinct wire ids");
+        assert!(id2 > id1_first, "ids are assigned monotonically as entities are first referenced");
+    }
+
+    /// Finding 1 of docs/reviews/plan-networking-rework-5-2026-07-13.md:
+    /// `sweep` must drop a despawned entity's mapping, and a fresh entity
+    /// (even one that reuses the despawned entity's hecs slot at a new
+    /// generation) must get a BRAND NEW id — never the stale one — so a
+    /// lingering client reference can never alias a different live entity.
+    #[test]
+    fn repl_ids_sweep_drops_despawned_and_never_reuses_ids() {
+        let mut world = World::new();
+        let e1 = world.spawn(());
+        let mut ids = ReplIds::new();
+        let id1 = ids.id_for(e1);
+
+        world.despawn(e1).unwrap();
+        ids.sweep(&world);
+        assert!(!ids.by_entity.contains_key(&e1), "a despawned entity's id mapping must be forgotten");
+
+        let e2 = world.spawn(()); // may reuse e1's hecs slot at a new generation
+        let id2 = ids.id_for(e2);
+        assert_ne!(id1, id2, "a fresh entity must never be handed a stale wire id");
     }
 }

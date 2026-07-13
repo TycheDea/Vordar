@@ -195,9 +195,9 @@ pub struct NetClientState {
     /// `maybe_reconnect` from scheduling further redials: retrying with the
     /// same bad credential would only be denied again.
     login_denied: bool,
-    own_id: Option<u64>,
+    own_id: Option<u32>,
     /// server entity id → local entity
-    entities: HashMap<u64, Entity>,
+    entities: HashMap<u32, Entity>,
     seq: u32,
     predict: bool,
     pending: VecDeque<PendingIntent>,
@@ -444,7 +444,7 @@ fn maybe_reconnect(resources: &mut Resources) {
 /// entity. Snapshots stop mentioning it the same tick, so its local entity is
 /// despawned here too instead of waiting for the AOI leave. Our own death is
 /// burst-only — the server re-Welcomes us into a respawned entity.
-fn handle_entity_died(world: &mut World, resources: &mut Resources, id: u64, pos: Vec3) {
+fn handle_entity_died(world: &mut World, resources: &mut Resources, id: u32, pos: Vec3) {
     let (entity, own) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
         (state.entities.remove(&id), state.own_id == Some(id))
@@ -493,7 +493,7 @@ fn apply_snapshot(
     resources: &mut Resources,
     last_processed_seq: u32,
     enters: Vec<EntityState>,
-    leaves: Vec<u64>,
+    leaves: Vec<u32>,
     states: Vec<EntityPos>,
 ) {
     // Take the map instead of cloning it — nothing below reads it through
@@ -1096,7 +1096,7 @@ pub mod bench {
     /// NetClientState with no live connection: the net thread's connect
     /// attempt fails in the background while the benched paths only read
     /// and write the state fields.
-    pub fn state_for_bench(own_id: Option<u64>, predict: bool) -> NetClientState {
+    pub fn state_for_bench(own_id: Option<u32>, predict: bool) -> NetClientState {
         let server_addr = "127.0.0.1:9".parse().unwrap();
         NetClientState {
             client: Some(
@@ -1118,7 +1118,7 @@ pub mod bench {
     }
 
     /// server-id → local-entity mapping (the enters path builds this normally).
-    pub fn map_entity(state: &mut NetClientState, id: u64, entity: Entity) {
+    pub fn map_entity(state: &mut NetClientState, id: u32, entity: Entity) {
         state.entities.insert(id, entity);
     }
 
@@ -1131,7 +1131,7 @@ pub mod bench {
         resources: &mut Resources,
         last_processed_seq: u32,
         enters: Vec<EntityState>,
-        leaves: Vec<u64>,
+        leaves: Vec<u32>,
         states: Vec<EntityPos>,
     ) {
         super::apply_snapshot(world, resources, last_processed_seq, enters, leaves, states);

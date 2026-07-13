@@ -290,7 +290,7 @@ fn phase7_snapshot_throttle() {
     // KB/s. Freshness: every known id must appear in `states` within the
     // window (the round-robin covers the 119-entity pool in ~4 snapshots).
     bot.bytes = 0;
-    let mut refreshed: HashSet<u64> = HashSet::new();
+    let mut refreshed: HashSet<u32> = HashSet::new();
     let measure_until = Instant::now() + Duration::from_secs(2);
     while Instant::now() < measure_until {
         bot.pump();
@@ -298,7 +298,7 @@ fn phase7_snapshot_throttle() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(bot.bytes < 50_000, "throttled bandwidth over budget: {} bytes in 2 s", bot.bytes);
-    let known: HashSet<u64> = bot.last_snapshot.keys().copied().collect();
-    let stale: Vec<u64> = known.difference(&refreshed).copied().collect();
+    let known: HashSet<u32> = bot.last_snapshot.keys().copied().collect();
+    let stale: Vec<u32> = known.difference(&refreshed).copied().collect();
     assert!(stale.is_empty(), "{} entities never refreshed in 2 s", stale.len());
 }
