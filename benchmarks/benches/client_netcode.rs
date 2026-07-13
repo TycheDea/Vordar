@@ -19,7 +19,7 @@ use vordar_benches::{positions, workspace_root, Layout, DT};
 use vordar_client::net::bench as seam;
 use vordar_game::player::movement_velocity;
 use vordar_game::Player;
-use vordar_protocol::{EntityPos, EntityState};
+use vordar_protocol::{EntityPos, EntityState, WirePos};
 
 /// Everyone inside half_extent 14 is mutually within AOI — the same crowd
 /// shape as the server-side snapshot bench.
@@ -55,14 +55,14 @@ fn bench_apply_states(c: &mut Criterion) {
         let enters: Vec<EntityState> = spots
             .iter()
             .enumerate()
-            .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: "bolt".into(), pos, hp: 0 })
+            .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: "bolt".into(), pos: WirePos(pos), hp: 0 })
             .collect();
         seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
 
         let states: Vec<EntityPos> = spots
             .iter()
             .enumerate()
-            .map(|(i, &pos)| EntityPos { id: i as u32 + 1, pos: pos + Vec3::X, hp: 0 })
+            .map(|(i, &pos)| EntityPos { id: i as u32 + 1, pos: WirePos(pos + Vec3::X), hp: 0 })
             .collect();
         group.bench_function(format!("states_a{a}"), |b| {
             b.iter_batched(
@@ -92,7 +92,7 @@ fn bench_apply_enters(c: &mut Criterion) {
                 let enters: Vec<EntityState> = spots
                     .iter()
                     .enumerate()
-                    .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: "bolt".into(), pos, hp: 0 })
+                    .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: "bolt".into(), pos: WirePos(pos), hp: 0 })
                     .collect();
                 let t = Instant::now();
                 seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());

@@ -31,8 +31,8 @@ use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
 use vordar_game::world::WorldTimeRes;
 use vordar_game::zones::{portal_hit, ZoneDef};
 use vordar_protocol::{
-    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, ServerMsg, PROTOCOL_VERSION,
-    SNAPSHOT_HZ,
+    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, ServerMsg, WirePos,
+    PROTOCOL_VERSION, SNAPSHOT_HZ,
 };
 
 /// Lag-compensation rewind cap (DESIGN.md §3): high-latency players get
@@ -1207,7 +1207,7 @@ impl System for SnapshotBroadcastSystem {
                 .filter(|(id, ..)| !pc.known.contains(id))
                 .filter_map(|&(id, entity, pos, hp, _)| {
                     let prefab = world.get::<&PrefabId>(entity).ok()?.0.clone();
-                    Some(EntityState { id, prefab, pos, hp })
+                    Some(EntityState { id, prefab, pos: WirePos(pos), hp })
                 })
                 .collect();
             // Crowd throttling: only `states` is budgeted — identity (enters/
@@ -1219,7 +1219,7 @@ impl System for SnapshotBroadcastSystem {
                 .into_iter()
                 .map(|i| {
                     let (id, _, pos, hp, _) = current[i];
-                    EntityPos { id, pos, hp }
+                    EntityPos { id, pos: WirePos(pos), hp }
                 })
                 .collect();
             // The old known set becomes next conn's current_ids scratch.

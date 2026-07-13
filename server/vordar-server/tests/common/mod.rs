@@ -308,7 +308,7 @@ impl Bot {
                         }
                         self.snapshot_at.push(Instant::now());
                         for e in enters {
-                            self.last_snapshot.insert(e.id, e.pos);
+                            self.last_snapshot.insert(e.id, e.pos.0);
                             self.last_hp.insert(e.id, e.hp);
                             self.prefabs.insert(e.id, e.prefab);
                         }
@@ -319,7 +319,7 @@ impl Bot {
                         }
                         self.last_states = states.iter().map(|s| s.id).collect();
                         for s in states {
-                            self.last_snapshot.insert(s.id, s.pos);
+                            self.last_snapshot.insert(s.id, s.pos.0);
                             self.last_hp.insert(s.id, s.hp);
                         }
                     }

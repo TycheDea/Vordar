@@ -509,11 +509,11 @@ fn apply_snapshot(
             continue;
         }
         let is_own_predicted = predict && own_id == Some(enter.id);
-        match spawn_prefab(&enter.prefab, enter.pos, &mut SpawnContext { world, resources }) {
+        match spawn_prefab(&enter.prefab, enter.pos.0, &mut SpawnContext { world, resources }) {
             Ok(entity) => {
                 // A predicted own player is moved by the simulation, not the lerp.
                 if !is_own_predicted {
-                    let _ = world.insert_one(entity, NetLerp { from: enter.pos, to: enter.pos, t: 1.0 });
+                    let _ = world.insert_one(entity, NetLerp { from: enter.pos.0, to: enter.pos.0, t: 1.0 });
                 }
                 // Seed replicated health (v8) so the hit-react watcher starts
                 // from the server's value, not the prefab's.
@@ -536,7 +536,7 @@ fn apply_snapshot(
     // Own-player state is handled by reconciliation, which needs &mut World —
     // pull it out before the view below borrows the world.
     let own_state = match (predict, own_id) {
-        (true, Some(own)) => states.iter().find(|s| s.id == own).map(|s| (own, s.pos)),
+        (true, Some(own)) => states.iter().find(|s| s.id == own).map(|s| (own, s.pos.0)),
         _ => None,
     };
 
@@ -568,9 +568,9 @@ fn apply_snapshot(
             let Some(&entity) = known.get(&state.id) else { continue };
             // Restart the lerp from wherever the entity is currently displayed.
             let Some((lerp, transform)) = lerp_view.get_mut(entity) else { continue };
-            net_motions.push((entity, (state.pos - transform.position) * SNAPSHOT_HZ as f32));
+            net_motions.push((entity, (state.pos.0 - transform.position) * SNAPSHOT_HZ as f32));
             lerp.from = transform.position;
-            lerp.to = state.pos;
+            lerp.to = state.pos.0;
             lerp.t = 0.0;
         }
     }
