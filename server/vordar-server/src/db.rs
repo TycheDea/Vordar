@@ -18,9 +18,11 @@
 use engine_net::ConnId;
 use glam::Vec3;
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
 use std::thread::JoinHandle;
+use vordar_protocol::AccountToken;
 
 // Append-only schema history: entry i brings a database from user_version i
 // to i+1. Entry 0 is the original baseline schema — deliberately kept as
@@ -40,6 +42,11 @@ CREATE TABLE IF NOT EXISTS characters (
 );
 ", "
 ALTER TABLE characters ADD COLUMN cooldowns TEXT NOT NULL DEFAULT '{}';
+", "
+CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, token_hash BLOB);
+ALTER TABLE characters ADD COLUMN account_id INTEGER REFERENCES accounts(id);
+INSERT INTO accounts (name) SELECT name FROM characters;
+UPDATE characters SET account_id = (SELECT id FROM accounts WHERE accounts.name = characters.name);
 "];
 
 /// Bring `db` up to the latest schema version. Each pending migration runs in
@@ -88,14 +95,36 @@ enum DbRequest {
         /// Where the result goes — the requesting zone's handle.
         reply: mpsc::Sender<DbLoaded>,
     },
+    /// Verify `token` against the `accounts` row for `name` before loading or
+    /// creating the character — see `login()`. Not yet reachable from the
+    /// sim (the wire carries no token until finding 3); exercised directly by
+    /// `DbHandle::login` today.
+    Login {
+        conn: ConnId,
+        name: String,
+        token: AccountToken,
+        defaults: CharacterRecord,
+        reply: mpsc::Sender<DbLoaded>,
+    },
     Save { name: String, record: CharacterRecord },
+}
+
+/// The result of a worker-side login attempt.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DbLoginOutcome {
+    /// Credentials verified (or the name was claimed just now) — the
+    /// character's record, loaded or freshly created.
+    Granted(CharacterRecord),
+    /// The account exists and is claimed by a different token. No character
+    /// row was touched.
+    BadToken,
 }
 
 /// A finished load: the character `name` plays on connection `conn`.
 pub struct DbLoaded {
     pub conn: ConnId,
     pub name: String,
-    pub record: CharacterRecord,
+    pub outcome: DbLoginOutcome,
 }
 
 /// Owns the worker thread. Mint one `DbHandle` per zone App via `handle()`.
@@ -180,6 +209,20 @@ impl DbHandle {
         });
     }
 
+    /// Verify `token` against the `accounts` row for `name` (creating and
+    /// claiming it on first use, claiming a legacy unclaimed row, denying a
+    /// mismatch) and, on success, load or create the character. The result
+    /// arrives via `poll` on THIS handle.
+    pub fn login(&self, conn: ConnId, name: String, token: AccountToken, defaults: CharacterRecord) {
+        let _ = self.tx.send(DbRequest::Login {
+            conn,
+            name,
+            token,
+            defaults,
+            reply: self.reply_tx.clone(),
+        });
+    }
+
     /// Persist a full character record (zone, position, health, and cooldown
     /// remainders). Fire-and-forget; failures are logged by the worker.
     pub fn save(&self, name: String, record: CharacterRecord) {
@@ -229,9 +272,15 @@ fn worker(mut db: Connection, rx: mpsc::Receiver<DbRequest>) {
         for req in batch {
             match req {
                 DbRequest::LoadOrCreate { conn, name, defaults, reply } => {
-                    match load_or_create(&tx, &name, defaults) {
-                        Ok(record) => loaded.push((reply, DbLoaded { conn, name, record })),
+                    match load_or_create(&tx, &name, defaults, None) {
+                        Ok(record) => loaded.push((reply, DbLoaded { conn, name, outcome: DbLoginOutcome::Granted(record) })),
                         Err(e) => log::error!("db: load '{name}' failed: {e}"),
+                    }
+                }
+                DbRequest::Login { conn, name, token, defaults, reply } => {
+                    match login(&tx, &name, &token, defaults) {
+                        Ok(outcome) => loaded.push((reply, DbLoaded { conn, name, outcome })),
+                        Err(e) => log::error!("db: login '{name}' failed: {e}"),
                     }
                 }
                 DbRequest::Save { name, record } => {
@@ -268,12 +317,20 @@ fn worker(mut db: Connection, rx: mpsc::Receiver<DbRequest>) {
     }
 }
 
-fn load_or_create(db: &Connection, name: &str, defaults: CharacterRecord) -> rusqlite::Result<CharacterRecord> {
+fn load_or_create(
+    db: &Connection,
+    name: &str,
+    defaults: CharacterRecord,
+    account_id: Option<i64>,
+) -> rusqlite::Result<CharacterRecord> {
     // The schema default supplies zone = 'start' — fresh characters always
-    // begin in the start zone regardless of where they logged in.
+    // begin in the start zone regardless of where they logged in. `account_id`
+    // is only set on a genuine INSERT (`None` from the old trusting
+    // `LoadOrCreate` path, `Some` from a verified `login()`); an existing row
+    // keeps whatever it already had (`INSERT OR IGNORE` no-ops on conflict).
     db.execute(
-        "INSERT OR IGNORE INTO characters (name, pos_x, pos_y, pos_z, health) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![name, defaults.pos.x as f64, defaults.pos.y as f64, defaults.pos.z as f64, defaults.health],
+        "INSERT OR IGNORE INTO characters (name, pos_x, pos_y, pos_z, health, account_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![name, defaults.pos.x as f64, defaults.pos.y as f64, defaults.pos.z as f64, defaults.health, account_id],
     )?;
     db.query_row(
         "SELECT zone, pos_x, pos_y, pos_z, health, cooldowns FROM characters WHERE name = ?1",
@@ -294,6 +351,54 @@ fn load_or_create(db: &Connection, name: &str, defaults: CharacterRecord) -> rus
     )
 }
 
+/// Verify `token` against the `accounts` row for `name`: missing → create it
+/// claimed with `sha256(token)`; present but unclaimed (`token_hash` NULL —
+/// a legacy row, or one the migration backfilled) → claim it; present and
+/// claimed → grant only on a matching hash, denying (no character touched)
+/// otherwise. On success, load or create the character linked to the
+/// account, self-healing `account_id` for any row the old trusting
+/// `LoadOrCreate` path created without one.
+fn login(db: &Connection, name: &str, token: &AccountToken, defaults: CharacterRecord) -> rusqlite::Result<DbLoginOutcome> {
+    let hash = Sha256::digest(token).to_vec();
+
+    let existing: Option<(i64, Option<Vec<u8>>)> = match db.query_row(
+        "SELECT id, token_hash FROM accounts WHERE name = ?1",
+        [name],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ) {
+        Ok(row) => Some(row),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => return Err(e),
+    };
+
+    let account_id = match existing {
+        None => {
+            db.execute(
+                "INSERT INTO accounts (name, token_hash) VALUES (?1, ?2)",
+                rusqlite::params![name, hash],
+            )?;
+            db.last_insert_rowid()
+        }
+        Some((id, None)) => {
+            db.execute("UPDATE accounts SET token_hash = ?1 WHERE id = ?2", rusqlite::params![hash, id])?;
+            id
+        }
+        Some((id, Some(claimed))) => {
+            if claimed != hash {
+                return Ok(DbLoginOutcome::BadToken);
+            }
+            id
+        }
+    };
+
+    let record = load_or_create(db, name, defaults, Some(account_id))?;
+    db.execute(
+        "UPDATE characters SET account_id = ?1 WHERE name = ?2 AND account_id IS NULL",
+        rusqlite::params![account_id, name],
+    )?;
+    Ok(DbLoginOutcome::Granted(record))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,7 +413,27 @@ mod tests {
         CharacterRecord { zone: "start".into(), pos: Vec3::ZERO, health: 100, cooldowns: HashMap::new() }
     }
 
-    fn wait_loaded(handle: &DbHandle) -> DbLoaded {
+    /// The old always-a-record shape, for the many pre-existing tests that
+    /// only ever exercise `load_or_create` (whose replies are always
+    /// `Granted`). Panics on `BadToken` — that outcome is only reachable via
+    /// `login()`, exercised directly by `wait_login` below.
+    struct Loaded {
+        conn: ConnId,
+        name: String,
+        record: CharacterRecord,
+    }
+
+    fn wait_loaded(handle: &DbHandle) -> Loaded {
+        let loaded = wait_login(handle);
+        match loaded.outcome {
+            DbLoginOutcome::Granted(record) => Loaded { conn: loaded.conn, name: loaded.name, record },
+            DbLoginOutcome::BadToken => panic!("wait_loaded: unexpected BadToken from '{}'", loaded.name),
+        }
+    }
+
+    /// Outcome-aware wait for `DbHandle::login` tests, which need to see
+    /// `BadToken` rather than have it treated as a bug.
+    fn wait_login(handle: &DbHandle) -> DbLoaded {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             if let Some(loaded) = handle.poll().pop() {
@@ -511,7 +636,10 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         };
         assert_eq!(loaded.name, "forked");
-        assert_eq!(loaded.record, defaults());
+        match loaded.outcome {
+            DbLoginOutcome::Granted(record) => assert_eq!(record, defaults()),
+            DbLoginOutcome::BadToken => panic!("load_or_create must always grant"),
+        }
         assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle after completion");
 
         let moved = Vec3::new(5.0, 0.0, -1.0);
@@ -614,5 +742,142 @@ mod tests {
         handle.load_or_create(2, "dara".into(), defaults());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.record.cooldowns, cooldowns, "cooldown remainders must survive a reopen");
+    }
+
+    /// Finding 2 of docs/reviews/plan-networking-rework-1-2026-07-13.md: a
+    /// fresh name's first `login` has nothing to compare against, so it
+    /// claims the account (stores `sha256(token)`) and grants — same as
+    /// `load_or_create` would, just through the verified path.
+    #[test]
+    fn fresh_name_login_claims_the_account_and_grants() {
+        let path = temp_db("login-fresh");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        handle.login(1, "erin".into(), [7u8; 32], defaults());
+        let loaded = wait_login(&handle);
+        assert_eq!(loaded.conn, 1);
+        assert_eq!(loaded.name, "erin");
+        match loaded.outcome {
+            DbLoginOutcome::Granted(record) => assert_eq!(record, defaults()),
+            DbLoginOutcome::BadToken => panic!("a fresh name must claim the account, not be denied"),
+        }
+    }
+
+    /// A second login presenting the SAME token the account was claimed with
+    /// must keep granting — the account is claimed, not locked to one login.
+    #[test]
+    fn same_token_relogin_is_granted() {
+        let path = temp_db("login-same-token");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        let token = [3u8; 32];
+        handle.login(1, "finn".into(), token, defaults());
+        wait_login(&handle);
+        handle.login(2, "finn".into(), token, defaults());
+        let loaded = wait_login(&handle);
+        assert_eq!(loaded.conn, 2);
+        match loaded.outcome {
+            DbLoginOutcome::Granted(_) => {}
+            DbLoginOutcome::BadToken => panic!("the same token must still be granted on relogin"),
+        }
+    }
+
+    /// A DIFFERENT token than the one that claimed the name must be denied,
+    /// and the character row must be left exactly as it was — a mismatch
+    /// never touches character state.
+    #[test]
+    fn mismatched_token_is_denied_and_character_untouched() {
+        let path = temp_db("login-mismatch");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        handle.login(1, "gwen".into(), [1u8; 32], defaults());
+        wait_login(&handle);
+        handle.save(
+            "gwen".into(),
+            CharacterRecord { zone: "east".into(), pos: Vec3::new(5.0, 0.0, 0.0), health: 42, cooldowns: HashMap::new() },
+        );
+        handle.login(2, "gwen".into(), [2u8; 32], defaults());
+        let loaded = wait_login(&handle);
+        assert_eq!(loaded.conn, 2);
+        match loaded.outcome {
+            DbLoginOutcome::BadToken => {}
+            DbLoginOutcome::Granted(_) => panic!("a mismatched token must be denied"),
+        }
+        let check = Connection::open(&path).unwrap();
+        let (zone, health): (String, i32) = check
+            .query_row("SELECT zone, health FROM characters WHERE name = 'gwen'", [], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap();
+        assert_eq!(zone, "east", "a denied login must not touch the character row");
+        assert_eq!(health, 42, "a denied login must not touch the character row");
+    }
+
+    /// A pre-rework database (characters table only, no accounts) migrated
+    /// on `spawn` must land exactly one unclaimed account per character,
+    /// linked via `account_id`, at `user_version == 3` — and that legacy
+    /// character's first `login` claims the account for the presented token.
+    #[test]
+    fn legacy_characters_get_unclaimed_linked_accounts_and_first_login_claims() {
+        let path = temp_db("login-legacy");
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.execute_batch(
+                "CREATE TABLE characters (
+                    id     INTEGER PRIMARY KEY,
+                    name   TEXT NOT NULL UNIQUE,
+                    zone   TEXT NOT NULL DEFAULT 'start',
+                    pos_x  REAL NOT NULL,
+                    pos_y  REAL NOT NULL,
+                    pos_z  REAL NOT NULL,
+                    health INTEGER NOT NULL
+                );",
+            )
+            .unwrap();
+            raw.execute(
+                "INSERT INTO characters (name, zone, pos_x, pos_y, pos_z, health) VALUES ('holt', 'east', 1.0, 2.0, 3.0, 55)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        {
+            let check = Connection::open(&path).unwrap();
+            let version: i64 = check.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            assert_eq!(version, MIGRATIONS.len() as i64);
+
+            let account_count: i64 =
+                check.query_row("SELECT COUNT(*) FROM accounts WHERE name = 'holt'", [], |row| row.get(0)).unwrap();
+            assert_eq!(account_count, 1, "migration must create exactly one account per character");
+
+            let token_hash: Option<Vec<u8>> =
+                check.query_row("SELECT token_hash FROM accounts WHERE name = 'holt'", [], |row| row.get(0)).unwrap();
+            assert!(token_hash.is_none(), "a backfilled account starts unclaimed");
+
+            let linked: i64 = check
+                .query_row(
+                    "SELECT COUNT(*) FROM characters c JOIN accounts a ON c.account_id = a.id WHERE c.name = 'holt'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(linked, 1, "the legacy character must be linked to its account");
+        }
+
+        let handle = worker.handle();
+        handle.login(1, "holt".into(), [9u8; 32], defaults());
+        let loaded = wait_login(&handle);
+        match loaded.outcome {
+            DbLoginOutcome::Granted(record) => {
+                assert_eq!(record.zone, "east");
+                assert_eq!(record.pos, Vec3::new(1.0, 2.0, 3.0));
+                assert_eq!(record.health, 55);
+            }
+            DbLoginOutcome::BadToken => panic!("a legacy unclaimed account's first login must claim it"),
+        }
+
+        let check = Connection::open(&path).unwrap();
+        let claimed: Option<Vec<u8>> =
+            check.query_row("SELECT token_hash FROM accounts WHERE name = 'holt'", [], |row| row.get(0)).unwrap();
+        assert!(claimed.is_some(), "the account must be claimed after its first login");
     }
 }

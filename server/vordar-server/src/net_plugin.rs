@@ -1,6 +1,6 @@
 // NetServerPlugin — the seam between engine-net and the simulation.
 
-use crate::db::{CharacterRecord, DbHandle, DbLoaded, DbWorker};
+use crate::db::{CharacterRecord, DbHandle, DbLoaded, DbLoginOutcome, DbWorker};
 use engine_app::app::{App, AppExit};
 use engine_app::events::{EventBus, HealthDepleted};
 use engine_app::plugin::Plugin;
@@ -578,7 +578,15 @@ impl System for NetReceiveSystem {
         // the game only now; anything it sent earlier was dropped by the
         // PlayerConn guard.
         let loaded = resources.get_mut::<NetServerState>().unwrap().db.poll();
-        for DbLoaded { conn, name, record } in loaded {
+        for DbLoaded { conn, name, outcome } in loaded {
+            // The sim only ever calls `load_or_create` (finding 2 of
+            // docs/reviews/plan-networking-rework-1-2026-07-13.md) — its
+            // replies are always `Granted`. `BadToken` belongs to
+            // `DbHandle::login`, not yet wired to the wire (finding 3).
+            let DbLoginOutcome::Granted(record) = outcome else {
+                log::error!("conn {conn}: '{name}' login denied unexpectedly (no wire support for it yet)");
+                continue;
+            };
             if resources.get_mut::<NetServerState>().unwrap().loading.remove(&conn).is_none() {
                 continue; // disconnected while the load was in flight
             }

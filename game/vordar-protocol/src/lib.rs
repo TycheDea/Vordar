@@ -15,6 +15,13 @@ use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u8 = 8;
 
+/// A client's account credential: a random 32-byte token, presented on every
+/// `Login` and verified server-side against `sha256(token)` stored in the
+/// `accounts` table (trust-on-first-use — first login claims the name). Type
+/// alias only this step (networking rework 1 finding 2) — `Login` itself
+/// doesn't carry one yet; that's finding 3's wire change.
+pub type AccountToken = [u8; 32];
+
 /// Snapshot rate. The server drives its snapshot phase with this; the client
 /// uses it to pace interpolation between snapshots.
 pub const SNAPSHOT_HZ: f32 = 10.0;
