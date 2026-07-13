@@ -33,6 +33,9 @@ quinn    = { version = "0.11", default-features = false, features = ["runtime-to
 rustls   = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
 rcgen    = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
 postcard = { version = "1", features = ["use-std"] }
+# Datagram lane (engine-net, networking rework 3 finding 2): quinn's
+# `Connection::send_datagram`/`read_datagram` are typed on `bytes::Bytes`.
+bytes    = "1"
 
 # Persistence (server only). 0.40's libsqlite3-sys needs a newer rustc
 # (unstable cfg_select on 1.94) — bump when the toolchain moves.

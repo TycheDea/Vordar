@@ -11,3 +11,4 @@ rcgen    = { workspace = true }
 postcard = { workspace = true }
 serde    = { workspace = true }
 log      = { workspace = true }
+bytes    = { workspace = true }

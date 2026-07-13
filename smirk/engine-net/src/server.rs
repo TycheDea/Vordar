@@ -2,10 +2,12 @@
 // simulation polls events and pushes sends through unbounded channels.
 
 use crate::common::{
-    decode_ctrl, encode_ctrl, read_frame_in, server_crypto, write_frame, Ctrl, TAG_APP, TAG_CTRL,
+    decode_ctrl, decode_datagram, encode_ctrl, encode_datagram, read_frame_in, server_crypto,
+    write_frame, Ctrl, TAG_APP, TAG_CTRL,
 };
 use crate::metrics::NetMetrics;
 use crate::NetError;
+use bytes::Bytes;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +31,10 @@ enum Outgoing {
     To(ConnId, Arc<Vec<u8>>),
     All(Arc<Vec<u8>>),
     Kick(ConnId),
+    /// An unreliable datagram send (networking rework 3, finding 2) — already
+    /// tagged (`encode_datagram` applied in `NetServer::send_datagram`), so
+    /// the router only has to hand the bytes to quinn.
+    Datagram(ConnId, Vec<u8>),
 }
 
 /// Per-connection writer queue + the quinn handle (for server-side close) +
@@ -191,6 +197,19 @@ impl NetServer {
         let _ = self.out.send(Outgoing::All(Arc::new(data)));
     }
 
+    /// Send `data` to one connection via an unreliable QUIC datagram instead
+    /// of the reliable ordered stream (networking rework 3, finding 2): a
+    /// lost datagram is simply gone — no retransmit, no stream fallback — so
+    /// callers must only route messages here that tolerate loss/reorder
+    /// (superseded state, latest-wins acks). Tagged `TAG_APP` so a receiver's
+    /// datagram lane surfaces it as the same `ServerEvent::Message`/
+    /// `ClientEvent::Message` the stream uses. A failed send (connection
+    /// closing, payload too large) is counted in `NetMetrics::datagram_send_failures`
+    /// and dropped — never falls back to the stream.
+    pub fn send_datagram(&self, conn: ConnId, data: Vec<u8>) {
+        let _ = self.out.send(Outgoing::Datagram(conn, encode_datagram(TAG_APP, &data)));
+    }
+
     /// Bounded writer queue policy: drop connection when backlog exceeds this.
     pub const WRITER_QUEUE_CAP: usize = 128;
 
@@ -316,6 +335,14 @@ async fn server_main(
                 Outgoing::Kick(id) => {
                     if let Some((_, connection, _)) = map.get(&id) {
                         connection.close(0u32.into(), b"kicked");
+                    }
+                }
+                Outgoing::Datagram(id, bytes) => {
+                    if let Some((_, connection, _)) = map.get(&id) {
+                        match connection.send_datagram(Bytes::from(bytes)) {
+                            Ok(()) => router_metrics.record_datagram_out(),
+                            Err(_) => router_metrics.record_datagram_send_failure(),
+                        }
                     }
                 }
             }
@@ -504,6 +531,57 @@ async fn handle_connection(
         }
     });
 
+    // Datagram receive task (networking rework 3, finding 2) — its own
+    // reader loop, independent of the stream reader below, with its OWN
+    // token bucket (the stream reader-loop bucket above is untouched). A
+    // datagram `Ctrl::Ping` is answered DIRECTLY via `send_datagram` here,
+    // bypassing the writer queue entirely — precisely the queueing delay a
+    // ping/pong is meant to avoid measuring. Ends silently when
+    // `read_datagram` errors; the stream reader loop below owns
+    // connection-teardown signaling, so this task is aborted alongside the
+    // writer once that loop exits.
+    let datagram_conn = connection.clone();
+    let datagram_events = events.clone();
+    let datagram_metrics = metrics.clone();
+    let datagram_rtt = rtt.clone();
+    let datagram_task = tokio::spawn(async move {
+        let mut dgram_tokens = NetServer::MSG_BUCKET_CAPACITY;
+        let mut dgram_last_refill = Instant::now();
+        while let Ok(bytes) = datagram_conn.read_datagram().await {
+            let Some((tag, payload)) = decode_datagram(&bytes) else { continue };
+            datagram_metrics.record_datagram_in();
+            match tag {
+                TAG_CTRL => {
+                    if let Some(Ctrl::Ping { t_client }) = decode_ctrl(payload) {
+                        let pong = Ctrl::Pong { t_client, t_server: epoch.elapsed().as_micros() as u64 };
+                        let out = encode_datagram(TAG_CTRL, &encode_ctrl(&pong));
+                        match datagram_conn.send_datagram(Bytes::from(out)) {
+                            Ok(()) => datagram_metrics.record_datagram_out(),
+                            Err(_) => datagram_metrics.record_datagram_send_failure(),
+                        }
+                    }
+                }
+                TAG_APP => {
+                    let now = Instant::now();
+                    dgram_tokens = (dgram_tokens
+                        + now.duration_since(dgram_last_refill).as_secs_f64() * NetServer::MSG_REFILL_PER_SEC)
+                        .min(NetServer::MSG_BUCKET_CAPACITY);
+                    dgram_last_refill = now;
+                    if dgram_tokens < 1.0 {
+                        datagram_metrics.record_reject();
+                    } else {
+                        dgram_tokens -= 1.0;
+                        datagram_rtt.store(datagram_conn.rtt().as_micros() as u64, Ordering::Relaxed);
+                        let recv_micros = epoch.elapsed().as_micros() as u64;
+                        let payload = payload.to_vec();
+                        let _ = datagram_events.send(ServerEvent::Message { conn: id, data: payload, recv_micros });
+                    }
+                }
+                _ => {}
+            }
+        }
+    });
+
     // Reader-side token bucket (finding 4): refills continuously, drained one
     // token per app frame. Bounds how fast this connection's frames turn
     // into `ServerEvent`s — without it, a client sending faster than the
@@ -550,13 +628,14 @@ async fn handle_connection(
     };
 
     writer.abort();
+    datagram_task.abort();
     result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{client_crypto, encode_ctrl, read_frame_out, write_frame, Ctrl, TAG_CTRL};
+    use crate::common::{client_crypto, decode_ctrl, encode_ctrl, read_frame_out, write_frame, Ctrl, TAG_CTRL};
     use std::time::Duration;
 
     /// Regression test for the writer-queue-cap facade fix (networking audit
@@ -725,5 +804,167 @@ mod tests {
         }
 
         assert_eq!(server.peer_ip(conn_id), None, "peer_ip must be gone after the connection ends");
+    }
+
+    /// Regression test for the datagram lane's server→client direction
+    /// (networking rework 3, finding 2). Before this fix `NetServer` had no
+    /// `send_datagram` at all — the only way to reach a client was the
+    /// reliable ordered stream. This didn't compile until the lane existed,
+    /// which is the fail-first evidence for this step (the API itself was
+    /// the missing piece, not a runtime behavior).
+    #[tokio::test]
+    async fn datagram_lane_delivers_server_to_client_message() {
+        let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
+        let addr = server.local_addr();
+        let mut client = crate::NetClient::connect(addr, 1).expect("connect");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let conn_id = loop {
+            if let Some(id) = server.poll().into_iter().find_map(|ev| match ev {
+                ServerEvent::Connected(id) => Some(id),
+                _ => None,
+            }) {
+                break id;
+            }
+            assert!(Instant::now() < deadline, "server never saw the connection");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        // Wait for the client to observe Connected too, so its datagram
+        // receive task is definitely up before the server sends.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if client.poll().into_iter().any(|ev| matches!(ev, crate::ClientEvent::Connected)) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "client never observed Connected");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let payload = b"hello-over-datagram".to_vec();
+        server.send_datagram(conn_id, payload.clone());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let received = loop {
+            if let Some(data) = client.poll().into_iter().find_map(|ev| match ev {
+                crate::ClientEvent::Message(data) => Some(data),
+                _ => None,
+            }) {
+                break Some(data);
+            }
+            if Instant::now() >= deadline {
+                break None;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert_eq!(
+            received,
+            Some(payload),
+            "client never received the server's datagram-lane message"
+        );
+    }
+
+    /// Regression test for the datagram lane's client→server direction
+    /// (networking rework 3, finding 2): `NetClient::send_datagram` must
+    /// surface at the server as the same `ServerEvent::Message` the stream
+    /// produces, with a real (nonzero) `recv_micros` arrival stamp.
+    #[tokio::test]
+    async fn datagram_lane_delivers_client_to_server_message() {
+        let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
+        let addr = server.local_addr();
+        let client = crate::NetClient::connect(addr, 1).expect("connect");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let conn_id = loop {
+            if let Some(id) = server.poll().into_iter().find_map(|ev| match ev {
+                ServerEvent::Connected(id) => Some(id),
+                _ => None,
+            }) {
+                break id;
+            }
+            assert!(Instant::now() < deadline, "server never saw the connection");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+
+        let payload = b"client-datagram-payload".to_vec();
+        client.send_datagram(payload.clone());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let received = loop {
+            if let Some(found) = server.poll().into_iter().find_map(|ev| match ev {
+                ServerEvent::Message { conn, data, recv_micros } if conn == conn_id => Some((data, recv_micros)),
+                _ => None,
+            }) {
+                break Some(found);
+            }
+            if Instant::now() >= deadline {
+                break None;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let (data, recv_micros) =
+            received.expect("server never received the client's datagram-lane message");
+        assert_eq!(data, payload);
+        assert!(recv_micros > 0, "recv_micros should be nonzero — the server epoch has elapsed by arrival");
+    }
+
+    /// Regression test for the datagram ctrl-ping path answering DIRECTLY via
+    /// `send_datagram` instead of the per-connection writer queue (networking
+    /// rework 3, finding 2) — precisely the queueing delay a ping/pong is
+    /// meant to measure around. A raw (non-`NetClient`) connection sends a
+    /// `Ctrl::Ping` as a bare datagram and must get a `Ctrl::Pong` datagram
+    /// back while `NetMetrics::frames_out` (the STREAM counter, incremented
+    /// only by the writer task) stays at 0 — proof the reply never touched
+    /// the writer queue at all.
+    #[tokio::test]
+    async fn datagram_ctrl_ping_gets_direct_pong_bypassing_writer_queue() {
+        let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
+        let addr = server.local_addr();
+
+        let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).expect("client endpoint");
+        endpoint.set_default_client_config(client_crypto().expect("client crypto"));
+        let connection = endpoint
+            .connect(addr, "localhost")
+            .expect("connect")
+            .await
+            .expect("handshake");
+        let (mut send, mut recv) = connection.open_bi().await.expect("open bi");
+        write_frame(&mut send, TAG_CTRL, &encode_ctrl(&Ctrl::Hello { version: 1 }))
+            .await
+            .expect("send hello");
+        read_frame_out(&mut recv).await.expect("hello ack");
+
+        // Wait for the server to register the connection.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if server.poll().into_iter().any(|ev| matches!(ev, ServerEvent::Connected(_))) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "server never saw the connection");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // Send a Ctrl::Ping as a raw datagram — never touching the stream.
+        let ping = Ctrl::Ping { t_client: 12345 };
+        let dgram = encode_datagram(TAG_CTRL, &encode_ctrl(&ping));
+        connection.send_datagram(Bytes::from(dgram)).expect("send ping datagram");
+
+        let pong_bytes = tokio::time::timeout(Duration::from_secs(5), connection.read_datagram())
+            .await
+            .expect("timed out waiting for the pong datagram")
+            .expect("read_datagram failed");
+        let (tag, payload) = decode_datagram(&pong_bytes).expect("empty datagram");
+        assert_eq!(tag, TAG_CTRL);
+        match decode_ctrl(payload) {
+            Some(Ctrl::Pong { t_client, .. }) => assert_eq!(t_client, 12345),
+            _ => panic!("expected a decodable Ctrl::Pong datagram"),
+        }
+
+        assert_eq!(
+            server.metrics().frames_out.load(Ordering::Relaxed),
+            0,
+            "pong must bypass the writer queue entirely — frames_out only counts stream writes"
+        );
+
+        drop(connection);
     }
 }

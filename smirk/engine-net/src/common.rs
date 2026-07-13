@@ -65,6 +65,22 @@ async fn read_frame_cap(recv: &mut quinn::RecvStream, max: usize) -> Result<(u8,
     Ok((tag[0], buf))
 }
 
+/// Encode a datagram payload with its tag byte — no length prefix, unlike
+/// `write_frame`'s stream framing: a QUIC datagram is a whole message on
+/// arrival, so there is nothing to delimit.
+pub(crate) fn encode_datagram(tag: u8, payload: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(1 + payload.len());
+    buf.push(tag);
+    buf.extend_from_slice(payload);
+    buf
+}
+
+/// Split a received datagram into its tag and payload. `None` only for an
+/// empty datagram, which this crate never sends.
+pub(crate) fn decode_datagram(bytes: &[u8]) -> Option<(u8, &[u8])> {
+    bytes.split_first().map(|(&tag, rest)| (tag, rest))
+}
+
 pub(crate) fn encode_ctrl(msg: &Ctrl) -> Vec<u8> {
     postcard::to_allocvec(msg).expect("Ctrl serialization cannot fail")
 }

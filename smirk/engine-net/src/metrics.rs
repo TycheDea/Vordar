@@ -19,6 +19,16 @@ pub struct NetMetrics {
     /// a proxy for how saturated the network thread is (networking audit
     /// 2026-07-11, finding 14 step 1).
     pub busy_micros: AtomicU64,
+    /// Datagrams received on the unreliable lane (networking rework 3,
+    /// finding 2) — counted regardless of tag (ctrl ping or app payload).
+    pub datagrams_in: AtomicU64,
+    /// Datagrams successfully handed to `quinn::Connection::send_datagram`
+    /// on the unreliable lane.
+    pub datagrams_out: AtomicU64,
+    /// A `send_datagram` call that failed (connection closing, payload too
+    /// large) and was dropped instead of falling back to the stream —
+    /// datagrams are best-effort by contract; the next cadence supersedes.
+    pub datagram_send_failures: AtomicU64,
 }
 
 impl NetMetrics {
@@ -41,5 +51,20 @@ impl NetMetrics {
     #[inline]
     pub fn record_reject(&self) {
         self.rejects.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_datagram_in(&self) {
+        self.datagrams_in.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_datagram_out(&self) {
+        self.datagrams_out.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_datagram_send_failure(&self) {
+        self.datagram_send_failures.fetch_add(1, Ordering::Relaxed);
     }
 }

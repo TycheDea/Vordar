@@ -11,9 +11,24 @@
 //     verification. Real certificates can be swapped in later without touching
 //     the API.
 //
-// Wire format, per QUIC bidirectional stream:
-//   [u32 LE frame length][u8 tag][payload]
-//   tag 0 = control (postcard-encoded Ctrl), tag 1 = application bytes.
+// Two lanes carry frames (networking rework 3, finding 2):
+//   - Reliable ordered stream, per QUIC bidirectional stream:
+//       [u32 LE frame length][u8 tag][payload]
+//       tag 0 = control (postcard-encoded Ctrl), tag 1 = application bytes.
+//   - Unreliable QUIC datagram, one per `send_datagram`/`read_datagram`:
+//       [u8 tag][payload] — no length prefix; a datagram is self-delimiting
+//       on arrival. Same tag values as the stream. Payloads are opaque bytes
+//       either way; which messages tolerate loss/reorder well enough to ride
+//       the datagram lane is a decision for the layer above (vordar-protocol),
+//       not this crate. Both directions surface a received datagram exactly
+//       like a received stream frame — `ServerEvent::Message`/
+//       `ClientEvent::Message` — so callers don't fork on which lane a
+//       message arrived over. A datagram `Ctrl::Ping` is answered directly
+//       via `send_datagram`, bypassing the stream's per-connection writer
+//       queue entirely, so its RTT sample carries no queueing delay.
+//       `send_datagram` failures (connection closing, payload too large) are
+//       counted in `NetMetrics` and dropped — best-effort by contract, never
+//       falling back to the stream.
 //
 // Clock sync: the client pings (t_client), the server pongs (t_client, t_server),
 // the client computes offset = (t_server + rtt/2) - t_now, keeping the sample

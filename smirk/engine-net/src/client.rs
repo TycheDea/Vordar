@@ -2,10 +2,12 @@
 // owns the clock-sync state machine.
 
 use crate::common::{
-    client_crypto, decode_ctrl, encode_ctrl, read_frame_out, write_frame, Ctrl, TAG_APP, TAG_CTRL,
+    client_crypto, decode_ctrl, decode_datagram, encode_ctrl, encode_datagram, read_frame_out,
+    write_frame, Ctrl, TAG_APP, TAG_CTRL,
 };
 use crate::metrics::NetMetrics;
 use crate::NetError;
+use bytes::Bytes;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
 use std::net::SocketAddr;
@@ -316,6 +318,10 @@ impl ClockSync {
 pub struct NetClient {
     events: UnboundedReceiver<ClientEvent>,
     out: UnboundedSender<Vec<u8>>,
+    /// Outbound datagram lane (networking rework 3, finding 2) — a separate
+    /// channel from `out` above: datagrams never touch the reliable stream's
+    /// writer queue, so a stalled stream can never delay them.
+    out_datagram: UnboundedSender<Vec<u8>>,
     clock: Arc<Mutex<ClockSync>>,
     epoch: Instant,
     /// Simulated clock drift applied to every reading of `epoch` (finding 17's
@@ -353,6 +359,7 @@ impl NetClient {
         let epoch = Instant::now();
         let (event_tx, event_rx) = unbounded_channel();
         let (out_tx, out_rx) = unbounded_channel();
+        let (out_datagram_tx, out_datagram_rx) = unbounded_channel();
         let clock = Arc::new(Mutex::new(ClockSync::new()));
         let metrics = NetMetrics::new();
 
@@ -367,8 +374,8 @@ impl NetClient {
                 };
                 rt.block_on(async move {
                     match client_main(
-                        addr, version, epoch, event_tx.clone(), out_rx, thread_clock, one_way, impairment,
-                        thread_metrics,
+                        addr, version, epoch, event_tx.clone(), out_rx, out_datagram_rx, thread_clock,
+                        one_way, impairment, thread_metrics,
                     ).await {
                         Ok(()) => log::info!("net: connection closed"),
                         Err(e) => log::warn!("net: connection ended: {e}"),
@@ -381,6 +388,7 @@ impl NetClient {
         Ok(Self {
             events: event_rx,
             out: out_tx,
+            out_datagram: out_datagram_tx,
             clock,
             epoch,
             clock_skew_ppm: impairment.clock_skew_ppm,
@@ -399,6 +407,16 @@ impl NetClient {
 
     pub fn send(&self, data: Vec<u8>) {
         let _ = self.out.send(data);
+    }
+
+    /// Send `data` to the server via an unreliable QUIC datagram instead of
+    /// the reliable ordered stream (networking rework 3, finding 2): a lost
+    /// datagram is simply gone — no retransmit, no stream fallback — so
+    /// callers must only route messages here that tolerate loss/reorder.
+    /// Tagged `TAG_APP` so the server's datagram lane surfaces it as the same
+    /// `ServerEvent::Message` the stream uses.
+    pub fn send_datagram(&self, data: Vec<u8>) {
+        let _ = self.out_datagram.send(data);
     }
 
     /// Microseconds since this client started — the local monotonic clock
@@ -437,6 +455,7 @@ async fn client_main(
     epoch: Instant,
     events: UnboundedSender<ClientEvent>,
     mut out_rx: UnboundedReceiver<Vec<u8>>,
+    mut out_rx_datagram: UnboundedReceiver<Vec<u8>>,
     clock: Arc<Mutex<ClockSync>>,
     one_way: Duration,
     impairment: Impairment,
@@ -533,12 +552,62 @@ async fn client_main(
         }
     });
 
+    // Datagram outbound pipeline (networking rework 3, finding 2): outbound
+    // datagrams get their own delay_reorder stage (one_way + jitter, a fresh
+    // seed) but never touch the stream's writer queue at all —
+    // `connection.send_datagram` is fire-and-forget, so a lost datagram is
+    // truly gone instead of retransmitted.
+    let (dgram_write_tx, dgram_write_rx) = unbounded_channel::<(tokio::time::Instant, (u8, Vec<u8>))>();
+    let (dgram_ordered_tx, mut dgram_ordered_rx) = unbounded_channel::<(u8, Vec<u8>)>();
+    tokio::spawn(delay_reorder(dgram_write_rx, dgram_ordered_tx));
+    let dgram_sender_metrics = metrics.clone();
+    let dgram_conn_for_send = connection.clone();
+    let dgram_sender = tokio::spawn(async move {
+        while let Some((tag, payload)) = dgram_ordered_rx.recv().await {
+            let bytes = Bytes::from(encode_datagram(tag, &payload));
+            match dgram_conn_for_send.send_datagram(bytes) {
+                Ok(()) => dgram_sender_metrics.record_datagram_out(),
+                Err(_) => dgram_sender_metrics.record_datagram_send_failure(),
+            }
+        }
+    });
+    let dgram_app_tx = dgram_write_tx.clone();
+    let dgram_forward = tokio::spawn(async move {
+        let mut dgram_jitter = Jitter::with_seed(jitter, 0x5EED_C0DE_1357_9BDF);
+        while let Some(data) = out_rx_datagram.recv().await {
+            let at = tokio::time::Instant::now() + one_way + dgram_jitter.sample();
+            if dgram_app_tx.send((at, (TAG_APP, data))).is_err() { break; }
+        }
+    });
+
     // Raw reader stamps each frame on arrival; delay_reorder releases it
     // one_way (+ jitter) later, possibly out of arrival order.
     let (in_tx, in_rx) =
         unbounded_channel::<(tokio::time::Instant, Result<(u8, Vec<u8>), NetError>)>();
     let (ordered_in_tx, mut ordered_in_rx) = unbounded_channel::<Result<(u8, Vec<u8>), NetError>>();
     tokio::spawn(delay_reorder(in_rx, ordered_in_tx));
+
+    // Datagram inbound task (finding 2): stamps arrivals into the SAME in_tx
+    // channel the stream reader (below) uses, so the one delay_reorder /
+    // ordered_in_rx consumer loop handles both lanes identically — a
+    // datagram Ctrl::Pong or app message is indistinguishable from its
+    // stream counterpart by the time it reaches that loop. Never sends
+    // `Err`: only the stream reader owns connection-teardown signaling.
+    let dgram_in_tx = in_tx.clone();
+    let dgram_conn_for_recv = connection.clone();
+    let dgram_reader_metrics = metrics.clone();
+    let dgram_reader = tokio::spawn(async move {
+        let mut dgram_read_jitter = Jitter::with_seed(jitter, 0xFEED_BEEF_0BAD_C0DE);
+        while let Ok(bytes) = dgram_conn_for_recv.read_datagram().await {
+            let Some((tag, payload)) = decode_datagram(&bytes) else { continue };
+            dgram_reader_metrics.record_datagram_in();
+            let at = tokio::time::Instant::now() + one_way + dgram_read_jitter.sample();
+            if dgram_in_tx.send((at, Ok((tag, payload.to_vec())))).is_err() {
+                break;
+            }
+        }
+    });
+
     let reader_metrics = metrics.clone();
     let reader = tokio::spawn(async move {
         let mut read_jitter = Jitter::with_seed(jitter, 0x1234_5678_9ABC_DEF0);
@@ -581,6 +650,9 @@ async fn client_main(
     pinger.abort();
     forward.abort();
     writer.abort();
+    dgram_reader.abort();
+    dgram_forward.abort();
+    dgram_sender.abort();
     result
 }
 
