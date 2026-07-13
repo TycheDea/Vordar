@@ -1442,17 +1442,20 @@ mod tests {
             std::thread::sleep(Duration::from_millis(16));
         }
 
-        // Finding 8: a fresh spawn starts every ability on full cooldown —
-        // clear onslaught's 8 s cooldown before casting it (same wait
-        // `ravager_onslaught_dashes_and_resolves` uses server-side, in
-        // server/vordar-server/tests/e2e.rs).
-        let clear_cooldown = Instant::now() + Duration::from_millis(8300);
-        while Instant::now() < clear_cooldown {
+        // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+        // cooldowns now persist as remainders instead of pessimistically
+        // seeding full cooldown at spawn, so a fresh character's "onslaught"
+        // is castable immediately — no cooldown-clearing wait needed. The
+        // predicted entity itself is still created only once the first
+        // Snapshot's `enters` list reaches this client (Welcome alone
+        // doesn't spawn it), so pump until it exists.
+        let entity_deadline = Instant::now() + Duration::from_secs(2);
+        while own_entity(&resources).is_none() {
             run_input(&mut world, &mut resources);
             run_update(&mut world, &mut resources);
+            assert!(Instant::now() < entity_deadline, "predicted entity never appeared after Welcome");
             std::thread::sleep(Duration::from_millis(16));
         }
-
         let entity = own_entity(&resources).expect("predicted entity must exist by now");
         let origin = world.get::<&Transform>(entity).unwrap().position;
         let target = origin + Vec3::new(max_range * 0.5, 0.0, 0.0);

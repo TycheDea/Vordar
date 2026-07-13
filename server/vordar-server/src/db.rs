@@ -18,6 +18,7 @@
 use engine_net::ConnId;
 use glam::Vec3;
 use rusqlite::Connection;
+use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
 use std::thread::JoinHandle;
 
@@ -37,6 +38,8 @@ CREATE TABLE IF NOT EXISTS characters (
     pos_z  REAL NOT NULL,
     health INTEGER NOT NULL
 );
+", "
+ALTER TABLE characters ADD COLUMN cooldowns TEXT NOT NULL DEFAULT '{}';
 "];
 
 /// Bring `db` up to the latest schema version. Each pending migration runs in
@@ -70,6 +73,11 @@ pub struct CharacterRecord {
     pub zone: String,
     pub pos: Vec3,
     pub health: i32,
+    /// Cooldown remainders (skill id → remaining microseconds) as of the
+    /// moment this record was saved — never absolute `ready_at` stamps,
+    /// which only mean something against the server clock that produced
+    /// them. Only skills still cooling down are present.
+    pub cooldowns: HashMap<String, u64>,
 }
 
 enum DbRequest {
@@ -80,7 +88,7 @@ enum DbRequest {
         /// Where the result goes — the requesting zone's handle.
         reply: mpsc::Sender<DbLoaded>,
     },
-    Save { name: String, zone: String, pos: Vec3, health: i32 },
+    Save { name: String, record: CharacterRecord },
 }
 
 /// A finished load: the character `name` plays on connection `conn`.
@@ -172,10 +180,10 @@ impl DbHandle {
         });
     }
 
-    /// Persist zone + position + health. Fire-and-forget; failures are
-    /// logged by the worker.
-    pub fn save(&self, name: String, zone: String, pos: Vec3, health: i32) {
-        let _ = self.tx.send(DbRequest::Save { name, zone, pos, health });
+    /// Persist a full character record (zone, position, health, and cooldown
+    /// remainders). Fire-and-forget; failures are logged by the worker.
+    pub fn save(&self, name: String, record: CharacterRecord) {
+        let _ = self.tx.send(DbRequest::Save { name, record });
     }
 
     /// Completed loads since the last poll.
@@ -226,10 +234,22 @@ fn worker(mut db: Connection, rx: mpsc::Receiver<DbRequest>) {
                         Err(e) => log::error!("db: load '{name}' failed: {e}"),
                     }
                 }
-                DbRequest::Save { name, zone, pos, health } => {
+                DbRequest::Save { name, record } => {
+                    let cooldowns_text = ron::to_string(&record.cooldowns).unwrap_or_else(|e| {
+                        log::error!("db: failed to encode cooldowns for '{name}': {e}");
+                        "{}".into()
+                    });
                     let result = tx.execute(
-                        "UPDATE characters SET zone = ?1, pos_x = ?2, pos_y = ?3, pos_z = ?4, health = ?5 WHERE name = ?6",
-                        rusqlite::params![zone, pos.x as f64, pos.y as f64, pos.z as f64, health, name],
+                        "UPDATE characters SET zone = ?1, pos_x = ?2, pos_y = ?3, pos_z = ?4, health = ?5, cooldowns = ?6 WHERE name = ?7",
+                        rusqlite::params![
+                            record.zone,
+                            record.pos.x as f64,
+                            record.pos.y as f64,
+                            record.pos.z as f64,
+                            record.health,
+                            cooldowns_text,
+                            name
+                        ],
                     );
                     if let Err(e) = result {
                         log::error!("db: save '{name}' failed: {e}");
@@ -256,13 +276,19 @@ fn load_or_create(db: &Connection, name: &str, defaults: CharacterRecord) -> rus
         rusqlite::params![name, defaults.pos.x as f64, defaults.pos.y as f64, defaults.pos.z as f64, defaults.health],
     )?;
     db.query_row(
-        "SELECT zone, pos_x, pos_y, pos_z, health FROM characters WHERE name = ?1",
+        "SELECT zone, pos_x, pos_y, pos_z, health, cooldowns FROM characters WHERE name = ?1",
         [name],
         |row| {
+            let cooldowns_text: String = row.get(5)?;
+            let cooldowns = ron::from_str(&cooldowns_text).unwrap_or_else(|e| {
+                log::error!("db: failed to parse cooldowns for '{name}': {e}");
+                HashMap::new()
+            });
             Ok(CharacterRecord {
                 zone: row.get(0)?,
                 pos: Vec3::new(row.get::<_, f64>(1)? as f32, row.get::<_, f64>(2)? as f32, row.get::<_, f64>(3)? as f32),
                 health: row.get(4)?,
+                cooldowns,
             })
         },
     )
@@ -279,7 +305,7 @@ mod tests {
     }
 
     fn defaults() -> CharacterRecord {
-        CharacterRecord { zone: "start".into(), pos: Vec3::ZERO, health: 100 }
+        CharacterRecord { zone: "start".into(), pos: Vec3::ZERO, health: 100, cooldowns: HashMap::new() }
     }
 
     fn wait_loaded(handle: &DbHandle) -> DbLoaded {
@@ -298,7 +324,7 @@ mod tests {
         let path = temp_db("fresh");
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        let defaults = CharacterRecord { zone: "start".into(), pos: Vec3::new(3.0, 0.0, -2.0), health: 100 };
+        let defaults = CharacterRecord { zone: "start".into(), pos: Vec3::new(3.0, 0.0, -2.0), health: 100, cooldowns: HashMap::new() };
         handle.load_or_create(1, "alice".into(), defaults.clone());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.conn, 1);
@@ -315,7 +341,7 @@ mod tests {
             let handle = worker.handle();
             handle.load_or_create(1, "bob".into(), defaults());
             wait_loaded(&handle);
-            handle.save("bob".into(), "east".into(), saved_pos, 40);
+            handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: saved_pos, health: 40, cooldowns: HashMap::new() });
             // Drop (handle first, then worker) flushes the queued save.
         }
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
@@ -332,7 +358,7 @@ mod tests {
         let path = temp_db("unknown");
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        handle.save("ghost".into(), "east".into(), Vec3::ONE, 1);
+        handle.save("ghost".into(), CharacterRecord { zone: "east".into(), pos: Vec3::ONE, health: 1, cooldowns: HashMap::new() });
         handle.load_or_create(1, "ghost".into(), defaults());
         // The save hit no row; the later create uses defaults.
         assert_eq!(wait_loaded(&handle).record, defaults());
@@ -362,7 +388,7 @@ mod tests {
         a.load_or_create(1, "carl".into(), defaults());
         wait_loaded(&a);
         let moved = Vec3::new(-16.0, 0.0, 0.0);
-        a.save("carl".into(), "east".into(), moved, 80);
+        a.save("carl".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 80, cooldowns: HashMap::new() });
         b.load_or_create(7, "carl".into(), defaults());
         let loaded = wait_loaded(&b);
         assert_eq!(loaded.record.zone, "east");
@@ -489,7 +515,7 @@ mod tests {
         assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle after completion");
 
         let moved = Vec3::new(5.0, 0.0, -1.0);
-        h2.save("forked".into(), "east".into(), moved, 77);
+        h2.save("forked".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 77, cooldowns: HashMap::new() });
         drop(h1);
         drop(h2);
         drop(worker);
@@ -530,9 +556,9 @@ mod tests {
         }
 
         // Fire the burst without waiting between sends.
-        handle.save("ann".into(), "east".into(), Vec3::new(1.0, 0.0, 0.0), 10);
-        handle.save("bob".into(), "east".into(), Vec3::new(2.0, 0.0, 0.0), 20);
-        handle.save("cleo".into(), "east".into(), Vec3::new(3.0, 0.0, 0.0), 30);
+        handle.save("ann".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(1.0, 0.0, 0.0), health: 10, cooldowns: HashMap::new() });
+        handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(2.0, 0.0, 0.0), health: 20, cooldowns: HashMap::new() });
+        handle.save("cleo".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(3.0, 0.0, 0.0), health: 30, cooldowns: HashMap::new() });
         handle.load_or_create(9, "dana".into(), defaults());
         let dana = wait_loaded(&handle);
         assert_eq!(dana.name, "dana");
@@ -553,5 +579,40 @@ mod tests {
             assert_eq!(loaded.record.pos, pos, "{name} pos not saved");
             assert_eq!(loaded.record.health, health, "{name} health not saved");
         }
+    }
+
+    /// Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    /// cooldowns are now persisted as remainders in the new `cooldowns`
+    /// column (RON-encoded `HashMap<String, u64>`). A save carrying a
+    /// non-empty cooldowns map must survive a full close/reopen of the
+    /// database file, the same round-trip `save_then_reload_roundtrips_
+    /// across_reopen` proves for position/health.
+    #[test]
+    fn cooldowns_persist_across_reopen() {
+        let path = temp_db("cooldowns");
+        let mut cooldowns = HashMap::new();
+        cooldowns.insert("onslaught".to_string(), 4_500_000u64);
+        cooldowns.insert("rend".to_string(), 200_000u64);
+        {
+            let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+            let handle = worker.handle();
+            handle.load_or_create(1, "dara".into(), defaults());
+            wait_loaded(&handle);
+            handle.save(
+                "dara".into(),
+                CharacterRecord {
+                    zone: "start".into(),
+                    pos: Vec3::new(2.0, 0.0, 3.0),
+                    health: 80,
+                    cooldowns: cooldowns.clone(),
+                },
+            );
+            // Drop (handle first, then worker) flushes the queued save.
+        }
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        handle.load_or_create(2, "dara".into(), defaults());
+        let loaded = wait_loaded(&handle);
+        assert_eq!(loaded.record.cooldowns, cooldowns, "cooldown remainders must survive a reopen");
     }
 }

@@ -207,10 +207,11 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
         bot.pump();
         std::thread::sleep(Duration::from_millis(16));
     }
-    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: the zone
-    // transfer re-spawned this connection's PlayerConn, which now
-    // pessimistically starts abilities on full cooldown — clear it first.
-    std::thread::sleep(Duration::from_millis(3200));
+    // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    // cooldowns now persist as remainders restored across a zone transfer
+    // instead of pessimistically seeding full cooldown at spawn, so a
+    // never-cast "cleave" is castable immediately after the transfer — no
+    // clearing wait needed.
     bot.send_cast("cleave", glam::Vec2::new(npc.x, npc.z));
     bot.wait_for("cleave schedules", Duration::from_secs(3), |b| !b.mechanics.is_empty());
     let (mech, _) = *bot.mechanics.last().unwrap();

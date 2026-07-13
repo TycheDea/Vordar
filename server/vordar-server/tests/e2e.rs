@@ -578,12 +578,10 @@ fn ravager_onslaught_dashes_and_resolves() {
     let target = *a.last_snapshot.get(&b_id).unwrap();
     let start_dist = (glam::Vec2::new(start.x, start.z) - glam::Vec2::new(target.x, target.z)).length();
 
-    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: every fresh
-    // spawn now pessimistically starts its abilities on full cooldown, so
-    // "onslaught" (8 s cooldown) isn't castable in the instant after login —
-    // clear it first.
-    std::thread::sleep(Duration::from_millis(8200));
-
+    // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    // cooldowns now persist as remainders instead of pessimistically seeding
+    // full cooldown at spawn, so a fresh character's "onslaught" is castable
+    // immediately — no clearing wait needed.
     a.send_cast("onslaught", glam::Vec2::new(target.x, target.z));
 
     a.wait_for("dash schedule broadcast", Duration::from_secs(3), |bot| !bot.mechanics.is_empty());
@@ -787,15 +785,15 @@ fn phase6_restart_durability() {
     );
 }
 
-// Finding 8 of docs/reviews/audit-networking-2026-07-11.md: cooldowns lived
-// only in the connection's in-memory `PlayerConn.last_cast`, which a fresh
-// login recreated empty — burn an ability's cooldown, disconnect, relog, and
-// the same ability was instantly castable again. The fix pessimistically
-// starts every ability of the character's class on full cooldown as of
-// spawn (Path step 1), so a relog is never an advantage even though the
-// "true" remaining cooldown from before disconnect isn't persisted.
+// Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md: cooldowns
+// used to live only in the connection's in-memory `PlayerConn.last_cast`
+// (audit finding 8's pessimistic fix seeded every ability on full cooldown
+// at spawn instead of persisting the true remainder). Cooldowns now persist
+// as `ready_at` remainders, so a relog restores the EXACT remaining
+// cooldown — neither a free reset (the original finding 8 bug) nor a full
+// pessimistic reset (finding 8's fix).
 #[test]
-fn finding8_relog_does_not_reset_cooldown() {
+fn relog_restores_exact_cooldown_remainder() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25165".parse().unwrap();
     let db = temp_db("cooldown-relog");
@@ -810,38 +808,29 @@ fn finding8_relog_does_not_reset_cooldown() {
     alice.wait_for("alice clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
     alice.wait_for("alice first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
 
-    // The very first spawn also starts on the pessimistic cooldown, so wait
-    // it out before burning "rend" (900 ms, 2.5 m range) targeting herself —
-    // well within range — for real.
+    // A fresh character's cooldowns start empty — "onslaught" (8 s cooldown,
+    // 12-unit range, target own position, well within range) is castable
+    // immediately, no pessimistic wait needed.
     let pos = alice.own_pos().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        alice.send_cast("rend", glam::Vec2::new(pos.x, pos.z));
-        alice.pump();
-        if !alice.mechanics.is_empty() {
-            break;
-        }
-        assert!(Instant::now() < deadline, "'rend' never became castable after the initial spawn cooldown elapsed");
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    alice.send_cast("onslaught", glam::Vec2::new(pos.x, pos.z));
+    alice.wait_for("onslaught schedules", Duration::from_secs(2), |b| !b.mechanics.is_empty());
 
+    // Stay connected for 4 s of the 8 s cooldown before disconnecting — the
+    // true remainder to persist is ~4 s.
+    settle(&mut alice, Duration::from_secs(4));
     drop(alice);
     // Give the server a moment to process the disconnect and save.
     std::thread::sleep(Duration::from_millis(500));
 
-    // Relog as the same character and immediately retry "rend". Before the
-    // fix, the freshly-recreated PlayerConn's `last_cast` map was empty, so
-    // this went through instantly — a free cooldown reset via relog.
     let mut alice2 = Bot::connect_as(addr, "alice");
     alice2.wait_for("alice re-welcome", Duration::from_secs(5), |b| b.player_id.is_some());
     alice2.wait_for("alice re-clock-sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
     alice2.wait_for("alice re-snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
     let pos2 = alice2.own_pos().unwrap();
-    alice2.send_cast("rend", glam::Vec2::new(pos2.x, pos2.z));
+    alice2.send_cast("onslaught", glam::Vec2::new(pos2.x, pos2.z));
 
-    // Pump for well under the 900 ms cooldown; the pessimistic full-cooldown-
-    // on-spawn must reject this cast just like a continuously-connected
-    // player's repeat cast would be.
+    // (a) An immediate recast must be rejected: the persisted remainder is
+    // still in effect — a relog must never reset the cooldown to zero.
     let settle_until = Instant::now() + Duration::from_millis(400);
     while Instant::now() < settle_until {
         alice2.pump();
@@ -849,19 +838,24 @@ fn finding8_relog_does_not_reset_cooldown() {
     }
     assert!(
         alice2.mechanics.is_empty(),
-        "relog must not reset the cooldown: 'rend' was accepted immediately after respawn"
+        "relog must not reset the cooldown: 'onslaught' was accepted immediately after relog"
     );
 
-    // Not a permanent lock — once the pessimistic cooldown set at spawn
-    // elapses, the same ability casts normally.
-    let deadline = Instant::now() + Duration::from_secs(2);
+    // (b) The TRUE remaining cooldown is ~3-4 s (8 s minus the ~4 s already
+    // elapsed before disconnect) — a pessimistic full-cooldown reset would
+    // need the full 8 s from re-Welcome, so succeeding within 6 s proves the
+    // exact remainder was restored, not a fresh full cooldown.
+    let deadline = Instant::now() + Duration::from_secs(6);
     loop {
-        alice2.send_cast("rend", glam::Vec2::new(pos2.x, pos2.z));
+        alice2.send_cast("onslaught", glam::Vec2::new(pos2.x, pos2.z));
         alice2.pump();
         if !alice2.mechanics.is_empty() {
             break;
         }
-        assert!(Instant::now() < deadline, "'rend' never became castable after the pessimistic cooldown elapsed");
+        assert!(
+            Instant::now() < deadline,
+            "'onslaught' never became castable within 6 s of relog — the persisted remainder was not restored"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }

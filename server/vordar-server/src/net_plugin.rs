@@ -159,9 +159,12 @@ struct PlayerConn {
     /// one tick of integration. Mechanic resolution rewinds through these to
     /// evaluate "position at T" by stamp time (favor-the-defender).
     history: VecDeque<(u64, Vec2)>,
-    /// Server time of the last accepted cast PER SKILL (cooldown
-    /// enforcement) — a fast skill must not eat a slow skill's cooldown.
-    last_cast: HashMap<String, u64>,
+    /// Server time each skill is next castable (cooldown enforcement) — a
+    /// fast skill must not eat a slow skill's cooldown. Persisted as a
+    /// remainder (`ready_at − now`) on every save and restored as
+    /// `spawn_now + remaining` on load, so a relog or zone transfer
+    /// preserves the exact remaining cooldown instead of resetting it.
+    cooldown_ready: HashMap<String, u64>,
     /// Round-robin cursor for snapshot `states` throttling — where the
     /// non-nearest rotation resumes next snapshot.
     rr_cursor: usize,
@@ -244,6 +247,23 @@ fn spawn_position(conn: ConnId) -> Vec3 {
     Vec3::new(angle.cos() * 3.0, 0.0, angle.sin() * 3.0)
 }
 
+/// Convert absolute `ready_at` cooldown stamps into remaining-microsecond
+/// durations as of `now`, for persistence. Entries whose cooldown has
+/// already elapsed (`ready_at <= now`) are dropped — a save never needs to
+/// carry an already-expired cooldown, and a relog would otherwise restore a
+/// stale zero-remainder entry it can never grow back from. Pure — the same
+/// representation change (`ready_at` replacing `last_cast`) that lets this
+/// function skip any `ClassLibrary` lookup at save time.
+fn cooldown_remainders(ready: &HashMap<String, u64>, now: u64) -> HashMap<String, u64> {
+    ready
+        .iter()
+        .filter_map(|(id, &ready_at)| {
+            let remaining = ready_at.saturating_sub(now);
+            (remaining > 0).then(|| (id.clone(), remaining))
+        })
+        .collect()
+}
+
 /// Connections whose player is within AOI range of `center` — the interest-
 /// management filter for the mechanic sends below (Finding 5 of
 /// docs/reviews/audit-networking-2026-07-11.md: `state.server.broadcast` used
@@ -305,7 +325,8 @@ impl System for NetReceiveSystem {
                         // runs later in the frame, the entity is still alive.
                         if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
                             let zone = state.zone.name.clone();
-                            state.db.save(pc.name.clone(), zone, tr.position, hp.current);
+                            let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+                            state.db.save(pc.name.clone(), CharacterRecord { zone, pos: tr.position, health: hp.current, cooldowns });
                         }
                         resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
                         log::info!("conn {conn}: disconnected, despawning {:?}", pc.entity);
@@ -344,7 +365,8 @@ impl System for NetReceiveSystem {
                             // freshest state.
                             if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
                                 let zone = state.zone.name.clone();
-                                state.db.save(pc.name.clone(), zone, tr.position, hp.current);
+                                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+                                state.db.save(pc.name.clone(), CharacterRecord { zone, pos: tr.position, health: hp.current, cooldowns });
                             }
                             state.server.disconnect(old_conn);
                             log::info!("conn {conn}: '{name}' takes over session from conn {old_conn}");
@@ -366,7 +388,12 @@ impl System for NetReceiveSystem {
                         // Health.current after spawn).
                         // (The zone field is decorative here: the schema
                         // default puts every NEW character in 'start'.)
-                        let defaults = CharacterRecord { zone: "start".into(), pos: spawn_position(conn), health: 100 };
+                        let defaults = CharacterRecord {
+                            zone: "start".into(),
+                            pos: spawn_position(conn),
+                            health: 100,
+                            cooldowns: HashMap::new(),
+                        };
                         state.db.load_or_create(conn, name.clone(), defaults);
                         continue;
                     }
@@ -417,8 +444,8 @@ impl System for NetReceiveSystem {
                                 continue;
                             };
                             let now = state.server.now_micros();
-                            let on_cooldown = pc.last_cast.get(&skill_id)
-                                .is_some_and(|&last| now.saturating_sub(last) < def.cooldown_micros);
+                            let on_cooldown = pc.cooldown_ready.get(&skill_id)
+                                .is_some_and(|&ready_at| now < ready_at);
                             if on_cooldown {
                                 log::debug!("conn {conn}: '{skill_id}' on cooldown");
                                 continue;
@@ -436,7 +463,7 @@ impl System for NetReceiveSystem {
                                         log::debug!("conn {conn}: cast out of range");
                                         continue;
                                     }
-                                    pc.last_cast.insert(skill_id.clone(), now);
+                                    pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
                                     state.next_mechanic_id += 1;
                                     let id = state.next_mechanic_id;
                                     // Schedule in ABSOLUTE server time and tell everyone the
@@ -478,7 +505,7 @@ impl System for NetReceiveSystem {
                                         continue; // degenerate aim at own feet
                                     }
                                     let dir = dir.normalize();
-                                    pc.last_cast.insert(skill_id.clone(), now);
+                                    pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
                                     pending_bolts.push((
                                         prefab,
                                         caster_pos + dir * spawn_offset,
@@ -497,7 +524,7 @@ impl System for NetReceiveSystem {
                                         log::debug!("conn {conn}: leap out of range");
                                         continue;
                                     }
-                                    pc.last_cast.insert(skill_id.clone(), now);
+                                    pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
                                     state.next_mechanic_id += 1;
                                     let id = state.next_mechanic_id;
                                     // Same scheduling as Scheduled — the arrival hit test IS a
@@ -583,20 +610,15 @@ impl System for NetReceiveSystem {
                     if let Ok(mut hp) = world.get::<&mut Health>(entity) {
                         hp.current = record.health;
                     }
-                    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md:
-                    // cooldowns live only in this connection's `last_cast` map,
-                    // which relogging used to recreate empty — burn a cooldown,
-                    // disconnect, relog, cast again for free. Pessimistically
-                    // start every ability of the character's class on full
-                    // cooldown as of spawn: relog is never an advantage even
-                    // though the true remaining cooldown isn't persisted yet.
-                    let class_id = world.get::<&ClassId>(entity)
-                        .map(|c| c.id.clone())
-                        .unwrap_or_else(|_| DEFAULT_CLASS.to_owned());
+                    // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+                    // cooldowns are persisted as remainders (`record.cooldowns`),
+                    // so a relog or zone transfer restores the exact remaining
+                    // cooldown instead of the pessimistic full-cooldown reset
+                    // this used to seed (finding 8 of the networking audit).
                     let spawn_now = state.server.now_micros();
-                    let last_cast: HashMap<String, u64> = class_library.abilities_of(&class_id)
-                        .iter()
-                        .map(|a| (a.id.clone(), spawn_now))
+                    let cooldown_ready: HashMap<String, u64> = record.cooldowns
+                        .into_iter()
+                        .map(|(id, remaining)| (id, spawn_now + remaining))
                         .collect();
                     state.conns.insert(conn, PlayerConn {
                         entity,
@@ -607,7 +629,7 @@ impl System for NetReceiveSystem {
                         last_t: 0,
                         known: HashSet::new(),
                         history: VecDeque::new(),
-                        last_cast,
+                        cooldown_ready,
                         rr_cursor: 0,
                     });
                     state.server.send(conn, encode(&ServerMsg::Welcome { player_id: entity.to_bits().get() }));
@@ -869,7 +891,11 @@ impl System for ZoneTransferSystem {
             let health = world.get::<&Health>(pc.entity).map(|hp| hp.current).unwrap_or(100);
             // Save FIRST: the FIFO db queue puts this ahead of the relogin
             // load the redirected client is about to trigger in the target.
-            state.db.save(pc.name.clone(), portal.target_zone.clone(), portal.target_pos, health);
+            let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+            state.db.save(
+                pc.name.clone(),
+                CharacterRecord { zone: portal.target_zone.clone(), pos: portal.target_pos, health, cooldowns },
+            );
             state.server.send(conn, encode(&ServerMsg::Redirect { zone: portal.target_zone.clone(), addr }));
             resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
             log::info!("conn {conn}: '{}' transfers to zone '{}' via portal", pc.name, portal.target_zone);
@@ -1098,7 +1124,11 @@ impl System for AutosaveSystem {
                 continue;
             }
             if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                state.db.save(pc.name.clone(), state.zone.name.clone(), tr.position, hp.current);
+                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+                state.db.save(
+                    pc.name.clone(),
+                    CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
+                );
             }
         }
     }
@@ -1131,7 +1161,11 @@ impl System for ShutdownSystem {
             // Players still in `state.loading` have no entity yet — nothing
             // to save.
             if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                state.db.save(pc.name.clone(), state.zone.name.clone(), tr.position, hp.current);
+                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+                state.db.save(
+                    pc.name.clone(),
+                    CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
+                );
             }
         }
         log::info!("zone '{}': shutdown flag set, saved {saved} connected player(s), requesting app exit", state.zone.name);
@@ -1180,7 +1214,7 @@ pub mod bench {
                     last_t: 0,
                     known: HashSet::new(),
                     history: VecDeque::new(),
-                    last_cast: HashMap::new(),
+                    cooldown_ready: HashMap::new(),
                     rr_cursor: 0,
                 },
             );
@@ -1276,7 +1310,7 @@ mod tests {
             last_t: 0,
             known: HashSet::new(),
             history: VecDeque::new(),
-            last_cast: HashMap::new(),
+            cooldown_ready: HashMap::new(),
             rr_cursor: 0,
         };
         // Otherwise-well-formed intent (monotonic t, arrives on time) —
@@ -1313,5 +1347,26 @@ mod tests {
         // The 50-strong crowd's saves land on more than one tick — not a
         // single-tick burst.
         assert!(due_ticks.len() > 1, "all autosaves landed on the same tick: {due_ticks:?}");
+    }
+
+    /// Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    /// `cooldown_remainders` is the pure conversion from absolute `ready_at`
+    /// stamps to save-time remainders — it must subtract correctly for a
+    /// skill still cooling down, and drop (not zero-fill) any entry whose
+    /// cooldown has already elapsed as of `now`.
+    #[test]
+    fn cooldown_remainders_drops_expired_and_subtracts_correctly() {
+        let mut ready: HashMap<String, u64> = HashMap::new();
+        ready.insert("still_cooling".into(), 5_000_000); // ready 4 s from now
+        ready.insert("exactly_now".into(), 1_000_000); // ready exactly now
+        ready.insert("long_expired".into(), 500_000); // ready well in the past
+        let now = 1_000_000;
+
+        let remainders = cooldown_remainders(&ready, now);
+
+        assert_eq!(remainders.get("still_cooling"), Some(&4_000_000));
+        assert!(!remainders.contains_key("exactly_now"), "an elapsed cooldown must not persist");
+        assert!(!remainders.contains_key("long_expired"), "an already-expired cooldown must not persist");
+        assert_eq!(remainders.len(), 1, "only the still-cooling skill should remain: {remainders:?}");
     }
 }

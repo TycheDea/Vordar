@@ -29,6 +29,7 @@ hecs            = { workspace = true }
 log             = { workspace = true }
 rusqlite        = { workspace = true }
 ctrlc           = { workspace = true }
+ron             = { workspace = true }
 
 [dev-dependencies]
 # e2e asserts persisted state by reading the test database directly.
