@@ -980,3 +980,72 @@ fn wrong_token_cannot_kick_or_impersonate() {
     assert!(!guarded.disconnected, "a mismatched-token login must never kick the connected victim");
     assert!(guarded.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
 }
+
+// Finding 4 of docs/reviews/plan-networking-rework-1-2026-07-13.md: nothing
+// throttled repeated bad-credential login attempts — a client could probe
+// names/tokens as fast as the message token bucket allowed. Failed logins
+// (here: token mismatches) now count against a per-IP budget; once
+// exhausted, further attempts from that IP are denied `RateLimited` instead
+// of running credential verification again, while the CONNECTED victim whose
+// name is being probed is never touched.
+#[test]
+fn login_failures_are_rate_limited() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25170".parse().unwrap();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut keeper = Bot::connect_as(addr, "keeper");
+    keeper.wait_for("keeper welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+
+    let mut wrong_token = name_token("keeper");
+    wrong_token[0] ^= 0xFF;
+
+    // Six raw (non-Bot) connections in sequence, each presenting the same
+    // wrong token for "keeper" — the first five are credential failures, the
+    // sixth must be turned away on the rate-limit gate alone.
+    let mut reasons: Vec<LoginDenyReason> = Vec::new();
+    for _ in 0..6 {
+        let mut attacker = NetClient::connect(addr, PROTOCOL_VERSION).expect("attacker connect");
+        let mut denied = None;
+        let mut got_welcome = false;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline && denied.is_none() && !got_welcome {
+            for event in attacker.poll() {
+                match event {
+                    ClientEvent::Connected => {
+                        attacker.send(encode(&ClientMsg::Login { name: "keeper".into(), token: wrong_token }));
+                    }
+                    ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
+                        Some(ServerMsg::LoginDenied { reason }) => denied = Some(reason),
+                        Some(ServerMsg::Welcome { .. }) => got_welcome = true,
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+            // Keep the victim's connection alive and pumped throughout the
+            // probing loop, not just checked at the very end.
+            keeper.pump();
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        assert!(!got_welcome, "the attacker must never receive a Welcome");
+        reasons.push(denied.expect("attacker must receive a LoginDenied answer, not silence"));
+    }
+
+    assert_eq!(
+        &reasons[..5],
+        &[LoginDenyReason::BadCredentials; 5],
+        "the first five bad-token attempts must each be denied BadCredentials: {reasons:?}"
+    );
+    assert_eq!(
+        reasons[5],
+        LoginDenyReason::RateLimited,
+        "the sixth attempt within the failure window must be denied RateLimited: {reasons:?}"
+    );
+
+    assert!(!keeper.disconnected, "rate-limited probing of another name must never touch the connected victim");
+    assert!(keeper.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
+}

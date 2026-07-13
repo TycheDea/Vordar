@@ -43,6 +43,11 @@ type ConnMap = Arc<
 /// connect (insert) and disconnect (remove), so the sim thread's reads
 /// essentially never contend with the network thread.
 type RttMap = Arc<Mutex<HashMap<ConnId, Arc<AtomicU64>>>>;
+/// Source IP per live connection (networking rework 1, finding 4): populated
+/// once at connect, removed once at disconnect — the exact same lifecycle as
+/// `RttMap` above, so `NetServer::peer_ip` can attribute a failed login to an
+/// address without the sim tracking connection metadata of its own.
+type PeerMap = Arc<Mutex<HashMap<ConnId, IpAddr>>>;
 /// Live connection count per source IP — reserved the instant a connection
 /// is accepted (before its handshake even completes) and released when it
 /// ends, so `NetServer::MAX_CONNECTIONS_PER_IP` holds even against a burst of
@@ -55,6 +60,7 @@ pub struct NetServer {
     epoch: Instant,
     local_addr: SocketAddr,
     rtts: RttMap,
+    peers: PeerMap,
     metrics: Arc<NetMetrics>,
     /// Signals `server_main`'s accept loop to stop; taken and sent on Drop.
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
@@ -126,6 +132,7 @@ impl NetServer {
         let (out_tx, out_rx) = unbounded_channel();
         let conns: ConnMap = Arc::new(Mutex::new(HashMap::new()));
         let rtts: RttMap = Arc::new(Mutex::new(HashMap::new()));
+        let peers: PeerMap = Arc::new(Mutex::new(HashMap::new()));
         let metrics = NetMetrics::new();
 
         // Report bind success/failure synchronously before the thread detaches.
@@ -134,6 +141,7 @@ impl NetServer {
 
         let thread_conns = conns.clone();
         let thread_rtts = rtts.clone();
+        let thread_peers = peers.clone();
         let thread_metrics = metrics.clone();
         let thread = std::thread::Builder::new()
             .name("engine-net-server".into())
@@ -143,7 +151,7 @@ impl NetServer {
                     Err(e) => { let _ = ready_tx.send(Err(NetError::Io(e))); return; }
                 };
                 rt.block_on(server_main(
-                    addr, version, epoch, event_tx, out_rx, thread_conns, thread_rtts,
+                    addr, version, epoch, event_tx, out_rx, thread_conns, thread_rtts, thread_peers,
                     thread_metrics, ready_tx, limits, shutdown_rx,
                 ));
             })
@@ -159,6 +167,7 @@ impl NetServer {
             epoch,
             local_addr,
             rtts,
+            peers,
             metrics,
             shutdown_tx: Some(shutdown_tx),
             thread: Some(thread),
@@ -227,6 +236,13 @@ impl NetServer {
         self.rtts.lock().unwrap().get(&conn).map(|a| a.load(Ordering::Relaxed))
     }
 
+    /// Source IP of a connection, if still connected (networking rework 1,
+    /// finding 4) — the accessor the per-IP failed-login rate limiter reads
+    /// to attribute a denied login to its source address.
+    pub fn peer_ip(&self, conn: ConnId) -> Option<IpAddr> {
+        self.peers.lock().unwrap().get(&conn).copied()
+    }
+
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -261,6 +277,7 @@ async fn server_main(
     mut out_rx: UnboundedReceiver<Outgoing>,
     conns: ConnMap,
     rtts: RttMap,
+    peers: PeerMap,
     metrics: Arc<NetMetrics>,
     ready: std::sync::mpsc::Sender<Result<SocketAddr, NetError>>,
     limits: NetLimits,
@@ -365,12 +382,14 @@ async fn server_main(
         let events = events.clone();
         let conns = conns.clone();
         let rtts = rtts.clone();
+        let peers = peers.clone();
         let metrics = metrics.clone();
         let ip_counts = ip_counts.clone();
         let total_conns = total_conns.clone();
         tokio::spawn(async move {
             match handle_connection(
-                incoming, id, version, epoch, events.clone(), conns.clone(), rtts.clone(), metrics.clone(),
+                incoming, id, version, epoch, events.clone(), conns.clone(), rtts.clone(), peers.clone(),
+                remote_ip, metrics.clone(),
             ).await {
                 Ok(()) => log::info!("net: conn {id} closed"),
                 Err(e) => log::info!("net: conn {id} ended: {e}"),
@@ -378,6 +397,7 @@ async fn server_main(
             // Cleanup runs on every exit path; Disconnected only fires if Connected did.
             let removed = conns.lock().unwrap().remove(&id);
             rtts.lock().unwrap().remove(&id);
+            peers.lock().unwrap().remove(&id);
             if let Some((_, _, depth)) = removed {
                 // Frames still sitting in this connection's queue (never dequeued
                 // because the writer task was aborted) must not leak into the
@@ -418,6 +438,8 @@ async fn handle_connection(
     events: UnboundedSender<ServerEvent>,
     conns: ConnMap,
     rtts: RttMap,
+    peers: PeerMap,
+    remote_ip: IpAddr,
     metrics: Arc<NetMetrics>,
 ) -> Result<(), NetError> {
     let connection = incoming.await.map_err(|e| NetError::Handshake(e.to_string()))?;
@@ -461,6 +483,10 @@ async fn handle_connection(
     // writes through this handle directly, with no map lock per frame.
     let rtt = Arc::new(AtomicU64::new(0));
     rtts.lock().unwrap().insert(id, rtt.clone());
+    // Source IP, registered once at connect (networking rework 1, finding 4):
+    // same lifecycle as `rtts` above, removed by the same cleanup in
+    // `server_main`.
+    peers.lock().unwrap().insert(id, remote_ip);
     let _ = events.send(ServerEvent::Connected(id));
     log::info!("net: conn {id} from {}", connection.remote_address());
 
@@ -654,5 +680,50 @@ mod tests {
         // fix the leaked endpoint still owned the port and this rebind failed.
         let _rebound = NetServer::bind(addr, 1)
             .expect("rebind on the same address should succeed immediately after drop");
+    }
+
+    /// Regression test for the per-IP failed-login rate limiter's engine-net
+    /// dependency (networking rework 1, finding 4): before this, `NetServer`
+    /// exposed no per-connection source address at all, so the sim had no way
+    /// to attribute a failed login to an IP. `peer_ip` must mirror `rtts`'s
+    /// exact lifecycle — populated once `Connected` fires, gone once
+    /// `Disconnected` fires.
+    #[tokio::test]
+    async fn peer_ip_tracks_connection_lifecycle() {
+        let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
+        let addr = server.local_addr();
+
+        let client = crate::NetClient::connect(addr, 1).expect("connect");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let conn_id = loop {
+            if let Some(id) = server.poll().into_iter().find_map(|ev| match ev {
+                ServerEvent::Connected(id) => Some(id),
+                _ => None,
+            }) {
+                break id;
+            }
+            assert!(Instant::now() < deadline, "server never saw the connection");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+
+        assert_eq!(
+            server.peer_ip(conn_id),
+            Some("127.0.0.1".parse().unwrap()),
+            "peer_ip must report the connected client's source address"
+        );
+
+        drop(client);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if server.poll().into_iter().any(|ev| matches!(ev, ServerEvent::Disconnected(id) if id == conn_id)) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "server never saw the disconnect");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(server.peer_ip(conn_id), None, "peer_ip must be gone after the connection ends");
     }
 }
