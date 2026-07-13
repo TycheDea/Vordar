@@ -80,12 +80,14 @@ pub fn build_zone_app(
 /// Join every zone thread, logging loudly if one panicked instead of exiting
 /// cleanly (networking audit 2026-07-11, finding 18). `main` used to discard
 /// `handle.join()`'s `Result` outright (`let _ = handle.join();`), so a
-/// panicked zone died with no trace at all: its listener stayed bound but
-/// dead, and every other zone kept redirecting players into that now-dead
-/// address forever. This closes the visibility gap; actually recovering the
-/// zone (restart, or pulling it from the shared directory so other zones stop
-/// redirecting into it) needs `NetServer` to gain a shutdown path first — see
-/// `reworks-networking-2026-07-11.md` finding 10.
+/// panicked zone died with no trace at all. Since rework 10 wired every zone
+/// thread through `supervise_zone`, a panic is caught and the zone rebuilds
+/// on the same address automatically — this log now fires only once the
+/// restart budget (`MAX_ZONE_RESTARTS`) is spent, or the shutdown flag was
+/// already set when the panic was caught: the zone is then genuinely,
+/// permanently down, its listener stays bound but dead, and every other zone
+/// keeps redirecting players into that now-dead address until the process is
+/// restarted.
 pub fn join_zone_threads(handles: Vec<(String, std::thread::JoinHandle<()>)>) {
     for (name, handle) in handles {
         if let Err(payload) = handle.join() {

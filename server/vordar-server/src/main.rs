@@ -21,7 +21,7 @@ use std::time::Instant;
 use vordar_game::chapter::ChapterRegistry;
 use vordar_server::db::DbWorker;
 use vordar_server::net_plugin::ShutdownFlag;
-use vordar_server::{build_zone_app, join_zone_threads, TICK_HZ};
+use vordar_server::{build_zone_app, join_zone_threads, supervise_zone, TICK_HZ};
 
 /// Every chapter this binary can host. Linking a new chapter crate +
 /// one line here is the entire integration.
@@ -80,18 +80,32 @@ fn main() {
                 .name(format!("zone-{}", zone.name))
                 .spawn(move || {
                     // Built on this thread: a built App cannot move (systems
-                    // aren't Send).
-                    let chapter = zone.chapter.clone();
-                    let mut app = build_zone_app(addr, handle, zone, directory, world_origin);
-                    if let Some(name) = chapter.as_deref() {
-                        chapters()
-                            .install(name, &mut app)
-                            .unwrap_or_else(|e| panic!("zones.ron: {e}"));
-                    }
-                    app.insert_resource(vordar_game::world::load_world_events("content/world/events.ron"));
-                    app.insert_resource(ShutdownFlag(zone_shutdown));
-                    log::info!("zone listening on {addr}");
-                    app.run_headless(TICK_HZ, None);
+                    // aren't Send). `supervise_zone` (rework 10) reruns this
+                    // closure from scratch on the same address after a panic,
+                    // so every capture below must be safe to rebuild from —
+                    // `zone`/`directory` are cloned per rebuild and `handle`
+                    // mints a fresh `DbHandle` via `fork()` so a rebuilt App
+                    // never inherits a dead App's in-flight reply channel.
+                    let watchdog_name = zone.name.clone();
+                    // A fresh clone kept separate from `zone_shutdown`
+                    // itself: the supervisor borrows `zone_shutdown` for the
+                    // whole call below, so the rebuildable closure must move
+                    // a clone into itself, not the borrowed original.
+                    let app_shutdown = zone_shutdown.clone();
+                    supervise_zone(&watchdog_name, &zone_shutdown, move || {
+                        let chapter = zone.chapter.clone();
+                        let mut app =
+                            build_zone_app(addr, handle.fork(), zone.clone(), directory.clone(), world_origin);
+                        if let Some(name) = chapter.as_deref() {
+                            chapters()
+                                .install(name, &mut app)
+                                .unwrap_or_else(|e| panic!("zones.ron: {e}"));
+                        }
+                        app.insert_resource(vordar_game::world::load_world_events("content/world/events.ron"));
+                        app.insert_resource(ShutdownFlag(app_shutdown.clone()));
+                        log::info!("zone listening on {addr}");
+                        app.run_headless(TICK_HZ, None);
+                    });
                 })
                 .expect("spawn zone thread");
             (name, join)

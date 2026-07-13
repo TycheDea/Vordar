@@ -138,6 +138,68 @@ impl Bot {
         Self::connect_with_latency_as(addr, name, Duration::ZERO)
     }
 
+    /// Like `connect_as`, but returns `None` on a failed dial instead of
+    /// panicking (zone-watchdog rework 10, finding 3): a test polling a
+    /// rebinding address across the supervisor's teardown-then-rebuild
+    /// window expects some attempts to fail before the new listener is up,
+    /// not to end the test. `NetClient::connect_impaired` itself only
+    /// reports a synchronous thread-spawn failure — a dial rejected because
+    /// the old listener is mid-teardown (or refused because no listener is
+    /// up yet) surfaces later as a `ClientEvent::Disconnected`, not as an
+    /// `Err` here — so this also pumps briefly for that real signal before
+    /// handing the bot back, instead of treating "thread spawned" as
+    /// "connected".
+    pub fn try_connect_as(addr: SocketAddr, name: &str) -> Option<Self> {
+        let mut client = NetClient::connect_impaired(addr, PROTOCOL_VERSION, Impairment::default()).ok()?;
+        // Wait for the real, low-level signal instead of `connect_impaired`'s
+        // immediate `Ok`: `ClientEvent::Connected` means the handshake
+        // actually completed; `Disconnected` (or nothing within the window —
+        // dialing a port with no listener bound yet, mid-rebuild, does not
+        // necessarily produce a prompt `Disconnected`) means this attempt
+        // must be treated as failed so the caller retries with a fresh dial.
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut connected = false;
+        'wait: while Instant::now() < deadline {
+            for event in client.poll() {
+                match event {
+                    ClientEvent::Connected => {
+                        connected = true;
+                        break 'wait;
+                    }
+                    ClientEvent::Disconnected => return None,
+                    _ => {}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if !connected {
+            return None;
+        }
+        // Same identity step `pump` performs on `Connected` — this event was
+        // consumed above, so it will never reach `pump` for this bot.
+        client.send(encode(&ClientMsg::Login { name: name.to_owned() }));
+        Some(Self {
+            client,
+            name: name.to_owned(),
+            player_id: None,
+            last_snapshot: HashMap::new(),
+            prefabs: HashMap::new(),
+            seq: 0,
+            last_ack: 0,
+            bytes: 0,
+            mechanics: Vec::new(),
+            hit_results: HashMap::new(),
+            world_offset: None,
+            redirect: None,
+            snapshot_ticks: Vec::new(),
+            snapshot_at: Vec::new(),
+            last_states: Vec::new(),
+            last_hp: HashMap::new(),
+            deaths: Vec::new(),
+            disconnected: false,
+        })
+    }
+
     pub fn connect_with_latency_as(addr: SocketAddr, name: &str, simulated_rtt: Duration) -> Self {
         Self::connect_impaired_as(addr, name, simulated_rtt, 0.0)
     }
