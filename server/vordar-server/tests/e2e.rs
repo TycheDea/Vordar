@@ -445,7 +445,7 @@ fn phase3_aoi_border() {
 
     std::thread::spawn(move || {
         let mut app = vordar_server::build_server_app(addr, ":memory:");
-        app.add_system(PopulateSystem { done: false, positions }, Phase::PreUpdate, SystemOrder::First);
+        app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
         app.run_headless(60.0, Some(1500));
     });
     std::thread::sleep(Duration::from_millis(300));
@@ -1067,7 +1067,7 @@ fn replication_ids_are_compact() {
     let positions: Vec<glam::Vec3> = (0..10).map(|i| glam::Vec3::new(i as f32 * 2.0, 0.0, 0.0)).collect();
     std::thread::spawn(move || {
         let mut app = vordar_server::build_server_app(addr, ":memory:");
-        app.add_system(PopulateSystem { done: false, positions }, Phase::PreUpdate, SystemOrder::First);
+        app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
         app.run_headless(60.0, Some(1200));
     });
     std::thread::sleep(Duration::from_millis(300));
@@ -1084,4 +1084,55 @@ fn replication_ids_are_compact() {
     for &id in bot.last_snapshot.keys() {
         assert!((id as u64) < 100_000, "an enters/states id ({id}) is not a compact zone-local id");
     }
+}
+
+// Finding 3 of docs/reviews/plan-networking-rework-5-2026-07-13.md: hp used
+// to flatten to a plain `i32` with 0 doing double duty for "no Health
+// component" and "dead at 0 HP" (net_plugin.rs's old
+// `hp.map(|h| h.current).unwrap_or(0)`). A Health-less replicated entity (the
+// "bolt" prefab: Transform+Hitbox+PrefabId, no Health) must be indistinguishable
+// on the wire from *absent hp*, not from "hp is 0" — which the old i32 format
+// could not express. Against the pre-fix format this test fails: the bolt's
+// flattened hp of 0 lands in `last_hp` just like any other reading, so it is
+// NOT absent. After the fix, hp rides as `Option<i32>` and only `Some` readings
+// reach `last_hp`.
+#[test]
+fn hp_none_distinguishes_health_less_entities() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25190".parse().unwrap();
+
+    let positions = vec![glam::Vec3::new(5.0, 0.0, 0.0)];
+    std::thread::spawn(move || {
+        let mut app = vordar_server::build_server_app(addr, ":memory:");
+        app.add_system(
+            PopulateSystem { done: false, positions, prefab: "bolt".into() },
+            Phase::PreUpdate,
+            SystemOrder::First,
+        );
+        app.run_headless(60.0, Some(1200));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("the bolt replicates", Duration::from_secs(5), |b| {
+        b.prefabs.values().any(|p| p == "bolt")
+    });
+    // Let a few more snapshots land so the bolt shows up in `states` too, not
+    // only in its AOI-enter.
+    settle(&mut bot, Duration::from_millis(500));
+
+    let player_id = bot.player_id.unwrap();
+    let bolt_id = *bot.prefabs.iter().find(|(_, p)| *p == "bolt").unwrap().0;
+
+    assert!(bot.last_snapshot.contains_key(&bolt_id), "the bolt must still replicate a position");
+    assert!(
+        !bot.last_hp.contains_key(&bolt_id),
+        "a Health-less entity must be ABSENT from last_hp (wire None), not present at 0"
+    );
+    assert_eq!(
+        bot.last_hp.get(&player_id),
+        Some(&100),
+        "the player has a real Health component, so its hp rides as Some(100)"
+    );
 }

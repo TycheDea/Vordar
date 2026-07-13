@@ -309,7 +309,11 @@ impl Bot {
                         self.snapshot_at.push(Instant::now());
                         for e in enters {
                             self.last_snapshot.insert(e.id, e.pos.0);
-                            self.last_hp.insert(e.id, e.hp);
+                            // None (v12) = no Health component — record only
+                            // real readings, never a stand-in 0.
+                            if let Some(hp) = e.hp {
+                                self.last_hp.insert(e.id, hp);
+                            }
                             self.prefabs.insert(e.id, e.prefab);
                         }
                         for id in leaves {
@@ -320,7 +324,9 @@ impl Bot {
                         self.last_states = states.iter().map(|s| s.id).collect();
                         for s in states {
                             self.last_snapshot.insert(s.id, s.pos.0);
-                            self.last_hp.insert(s.id, s.hp);
+                            if let Some(hp) = s.hp {
+                                self.last_hp.insert(s.id, hp);
+                            }
                         }
                     }
                     Some(ServerMsg::MechanicScheduled { id, resolve_at_micros, .. }) => {
@@ -409,6 +415,11 @@ pub fn settle(bot: &mut Bot, dur: Duration) {
 pub struct PopulateSystem {
     pub done: bool,
     pub positions: Vec<glam::Vec3>,
+    /// Prefab to spawn at each position — "player" as a stationary, harmless
+    /// NPC stand-in (Transform/Hitbox so it's in the SpatialGrid, no AI) is
+    /// the common case; other replicated prefabs (e.g. "bolt", Health-less)
+    /// are spawned the same way for tests that need a specific shape.
+    pub prefab: String,
 }
 
 impl System for PopulateSystem {
@@ -418,9 +429,7 @@ impl System for PopulateSystem {
         }
         self.done = true;
         for &pos in &self.positions {
-            // "player" prefab as a stationary, harmless NPC stand-in: it has
-            // Transform/Hitbox (so it's in the SpatialGrid) but no AI.
-            queue_prefab_spawn(resources, "player", pos);
+            queue_prefab_spawn(resources, self.prefab.clone(), pos);
         }
     }
 }

@@ -1155,7 +1155,7 @@ impl System for SnapshotBroadcastSystem {
         // Per-client AOI: grid cells are coarse and multi-cell entities appear
         // more than once, so dedupe and apply the exact radius test — a fuzzy
         // border would make entities flap in and out between snapshots.
-        let mut per_conn: Vec<(ConnId, Vec<(Entity, Vec3, i32, f32)>)> = Vec::with_capacity(conn_players.len());
+        let mut per_conn: Vec<(ConnId, Vec<(Entity, Vec3, Option<i32>, f32)>)> = Vec::with_capacity(conn_players.len());
         {
             let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
             // One view for the whole gather: the replication filter (PrefabId),
@@ -1167,7 +1167,7 @@ impl System for SnapshotBroadcastSystem {
                 self.aoi_scratch.clear();
                 grid.query_radius_into(center, AOI_RADIUS, &mut self.aoi_scratch);
                 self.seen.clear();
-                let mut current: Vec<(Entity, Vec3, i32, f32)> = Vec::with_capacity(self.aoi_scratch.len());
+                let mut current: Vec<(Entity, Vec3, Option<i32>, f32)> = Vec::with_capacity(self.aoi_scratch.len());
                 for &entity in &self.aoi_scratch {
                     if !self.seen.insert(entity) {
                         continue;
@@ -1177,7 +1177,10 @@ impl System for SnapshotBroadcastSystem {
                     if dist_sq > AOI_RADIUS * AOI_RADIUS {
                         continue;
                     }
-                    let hp = hp.map(|h| h.current).unwrap_or(0);
+                    // None = no Health component (protocol v12) — never
+                    // flattened to 0, which used to conflate "no Health" with
+                    // "dead".
+                    let hp = hp.map(|h| h.current);
                     current.push((entity, t.position, hp, dist_sq));
                 }
                 per_conn.push((conn, current));
@@ -1192,7 +1195,7 @@ impl System for SnapshotBroadcastSystem {
             // above, because that block only holds an immutable SpatialGrid
             // borrow of `resources`, not the `&mut NetServerState` id_for needs.
             let ids: Vec<u32> = current.iter().map(|&(entity, ..)| state.repl_ids.id_for(entity)).collect();
-            let current: Vec<(u32, Entity, Vec3, i32, f32)> = ids
+            let current: Vec<(u32, Entity, Vec3, Option<i32>, f32)> = ids
                 .into_iter()
                 .zip(current)
                 .map(|(id, (entity, pos, hp, dist_sq))| (id, entity, pos, hp, dist_sq))

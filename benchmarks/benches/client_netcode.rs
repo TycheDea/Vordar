@@ -55,14 +55,14 @@ fn bench_apply_states(c: &mut Criterion) {
         let enters: Vec<EntityState> = spots
             .iter()
             .enumerate()
-            .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: "bolt".into(), pos: WirePos(pos), hp: 0 })
+            .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: "bolt".into(), pos: WirePos(pos), hp: None })
             .collect();
         seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
 
         let states: Vec<EntityPos> = spots
             .iter()
             .enumerate()
-            .map(|(i, &pos)| EntityPos { id: i as u32 + 1, pos: WirePos(pos + Vec3::X), hp: 0 })
+            .map(|(i, &pos)| EntityPos { id: i as u32 + 1, pos: WirePos(pos + Vec3::X), hp: None })
             .collect();
         group.bench_function(format!("states_a{a}"), |b| {
             b.iter_batched(
@@ -92,7 +92,7 @@ fn bench_apply_enters(c: &mut Criterion) {
                 let enters: Vec<EntityState> = spots
                     .iter()
                     .enumerate()
-                    .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: "bolt".into(), pos: WirePos(pos), hp: 0 })
+                    .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: "bolt".into(), pos: WirePos(pos), hp: None })
                     .collect();
                 let t = Instant::now();
                 seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());

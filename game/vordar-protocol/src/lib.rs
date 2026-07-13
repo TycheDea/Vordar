@@ -13,7 +13,7 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 11;
+pub const PROTOCOL_VERSION: u8 = 12;
 
 /// A client's account credential: a random 32-byte token, presented on every
 /// `Login` and verified server-side against `sha256(token)` stored in the
@@ -129,9 +129,11 @@ pub struct EntityState {
     pub prefab: String,
     /// Quantized position (protocol v11) — see `WirePos`.
     pub pos: WirePos,
-    /// Current health (v8) — cosmetic on the client (hit reacts, health bars);
-    /// 0 for entities without a Health component.
-    pub hp: i32,
+    /// Current health (v8) — cosmetic on the client (hit reacts, health bars).
+    /// `None` means the entity has no `Health` component (protocol v12); a
+    /// present reading may still be `Some(v)` with `v <= 0` momentarily
+    /// (dying this tick) — `None` never conflates with "dead".
+    pub hp: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -140,8 +142,9 @@ pub struct EntityPos {
     pub id: u32,
     /// Quantized position (protocol v11) — see `WirePos`.
     pub pos: WirePos,
-    /// Current health (v8); 0 for entities without a Health component.
-    pub hp: i32,
+    /// Current health (v8); `None` = no `Health` component (protocol v12) —
+    /// see `EntityState::hp`.
+    pub hp: Option<i32>,
 }
 
 /// Quantization scale for `WirePos`: 256 units per meter (a 1/256 m quantum,
@@ -259,22 +262,29 @@ mod tests {
         let msg = ServerMsg::Snapshot {
             tick: 42,
             last_processed_seq: 17,
-            enters: vec![EntityState { id: 9, prefab: "player".into(), pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: 100 }],
+            enters: vec![
+                EntityState { id: 9, prefab: "player".into(), pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: Some(100) },
+                EntityState { id: 11, prefab: "bolt".into(), pos: WirePos(Vec3::ZERO), hp: None },
+            ],
             leaves: vec![4],
-            states: vec![EntityPos { id: 9, pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: 100 }],
+            states: vec![
+                EntityPos { id: 9, pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: Some(100) },
+                EntityPos { id: 11, pos: WirePos(Vec3::ZERO), hp: None },
+            ],
         };
         let bytes = encode(&msg);
         match decode::<ServerMsg>(&bytes).unwrap() {
             ServerMsg::Snapshot { tick, last_processed_seq, enters, leaves, states } => {
                 assert_eq!(tick, 42);
                 assert_eq!(last_processed_seq, 17);
-                assert_eq!(enters.len(), 1);
+                assert_eq!(enters.len(), 2);
                 assert_eq!(enters[0].prefab, "player");
                 assert!((enters[0].pos.0 - Vec3::new(1.0, 0.0, -3.0)).length() < 1.0 / 256.0);
                 assert_eq!(leaves, vec![4]);
                 assert_eq!(states[0].id, 9);
                 assert!((states[0].pos.0 - Vec3::new(1.0, 0.0, -3.0)).length() < 1.0 / 256.0);
-                assert_eq!(states[0].hp, 100, "hp rides in every state (v8)");
+                assert_eq!(states[0].hp, Some(100), "hp rides in every state (v8) as Some when Health exists");
+                assert_eq!(states[1].hp, None, "a Health-less entity's hp is None (v12), not 0");
             }
             _ => panic!("wrong variant"),
         }
@@ -321,9 +331,9 @@ mod tests {
         let msg = ServerMsg::Snapshot {
             tick: 1,
             last_processed_seq: 0,
-            enters: vec![EntityState { id: 1, prefab: "player".into(), pos: WirePos(awkward), hp: 100 }],
+            enters: vec![EntityState { id: 1, prefab: "player".into(), pos: WirePos(awkward), hp: Some(100) }],
             leaves: vec![],
-            states: vec![EntityPos { id: 1, pos: WirePos(awkward), hp: 100 }],
+            states: vec![EntityPos { id: 1, pos: WirePos(awkward), hp: Some(100) }],
         };
         let bytes = encode(&msg);
         match decode::<ServerMsg>(&bytes).unwrap() {
@@ -346,7 +356,7 @@ mod tests {
     fn wirepos_entity_pos_encoding_is_compact() {
         // Raw f32 would cost id(u32 varint) + 3*4 bytes = 17 B for this id/pos.
         // Quantized zigzag varints must bring a single EntityPos under 12 B.
-        let msg = EntityPos { id: 500, pos: WirePos(Vec3::new(12.34, 0.0, -7.89)), hp: 100 };
+        let msg = EntityPos { id: 500, pos: WirePos(Vec3::new(12.34, 0.0, -7.89)), hp: Some(100) };
         let bytes = encode(&msg);
         assert!(bytes.len() <= 12, "EntityPos encoded to {} bytes, expected <= 12", bytes.len());
     }

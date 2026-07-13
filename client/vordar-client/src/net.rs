@@ -516,9 +516,12 @@ fn apply_snapshot(
                     let _ = world.insert_one(entity, NetLerp { from: enter.pos.0, to: enter.pos.0, t: 1.0 });
                 }
                 // Seed replicated health (v8) so the hit-react watcher starts
-                // from the server's value, not the prefab's.
-                if let Ok(mut health) = world.get::<&mut Health>(entity) {
-                    health.current = enter.hp;
+                // from the server's value, not the prefab's. `None` (v12)
+                // means the entity has no Health component — nothing to seed.
+                if let Some(hp) = enter.hp {
+                    if let Ok(mut health) = world.get::<&mut Health>(entity) {
+                        health.current = hp;
+                    }
                 }
                 known.insert(enter.id, entity);
             }
@@ -546,9 +549,10 @@ fn apply_snapshot(
         let mut hp_q = world.query::<&mut Health>();
         let mut hp_view = hp_q.view();
         for state in &states {
+            let Some(hp) = state.hp else { continue }; // None (v12): no Health component
             let Some(&entity) = known.get(&state.id) else { continue };
             if let Some(health) = hp_view.get_mut(entity) {
-                health.current = state.hp;
+                health.current = hp;
             }
         }
     }
