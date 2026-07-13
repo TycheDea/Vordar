@@ -504,12 +504,14 @@ async fn client_main(
     let _ = events.send(ClientEvent::Connected);
     log::info!("net: connected to {addr}");
 
-    // Writer task — merges app sends and clock pings; sole owner of the
-    // stream. Frames carry a delivery deadline (enqueue time + one_way, plus
-    // a jitter draw); `delay_reorder` releases them in deadline order rather
-    // than enqueue order, so under jitter a frame can legitimately overtake
-    // one queued ahead of it (finding 17 — previously a strictly monotonic
-    // FIFO delay, which could never reorder anything).
+    // Writer task — merges app sends only; sole owner of the stream. Clock
+    // pings ride the datagram lane below (networking rework 3, finding 3) so
+    // they never queue behind app frames here. Frames carry a delivery
+    // deadline (enqueue time + one_way, plus a jitter draw); `delay_reorder`
+    // releases them in deadline order rather than enqueue order, so under
+    // jitter a frame can legitimately overtake one queued ahead of it
+    // (finding 17 — previously a strictly monotonic FIFO delay, which could
+    // never reorder anything).
     let (write_tx, write_rx) = unbounded_channel::<(tokio::time::Instant, (u8, Vec<u8>))>();
     let (ordered_tx, mut ordered_rx) = unbounded_channel::<(u8, Vec<u8>)>();
     tokio::spawn(delay_reorder(write_rx, ordered_tx));
@@ -532,24 +534,6 @@ async fn client_main(
         }
         // The simulation dropped its NetClient — close so the server notices.
         conn_for_forward.close(0u32.into(), b"client closed");
-    });
-
-    // Clock-sync pinger: a fast burst, then occasional re-checks.
-    let ping_tx = write_tx.clone();
-    let pinger = tokio::spawn(async move {
-        let mut ping_jitter = Jitter::with_seed(jitter, 0xA5A5_5A5A_1234_5678);
-        for _ in 0..SYNC_BURST_PINGS {
-            let ping = Ctrl::Ping { t_client: skewed_micros(epoch.elapsed(), skew_ppm) };
-            let at = tokio::time::Instant::now() + one_way + ping_jitter.sample();
-            if ping_tx.send((at, (TAG_CTRL, encode_ctrl(&ping)))).is_err() { return; }
-            tokio::time::sleep(SYNC_BURST_INTERVAL).await;
-        }
-        loop {
-            tokio::time::sleep(SYNC_INTERVAL).await;
-            let ping = Ctrl::Ping { t_client: skewed_micros(epoch.elapsed(), skew_ppm) };
-            let at = tokio::time::Instant::now() + one_way + ping_jitter.sample();
-            if ping_tx.send((at, (TAG_CTRL, encode_ctrl(&ping)))).is_err() { return; }
-        }
     });
 
     // Datagram outbound pipeline (networking rework 3, finding 2): outbound
@@ -577,6 +561,28 @@ async fn client_main(
         while let Some(data) = out_rx_datagram.recv().await {
             let at = tokio::time::Instant::now() + one_way + dgram_jitter.sample();
             if dgram_app_tx.send((at, (TAG_APP, data))).is_err() { break; }
+        }
+    });
+
+    // Clock-sync pinger: a fast burst, then occasional re-checks. Pings ride
+    // the datagram lane (networking rework 3, finding 3) — never `write_tx`
+    // — so a retransmitting stream can never inflate an RTT sample with
+    // queueing delay that has nothing to do with the path. A lost ping/pong
+    // datagram costs one sample; the burst and recheck cadence absorb it.
+    let ping_tx = dgram_write_tx.clone();
+    let pinger = tokio::spawn(async move {
+        let mut ping_jitter = Jitter::with_seed(jitter, 0xA5A5_5A5A_1234_5678);
+        for _ in 0..SYNC_BURST_PINGS {
+            let ping = Ctrl::Ping { t_client: skewed_micros(epoch.elapsed(), skew_ppm) };
+            let at = tokio::time::Instant::now() + one_way + ping_jitter.sample();
+            if ping_tx.send((at, (TAG_CTRL, encode_ctrl(&ping)))).is_err() { return; }
+            tokio::time::sleep(SYNC_BURST_INTERVAL).await;
+        }
+        loop {
+            tokio::time::sleep(SYNC_INTERVAL).await;
+            let ping = Ctrl::Ping { t_client: skewed_micros(epoch.elapsed(), skew_ppm) };
+            let at = tokio::time::Instant::now() + one_way + ping_jitter.sample();
+            if ping_tx.send((at, (TAG_CTRL, encode_ctrl(&ping)))).is_err() { return; }
         }
     });
 

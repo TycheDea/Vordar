@@ -967,4 +967,41 @@ mod tests {
 
         drop(connection);
     }
+
+    /// Regression test for clock pings riding the datagram lane instead of
+    /// the reliable stream (networking rework 3, finding 3). Before this fix
+    /// the client's pinger task enqueued every `Ctrl::Ping` onto `write_tx`
+    /// — the same delayed pipeline and QUIC stream the app frames use — so
+    /// each ping counted in the client's `frames_out`. This test waits for
+    /// the clock to converge (`server_offset_micros` becomes `Some`, which
+    /// requires at least one ping/pong round trip) and asserts the client's
+    /// stream `frames_out` is still 0 — the test itself never sends anything
+    /// over the stream, so any nonzero count can only be ping traffic that
+    /// leaked onto the ordered stream.
+    #[tokio::test]
+    async fn clock_pings_never_touch_the_stream() {
+        let server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
+        let addr = server.local_addr();
+        let client = crate::NetClient::connect(addr, 1).expect("connect");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let synced = loop {
+            if client.server_offset_micros().is_some() {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert!(synced, "client clock never converged");
+
+        assert_eq!(
+            client.metrics().frames_out.load(Ordering::Relaxed),
+            0,
+            "ctrl pings must ride the datagram lane, never the stream — frames_out counts stream writes only"
+        );
+
+        drop(server);
+    }
 }
