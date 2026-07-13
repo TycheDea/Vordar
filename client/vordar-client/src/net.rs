@@ -29,7 +29,9 @@ use vordar_game::motion::MovementSystem;
 use vordar_game::player::{movement_velocity, PlayerMovementSystem};
 use vordar_game::Player;
 use vordar_game::world::{active_event, day_night_light, WorldEventsDef};
-use vordar_protocol::{decode, encode, ClientMsg, EntityPos, EntityState, ServerMsg, PROTOCOL_VERSION, SNAPSHOT_HZ};
+use vordar_protocol::{
+    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, ServerMsg, PROTOCOL_VERSION, SNAPSHOT_HZ,
+};
 
 /// Reconciliation error below this is ignored — local prediction is trusted
 /// outright. Tick-phase jitter between client and server lives in this band
@@ -83,9 +85,11 @@ pub struct NetClientPlugin {
     pub predict: bool,
     /// Artificial round-trip latency added by engine-net (testing knob).
     pub simulated_rtt: Duration,
-    /// Character name sent as the first message after connect — identity
-    /// without auth during development (accounts land later).
+    /// Character name sent as the first message after connect.
     pub user: String,
+    /// Account credential presented with `user` on every `Login` (networking
+    /// rework 1, finding 3) — see `credentials::load_or_mint`.
+    pub token: AccountToken,
 }
 
 impl Plugin for NetClientPlugin {
@@ -108,6 +112,8 @@ impl Plugin for NetClientPlugin {
             server_addr: self.server_addr,
             reconnect,
             user: self.user.clone(),
+            token: self.token,
+            login_denied: false,
             own_id: None,
             entities: HashMap::new(),
             seq: 0,
@@ -182,6 +188,13 @@ pub struct NetClientState {
     /// overwrites this with the new zone's address.
     server_addr: SocketAddr,
     user: String,
+    /// Account credential presented on every `Login` (networking rework 1,
+    /// finding 3).
+    token: AccountToken,
+    /// Set once a `LoginDenied` arrives — stops `handle_disconnected` and
+    /// `maybe_reconnect` from scheduling further redials: retrying with the
+    /// same bad credential would only be denied again.
+    login_denied: bool,
     own_id: Option<u64>,
     /// server entity id → local entity
     entities: HashMap<u64, Entity>,
@@ -247,8 +260,9 @@ impl System for NetReceiveSystem {
                     let state = resources.get_mut::<NetClientState>().unwrap();
                     state.reconnect = None;
                     let name = state.user.clone();
+                    let token = state.token;
                     if let Some(client) = &state.client {
-                        client.send(encode(&ClientMsg::Login { name: name.clone() }));
+                        client.send(encode(&ClientMsg::Login { name: name.clone(), token }));
                     }
                     log::info!("connected to server, logging in as '{name}'");
                 }
@@ -285,6 +299,18 @@ impl System for NetReceiveSystem {
                     }
                     Some(ServerMsg::EntityDied { id, pos }) => {
                         handle_entity_died(world, resources, id, pos);
+                    }
+                    Some(ServerMsg::LoginDenied { reason }) => {
+                        // Denials are messages, not kicks (networking rework
+                        // 1, finding 3): the server leaves the connection
+                        // open, so WE close it — same lesson as Redirect and
+                        // the Phase-6 takeover, a server-side kick could
+                        // outrace this frame. `login_denied` then stops
+                        // `handle_disconnected` from scheduling a redial that
+                        // would only be denied again with the same credential.
+                        log::error!("login denied: {reason:?}");
+                        resources.get_mut::<NetClientState>().unwrap().login_denied = true;
+                        handle_disconnected(world, resources);
                     }
                     Some(ServerMsg::Redirect { zone, addr }) => {
                         // Zone transfer: WE close the old connection (dropping
@@ -370,6 +396,11 @@ fn handle_disconnected(world: &mut World, resources: &mut Resources) {
     teardown_replicated_world(world, resources);
     let state = resources.get_mut::<NetClientState>().unwrap();
     state.client = None;
+    if state.login_denied {
+        log::warn!("net: not reconnecting — the last login was denied");
+        state.reconnect = None;
+        return;
+    }
     let attempt = state.reconnect.as_ref().map_or(1, |r| r.attempt + 1);
     let backoff = reconnect_backoff(attempt);
     log::warn!("net: disconnected from server — reconnect attempt {attempt} in {backoff:?}");
@@ -382,6 +413,9 @@ fn handle_disconnected(world: &mut World, resources: &mut Resources) {
 /// received. Networking audit 2026-07-11, finding 7.
 fn maybe_reconnect(resources: &mut Resources) {
     let state = resources.get_mut::<NetClientState>().unwrap();
+    if state.login_denied {
+        return;
+    }
     let Some(reconnect) = &state.reconnect else { return };
     if Instant::now() < reconnect.retry_at {
         return;
@@ -1070,6 +1104,8 @@ pub mod bench {
             ),
             server_addr,
             user: "bench".into(),
+            token: [0u8; 32],
+            login_denied: false,
             own_id,
             entities: HashMap::new(),
             seq: 0,
@@ -1120,6 +1156,19 @@ mod tests {
 
     fn intent(seq: u32, dir: Vec2) -> PendingIntent {
         PendingIntent { seq, dir, dt: DT, leap: None }
+    }
+
+    /// Deterministic token for `name` (mirrors `tests/common/mod.rs`'s
+    /// `name_token` in vordar-server): name bytes zero-padded/truncated into
+    /// the 32-byte account token, so a victim and a same-name kicker in the
+    /// same test always agree on a token without either hardcoding the
+    /// other's literal.
+    fn name_token(name: &str) -> AccountToken {
+        let mut token = [0u8; 32];
+        let bytes = name.as_bytes();
+        let n = bytes.len().min(32);
+        token[..n].copy_from_slice(&bytes[..n]);
+        token
     }
 
     #[test]
@@ -1229,6 +1278,8 @@ mod tests {
             client: Some(NetClient::connect(addr, PROTOCOL_VERSION).expect("victim connect")),
             server_addr: addr,
             user: "reconnect-victim".into(),
+            token: name_token("reconnect-victim"),
+            login_denied: false,
             own_id: None,
             entities: HashMap::new(),
             seq: 0,
@@ -1261,7 +1312,15 @@ mod tests {
             for ev in kicker.poll() {
                 match ev {
                     ClientEvent::Connected => {
-                        kicker.send(encode(&ClientMsg::Login { name: "reconnect-victim".into() }));
+                        // Same derived token as the victim's login above — a
+                        // takeover requires a token match (networking rework
+                        // 1, finding 3); this test is about the reconnect
+                        // state machine, not credential mismatches, so the
+                        // kicker must present the victim's own token.
+                        kicker.send(encode(&ClientMsg::Login {
+                            name: "reconnect-victim".into(),
+                            token: name_token("reconnect-victim"),
+                        }));
                     }
                     ClientEvent::Message(data) => {
                         if let Some(ServerMsg::Welcome { .. }) = decode::<ServerMsg>(&data) {
@@ -1384,6 +1443,8 @@ mod tests {
             ),
             server_addr: addr,
             user: "onslaught-dasher".into(),
+            token: name_token("onslaught-dasher"),
+            login_denied: false,
             own_id: None,
             entities: HashMap::new(),
             seq: 0,

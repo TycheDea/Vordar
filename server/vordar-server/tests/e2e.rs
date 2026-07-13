@@ -12,16 +12,17 @@
 
 mod common;
 
-use common::{settle, temp_db, workspace_root, Bot, PopulateSystem};
+use common::{name_token, settle, temp_db, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
+use engine_net::{ClientEvent, NetClient};
 use hecs::Entity;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vordar_protocol::{encode, ClientMsg};
+use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, ServerMsg, PROTOCOL_VERSION};
 use vordar_server::net_plugin::NetServerState;
 
 #[test]
@@ -915,4 +916,67 @@ fn finding18_invalid_intent_increments_reject_counter() {
         std::thread::sleep(Duration::from_millis(16));
     }
     assert!(rejects.load(Ordering::Relaxed) >= 1, "an invalid intent must be counted in NetMetrics::rejects");
+}
+
+// Finding 3 of docs/reviews/plan-networking-rework-1-2026-07-13.md: `Login`
+// used to carry only a bare name, so anyone who knew a character's name could
+// take over — or kick — its session (`phase6_login_takeover` above exercises
+// the LEGITIMATE version of this same mechanism). A same-name login must now
+// also present the token the session claimed the name with; a mismatch is
+// denied (`LoginDenied(BadCredentials)`, connection left open — the CLIENT
+// closes) and the connected victim is never touched: no kick, no DB
+// roundtrip, no interruption to its snapshots.
+#[test]
+fn wrong_token_cannot_kick_or_impersonate() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25169".parse().unwrap();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut guarded = Bot::connect_as(addr, "guarded");
+    guarded.wait_for("guarded welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    guarded.walk_until("guarded walks a little", glam::Vec2::new(1.0, 0.0), Duration::from_secs(3), |b| {
+        b.own_pos().is_some_and(|p| p.x > 1.0)
+    });
+
+    // Attacker: same name, a token that does NOT match "guarded"'s.
+    let mut wrong_token = name_token("guarded");
+    wrong_token[0] ^= 0xFF;
+    let mut attacker = NetClient::connect(addr, PROTOCOL_VERSION).expect("attacker connect");
+    let mut denied = None;
+    let mut got_welcome = false;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && denied.is_none() && !got_welcome {
+        for event in attacker.poll() {
+            match event {
+                ClientEvent::Connected => {
+                    attacker.send(encode(&ClientMsg::Login { name: "guarded".into(), token: wrong_token }));
+                }
+                ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
+                    Some(ServerMsg::LoginDenied { reason }) => denied = Some(reason),
+                    Some(ServerMsg::Welcome { .. }) => got_welcome = true,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert_eq!(
+        denied,
+        Some(LoginDenyReason::BadCredentials),
+        "the attacker must be denied a Welcome, not silently ignored or granted"
+    );
+    assert!(!got_welcome, "the attacker must never receive a Welcome");
+
+    // The victim must be completely untouched: still online, still getting
+    // snapshots, never kicked.
+    for _ in 0..20 {
+        guarded.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert!(!guarded.disconnected, "a mismatched-token login must never kick the connected victim");
+    assert!(guarded.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
 }

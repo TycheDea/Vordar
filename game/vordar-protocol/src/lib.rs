@@ -13,13 +13,11 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 8;
+pub const PROTOCOL_VERSION: u8 = 9;
 
 /// A client's account credential: a random 32-byte token, presented on every
 /// `Login` and verified server-side against `sha256(token)` stored in the
-/// `accounts` table (trust-on-first-use — first login claims the name). Type
-/// alias only this step (networking rework 1 finding 2) — `Login` itself
-/// doesn't carry one yet; that's finding 3's wire change.
+/// `accounts` table (trust-on-first-use — first login claims the name).
 pub type AccountToken = [u8; 32];
 
 /// Snapshot rate. The server drives its snapshot phase with this; the client
@@ -36,10 +34,12 @@ pub enum ClientMsg {
     /// stream (and its validation) with MoveIntent; bypasses the movement
     /// queue — the cast time is the delay.
     CastIntent { seq: u32, t_server_micros: u64, skill: String, target: Vec2 },
-    /// First message after connect: which character this connection plays.
-    /// Identity without authentication during development — accounts and
-    /// passwords land later. The server gates spawn + Welcome on this.
-    Login { name: String }, // validated ≤ 32 printable ASCII
+    /// First message after connect: which character this connection plays,
+    /// and the account credential proving it (networking rework 1 finding
+    /// 3). `token` is verified server-side against `sha256(token)` stored in
+    /// the `accounts` table — trust-on-first-use, so a fresh name claims
+    /// itself on first login. The server gates spawn + Welcome on this.
+    Login { name: String, token: AccountToken }, // name validated ≤ 32 printable ASCII
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -95,6 +95,23 @@ pub enum ServerMsg {
     /// the cosmetic corpse + death burst. Sent only to clients whose known
     /// set contains the entity.
     EntityDied { id: u64, pos: Vec3 },
+    /// The presented `Login` was rejected (v9, networking rework 1 finding
+    /// 3): invalid/mismatched token (`BadCredentials`), or — once finding 4
+    /// wires it — too many recent failures from this IP (`RateLimited`,
+    /// declared now so the wire never bumps twice). The server leaves the
+    /// connection open; the CLIENT closes it, same as `Redirect` and the
+    /// Phase-6 takeover — a server-side kick could outrace this frame.
+    LoginDenied { reason: LoginDenyReason },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginDenyReason {
+    /// An invalid name, or a name already claimed by a different token than
+    /// the one presented (trust-on-first-use: a fresh name always claims and
+    /// grants — this is only a mismatch against an existing claim).
+    BadCredentials,
+    /// This source IP has too many recent failed logins (finding 4).
+    RateLimited,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -164,10 +181,23 @@ mod tests {
 
     #[test]
     fn login_roundtrip() {
-        let msg = ClientMsg::Login { name: "alice".into() };
+        let msg = ClientMsg::Login { name: "alice".into(), token: [7u8; 32] };
         let bytes = encode(&msg);
         match decode::<ClientMsg>(&bytes).unwrap() {
-            ClientMsg::Login { name } => assert_eq!(name, "alice"),
+            ClientMsg::Login { name, token } => {
+                assert_eq!(name, "alice");
+                assert_eq!(token, [7u8; 32]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn login_denied_roundtrip() {
+        let msg = ServerMsg::LoginDenied { reason: LoginDenyReason::RateLimited };
+        let bytes = encode(&msg);
+        match decode::<ServerMsg>(&bytes).unwrap() {
+            ServerMsg::LoginDenied { reason } => assert_eq!(reason, LoginDenyReason::RateLimited),
             _ => panic!("wrong variant"),
         }
     }

@@ -42,6 +42,10 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 # are hashed at rest, never stored raw.
 sha2 = "0.10"
 
+# Account token minting (client only, networking rework 1 finding 3): the
+# real client mints its 32-byte token once via the OS CSPRNG.
+getrandom = "0.3"
+
 # Signal handling (server only): SIGINT/SIGTERM on Unix, Ctrl+C/console-close
 # on Windows, in one `set_handler` call (networking rework plan 2026-07-12,
 # finding 4).

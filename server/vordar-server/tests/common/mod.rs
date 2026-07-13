@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_game::zones::{validate_zones, PortalDef, ZoneDef, ZonesDef};
-use vordar_protocol::{decode, encode, ClientMsg, ServerMsg, PROTOCOL_VERSION};
+use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, ServerMsg, PROTOCOL_VERSION};
 
 pub fn workspace_root() {
     // Prefabs load from content/ relative to cwd — run as if from workspace root.
@@ -86,10 +86,26 @@ pub fn walk_into_portal(bot: &mut Bot, portal: Vec3, timeout: Duration) {
 /// that session, so every bot in a multi-bot test needs its own character.
 static NEXT_BOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// Deterministic account token for `name` (networking rework 1, finding 3):
+/// name bytes zero-padded/truncated into the 32-byte token. Every bot derives
+/// its token this way, so two bots sharing a name (same-name tests:
+/// `phase6_login_takeover`, reconnect kicks) automatically share credentials
+/// too — token-gated takeover keeps working for them unchanged.
+pub fn name_token(name: &str) -> AccountToken {
+    let mut token = [0u8; 32];
+    let bytes = name.as_bytes();
+    let n = bytes.len().min(32);
+    token[..n].copy_from_slice(&bytes[..n]);
+    token
+}
+
 pub struct Bot {
     pub client: NetClient,
     /// Character name sent as Login when the connection opens.
     pub name: String,
+    /// Account token sent alongside `name` — `name_token(&name)` (networking
+    /// rework 1, finding 3).
+    pub token: AccountToken,
     pub player_id: Option<u64>,
     /// id → position, maintained from enter/leave/state messages
     pub last_snapshot: HashMap<u64, glam::Vec3>,
@@ -122,6 +138,9 @@ pub struct Bot {
     /// Set once `ClientEvent::Disconnected` is observed (networking rework 8,
     /// finding 3: proves a server-side shutdown actually closed the wire).
     pub disconnected: bool,
+    /// Latest `LoginDenied` reason received, if any (networking rework 1,
+    /// finding 3).
+    pub denied: Option<LoginDenyReason>,
 }
 
 impl Bot {
@@ -177,10 +196,12 @@ impl Bot {
         }
         // Same identity step `pump` performs on `Connected` — this event was
         // consumed above, so it will never reach `pump` for this bot.
-        client.send(encode(&ClientMsg::Login { name: name.to_owned() }));
+        let token = name_token(name);
+        client.send(encode(&ClientMsg::Login { name: name.to_owned(), token }));
         Some(Self {
             client,
             name: name.to_owned(),
+            token,
             player_id: None,
             last_snapshot: HashMap::new(),
             prefabs: HashMap::new(),
@@ -197,6 +218,7 @@ impl Bot {
             last_hp: HashMap::new(),
             deaths: Vec::new(),
             disconnected: false,
+            denied: None,
         })
     }
 
@@ -233,6 +255,7 @@ impl Bot {
         Self {
             client,
             name: name.to_owned(),
+            token: name_token(name),
             player_id: None,
             last_snapshot: HashMap::new(),
             prefabs: HashMap::new(),
@@ -249,6 +272,7 @@ impl Bot {
             last_hp: HashMap::new(),
             deaths: Vec::new(),
             disconnected: false,
+            denied: None,
         }
     }
 
@@ -266,7 +290,7 @@ impl Bot {
             // Identity first: the server spawns the player and Welcomes only
             // after Login.
             if let ClientEvent::Connected = event {
-                self.client.send(encode(&ClientMsg::Login { name: self.name.clone() }));
+                self.client.send(encode(&ClientMsg::Login { name: self.name.clone(), token: self.token }));
                 continue;
             }
             if let ClientEvent::Disconnected = event {
@@ -313,6 +337,9 @@ impl Bot {
                     }
                     Some(ServerMsg::EntityDied { id, pos }) => {
                         self.deaths.push((id, pos));
+                    }
+                    Some(ServerMsg::LoginDenied { reason }) => {
+                        self.denied = Some(reason);
                     }
                     None => panic!("undecodable server message"),
                 }

@@ -30,7 +30,10 @@ use vordar_game::skills::AbilityEffect;
 use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
 use vordar_game::world::WorldTimeRes;
 use vordar_game::zones::{portal_hit, ZoneDef};
-use vordar_protocol::{decode, encode, ClientMsg, EntityPos, EntityState, ServerMsg, PROTOCOL_VERSION, SNAPSHOT_HZ};
+use vordar_protocol::{
+    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, ServerMsg, PROTOCOL_VERSION,
+    SNAPSHOT_HZ,
+};
 
 /// Lag-compensation rewind cap (DESIGN.md §3): high-latency players get
 /// degraded forgiveness, not infinite rewind.
@@ -139,9 +142,13 @@ pub fn install(
 
 struct PlayerConn {
     entity: Entity,
-    /// Character name — the persistence key (identity without auth during
-    /// development; accounts land later).
+    /// Character name — the persistence key.
     name: String,
+    /// The account token this session logged in with (networking rework 1
+    /// finding 3): compared synchronously against a same-name login's
+    /// presented token to gate session takeover — a mismatch denies the new
+    /// connection without touching this one, no DB roundtrip needed.
+    token: AccountToken,
     /// Validated intents as (seq, client stamp, dir) in arrival order, applied
     /// ONE PER TICK. The client emits exactly one intent per fixed Input tick,
     /// so consuming one per fixed server tick integrates the same dirs over
@@ -188,9 +195,13 @@ pub struct NetServerState {
     /// agree on world time up to one clock-read of sampling error (µs).
     world_offset_micros: i64,
     conns: HashMap<ConnId, PlayerConn>,
-    /// Logins whose character load is in flight: conn → name. Spawn + Welcome
-    /// happen when the DbLoaded result arrives.
-    loading: HashMap<ConnId, String>,
+    /// Logins whose character load is in flight: conn → (name, presented
+    /// token). The token rides along so a later same-name login (takeover or
+    /// stale-loading eviction) can be gated on a match before the in-flight
+    /// load is disturbed, and so a granted load can seed the new
+    /// `PlayerConn.token` without re-reading the wire (networking rework 1
+    /// finding 3). Spawn + Welcome happen when the DbLoaded result arrives.
+    loading: HashMap<ConnId, (String, AccountToken)>,
     tick: u64,
     next_mechanic_id: u64,
 }
@@ -340,25 +351,38 @@ impl System for NetReceiveSystem {
                     };
                     // Login comes from a connection that has no PlayerConn
                     // yet — handle it before the guard below.
-                    if let ClientMsg::Login { name } = &msg {
+                    if let ClientMsg::Login { name, token } = &msg {
+                        let token = *token;
                         if name.len() > 32 || !name.chars().all(|c| c.is_ascii_graphic() && c != ' ') {
                             log::warn!("conn {conn}: invalid login name");
+                            state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
                             continue;
                         }
                         if state.conns.contains_key(&conn) || state.loading.contains_key(&conn) {
                             log::debug!("conn {conn}: duplicate login ignored");
                             continue;
                         }
-                        // Session takeover: the newest connection wins. The
-                        // old one is usually a stale session — a closed client
+                        // Session takeover: the newest connection wins, but
+                        // ONLY when the presented token matches the connected
+                        // session's — a mismatch denies the NEW connection
+                        // without touching the victim, no DB roundtrip
+                        // (networking rework 1, finding 3: this used to kick
+                        // on bare name match, letting anyone who knew a
+                        // character name hijack or kick its session). The old
+                        // one is usually a stale session — a closed client
                         // whose QUIC close never arrived (process exit can
                         // outrace the close frame) lingers until the idle
                         // timeout, and ignoring the relogin until then would
                         // leave the new client waiting forever for Welcome.
                         let old = state.conns.iter()
                             .find(|(_, pc)| pc.name == *name)
-                            .map(|(&c, _)| c);
-                        if let Some(old_conn) = old {
+                            .map(|(&c, pc)| (c, pc.token));
+                        if let Some((old_conn, old_token)) = old {
+                            if old_token != token {
+                                log::warn!("conn {conn}: login as '{name}' denied — active session token mismatch");
+                                state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
+                                continue;
+                            }
                             let pc = state.conns.remove(&old_conn).unwrap();
                             // Same save-then-despawn as a real disconnect, so
                             // the takeover load (FIFO behind it) restores the
@@ -375,13 +399,23 @@ impl System for NetReceiveSystem {
                         let state = resources.get_mut::<NetServerState>().unwrap();
                         // A same-name load still in flight belongs to another
                         // stale connection — forget it (its DbLoaded result
-                        // gets discarded) and kick that connection too.
-                        if let Some(stale) = state.loading.iter().find(|(_, n)| *n == name).map(|(&c, _)| c) {
-                            state.loading.remove(&stale);
-                            state.server.disconnect(stale);
+                        // gets discarded) and kick that connection too, but
+                        // again only on a token match; a mismatch denies the
+                        // NEW connection and leaves the in-flight login alone.
+                        let stale = state.loading.iter()
+                            .find(|(_, (n, _))| n == name)
+                            .map(|(&c, &(_, t))| (c, t));
+                        if let Some((stale_conn, stale_token)) = stale {
+                            if stale_token != token {
+                                log::warn!("conn {conn}: login as '{name}' denied — in-flight login token mismatch");
+                                state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
+                                continue;
+                            }
+                            state.loading.remove(&stale_conn);
+                            state.server.disconnect(stale_conn);
                         }
                         log::info!("conn {conn}: login as '{name}', loading character");
-                        state.loading.insert(conn, name.clone());
+                        state.loading.insert(conn, (name.clone(), token));
                         // Defaults seed a NEW character only: ring spawn +
                         // the player prefab's full health (player.ron is
                         // the source of truth; the DB merely overrides
@@ -394,7 +428,7 @@ impl System for NetReceiveSystem {
                             health: 100,
                             cooldowns: HashMap::new(),
                         };
-                        state.db.load_or_create(conn, name.clone(), defaults);
+                        state.db.login(conn, name.clone(), token, defaults);
                         continue;
                     }
                     let rtt = state.server.rtt_micros(conn).unwrap_or(0);
@@ -574,22 +608,26 @@ impl System for NetReceiveSystem {
             spawn_projectile(world, resources, &prefab, origin, dir, speed, damage, damage_type, ttl, caster, false);
         }
 
-        // Finished character loads → spawn + Welcome. The connection enters
-        // the game only now; anything it sent earlier was dropped by the
-        // PlayerConn guard.
+        // Finished character loads → spawn + Welcome (or a denial). The
+        // connection enters the game only now; anything it sent earlier was
+        // dropped by the PlayerConn guard.
         let loaded = resources.get_mut::<NetServerState>().unwrap().db.poll();
         for DbLoaded { conn, name, outcome } in loaded {
-            // The sim only ever calls `load_or_create` (finding 2 of
-            // docs/reviews/plan-networking-rework-1-2026-07-13.md) — its
-            // replies are always `Granted`. `BadToken` belongs to
-            // `DbHandle::login`, not yet wired to the wire (finding 3).
-            let DbLoginOutcome::Granted(record) = outcome else {
-                log::error!("conn {conn}: '{name}' login denied unexpectedly (no wire support for it yet)");
-                continue;
-            };
-            if resources.get_mut::<NetServerState>().unwrap().loading.remove(&conn).is_none() {
+            // The in-flight login's presented token, captured either way —
+            // a `Granted` record below seeds the new PlayerConn's token
+            // without re-reading the wire.
+            let Some((_, token)) = resources.get_mut::<NetServerState>().unwrap().loading.remove(&conn) else {
                 continue; // disconnected while the load was in flight
-            }
+            };
+            let record = match outcome {
+                DbLoginOutcome::Granted(record) => record,
+                DbLoginOutcome::BadToken => {
+                    log::warn!("conn {conn}: '{name}' login denied — token mismatch");
+                    let state = resources.get_mut::<NetServerState>().unwrap();
+                    state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
+                    continue;
+                }
+            };
             // Login routing: this zone serves only characters it owns. The
             // owner's address comes from the directory; the client closes
             // this connection and logs in there instead.
@@ -631,6 +669,7 @@ impl System for NetReceiveSystem {
                     state.conns.insert(conn, PlayerConn {
                         entity,
                         name: name.clone(),
+                        token,
                         queue: VecDeque::new(),
                         applied_seq: 0,
                         last_seq: 0,
@@ -1216,6 +1255,7 @@ pub mod bench {
                 PlayerConn {
                     entity,
                     name: format!("bench-{i}"),
+                    token: [0u8; 32],
                     queue: VecDeque::new(),
                     applied_seq: 0,
                     last_seq: 0,
@@ -1312,6 +1352,7 @@ mod tests {
         let pc = PlayerConn {
             entity,
             name: "victim".into(),
+            token: [0u8; 32],
             queue: VecDeque::new(),
             applied_seq: 0,
             last_seq: 0,

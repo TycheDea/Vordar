@@ -6,7 +6,9 @@
 //
 // Env knobs: VORDAR_USER=name picks the character to play (default "player");
 // VORDAR_LATENCY_MS=150 adds artificial round-trip latency; VORDAR_PREDICT=0
-// disables prediction (Phase-1 server-driven feel).
+// disables prediction (Phase-1 server-driven feel); VORDAR_CREDENTIALS
+// overrides where the account token is persisted (default
+// "vordar-credentials.ron").
 //
 // Run from the workspace root: prefabs load from content/ relative to cwd.
 
@@ -14,7 +16,9 @@ use engine_app::app::App;
 use engine_app::prefab_plugin::PrefabPlugin;
 use engine_renderer::RenderPlugin;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::time::Duration;
+use vordar_client::credentials;
 use vordar_client::net::NetClientPlugin;
 use vordar_game::chapter::ChapterRegistry;
 use vordar_game::GameComponentsPlugin;
@@ -32,6 +36,9 @@ fn main() {
         .unwrap_or(Duration::ZERO);
     let predict = std::env::var("VORDAR_PREDICT").map_or(true, |v| v != "0");
     let user = std::env::var("VORDAR_USER").unwrap_or_else(|_| "player".into());
+    let credentials_path =
+        std::env::var("VORDAR_CREDENTIALS").unwrap_or_else(|_| "vordar-credentials.ron".into());
+    let token = credentials::load_or_mint(Path::new(&credentials_path), &user);
 
     let mut app = App::new();
     app.configure("content/config/engine.ron")
@@ -45,6 +52,6 @@ fn main() {
     // EVERY linked chapter (a Redirect can land us in any zone), no chapter
     // systems (the server is authoritative).
     ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module()]).install_all_content(&mut app);
-    app.add_plugin(NetClientPlugin { server_addr, predict, simulated_rtt, user })
+    app.add_plugin(NetClientPlugin { server_addr, predict, simulated_rtt, user, token })
         .run()
 }

@@ -4,6 +4,7 @@
 // winit and the renderer; the shared simulation (vordar-game) never does.
 
 pub mod body;
+pub mod credentials;
 pub mod ground;
 pub mod locomotion;
 pub mod net;

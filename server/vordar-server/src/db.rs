@@ -88,17 +88,8 @@ pub struct CharacterRecord {
 }
 
 enum DbRequest {
-    LoadOrCreate {
-        conn: ConnId,
-        name: String,
-        defaults: CharacterRecord,
-        /// Where the result goes — the requesting zone's handle.
-        reply: mpsc::Sender<DbLoaded>,
-    },
     /// Verify `token` against the `accounts` row for `name` before loading or
-    /// creating the character — see `login()`. Not yet reachable from the
-    /// sim (the wire carries no token until finding 3); exercised directly by
-    /// `DbHandle::login` today.
+    /// creating the character — see `login()`.
     Login {
         conn: ConnId,
         name: String,
@@ -198,17 +189,6 @@ impl DbHandle {
         }
     }
 
-    /// Load `name`'s character, inserting `defaults` first if it doesn't
-    /// exist. The result arrives via `poll` on THIS handle.
-    pub fn load_or_create(&self, conn: ConnId, name: String, defaults: CharacterRecord) {
-        let _ = self.tx.send(DbRequest::LoadOrCreate {
-            conn,
-            name,
-            defaults,
-            reply: self.reply_tx.clone(),
-        });
-    }
-
     /// Verify `token` against the `accounts` row for `name` (creating and
     /// claiming it on first use, claiming a legacy unclaimed row, denying a
     /// mismatch) and, on success, load or create the character. The result
@@ -271,12 +251,6 @@ fn worker(mut db: Connection, rx: mpsc::Receiver<DbRequest>) {
         let mut loaded: Vec<(mpsc::Sender<DbLoaded>, DbLoaded)> = Vec::new();
         for req in batch {
             match req {
-                DbRequest::LoadOrCreate { conn, name, defaults, reply } => {
-                    match load_or_create(&tx, &name, defaults, None) {
-                        Ok(record) => loaded.push((reply, DbLoaded { conn, name, outcome: DbLoginOutcome::Granted(record) })),
-                        Err(e) => log::error!("db: load '{name}' failed: {e}"),
-                    }
-                }
                 DbRequest::Login { conn, name, token, defaults, reply } => {
                     match login(&tx, &name, &token, defaults) {
                         Ok(outcome) => loaded.push((reply, DbLoaded { conn, name, outcome })),
@@ -321,13 +295,12 @@ fn load_or_create(
     db: &Connection,
     name: &str,
     defaults: CharacterRecord,
-    account_id: Option<i64>,
+    account_id: i64,
 ) -> rusqlite::Result<CharacterRecord> {
     // The schema default supplies zone = 'start' — fresh characters always
-    // begin in the start zone regardless of where they logged in. `account_id`
-    // is only set on a genuine INSERT (`None` from the old trusting
-    // `LoadOrCreate` path, `Some` from a verified `login()`); an existing row
-    // keeps whatever it already had (`INSERT OR IGNORE` no-ops on conflict).
+    // begin in the start zone regardless of where they logged in.
+    // `account_id` is set on a genuine INSERT; an existing row keeps
+    // whatever it already had (`INSERT OR IGNORE` no-ops on conflict).
     db.execute(
         "INSERT OR IGNORE INTO characters (name, pos_x, pos_y, pos_z, health, account_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![name, defaults.pos.x as f64, defaults.pos.y as f64, defaults.pos.z as f64, defaults.health, account_id],
@@ -356,8 +329,8 @@ fn load_or_create(
 /// a legacy row, or one the migration backfilled) → claim it; present and
 /// claimed → grant only on a matching hash, denying (no character touched)
 /// otherwise. On success, load or create the character linked to the
-/// account, self-healing `account_id` for any row the old trusting
-/// `LoadOrCreate` path created without one.
+/// account, self-healing `account_id` for any row left without one (a
+/// defensive no-op once every login path sets it on INSERT).
 fn login(db: &Connection, name: &str, token: &AccountToken, defaults: CharacterRecord) -> rusqlite::Result<DbLoginOutcome> {
     let hash = Sha256::digest(token).to_vec();
 
@@ -391,7 +364,7 @@ fn login(db: &Connection, name: &str, token: &AccountToken, defaults: CharacterR
         }
     };
 
-    let record = load_or_create(db, name, defaults, Some(account_id))?;
+    let record = load_or_create(db, name, defaults, account_id)?;
     db.execute(
         "UPDATE characters SET account_id = ?1 WHERE name = ?2 AND account_id IS NULL",
         rusqlite::params![account_id, name],
@@ -414,9 +387,10 @@ mod tests {
     }
 
     /// The old always-a-record shape, for the many pre-existing tests that
-    /// only ever exercise `load_or_create` (whose replies are always
-    /// `Granted`). Panics on `BadToken` — that outcome is only reachable via
-    /// `login()`, exercised directly by `wait_login` below.
+    /// only care about the granted path (every `login()` call they make
+    /// either claims a fresh name or repeats the same token, so the outcome
+    /// is always `Granted`). Panics on `BadToken` — that outcome is only
+    /// exercised by the token-mismatch tests below, via `wait_login`.
     struct Loaded {
         conn: ConnId,
         name: String,
@@ -450,7 +424,7 @@ mod tests {
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
         let defaults = CharacterRecord { zone: "start".into(), pos: Vec3::new(3.0, 0.0, -2.0), health: 100, cooldowns: HashMap::new() };
-        handle.load_or_create(1, "alice".into(), defaults.clone());
+        handle.login(1, "alice".into(), [0u8; 32], defaults.clone());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.conn, 1);
         assert_eq!(loaded.name, "alice");
@@ -464,14 +438,14 @@ mod tests {
         {
             let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
             let handle = worker.handle();
-            handle.load_or_create(1, "bob".into(), defaults());
+            handle.login(1, "bob".into(), [0u8; 32], defaults());
             wait_loaded(&handle);
             handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: saved_pos, health: 40, cooldowns: HashMap::new() });
             // Drop (handle first, then worker) flushes the queued save.
         }
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        handle.load_or_create(2, "bob".into(), defaults());
+        handle.login(2, "bob".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.record.zone, "east");
         assert_eq!(loaded.record.pos, saved_pos);
@@ -484,7 +458,7 @@ mod tests {
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
         handle.save("ghost".into(), CharacterRecord { zone: "east".into(), pos: Vec3::ONE, health: 1, cooldowns: HashMap::new() });
-        handle.load_or_create(1, "ghost".into(), defaults());
+        handle.login(1, "ghost".into(), [0u8; 32], defaults());
         // The save hit no row; the later create uses defaults.
         assert_eq!(wait_loaded(&handle).record, defaults());
     }
@@ -495,7 +469,7 @@ mod tests {
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let a = worker.handle();
         let b = worker.handle();
-        a.load_or_create(1, "ann".into(), defaults());
+        a.login(1, "ann".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&a);
         assert_eq!(loaded.name, "ann");
         // b never sees a's load, even after it has completed.
@@ -510,11 +484,11 @@ mod tests {
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let a = worker.handle();
         let b = worker.handle();
-        a.load_or_create(1, "carl".into(), defaults());
+        a.login(1, "carl".into(), [0u8; 32], defaults());
         wait_loaded(&a);
         let moved = Vec3::new(-16.0, 0.0, 0.0);
         a.save("carl".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 80, cooldowns: HashMap::new() });
-        b.load_or_create(7, "carl".into(), defaults());
+        b.login(7, "carl".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&b);
         assert_eq!(loaded.record.zone, "east");
         assert_eq!(loaded.record.pos, moved);
@@ -583,7 +557,7 @@ mod tests {
 
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        handle.load_or_create(1, "legacy".into(), defaults());
+        handle.login(1, "legacy".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.record.zone, "east");
         assert_eq!(loaded.record.pos, Vec3::new(1.0, 2.0, 3.0));
@@ -625,7 +599,7 @@ mod tests {
         let h1 = worker.handle();
         let h2 = h1.fork();
 
-        h2.load_or_create(1, "forked".into(), defaults());
+        h2.login(1, "forked".into(), [0u8; 32], defaults());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let loaded = loop {
             assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle");
@@ -638,7 +612,7 @@ mod tests {
         assert_eq!(loaded.name, "forked");
         match loaded.outcome {
             DbLoginOutcome::Granted(record) => assert_eq!(record, defaults()),
-            DbLoginOutcome::BadToken => panic!("load_or_create must always grant"),
+            DbLoginOutcome::BadToken => panic!("a fresh name's first login must always grant"),
         }
         assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle after completion");
 
@@ -679,7 +653,7 @@ mod tests {
             // replies have arrived as a batch, and `wait_loaded` only keeps
             // the last — waiting after each send keeps this seeding loop
             // (not the fix under test) from losing replies.
-            handle.load_or_create(0, n.into(), defaults());
+            handle.login(0, n.into(), [0u8; 32], defaults());
             wait_loaded(&handle);
         }
 
@@ -687,7 +661,7 @@ mod tests {
         handle.save("ann".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(1.0, 0.0, 0.0), health: 10, cooldowns: HashMap::new() });
         handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(2.0, 0.0, 0.0), health: 20, cooldowns: HashMap::new() });
         handle.save("cleo".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(3.0, 0.0, 0.0), health: 30, cooldowns: HashMap::new() });
-        handle.load_or_create(9, "dana".into(), defaults());
+        handle.login(9, "dana".into(), [0u8; 32], defaults());
         let dana = wait_loaded(&handle);
         assert_eq!(dana.name, "dana");
         assert_eq!(dana.record, defaults());
@@ -701,7 +675,7 @@ mod tests {
             ("bob", Vec3::new(2.0, 0.0, 0.0), 20),
             ("cleo", Vec3::new(3.0, 0.0, 0.0), 30),
         ] {
-            handle.load_or_create(1, name.into(), defaults());
+            handle.login(1, name.into(), [0u8; 32], defaults());
             let loaded = wait_loaded(&handle);
             assert_eq!(loaded.record.zone, "east", "{name} zone not saved");
             assert_eq!(loaded.record.pos, pos, "{name} pos not saved");
@@ -724,7 +698,7 @@ mod tests {
         {
             let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
             let handle = worker.handle();
-            handle.load_or_create(1, "dara".into(), defaults());
+            handle.login(1, "dara".into(), [0u8; 32], defaults());
             wait_loaded(&handle);
             handle.save(
                 "dara".into(),
@@ -739,7 +713,7 @@ mod tests {
         }
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        handle.load_or_create(2, "dara".into(), defaults());
+        handle.login(2, "dara".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.record.cooldowns, cooldowns, "cooldown remainders must survive a reopen");
     }
