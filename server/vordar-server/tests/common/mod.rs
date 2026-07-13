@@ -8,11 +8,11 @@ use engine_core::traits::Resources;
 use engine_core::World;
 use engine_net::{ClientEvent, Impairment, NetClient};
 use glam::{Vec2, Vec3};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_game::zones::{validate_zones, PortalDef, ZoneDef, ZonesDef};
-use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, ServerMsg, PROTOCOL_VERSION};
+use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION};
 
 pub fn workspace_root() {
     // Prefabs load from content/ relative to cwd — run as if from workspace root.
@@ -118,6 +118,11 @@ pub struct Bot {
     /// once per connection right after `Welcome`.
     pub prefab_names: Vec<String>,
     pub seq: u32,
+    /// Last 3 sent `MoveIntentEntry`s, oldest first (protocol v15, networking
+    /// rework 3 finding 5) — resent every tick as the `ClientMsg::MoveIntents`
+    /// batch. Cleared implicitly on reconnect: `follow_redirect` and the
+    /// `connect_*` constructors always build a fresh `Bot`.
+    pub move_ring: VecDeque<MoveIntentEntry>,
     /// last_processed_seq from the latest snapshot — the server's intent ack
     pub last_ack: u32,
     /// total bytes received in app messages (bandwidth measurement)
@@ -221,6 +226,7 @@ impl Bot {
             prefabs: HashMap::new(),
             prefab_names: Vec::new(),
             seq: 0,
+            move_ring: VecDeque::new(),
             last_ack: 0,
             bytes: 0,
             snapshot_bytes: Vec::new(),
@@ -278,6 +284,7 @@ impl Bot {
             prefabs: HashMap::new(),
             prefab_names: Vec::new(),
             seq: 0,
+            move_ring: VecDeque::new(),
             last_ack: 0,
             bytes: 0,
             snapshot_bytes: Vec::new(),
@@ -430,7 +437,15 @@ impl Bot {
     pub fn send_move(&mut self, dir: glam::Vec2) {
         if let Some(t_server_micros) = self.client.server_now_micros() {
             self.seq += 1;
-            self.client.send(encode(&ClientMsg::MoveIntent { seq: self.seq, t_server_micros, dir }));
+            // Last-3 redundancy (protocol v15, networking rework 3 finding
+            // 5): mirrors NetSendInputSystem's ring buffer — this tick's
+            // entry plus the two previous, sent via datagram.
+            self.move_ring.push_back(MoveIntentEntry { seq: self.seq, t_server_micros, dir });
+            if self.move_ring.len() > 3 {
+                self.move_ring.pop_front();
+            }
+            let intents: Vec<MoveIntentEntry> = self.move_ring.iter().cloned().collect();
+            self.client.send_datagram(encode(&ClientMsg::MoveIntents { intents }));
         }
     }
 

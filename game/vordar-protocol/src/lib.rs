@@ -13,7 +13,7 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 14;
+pub const PROTOCOL_VERSION: u8 = 15;
 
 /// A client's account credential: a random 32-byte token, presented on every
 /// `Login` and verified server-side against `sha256(token)` stored in the
@@ -26,13 +26,20 @@ pub const SNAPSHOT_HZ: f32 = 10.0;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMsg {
-    /// Desired movement direction (≤ unit length, world XZ plane).
-    /// `seq` increases monotonically; `t_server_micros` is the synced-clock
-    /// stamp — both are validated server-side (anti-cheat caps, DESIGN.md §3).
-    MoveIntent { seq: u32, t_server_micros: u64, dir: Vec2 },
+    /// This tick's movement intent plus up to the two previous (ascending
+    /// `seq`), sent via an unreliable QUIC datagram every Input tick
+    /// (protocol v15, networking rework 3 finding 5) — last-3 redundancy
+    /// means a single lost datagram costs nothing, since the next tick's
+    /// batch re-carries it. The server applies entries in order, skipping
+    /// any whose `seq` it has already seen (expected redundancy, not a
+    /// violation) and running full validation only on entries that advance
+    /// `PlayerConn::last_seq`.
+    MoveIntents { intents: Vec<MoveIntentEntry> },
     /// Cast skill `skill` at world-XZ `target`. Shares the seq/timestamp
-    /// stream (and its validation) with MoveIntent; bypasses the movement
-    /// queue — the cast time is the delay.
+    /// validation with `MoveIntents`' entries; bypasses the movement
+    /// queue — the cast time is the delay. Stays on the reliable stream: a
+    /// lost cast eats the input, and a duplicate is a griefing vector, so
+    /// unlike movement it cannot tolerate loss/replay.
     CastIntent { seq: u32, t_server_micros: u64, skill: String, target: Vec2 },
     /// First message after connect: which character this connection plays,
     /// and the account credential proving it (networking rework 1 finding
@@ -40,6 +47,19 @@ pub enum ClientMsg {
     /// the `accounts` table — trust-on-first-use, so a fresh name claims
     /// itself on first login. The server gates spawn + Welcome on this.
     Login { name: String, token: AccountToken }, // name validated ≤ 32 printable ASCII
+}
+
+/// One movement intent inside a `ClientMsg::MoveIntents` batch (protocol v15,
+/// networking rework 3 finding 5). Desired movement direction (≤ unit
+/// length, world XZ plane); `seq` increases monotonically and
+/// `t_server_micros` is the synced-clock stamp — both are validated
+/// server-side (anti-cheat caps, DESIGN.md §3) on whichever entry in the
+/// batch first advances the connection's `last_seq`.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MoveIntentEntry {
+    pub seq: u32,
+    pub t_server_micros: u64,
+    pub dir: Vec2,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -234,13 +254,23 @@ mod tests {
 
     #[test]
     fn client_msg_roundtrip() {
-        let msg = ClientMsg::MoveIntent { seq: 7, t_server_micros: 123_456, dir: Vec2::new(0.6, -0.8) };
+        // Protocol v15, networking rework 3 finding 5: MoveIntent was
+        // replaced by a batch of up to 3 entries (last-3 redundancy).
+        let msg = ClientMsg::MoveIntents {
+            intents: vec![
+                MoveIntentEntry { seq: 5, t_server_micros: 100_000, dir: Vec2::new(1.0, 0.0) },
+                MoveIntentEntry { seq: 6, t_server_micros: 116_667, dir: Vec2::new(1.0, 0.0) },
+                MoveIntentEntry { seq: 7, t_server_micros: 123_456, dir: Vec2::new(0.6, -0.8) },
+            ],
+        };
         let bytes = encode(&msg);
         match decode::<ClientMsg>(&bytes).unwrap() {
-            ClientMsg::MoveIntent { seq, t_server_micros, dir } => {
-                assert_eq!(seq, 7);
-                assert_eq!(t_server_micros, 123_456);
-                assert!((dir - Vec2::new(0.6, -0.8)).length() < 1e-6);
+            ClientMsg::MoveIntents { intents } => {
+                assert_eq!(intents.len(), 3);
+                assert_eq!(intents[0].seq, 5);
+                assert_eq!(intents[2].seq, 7);
+                assert_eq!(intents[2].t_server_micros, 123_456);
+                assert!((intents[2].dir - Vec2::new(0.6, -0.8)).length() < 1e-6);
             }
             _ => panic!("wrong variant"),
         }

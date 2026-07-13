@@ -31,8 +31,8 @@ use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
 use vordar_game::world::WorldTimeRes;
 use vordar_game::zones::{portal_hit, ZoneDef};
 use vordar_protocol::{
-    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, ServerMsg, WirePos,
-    PROTOCOL_VERSION, SNAPSHOT_HZ,
+    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, MoveIntentEntry, ServerMsg,
+    WirePos, PROTOCOL_VERSION, SNAPSHOT_HZ,
 };
 
 /// Lag-compensation rewind cap (DESIGN.md §3): high-latency players get
@@ -556,35 +556,13 @@ impl System for NetReceiveSystem {
                     let Some(pc) = state.conns.get_mut(&conn) else { continue };
 
                     match msg {
-                        ClientMsg::MoveIntent { seq, t_server_micros: t, dir } => {
-                            if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
-                                log::debug!("conn {conn}: intent rejected ({reason})");
-                                // Operational visibility (networking audit 2026-07-11,
-                                // finding 18): validate_intent's callers used to only
-                                // log::debug!, so a client spamming invalid intents was
-                                // as invisible to NetMetrics as one behaving normally.
-                                state.server.metrics().record_reject();
-                                continue;
-                            }
-                            pc.last_seq = seq;
-                            pc.last_t = t;
-                            // Max-speed validation: direction can never exceed unit length.
-                            // Reject only genuine violations (NaN/Inf, or well past unit
-                            // length); tolerate epsilon-scale float noise from the client's
-                            // f32 `normalize()` and clamp it — same rule as the shared
-                            // `movement_velocity` the client replays, so validation and
-                            // simulation agree instead of forking.
-                            if !dir.is_finite() || dir.length_squared() > 1.0 + 1e-3 { continue; }
-                            let dir = if dir.length_squared() > 1.0 { dir.normalize() } else { dir };
-                            pc.queue.push_back((seq, t, dir));
-                            if pc.queue.len() > INTENT_QUEUE_CAP {
-                                pc.queue.pop_front();
-                            }
+                        ClientMsg::MoveIntents { intents } => {
+                            queue_move_intents(pc, &intents, recv_micros, rtt, &state.server.metrics());
                         }
                         ClientMsg::CastIntent { seq, t_server_micros: t, skill: skill_id, target } => {
                             if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
                                 log::warn!("conn {conn}: cast rejected ({reason})");
-                                // See the MoveIntent arm above (finding 18).
+                                // See queue_move_intents below (finding 18).
                                 state.server.metrics().record_reject();
                                 continue;
                             }
@@ -932,6 +910,47 @@ fn validate_intent(pc: &PlayerConn, seq: u32, t: u64, recv_micros: u64, rtt: u64
         return Err("arrived past deadline");
     }
     Ok(())
+}
+
+/// Applies a `ClientMsg::MoveIntents` batch in order (protocol v15,
+/// networking rework 3 finding 5): the client resends up to the last 3
+/// intents each tick, so a lost datagram is fully recovered by the next
+/// tick's batch. An entry whose `seq` this connection has already seen
+/// (`seq <= pc.last_seq`) is expected redundancy — skipped silently, no
+/// reject, no log — not a violation; only entries advancing `last_seq` run
+/// the full `validate_intent` + dir-cap checks and enqueue exactly as the
+/// old single-intent path did.
+fn queue_move_intents(pc: &mut PlayerConn, entries: &[MoveIntentEntry], recv_micros: u64, rtt: u64, metrics: &NetMetrics) {
+    for entry in entries {
+        let MoveIntentEntry { seq, t_server_micros: t, dir } = *entry;
+        // Redundant resend of an already-seen seq (the last-3 window
+        // sliding forward, or a duplicate under reorder) — expected, not a
+        // violation. validate_intent's own seq<=last_seq check would reject
+        // this too, but doing it here keeps it silent: no metrics noise for
+        // ordinary redundancy.
+        if seq <= pc.last_seq {
+            continue;
+        }
+        if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
+            log::debug!("move intent rejected ({reason})");
+            metrics.record_reject();
+            continue;
+        }
+        pc.last_seq = seq;
+        pc.last_t = t;
+        // Max-speed validation: direction can never exceed unit length.
+        // Reject only genuine violations (NaN/Inf, or well past unit
+        // length); tolerate epsilon-scale float noise from the client's
+        // f32 `normalize()` and clamp it — same rule as the shared
+        // `movement_velocity` the client replays, so validation and
+        // simulation agree instead of forking.
+        if !dir.is_finite() || dir.length_squared() > 1.0 + 1e-3 { continue; }
+        let dir = if dir.length_squared() > 1.0 { dir.normalize() } else { dir };
+        pc.queue.push_back((seq, t, dir));
+        if pc.queue.len() > INTENT_QUEUE_CAP {
+            pc.queue.pop_front();
+        }
+    }
 }
 
 /// The scheduled-snapshot test (DESIGN.md §3): at the first resolve tick past
@@ -1569,6 +1588,82 @@ mod tests {
         // the only thing wrong with it is seq == 0.
         let result = validate_intent(&pc, 0, 1_000, 1_000, 0);
         assert_eq!(result, Err("stale seq"), "seq=0 must never pass validation");
+    }
+
+    fn fresh_pc(entity: Entity) -> PlayerConn {
+        PlayerConn {
+            entity,
+            name: "bot".into(),
+            token: [0u8; 32],
+            queue: VecDeque::new(),
+            applied_seq: 0,
+            last_seq: 0,
+            last_t: 0,
+            known: HashSet::new(),
+            history: VecDeque::new(),
+            cooldown_ready: HashMap::new(),
+            rr_cursor: 0,
+        }
+    }
+
+    /// Fail-first regression for the last-3 redundancy batch (networking
+    /// rework 3 finding 5): a client resends up to the last 3 move intents
+    /// every Input tick, so the server must treat an already-seen `seq` as
+    /// expected redundancy — skipped silently, no reject, no re-queue — not
+    /// a violation. Before the fix, `queue_move_intents` ran every entry
+    /// through `validate_intent` unconditionally, so the 6/7 duplicates in
+    /// the second batch tripped `validate_intent`'s own `seq <= last_seq`
+    /// rejection and were counted in `NetMetrics::rejects`.
+    #[test]
+    fn move_intents_dedupe_silently_without_rejecting() {
+        let mut world = World::new();
+        let entity = world.spawn(());
+        let mut pc = fresh_pc(entity);
+        let metrics = NetMetrics::new();
+        let recv_micros = 1_000_000u64;
+        // Stamps close behind recv_micros (well inside the arrival-deadline
+        // margin) and monotonically increasing with seq — only redundancy
+        // handling is under test here, not the deadline/monotonicity checks.
+        let entry = |seq: u32| MoveIntentEntry { seq, t_server_micros: recv_micros - (8 - seq as u64) * 16_000, dir: Vec2::X };
+
+        // First batch: [5, 6, 7] — all newer than last_seq=0, all queue.
+        queue_move_intents(&mut pc, &[entry(5), entry(6), entry(7)], recv_micros, 0, &metrics);
+        assert_eq!(pc.last_seq, 7, "last_seq must advance to the highest applied entry");
+        assert_eq!(pc.queue.len(), 3, "all three entries in the first batch must queue");
+        assert_eq!(metrics.rejects.load(Ordering::Relaxed), 0);
+
+        // Second batch: [6, 7, 8] — 6 and 7 are redundant resends (the
+        // last-3 window sliding forward), only 8 is genuinely new.
+        queue_move_intents(&mut pc, &[entry(6), entry(7), entry(8)], recv_micros, 0, &metrics);
+        assert_eq!(pc.last_seq, 8, "last_seq must advance to 8, the only genuinely new entry");
+        assert_eq!(pc.queue.len(), 4, "only seq 8 is newly queued (3 from batch 1 + 1 from batch 2)");
+        assert_eq!(
+            metrics.rejects.load(Ordering::Relaxed), 0,
+            "resending already-seen seqs 6/7 is expected redundancy, not a reject"
+        );
+    }
+
+    /// A genuinely invalid entry inside a batch (future timestamp) must
+    /// still reject through `NetMetrics::rejects` — the silent-skip rule
+    /// applies only to already-seen `seq`s, never to a stamp violation.
+    #[test]
+    fn move_intents_still_rejects_a_genuinely_invalid_entry() {
+        let mut world = World::new();
+        let entity = world.spawn(());
+        let mut pc = fresh_pc(entity);
+        let metrics = NetMetrics::new();
+        let recv_micros = 1_000_000u64;
+        let good = MoveIntentEntry { seq: 1, t_server_micros: recv_micros, dir: Vec2::X };
+        let future = MoveIntentEntry { seq: 2, t_server_micros: recv_micros + FUTURE_SLACK_MICROS + 1, dir: Vec2::X };
+
+        queue_move_intents(&mut pc, &[good, future], recv_micros, 0, &metrics);
+
+        assert_eq!(pc.last_seq, 1, "the future-stamped entry must not advance last_seq");
+        assert_eq!(pc.queue.len(), 1, "only the valid entry queues");
+        assert_eq!(
+            metrics.rejects.load(Ordering::Relaxed), 1,
+            "the future-stamped entry must still be counted as a reject"
+        );
     }
 
     /// Regression test for the autosave burst (networking audit

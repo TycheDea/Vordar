@@ -16,13 +16,13 @@ use common::{name_token, settle, temp_db, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
-use engine_net::{ClientEvent, NetClient};
+use engine_net::{ClientEvent, Impairment, NetClient};
 use hecs::Entity;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, ServerMsg, PROTOCOL_VERSION};
+use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION};
 use vordar_server::net_plugin::NetServerState;
 
 #[test]
@@ -909,12 +909,19 @@ fn finding18_invalid_intent_increments_reject_counter() {
 
     assert_eq!(rejects.load(Ordering::Relaxed), 0, "reject counter must start at zero");
 
-    // seq=0 is PlayerConn::last_seq's sentinel — validate_intent rejects it
-    // outright regardless of an otherwise well-formed intent (finding 16), so
-    // this is a guaranteed, deterministic reject with no need for any prior
-    // legitimate traffic to go stale first.
+    // A far-future timestamp is a guaranteed, deterministic reject with no
+    // need for any prior legitimate traffic to go stale first — unlike
+    // seq=0 (PlayerConn::last_seq's sentinel), which since protocol v15
+    // (networking rework 3 finding 5) is silently skipped as expected
+    // last-3-redundancy overlap rather than rejected when it arrives inside
+    // a `ClientMsg::MoveIntents` batch (`seq <= pc.last_seq`, and last_seq
+    // starts at 0). seq=1 is newer than the sentinel, so only its timestamp
+    // — stamped ~10 s in the future, far past FUTURE_SLACK_MICROS — trips
+    // validate_intent.
     let t_server_micros = bot.client.server_now_micros().expect("clock synced");
-    bot.client.send(encode(&ClientMsg::MoveIntent { seq: 0, t_server_micros, dir: glam::Vec2::ZERO }));
+    bot.client.send_datagram(encode(&ClientMsg::MoveIntents {
+        intents: vec![MoveIntentEntry { seq: 1, t_server_micros: t_server_micros + 10_000_000, dir: glam::Vec2::ZERO }],
+    }));
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline && rejects.load(Ordering::Relaxed) == 0 {
@@ -1254,5 +1261,72 @@ fn crowd_snapshot_fits_datagram_budget() {
     assert!(
         max <= 1100,
         "steady-state snapshot frame is {max} bytes, over the 1100-byte datagram-budget gate"
+    );
+}
+
+// Finding 5 of docs/reviews/plan-networking-rework-3-2026-07-13.md:
+// `ClientMsg::MoveIntent` was replaced by `ClientMsg::MoveIntents`, a batch
+// of up to 3 entries (this tick's plus the two previous) sent via datagram
+// every Input tick — a lost datagram is fully recovered by the next tick's
+// overlapping batch. This proves the recovery end-to-end under upstream
+// loss: a bot walking +X at realistic WAN RTT (40 ms) with heavy upstream
+// loss (30%) must still replicate most of the displacement an unimpaired
+// control bot covers over the identical send cadence and window. Without
+// redundancy only ~70% of intents would apply at this loss rate (each
+// dropped datagram is a fully lost tick); with last-3 redundancy an intent
+// is lost only if 3 consecutive datagrams all drop (0.3³ ≈ 2.7%), so ~97%+
+// apply — comfortably above the 85% gate this test asserts.
+#[test]
+fn move_intents_redundancy_survives_upstream_loss() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25193".parse().unwrap();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1200));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut control = Bot::connect_as(addr, "redundancy-control");
+    control.wait_for("control welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    control.wait_for("control clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    control.wait_for("control first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+
+    let mut impaired = Bot::connect_full_as(
+        addr,
+        "redundancy-impaired",
+        Impairment { rtt: Duration::from_millis(40), upstream_loss: 0.3, ..Default::default() },
+    );
+    impaired.wait_for("impaired welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    impaired.wait_for("impaired clock sync", Duration::from_secs(10), |b| b.client.server_offset_micros().is_some());
+    impaired.wait_for("impaired first snapshot", Duration::from_secs(10), |b| b.own_pos().is_some());
+
+    let control_start = control.own_pos().expect("control bot has an initial position");
+    let impaired_start = impaired.own_pos().expect("impaired bot has an initial position");
+
+    // Both bots walk +X, sending one MoveIntents batch per 16 ms tick, for
+    // the same ~3 s window.
+    let dir = glam::Vec2::X;
+    let end = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < end {
+        control.send_move(dir);
+        control.pump();
+        impaired.send_move(dir);
+        impaired.pump();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    control.send_move(glam::Vec2::ZERO);
+    impaired.send_move(glam::Vec2::ZERO);
+    settle(&mut control, Duration::from_millis(500));
+    settle(&mut impaired, Duration::from_millis(500));
+
+    let control_disp = control.own_pos().unwrap().x - control_start.x;
+    let impaired_disp = impaired.own_pos().unwrap().x - impaired_start.x;
+
+    assert!(control_disp > 1.0, "control bot barely moved ({control_disp:.2}) — test setup is broken");
+    assert!(
+        impaired_disp >= 0.85 * control_disp,
+        "impaired bot displaced {impaired_disp:.2} vs control's {control_disp:.2} \
+         ({:.0}%) — last-3 redundancy should recover ~97%+ of intents at 30% upstream \
+         loss, not fall below the 85% gate",
+        100.0 * impaired_disp / control_disp
     );
 }

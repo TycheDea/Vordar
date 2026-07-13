@@ -30,7 +30,8 @@ use vordar_game::player::{movement_velocity, PlayerMovementSystem};
 use vordar_game::Player;
 use vordar_game::world::{active_event, day_night_light, WorldEventsDef};
 use vordar_protocol::{
-    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, ServerMsg, PROTOCOL_VERSION, SNAPSHOT_HZ,
+    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION,
+    SNAPSHOT_HZ,
 };
 
 /// Reconciliation error below this is ignored — local prediction is trusted
@@ -48,6 +49,11 @@ const CORRECTION_HALF_LIFE: f32 = 0.15;
 /// Safety bound on unacknowledged intents (~4 s at 60 Hz). Hitting it means
 /// the server stopped acking; predicting further is pointless.
 const MAX_PENDING_INTENTS: usize = 240;
+/// Last-3 redundancy depth for `ClientMsg::MoveIntents` (protocol v15,
+/// networking rework 3 finding 5): this tick's entry plus the two previous,
+/// sent via datagram every Input tick — a single lost datagram is fully
+/// recovered by the next tick's batch.
+const MOVE_RING_LEN: usize = 3;
 
 /// Initial wait before the first redial after an unexpected disconnect — an
 /// ordinary blip (brief loss, a moment of server-side hiccup) clears fast.
@@ -120,6 +126,7 @@ impl Plugin for NetClientPlugin {
             seq: 0,
             predict: self.predict,
             pending: VecDeque::new(),
+            move_ring: VecDeque::new(),
             correction: Vec3::ZERO,
             simulated_rtt: self.simulated_rtt,
             latest_state_tick: 0,
@@ -209,6 +216,12 @@ pub struct NetClientState {
     seq: u32,
     predict: bool,
     pending: VecDeque<PendingIntent>,
+    /// Last `MOVE_RING_LEN` sent `MoveIntentEntry`s, oldest first (protocol
+    /// v15, networking rework 3 finding 5) — resent every tick as the
+    /// `ClientMsg::MoveIntents` batch. Cleared in `teardown_replicated_world`
+    /// alongside `seq` so a redirect/reconnect starts a fresh window instead
+    /// of resending the old connection's seqs.
+    move_ring: VecDeque<MoveIntentEntry>,
     /// Outstanding reconciliation error, folded into the predicted position a
     /// little each Update tick by NetCorrectionSystem.
     correction: Vec3,
@@ -380,6 +393,11 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     state.prefab_names.clear();
     // Fresh connection, fresh validation stream (per-connection on the server).
     state.seq = 0;
+    // The new connection starts its own last-3 redundancy window (protocol
+    // v15, networking rework 3 finding 5) — resending the old connection's
+    // seqs would just be silently skipped server-side, but there is no
+    // reason to carry them over.
+    state.move_ring.clear();
     // The new connection's tick sequence starts over — comparing against the
     // old zone's ticks would drop every snapshot until it catches up
     // (protocol v14, networking rework 3 finding 4).
@@ -1093,8 +1111,16 @@ impl System for NetSendInputSystem {
                 return;
             };
             state.seq += 1;
+            state.move_ring.push_back(MoveIntentEntry { seq: state.seq, t_server_micros, dir });
+            if state.move_ring.len() > MOVE_RING_LEN {
+                state.move_ring.pop_front();
+            }
             if let Some(client) = &state.client {
-                client.send(encode(&ClientMsg::MoveIntent { seq: state.seq, t_server_micros, dir }));
+                // Rides the unreliable datagram lane with last-3 redundancy
+                // (protocol v15, networking rework 3 finding 5): a single
+                // lost datagram is fully recovered by the next tick's batch.
+                let intents: Vec<MoveIntentEntry> = state.move_ring.iter().cloned().collect();
+                client.send_datagram(encode(&ClientMsg::MoveIntents { intents }));
             }
 
             let entity = if state.predict { state.own_entity() } else { None };
@@ -1178,6 +1204,7 @@ pub mod bench {
             seq: 0,
             predict,
             pending: VecDeque::new(),
+            move_ring: VecDeque::new(),
             correction: Vec3::ZERO,
             simulated_rtt: Duration::ZERO,
             reconnect: None,
@@ -1285,6 +1312,7 @@ mod tests {
             seq: 0,
             predict: true,
             pending: VecDeque::from(vec![intent(48, Vec2::X), intent(49, Vec2::X)]),
+            move_ring: VecDeque::new(),
             correction: Vec3::ZERO,
             simulated_rtt: Duration::ZERO,
             reconnect: None,
@@ -1456,6 +1484,7 @@ mod tests {
             seq: 0,
             predict: false,
             pending: VecDeque::new(),
+            move_ring: VecDeque::new(),
             correction: Vec3::ZERO,
             simulated_rtt: Duration::ZERO,
             reconnect: None,
@@ -1623,6 +1652,7 @@ mod tests {
             seq: 0,
             predict: true,
             pending: VecDeque::new(),
+            move_ring: VecDeque::new(),
             correction: Vec3::ZERO,
             simulated_rtt: Duration::from_millis(150),
             reconnect: None,
