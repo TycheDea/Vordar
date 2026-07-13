@@ -7,7 +7,7 @@ use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_app::tick_rate::TickRate;
 use engine_core::components::{Health, Transform};
-use engine_core::prefab::{spawn_prefab, PrefabId};
+use engine_core::prefab::{spawn_prefab, PrefabId, PrefabLibrary};
 use engine_core::spatial::SpatialGrid;
 use engine_core::traits::{DespawnQueue, Resources, SpawnContext};
 use engine_core::World;
@@ -250,6 +250,14 @@ pub struct NetServerState {
     /// Zone-local wire id allocator (protocol v10, networking rework 5
     /// finding 1) — see `ReplIds`.
     repl_ids: ReplIds,
+    /// This zone's prefab name table (protocol v13, networking rework 5
+    /// finding 4): `None` until the first login grant builds it from the
+    /// zone's fully-populated `PrefabLibrary` (sorted names, deterministic —
+    /// every chapter's prefab dir has loaded by App-build time). `Arc` makes
+    /// resending it to every new connection a cheap clone instead of a fresh
+    /// sort/alloc; the `HashMap` is the reverse index used to encode
+    /// `EntityState::prefab` at snapshot-gather time.
+    prefab_table: Option<(Arc<Vec<String>>, HashMap<String, u16>)>,
 }
 
 impl NetServerState {
@@ -275,6 +283,7 @@ impl NetServerState {
             tick: 0,
             next_mechanic_id: 0,
             repl_ids: ReplIds::new(),
+            prefab_table: None,
         }
     }
 
@@ -767,8 +776,34 @@ impl System for NetReceiveSystem {
                     continue;
                 }
             }
+            // This zone's prefab table (protocol v13, networking rework 5
+            // finding 4) is built lazily, once, on the first grant reaching
+            // this point — by App-build time every chapter's prefab dir has
+            // loaded, so PrefabLibrary is fully populated. Read here, before
+            // spawn_prefab needs `resources` mutably below.
+            let new_prefab_table: Option<Vec<String>> = {
+                let has_table = resources.get::<NetServerState>().unwrap().prefab_table.is_some();
+                if has_table {
+                    None
+                } else {
+                    let library = resources.get::<PrefabLibrary>().expect("PrefabLibrary not in resources");
+                    let names = library.names();
+                    assert!(
+                        names.len() <= u16::MAX as usize + 1,
+                        "zone prefab count {} exceeds the u16 wire index space",
+                        names.len()
+                    );
+                    Some(names)
+                }
+            };
+
             let result = spawn_prefab(PLAYER_PREFAB, record.pos, &mut SpawnContext { world, resources });
             let state = resources.get_mut::<NetServerState>().unwrap();
+            if let Some(names) = new_prefab_table {
+                let by_name: HashMap<String, u16> =
+                    names.iter().cloned().enumerate().map(|(i, n)| (n, i as u16)).collect();
+                state.prefab_table = Some((Arc::new(names), by_name));
+            }
             match result {
                 Ok(entity) => {
                     // The prefab is the source of truth for everything but
@@ -801,6 +836,13 @@ impl System for NetReceiveSystem {
                     });
                     let player_id = state.repl_ids.id_for(entity);
                     state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
+                    // Prefab table right after Welcome, on the same ordered
+                    // stream, so it always precedes the first Snapshot's
+                    // enters (protocol v13, networking rework 5 finding 4).
+                    // NOT resent on the respawn re-Welcome below — the
+                    // connection keeps its table.
+                    let names = (*state.prefab_table.as_ref().expect("prefab table built above").0).clone();
+                    state.server.send(conn, encode(&ServerMsg::PrefabTable { names }));
                     let at_server_micros = state.server.now_micros();
                     let world_micros = state.world_at(at_server_micros);
                     state.server.send(conn, encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
@@ -1201,6 +1243,7 @@ impl System for SnapshotBroadcastSystem {
                 .map(|(id, (entity, pos, hp, dist_sq))| (id, entity, pos, hp, dist_sq))
                 .collect();
             let Some(pc) = state.conns.get_mut(&conn) else { continue };
+            let by_name = state.prefab_table.as_ref().map(|(_, by_name)| by_name);
 
             self.current_ids.clear();
             self.current_ids.extend(current.iter().map(|&(id, ..)| id));
@@ -1209,7 +1252,19 @@ impl System for SnapshotBroadcastSystem {
                 .iter()
                 .filter(|(id, ..)| !pc.known.contains(id))
                 .filter_map(|&(id, entity, pos, hp, _)| {
-                    let prefab = world.get::<&PrefabId>(entity).ok()?.0.clone();
+                    let prefab_name = world.get::<&PrefabId>(entity).ok()?.0.clone();
+                    // A miss is unreachable in practice — spawn_prefab always
+                    // attaches PrefabId from the same PrefabLibrary the table
+                    // was built from (protocol v13, networking rework 5
+                    // finding 4) — but skip rather than crash the whole
+                    // snapshot over a content-bug edge case.
+                    let prefab = match by_name.and_then(|m| m.get(&prefab_name)) {
+                        Some(&idx) => idx,
+                        None => {
+                            log::error!("prefab '{prefab_name}' missing from the zone's prefab table");
+                            return None;
+                        }
+                    };
                     Some(EntityState { id, prefab, pos: WirePos(pos), hp })
                 })
                 .collect();

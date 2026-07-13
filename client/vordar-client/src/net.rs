@@ -116,6 +116,7 @@ impl Plugin for NetClientPlugin {
             login_denied: false,
             own_id: None,
             entities: HashMap::new(),
+            prefab_names: Vec::new(),
             seq: 0,
             predict: self.predict,
             pending: VecDeque::new(),
@@ -198,6 +199,12 @@ pub struct NetClientState {
     own_id: Option<u32>,
     /// server entity id → local entity
     entities: HashMap<u32, Entity>,
+    /// This zone's prefab name table (protocol v13, networking rework 5
+    /// finding 4): index = the `u16` `EntityState::prefab` rides on the wire.
+    /// Empty until `ServerMsg::PrefabTable` arrives (right after `Welcome`,
+    /// before the first `Snapshot`); cleared on teardown so a redirect or
+    /// reconnect adopts the new zone's table instead of the old one's.
+    prefab_names: Vec<String>,
     seq: u32,
     predict: bool,
     pending: VecDeque<PendingIntent>,
@@ -281,6 +288,10 @@ impl System for NetReceiveSystem {
                         state.pending.clear();
                         state.correction = Vec3::ZERO;
                     }
+                    Some(ServerMsg::PrefabTable { names }) => {
+                        log::info!("prefab table received: {} prefabs", names.len());
+                        resources.get_mut::<NetClientState>().unwrap().prefab_names = names;
+                    }
                     Some(ServerMsg::Snapshot { last_processed_seq, enters, leaves, states, .. }) => {
                         apply_snapshot(world, resources, last_processed_seq, enters, leaves, states);
                     }
@@ -351,6 +362,11 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     state.own_id = None;
     state.pending.clear();
     state.correction = Vec3::ZERO;
+    // A redirect/reconnect lands in a different zone with a different
+    // PrefabLibrary; clearing here forces the fresh table off the new
+    // connection's Welcome instead of resolving enters against the old
+    // zone's indices (protocol v13, networking rework 5 finding 4).
+    state.prefab_names.clear();
     // Fresh connection, fresh validation stream (per-connection on the server).
     state.seq = 0;
     resources.get_mut::<WorldTime>().unwrap().synced = false;
@@ -498,9 +514,12 @@ fn apply_snapshot(
 ) {
     // Take the map instead of cloning it — nothing below reads it through
     // NetClientState, and it is written back at the end of this function.
-    let (mut known, own_id, predict) = {
+    // prefab_names is small (a handful of short strings) and cloned once per
+    // snapshot — see ServerMsg::PrefabTable (protocol v13, networking rework
+    // 5 finding 4).
+    let (mut known, own_id, predict, prefab_names) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
-        (std::mem::take(&mut state.entities), state.own_id, state.predict)
+        (std::mem::take(&mut state.entities), state.own_id, state.predict, state.prefab_names.clone())
     };
 
     // Enters first, so this snapshot's states can address the new entities.
@@ -509,7 +528,11 @@ fn apply_snapshot(
             continue;
         }
         let is_own_predicted = predict && own_id == Some(enter.id);
-        match spawn_prefab(&enter.prefab, enter.pos.0, &mut SpawnContext { world, resources }) {
+        let Some(prefab_name) = prefab_names.get(enter.prefab as usize) else {
+            log::error!("unresolvable prefab index {} in AOI enter (id {})", enter.prefab, enter.id);
+            continue;
+        };
+        match spawn_prefab(prefab_name, enter.pos.0, &mut SpawnContext { world, resources }) {
             Ok(entity) => {
                 // A predicted own player is moved by the simulation, not the lerp.
                 if !is_own_predicted {
@@ -525,7 +548,7 @@ fn apply_snapshot(
                 }
                 known.insert(enter.id, entity);
             }
-            Err(e) => log::error!("replicated spawn '{}' failed: {e}", enter.prefab),
+            Err(e) => log::error!("replicated spawn '{prefab_name}' failed: {e}"),
         }
     }
 
@@ -1112,6 +1135,7 @@ pub mod bench {
             login_denied: false,
             own_id,
             entities: HashMap::new(),
+            prefab_names: Vec::new(),
             seq: 0,
             predict,
             pending: VecDeque::new(),
@@ -1124,6 +1148,14 @@ pub mod bench {
     /// server-id → local-entity mapping (the enters path builds this normally).
     pub fn map_entity(state: &mut NetClientState, id: u32, entity: Entity) {
         state.entities.insert(id, entity);
+    }
+
+    /// Seeds the client's cached prefab name table directly — bypasses the
+    /// `ServerMsg::PrefabTable` wire round trip so benches can build `enters`
+    /// with `u16` refs against a known table (protocol v13, networking
+    /// rework 5 finding 4).
+    pub fn set_prefab_table(state: &mut NetClientState, names: Vec<String>) {
+        state.prefab_names = names;
     }
 
     pub fn push_pending(state: &mut NetClientState, seq: u32, dir: Vec2, dt: f32) {
@@ -1286,6 +1318,7 @@ mod tests {
             login_denied: false,
             own_id: None,
             entities: HashMap::new(),
+            prefab_names: Vec::new(),
             seq: 0,
             predict: false,
             pending: VecDeque::new(),
@@ -1451,6 +1484,7 @@ mod tests {
             login_denied: false,
             own_id: None,
             entities: HashMap::new(),
+            prefab_names: Vec::new(),
             seq: 0,
             predict: true,
             pending: VecDeque::new(),

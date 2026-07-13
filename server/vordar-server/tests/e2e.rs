@@ -1142,3 +1142,47 @@ fn hp_none_distinguishes_health_less_entities() {
         "the player has a real Health component, so its hp rides as Some(100)"
     );
 }
+
+// Finding 4 of docs/reviews/plan-networking-rework-5-2026-07-13.md:
+// `EntityState.prefab` used to repeat the full prefab name string on every
+// single AOI enter. A per-zone `ServerMsg::PrefabTable` is now sent once per
+// connection immediately after `Welcome`, and `EntityState.prefab` rides as a
+// `u16` index into it. This test references `Bot::prefab_names` directly — a
+// field that does not exist before this finding lands — so it fails to
+// compile against the pre-fix code rather than failing at runtime; once it
+// compiles, `Bot::pump`'s index resolution (which panics on an unresolvable
+// index) is the thing that would actually catch a broken wire-ordering
+// regression.
+#[test]
+fn prefab_table_binds_u16_refs() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25191".parse().unwrap();
+    std::thread::spawn(move || {
+        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1200));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    // The bot's own AOI-enter can only have resolved to a name (below) if
+    // `pump` already had a non-empty prefab table when it processed the
+    // enter — Bot::pump panics on an unresolvable index instead of silently
+    // dropping it, so reaching this wait_for's exit already proves the table
+    // arrived before the first snapshot's enters (stream ordering).
+    bot.wait_for("own enter resolves through the prefab table", Duration::from_secs(5), |b| {
+        b.player_id.is_some_and(|id| b.prefabs.contains_key(&id))
+    });
+
+    assert!(!bot.prefab_names.is_empty(), "prefab table never arrived");
+    assert!(
+        bot.prefab_names.len() <= u16::MAX as usize + 1,
+        "prefab table exceeds the u16 wire index space"
+    );
+
+    let player_id = bot.player_id.unwrap();
+    assert_eq!(
+        bot.prefabs.get(&player_id).map(String::as_str),
+        Some("ravager"),
+        "own enter must resolve to the PLAYER_PREFAB via the u16 table index"
+    );
+}

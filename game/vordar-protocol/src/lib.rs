@@ -13,7 +13,7 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 12;
+pub const PROTOCOL_VERSION: u8 = 13;
 
 /// A client's account credential: a random 32-byte token, presented on every
 /// `Login` and verified server-side against `sha256(token)` stored in the
@@ -48,6 +48,17 @@ pub enum ServerMsg {
     /// is a zone-local wire id (protocol v10, networking rework 5 finding 1) —
     /// small and monotonic, not raw hecs `Entity` bits.
     Welcome { player_id: u32 },
+    /// This zone's prefab name table, sent once per connection immediately
+    /// after the initial `Welcome` on the same ordered stream — NOT resent on
+    /// the respawn re-Welcome, the connection keeps its table (protocol v13,
+    /// networking rework 5 finding 4). Index into `names` is the `u16`
+    /// `EntityState::prefab` rides on the wire; stream ordering guarantees
+    /// this arrives before the first `Snapshot`'s `enters`. Built once per
+    /// zone from the fully-populated `PrefabLibrary` (sorted names,
+    /// deterministic) — the client installs every chapter's content while a
+    /// zone installs only its own, so the table is authoritative rather than
+    /// independently derived on each side.
+    PrefabTable { names: Vec<String> },
     /// Per-client area-of-interest snapshot. Entity identity (prefab) is sent
     /// once on AOI entry; afterward only positions flow. `last_processed_seq`
     /// is the highest intent seq the server had applied when the snapshot was
@@ -125,8 +136,11 @@ pub struct EntityState {
     /// first reference — never raw hecs `Entity` bits. Stable for the
     /// entity's lifetime, never reused.
     pub id: u32,
-    /// Prefab to spawn client-side for this entity.
-    pub prefab: String,
+    /// Index into the zone's prefab name table (`ServerMsg::PrefabTable`,
+    /// protocol v13, networking rework 5 finding 4) — resolve client-side to
+    /// the prefab name to spawn. Replaces a repeated full prefab name string
+    /// on every AOI enter.
+    pub prefab: u16,
     /// Quantized position (protocol v11) — see `WirePos`.
     pub pos: WirePos,
     /// Current health (v8) — cosmetic on the client (hit reacts, health bars).
@@ -263,8 +277,8 @@ mod tests {
             tick: 42,
             last_processed_seq: 17,
             enters: vec![
-                EntityState { id: 9, prefab: "player".into(), pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: Some(100) },
-                EntityState { id: 11, prefab: "bolt".into(), pos: WirePos(Vec3::ZERO), hp: None },
+                EntityState { id: 9, prefab: 3, pos: WirePos(Vec3::new(1.0, 0.0, -3.0)), hp: Some(100) },
+                EntityState { id: 11, prefab: 7, pos: WirePos(Vec3::ZERO), hp: None },
             ],
             leaves: vec![4],
             states: vec![
@@ -278,7 +292,7 @@ mod tests {
                 assert_eq!(tick, 42);
                 assert_eq!(last_processed_seq, 17);
                 assert_eq!(enters.len(), 2);
-                assert_eq!(enters[0].prefab, "player");
+                assert_eq!(enters[0].prefab, 3);
                 assert!((enters[0].pos.0 - Vec3::new(1.0, 0.0, -3.0)).length() < 1.0 / 256.0);
                 assert_eq!(leaves, vec![4]);
                 assert_eq!(states[0].id, 9);
@@ -318,6 +332,18 @@ mod tests {
     }
 
     #[test]
+    fn prefab_table_roundtrip() {
+        let msg = ServerMsg::PrefabTable { names: vec!["bolt".into(), "grunt".into(), "ravager".into()] };
+        let bytes = encode(&msg);
+        match decode::<ServerMsg>(&bytes).unwrap() {
+            ServerMsg::PrefabTable { names } => {
+                assert_eq!(names, vec!["bolt".to_string(), "grunt".to_string(), "ravager".to_string()]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
     fn corrupt_bytes_decode_to_none() {
         assert!(decode::<ServerMsg>(&[0xFF, 0xFF, 0xFF]).is_none());
     }
@@ -331,7 +357,7 @@ mod tests {
         let msg = ServerMsg::Snapshot {
             tick: 1,
             last_processed_seq: 0,
-            enters: vec![EntityState { id: 1, prefab: "player".into(), pos: WirePos(awkward), hp: Some(100) }],
+            enters: vec![EntityState { id: 1, prefab: 0, pos: WirePos(awkward), hp: Some(100) }],
             leaves: vec![],
             states: vec![EntityPos { id: 1, pos: WirePos(awkward), hp: Some(100) }],
         };

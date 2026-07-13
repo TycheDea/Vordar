@@ -109,8 +109,14 @@ pub struct Bot {
     pub player_id: Option<u32>,
     /// id → position, maintained from enter/leave/state messages
     pub last_snapshot: HashMap<u32, glam::Vec3>,
-    /// id → prefab, learned from AOI enters
+    /// id → prefab name, learned from AOI enters — indices arriving in
+    /// `EntityState::prefab` (protocol v13, networking rework 5 finding 4)
+    /// are resolved through `prefab_names` in `pump`, so every existing
+    /// name-based assertion keeps working unchanged.
     pub prefabs: HashMap<u32, String>,
+    /// This zone's prefab name table (`ServerMsg::PrefabTable`), received
+    /// once per connection right after `Welcome`.
+    pub prefab_names: Vec<String>,
     pub seq: u32,
     /// last_processed_seq from the latest snapshot — the server's intent ack
     pub last_ack: u32,
@@ -205,6 +211,7 @@ impl Bot {
             player_id: None,
             last_snapshot: HashMap::new(),
             prefabs: HashMap::new(),
+            prefab_names: Vec::new(),
             seq: 0,
             last_ack: 0,
             bytes: 0,
@@ -259,6 +266,7 @@ impl Bot {
             player_id: None,
             last_snapshot: HashMap::new(),
             prefabs: HashMap::new(),
+            prefab_names: Vec::new(),
             seq: 0,
             last_ack: 0,
             bytes: 0,
@@ -301,6 +309,7 @@ impl Bot {
                 self.bytes += data.len();
                 match decode::<ServerMsg>(&data) {
                     Some(ServerMsg::Welcome { player_id }) => self.player_id = Some(player_id),
+                    Some(ServerMsg::PrefabTable { names }) => self.prefab_names = names,
                     Some(ServerMsg::Snapshot { tick, last_processed_seq, enters, leaves, states }) => {
                         self.last_ack = last_processed_seq;
                         if self.snapshot_ticks.last() != Some(&tick) {
@@ -314,7 +323,17 @@ impl Bot {
                             if let Some(hp) = e.hp {
                                 self.last_hp.insert(e.id, hp);
                             }
-                            self.prefabs.insert(e.id, e.prefab);
+                            // Resolve the u16 wire index through the table
+                            // (protocol v13, networking rework 5 finding 4).
+                            // A miss panics rather than silently dropping the
+                            // entity: test hygiene — it also proves the
+                            // table always arrives before any enter that
+                            // references it (stream ordering).
+                            let prefab = self.prefab_names.get(e.prefab as usize).unwrap_or_else(|| {
+                                panic!("unresolvable prefab index {} (id {}) — table has {} entries; \
+                                        did the enter arrive before PrefabTable?", e.prefab, e.id, self.prefab_names.len())
+                            });
+                            self.prefabs.insert(e.id, prefab.clone());
                         }
                         for id in leaves {
                             self.last_snapshot.remove(&id);

@@ -48,14 +48,16 @@ fn bench_apply_states(c: &mut Criterion) {
     for a in [64usize, 200] {
         let mut world = World::new();
         let mut resources = client_resources();
-        resources.insert(seam::state_for_bench(None, false));
+        let mut client_state = seam::state_for_bench(None, false);
+        seam::set_prefab_table(&mut client_state, vec!["bolt".into()]);
+        resources.insert(client_state);
         // Build the replicated set through the real enters path so every
         // entity carries NetLerp.
         let spots = positions(a, CROWD, 7);
         let enters: Vec<EntityState> = spots
             .iter()
             .enumerate()
-            .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: "bolt".into(), pos: WirePos(pos), hp: None })
+            .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: 0, pos: WirePos(pos), hp: None })
             .collect();
         seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
 
@@ -81,7 +83,9 @@ fn bench_apply_enters(c: &mut Criterion) {
     workspace_root();
     let mut world = World::new();
     let mut resources = client_resources();
-    resources.insert(seam::state_for_bench(None, false));
+    let mut client_state = seam::state_for_bench(None, false);
+    seam::set_prefab_table(&mut client_state, vec!["bolt".into()]);
+    resources.insert(client_state);
     let spots = positions(64, CROWD, 7);
 
     c.bench_function("client/apply_snapshot/enters_64", |b| {
@@ -92,7 +96,7 @@ fn bench_apply_enters(c: &mut Criterion) {
                 let enters: Vec<EntityState> = spots
                     .iter()
                     .enumerate()
-                    .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: "bolt".into(), pos: WirePos(pos), hp: None })
+                    .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: 0, pos: WirePos(pos), hp: None })
                     .collect();
                 let t = Instant::now();
                 seam::apply_snapshot(&mut world, &mut resources, 0, enters, Vec::new(), Vec::new());
