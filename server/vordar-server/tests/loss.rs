@@ -1,9 +1,10 @@
 // Loss probe (gap C — the WEAKPOINTS #4 evidence): snapshots ride one
 // reliable QUIC stream, so a single lost datagram stalls every later frame
 // on that stream until the retransmit lands (head-of-line blocking). An
-// observer with simulated 50 ms RTT and receive-side datagram loss (below
-// QUIC — see engine-net's `connect_impaired`) measures inter-snapshot
-// arrival gaps at 0/1/3/5 % loss.
+// observer with simulated 50 ms and 200 ms RTT (LAN and WAN paths) and
+// receive-side datagram loss (below QUIC — see engine-net's
+// `connect_impaired`) measures inter-snapshot arrival gaps at 0/1/3/5 % loss
+// for each RTT.
 //
 // This is a probe, not a budget test: it prints gap p50/p99/max per rate.
 // Decision gate for the datagram snapshot path (WEAKPOINTS #4): p99 gap
@@ -19,9 +20,11 @@ use std::time::{Duration, Instant};
 
 /// Measurement window per loss rate.
 const WINDOW: Duration = Duration::from_secs(30);
-/// Simulated observer RTT — a realistic WAN path, and enough that a
-/// retransmit costs a visible fraction of the 100 ms snapshot period.
-const RTT: Duration = Duration::from_millis(50);
+/// Simulated RTTs probed — a realistic LAN path (continuity with the
+/// original single-RTT baseline) and a realistic WAN path, where one
+/// retransmit cycle costs a much larger fraction of the 100 ms snapshot
+/// period.
+const WAN_RTTS: [Duration; 2] = [Duration::from_millis(50), Duration::from_millis(200)];
 
 fn pct(sorted: &[f64], p: f64) -> f64 {
     sorted[((sorted.len() as f64 * p) as usize).min(sorted.len() - 1)]
@@ -37,7 +40,7 @@ fn loss_probe_inter_snapshot_gaps() {
     let addr: SocketAddr = "127.0.0.1:25181".parse().unwrap();
     std::thread::spawn(move || {
         let mut app = vordar_server::build_server_app(addr, ":memory:");
-        // 10 min of sim — comfortably outlives the four 30 s windows.
+        // 10 min of sim — comfortably outlives the eight 30 s windows (2 RTTs × 4 loss rates).
         app.run_headless(60.0, Some(60 * 600));
     });
     std::thread::sleep(Duration::from_millis(300));
@@ -46,44 +49,53 @@ fn loss_probe_inter_snapshot_gaps() {
     let mut mover = Bot::connect(addr);
     mover.wait_for("mover welcomed", Duration::from_secs(10), |b| b.player_id.is_some());
 
-    println!("loss probe: {} s window per rate, simulated rtt {} ms", WINDOW.as_secs(), RTT.as_millis());
-    for loss in [0.0f32, 0.01, 0.03, 0.05] {
-        let name = format!("observer-{}", (loss * 100.0).round() as u32);
-        let mut observer = Bot::connect_impaired_as(addr, &name, RTT, loss);
-        observer.wait_for("observer welcomed", Duration::from_secs(30), |b| b.player_id.is_some());
-        common::settle(&mut observer, Duration::from_secs(2));
-        observer.snapshot_at.clear();
+    println!("loss probe: {} s window per rate", WINDOW.as_secs());
+    for rtt in WAN_RTTS {
+        println!("-- simulated rtt {} ms --", rtt.as_millis());
+        for loss in [0.0f32, 0.01, 0.03, 0.05] {
+            let name = format!("observer-{}-{}", rtt.as_millis(), (loss * 100.0).round() as u32);
+            let mut observer = Bot::connect_impaired_as(addr, &name, rtt, loss);
+            observer.wait_for("observer welcomed", Duration::from_secs(30), |b| b.player_id.is_some());
+            common::settle(&mut observer, Duration::from_secs(2));
+            observer.snapshot_at.clear();
 
-        // The mover oscillates near spawn (stays inside the observer's AOI).
-        let mut dir = glam::Vec2::X;
-        let mut pumps = 0u32;
-        let end = Instant::now() + WINDOW;
-        while Instant::now() < end {
-            pumps += 1;
-            if pumps % 120 == 0 {
-                dir = -dir;
+            // The mover oscillates near spawn (stays inside the observer's AOI).
+            let mut dir = glam::Vec2::X;
+            let mut pumps = 0u32;
+            let end = Instant::now() + WINDOW;
+            while Instant::now() < end {
+                pumps += 1;
+                if pumps % 120 == 0 {
+                    dir = -dir;
+                }
+                mover.send_move(dir);
+                mover.pump();
+                observer.pump();
+                std::thread::sleep(Duration::from_millis(4));
             }
-            mover.send_move(dir);
-            mover.pump();
-            observer.pump();
-            std::thread::sleep(Duration::from_millis(4));
-        }
 
-        let mut gaps: Vec<f64> = observer
-            .snapshot_at
-            .windows(2)
-            .map(|w| (w[1] - w[0]).as_secs_f64() * 1e3)
-            .collect();
-        assert!(gaps.len() > 50, "observer at {loss} loss saw only {} snapshots", gaps.len() + 1);
-        gaps.sort_by(|a, b| a.total_cmp(b));
-        println!(
-            "loss={:>2.0}%  snapshots={}  gap_ms p50={:.0} p99={:.0} max={:.0}",
-            loss * 100.0,
-            gaps.len() + 1,
-            pct(&gaps, 0.50),
-            pct(&gaps, 0.99),
-            gaps.last().unwrap(),
-        );
+            let mut gaps: Vec<f64> = observer
+                .snapshot_at
+                .windows(2)
+                .map(|w| (w[1] - w[0]).as_secs_f64() * 1e3)
+                .collect();
+            assert!(
+                gaps.len() > 50,
+                "observer at rtt={}ms loss={loss} saw only {} snapshots",
+                rtt.as_millis(),
+                gaps.len() + 1
+            );
+            gaps.sort_by(|a, b| a.total_cmp(b));
+            println!(
+                "rtt={:>3}ms loss={:>2.0}%  snapshots={}  gap_ms p50={:.0} p99={:.0} max={:.0}",
+                rtt.as_millis(),
+                loss * 100.0,
+                gaps.len() + 1,
+                pct(&gaps, 0.50),
+                pct(&gaps, 0.99),
+                gaps.last().unwrap(),
+            );
+        }
     }
 }
 
@@ -123,63 +135,70 @@ fn loss_probe_upstream_intent_lag() {
     let addr: SocketAddr = "127.0.0.1:25182".parse().unwrap();
     std::thread::spawn(move || {
         let mut app = vordar_server::build_server_app(addr, ":memory:");
-        app.run_headless(60.0, Some(60 * 200));
+        // 400 s of sim — comfortably outlives 2 RTTs × 5 loss rates × 8 s windows plus settle.
+        app.run_headless(60.0, Some(60 * 400));
     });
     std::thread::sleep(Duration::from_millis(300));
 
-    println!(
-        "upstream loss probe: {} s window per rate, simulated rtt {} ms",
-        UPSTREAM_WINDOW.as_secs(),
-        RTT.as_millis()
-    );
-    let mut baseline_max: Option<u32> = None;
-    for loss in [0.0f32, 0.01, 0.03, 0.05, EXTREME_LOSS] {
-        let name = format!("upstreamer-{}", (loss * 100.0).round() as u32);
-        let mut bot = Bot::connect_upstream_impaired_as(addr, &name, RTT, loss);
-        bot.wait_for("bot welcomed", Duration::from_secs(30), |b| b.player_id.is_some());
-        common::settle(&mut bot, Duration::from_secs(2));
+    println!("upstream loss probe: {} s window per rate", UPSTREAM_WINDOW.as_secs());
+    for rtt in WAN_RTTS {
+        println!("-- simulated rtt {} ms --", rtt.as_millis());
+        let mut baseline_max: Option<u32> = None;
+        for loss in [0.0f32, 0.01, 0.03, 0.05, EXTREME_LOSS] {
+            let name = format!("upstreamer-{}-{}", rtt.as_millis(), (loss * 100.0).round() as u32);
+            let mut bot = Bot::connect_upstream_impaired_as(addr, &name, rtt, loss);
+            bot.wait_for("bot welcomed", Duration::from_secs(30), |b| b.player_id.is_some());
+            common::settle(&mut bot, Duration::from_secs(2));
 
-        let mut dir = glam::Vec2::X;
-        let mut lags: Vec<u32> = Vec::new();
-        let end = Instant::now() + UPSTREAM_WINDOW;
-        let mut ticks = 0u32;
-        while Instant::now() < end {
-            ticks += 1;
-            if ticks % 100 == 0 {
-                dir = -dir;
+            let mut dir = glam::Vec2::X;
+            let mut lags: Vec<u32> = Vec::new();
+            let end = Instant::now() + UPSTREAM_WINDOW;
+            let mut ticks = 0u32;
+            while Instant::now() < end {
+                ticks += 1;
+                if ticks % 100 == 0 {
+                    dir = -dir;
+                }
+                bot.send_move(dir);
+                bot.pump();
+                lags.push(bot.seq.saturating_sub(bot.last_ack));
+                std::thread::sleep(UPSTREAM_SEND_INTERVAL);
             }
-            bot.send_move(dir);
-            bot.pump();
-            lags.push(bot.seq.saturating_sub(bot.last_ack));
-            std::thread::sleep(UPSTREAM_SEND_INTERVAL);
-        }
 
-        assert!(lags.len() > 50, "bot at {loss} upstream loss only sampled {} ticks", lags.len());
-        lags.sort_unstable();
-        let p50 = lags[lags.len() / 2];
-        let p99 = lags[(lags.len() * 99 / 100).min(lags.len() - 1)];
-        let max = *lags.last().unwrap();
-        println!(
-            "upstream loss={:>2.0}%  sent={}  samples={}  lag p50={} p99={} max={}",
-            loss * 100.0,
-            bot.seq,
-            lags.len(),
-            p50,
-            p99,
-            max,
-        );
-
-        if loss == 0.0 {
-            baseline_max = Some(max);
-        }
-        if loss == EXTREME_LOSS {
-            let baseline = baseline_max.expect("0% loss rate must run first to establish a baseline");
             assert!(
-                max > baseline * 2,
-                "upstream loss={loss} should clearly worsen applied-intent lag vs the 0%-loss \
-                 baseline ({baseline} ticks) — got max={max}; try_send drop not reaching the \
-                 reliable stream"
+                lags.len() > 50,
+                "bot at rtt={}ms loss={loss} upstream loss only sampled {} ticks",
+                rtt.as_millis(),
+                lags.len()
             );
+            lags.sort_unstable();
+            let p50 = lags[lags.len() / 2];
+            let p99 = lags[(lags.len() * 99 / 100).min(lags.len() - 1)];
+            let max = *lags.last().unwrap();
+            println!(
+                "rtt={:>3}ms upstream loss={:>2.0}%  sent={}  samples={}  lag p50={} p99={} max={}",
+                rtt.as_millis(),
+                loss * 100.0,
+                bot.seq,
+                lags.len(),
+                p50,
+                p99,
+                max,
+            );
+
+            if loss == 0.0 {
+                baseline_max = Some(max);
+            }
+            if loss == EXTREME_LOSS {
+                let baseline = baseline_max.expect("0% loss rate must run first to establish a baseline");
+                assert!(
+                    max > baseline * 2,
+                    "upstream loss={loss} at rtt={}ms should clearly worsen applied-intent lag vs the \
+                     0%-loss baseline ({baseline} ticks) — got max={max}; try_send drop not reaching \
+                     the reliable stream",
+                    rtt.as_millis()
+                );
+            }
         }
     }
 }

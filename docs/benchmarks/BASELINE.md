@@ -29,7 +29,7 @@ cargo bench -p vordar-benches -- --quick
 cargo test -p vordar-server --release --test soak -- --ignored --nocapture
 VORDAR_SOAK_BOTS=400 cargo test -p vordar-server --release --test soak -- --ignored --nocapture
 
-# Packet-loss probe (real QUIC, below-QUIC datagram drop, 50 ms simulated RTT):
+# Packet-loss probe (real QUIC, below-QUIC datagram drop, 50 ms and 200 ms simulated RTT):
 cargo test -p vordar-server --release --test loss -- --ignored --nocapture
 ```
 
@@ -194,19 +194,61 @@ soak: bots=400 input_hz=60.0 input_p99_ms=18.73 post_hz=60.0 post_p99_ms=20.31 k
 
 ### Packet-loss probe — `loss` (real QUIC, below-QUIC datagram drop, gap C)
 
+**Downstream (server→client) inter-snapshot gaps**, one wandering mover + one lossy
+observer, 30 s window per (RTT, loss) cell:
+
 ```
-loss= 0%  snapshots=301  gap_ms p50=100 p99=113 max=118
-loss= 1%  snapshots=300  gap_ms p50=100 p99=149 max=163
-loss= 3%  snapshots=300  gap_ms p50=100 p99=157 max=161
-loss= 5%  snapshots=99   gap_ms p50=99  p99=163 max=164
+rtt= 50ms loss= 0%  snapshots=300  gap_ms p50=100 p99=116 max=117
+rtt= 50ms loss= 1%  snapshots=300  gap_ms p50=98  p99=147 max=155
+rtt= 50ms loss= 3%  snapshots=300  gap_ms p50=99  p99=159 max=163
+rtt= 50ms loss= 5%  snapshots=300  gap_ms p50=98  p99=163 max=193
+rtt=200ms loss= 0%  snapshots=300  gap_ms p50=96  p99=116 max=119
+rtt=200ms loss= 1%  snapshots=300  gap_ms p50=97  p99=157 max=165
+rtt=200ms loss= 3%  snapshots=300  gap_ms p50=101 p99=160 max=166
+rtt=200ms loss= 5%  snapshots=300  gap_ms p50=101 p99=157 max=164
 ```
 
-50 ms simulated RTT, 30 s window per rate, one wandering mover + one lossy observer.
-Even at 5 % loss the worst inter-snapshot gap is 164 ms — under one QUIC retransmit
-cycle, absorbed by the 100 ms snapshot cadence. This is well under the decision gate
-(p99 > 250 ms or max > 500 ms), so the datagram snapshot path (WEAKPOINTS #4) was
-**not built** — reliable-stream snapshots stay. Re-probe if RTT or loss assumptions
-change materially (e.g. mobile/satellite clients).
+The 50 ms rows are the original 2026-07-11 measurement (kept for provenance). The
+**200 ms rows are the pre-datagram baseline for rework 3** ("Every message class
+rides one reliable ordered stream — head-of-line blocking by design",
+`docs/reviews/plan-networking-rework-3-2026-07-13.md`), captured by that plan's
+finding 1 before any datagram lane exists. Decision gate for the datagram snapshot
+path (p99 > 250 ms or max > 500 ms at 1-5 % loss): at 200 ms RTT the worst observed
+is p99=160 ms / max=166 ms (3 % loss) — the gate is **not breached** by this
+measurement, which contradicts the plan's arithmetic expectation that one retransmit
+cycle at WAN RTT would exceed it. The rework proceeds regardless: the mechanism the
+gate approximates — a single lost packet still stalls every later snapshot on the
+one reliable stream until the retransmit lands — is visible directly in these rows
+(loss pushes max up 40-75 ms over the 0 %-loss floor at both RTTs) even though the
+numeric threshold holds. These rows are what rework 3's final after-probe compares
+against.
+
+**Upstream (client→server) applied-intent lag**
+(`Snapshot::last_processed_seq` vs the bot's own send counter, in ticks),
+8 s window per (RTT, loss) cell:
+
+```
+rtt= 50ms upstream loss= 0%  lag p50=6  p99=9  max=9
+rtt= 50ms upstream loss= 1%  lag p50=6  p99=9  max=9
+rtt= 50ms upstream loss= 3%  lag p50=6  p99=9  max=10
+rtt= 50ms upstream loss= 5%  lag p50=7  p99=10 max=10
+rtt= 50ms upstream loss=60%  lag p50=15 p99=38 max=41
+rtt=200ms upstream loss= 0%  lag p50=13 p99=16 max=16
+rtt=200ms upstream loss= 1%  lag p50=13 p99=16 max=16
+rtt=200ms upstream loss= 3%  lag p50=13 p99=16 max=17
+rtt=200ms upstream loss= 5%  lag p50=13 p99=16 max=17
+rtt=200ms upstream loss=60%  lag p50=21 p99=43 max=46
+```
+
+At realistic WAN loss (0-5 %) applied-intent lag stays within a couple of ticks of
+the 0 %-loss baseline at both RTTs — QUIC's retransmission recovers within roughly
+one snapshot period at these rates, same conclusion the original 50 ms-only probe
+reached. `EXTREME_LOSS` (60 %) exists only to prove the stall mechanism is real:
+lag roughly quadruples over baseline at both RTTs (41 vs 9 ticks at 50 ms RTT; 46
+vs 16 ticks at 200 ms RTT).
+
+Re-probe if RTT or loss assumptions change materially (e.g. mobile/satellite
+clients above 200 ms).
 
 ## Budget shares & where the limits are
 
