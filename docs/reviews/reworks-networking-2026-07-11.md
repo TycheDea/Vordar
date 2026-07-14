@@ -235,3 +235,53 @@ retroactively from the deferred remainders of implemented findings 7 and 8.
   same address, with a bounded restart count; (3) e2e test: a zone panics, the watchdog
   restarts it, and a fresh connection to the same address succeeds afterward.
 
+### 11. Playback-cursor RESYNC threshold leaves almost no margin against the extrapolation cap — a sustained stall pops backward every ~35 ticks (discovered implementing `plan-networking-rework-4-2026-07-14.md` finding 2)
+
+- **Evidence:** `advance_playback` (`client/vordar-client/src/net.rs`, rework-4
+  finding 1) hard-snaps the shared playback cursor to `target =
+  latest_state_tick - INTERP_DELAY_TICKS` once `|target - cursor| >
+  RESYNC_TICKS` (30 ticks). Finding 2's capped extrapolation holds an
+  entity's rendered position steady once `cursor - last_buffered_tick >
+  EXTRAP_CAP_TICKS` (15 ticks). In cursor-vs-target coordinates the cap
+  engages at divergence `EXTRAP_CAP_TICKS + INTERP_DELAY_TICKS = 15 + 12 =
+  27` — only 3 ticks below RESYNC's 30-tick threshold. Reproduced by
+  extending `net::tests::extrapolation_bridges_lost_snapshots_then_caps`'s
+  own harness past its (deliberately short) cutoff: a remote entity moving
+  +X at 6 u/s whose real samples stop after server tick 30 holds
+  bit-identical at the capped point (position 4.5) for ticks 62–65, then at
+  tick 66 RESYNC fires and the position pops backward to 1.8 (a 2.7-unit /
+  27-nominal-step regression) — and the cycle repeats every ~35 ticks
+  (~580 ms) for as long as the stall continues.
+- **Ideal:** Once an entity is capped-and-held — or, more generally, once
+  the connection has been silent long enough for RESYNC to consider
+  snapping — recovering the cursor must not visibly regress a position that
+  was already being rendered further along. Either RESYNC's target should
+  account for the extrapolation cap (e.g. resync toward the capped point's
+  own projection rather than the raw `latest_state_tick -
+  INTERP_DELAY_TICKS`), or the two thresholds need enough margin that a
+  stable capped-hold is a genuine terminal state until new real data
+  arrives, with recovery handled by the existing dry-recovery synthetic
+  sample instead of a blind snap.
+- **Gap:** `RESYNC_TICKS` (finding 1) and `EXTRAP_CAP_TICKS` (finding 2)
+  were each chosen independently within the same rework — 30 ticks
+  "reconnect/long stall" vs. 15 ticks "matching the loss-probe gate" —
+  without checking their interaction. The result is a real, reproducible
+  periodic backward pop under any sustained stall (well past finding 2's
+  1–2-loss target case, but squarely inside what a genuine multi-second
+  network drop or reconnect produces), which finding 2's own Suggestion
+  (sampling-function branches only) cannot fix without touching
+  `advance_playback`.
+- **Suggestion:** Needs a design pass, not a constant tweak — whether the
+  fix is a smarter resync target, per-entity awareness of "currently
+  capped" state feeding back into the shared cursor's resync decision, or
+  reworking `advance_playback`'s hard-snap into something that also splices
+  a synthetic sample the way `apply_states`'s dry recovery already does for
+  ordinary arrivals.
+- **Path:** (1) design: decide where the "capped, don't regress" invariant
+  is owned (the shared cursor vs. per-entity state) and how it composes
+  with a genuine reconnect (where snapping IS eventually correct — the
+  world may have moved on entirely); (2) implement; (3) an extended version
+  of `extrapolation_bridges_lost_snapshots_then_caps` (or a new test)
+  running well past the current RESYNC boundary, asserting no backward
+  position step ever occurs while the connection is stalled.
+
