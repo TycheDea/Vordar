@@ -173,7 +173,7 @@ fn sample_buffer(buffer: &NetBuffer, cursor: f64) -> (Vec3, Vec3) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::{apply_states, NetClientState};
+    use crate::net::apply::apply_states;
     use vordar_protocol::WirePos;
 
     const DT: f32 = 1.0 / 60.0;
