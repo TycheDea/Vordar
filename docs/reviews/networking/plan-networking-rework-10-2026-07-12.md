@@ -1,6 +1,6 @@
 # Plan: Zone-thread watchdog recovery (restart or directory pull) — 2026-07-12
 
-Source: docs/reviews/reworks-networking-2026-07-11.md finding 10.
+Source: docs/reviews/networking/reworks-networking-2026-07-11.md finding 10.
 
 ## Ideal end state
 

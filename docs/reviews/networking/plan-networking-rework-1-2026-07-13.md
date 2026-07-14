@@ -1,6 +1,6 @@
 # Plan: Account identity, auth tokens, and combat-state persistence — 2026-07-13
 
-Source: docs/reviews/reworks-networking-2026-07-11.md finding 1.
+Source: docs/reviews/networking/reworks-networking-2026-07-11.md finding 1.
 
 ## Ideal end state
 
@@ -362,7 +362,7 @@ rework's scope — a future fix-sized finding.
   position/health"; `docs/online-play.mmd:67` `SPERSIST` lists the save
   contents implicitly. Nothing mentions tokens, denial, rate limiting, or
   cooldown restoration. The reworks queue header
-  (`docs/reviews/reworks-networking-2026-07-11.md:27-30`) mandates a
+  (`docs/reviews/networking/reworks-networking-2026-07-11.md:27-30`) mandates a
   diagram step whenever a plan changes the online-play flow — this rework
   changes the entire login half. `scripts/render-mmd.sh` renders
   `docs/online-play.mmd` → `docs/online-play.svg` via mermaid-cli.

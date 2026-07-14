@@ -1,6 +1,6 @@
 # Plan: Collision-aware prediction replay — 2026-07-14
 
-Source: `docs/reviews/reworks-networking-2026-07-11.md` finding 7.
+Source: `docs/reviews/networking/reworks-networking-2026-07-11.md` finding 7.
 
 ## Ideal end state
 
@@ -281,7 +281,7 @@ engineering call justified by decision 2.
   `CP` (client predict) and `SM` (server sim); node `R3` (`online-play.mmd:20`)
   describes replay as "replay not-yet-processed intents". `docs/online-play.svg`
   is the rendered copy. The reworks queue note
-  (`docs/reviews/reworks-networking-2026-07-11.md:10-41`) requires every plan
+  (`docs/reviews/networking/reworks-networking-2026-07-11.md:10-41`) requires every plan
   touching the online-play flow to update the diagram, and rework 7 is still
   unstruck in the queue line. `docs/benchmarks/BASELINE.md` carries the client
   netcode numbers (WEAKPOINTS gap B) that `benchmarks/benches/client_netcode.rs`
@@ -304,7 +304,7 @@ engineering call justified by decision 2.
   `cargo bench -p benchmarks --bench client_netcode` and add the
   `client/reconcile` with-statics row to `docs/benchmarks/BASELINE.md`'s client
   netcode section with a one-line note (statics count, per-reconcile cost).
-  (3) Strike rework 7 in `docs/reviews/reworks-networking-2026-07-11.md`'s
+  (3) Strike rework 7 in `docs/reviews/networking/reworks-networking-2026-07-11.md`'s
   queue note ("7 done 2026-MM-DD (plan-networking-rework-7-2026-07-14.md,
   4 steps; ...)" following the existing pattern). (4) Verification: the SVG
   renders (skill's own check), `git diff` shows only the named docs, and the

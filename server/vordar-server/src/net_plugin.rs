@@ -385,7 +385,7 @@ impl LoginFailures {
 
 /// Connections whose player is within AOI range of `center` — the interest-
 /// management filter for the mechanic sends below (Finding 5 of
-/// docs/reviews/audit-networking-2026-07-11.md: `state.server.broadcast` used
+/// docs/reviews/networking/audit-networking-2026-07-11.md: `state.server.broadcast` used
 /// to fan MechanicScheduled/HitResult out to EVERY connection, including
 /// pre-login ones, which both wasted O(players × casts) bandwidth and gave a
 /// cheating client a zone-wide radar off telegraph positions). Uses the same
@@ -792,7 +792,7 @@ impl System for NetReceiveSystem {
                     if let Ok(mut hp) = world.get::<&mut Health>(entity) {
                         hp.current = record.health;
                     }
-                    // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+                    // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
                     // cooldowns are persisted as remainders (`record.cooldowns`),
                     // so a relog or zone transfer restores the exact remaining
                     // cooldown instead of the pessimistic full-cooldown reset
@@ -1699,7 +1699,7 @@ mod tests {
         assert!(due_ticks.len() > 1, "all autosaves landed on the same tick: {due_ticks:?}");
     }
 
-    /// Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    /// Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
     /// `cooldown_remainders` is the pure conversion from absolute `ready_at`
     /// stamps to save-time remainders — it must subtract correctly for a
     /// skill still cooling down, and drop (not zero-fill) any entry whose
@@ -1720,7 +1720,7 @@ mod tests {
         assert_eq!(remainders.len(), 1, "only the still-cooling skill should remain: {remainders:?}");
     }
 
-    /// Finding 4 of docs/reviews/plan-networking-rework-1-2026-07-13.md, with
+    /// Finding 4 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md, with
     /// fabricated timestamps (no real 10 s sleeps): `LoginFailures` must
     /// tolerate `MAX_LOGIN_FAILURES - 1` failures, deny at
     /// `MAX_LOGIN_FAILURES` within the window, and forget the IP entirely
@@ -1748,7 +1748,7 @@ mod tests {
         );
     }
 
-    /// Finding 1 of docs/reviews/plan-networking-rework-5-2026-07-13.md:
+    /// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
     /// `ReplIds` must hand back the SAME id on every subsequent lookup of an
     /// entity, and assign distinct, monotonically increasing ids to distinct
     /// entities — the wire-compactness contract the whole finding rests on.
@@ -1768,7 +1768,7 @@ mod tests {
         assert!(id2 > id1_first, "ids are assigned monotonically as entities are first referenced");
     }
 
-    /// Finding 1 of docs/reviews/plan-networking-rework-5-2026-07-13.md:
+    /// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
     /// `sweep` must drop a despawned entity's mapping, and a fresh entity
     /// (even one that reuses the despawned entity's hecs slot at a new
     /// generation) must get a BRAND NEW id — never the stale one — so a

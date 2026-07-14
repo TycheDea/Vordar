@@ -45,7 +45,7 @@ Gap C's below-QUIC loss probe (see below) measured the actual head-of-line cost 
 50 ms RTT: even at 5 % receive-side loss, the worst inter-snapshot gap was 164 ms —
 under one retransmit cycle, absorbed by the 100 ms snapshot cadence. Re-probed at
 200 ms (WAN) RTT by networking rework 3
-(`docs/reviews/plan-networking-rework-3-2026-07-13.md`), the decision gate (p99 >
+(`docs/reviews/networking/plan-networking-rework-3-2026-07-13.md`), the decision gate (p99 >
 250 ms or max > 500 ms) still was not numerically breached, but the underlying
 mechanism it approximates — a single lost packet stalling every later snapshot on
 the one reliable stream until the retransmit lands — was real (loss pushed max up

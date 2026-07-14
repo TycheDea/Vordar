@@ -1,5 +1,5 @@
 Spawn one finding-worker subagent with exactly this task: "Implement finding
-2 of docs/reviews/audit-networking-2026-07-11.md. Read the finding's full
+2 of docs/reviews/networking/audit-networking-2026-07-11.md. Read the finding's full
 section from that file first — title through Path — and execute its Path
 steps faithfully. You may edit any file in the workspace the fix or its test
 requires. Declining or reporting 'not done' without code edits is not an

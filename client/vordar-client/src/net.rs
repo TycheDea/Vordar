@@ -1581,7 +1581,7 @@ mod tests {
     /// interaction between finding 1's RESYNC and finding 2's EXTRAP_CAP,
     /// not something fixable within this finding's Suggestion (sampling-
     /// function branches only) without touching `advance_playback` — filed
-    /// as `docs/reviews/reworks-networking-2026-07-11.md` finding 11. This
+    /// as `docs/reviews/networking/reworks-networking-2026-07-11.md` finding 11. This
     /// test asserts bit-identical holding for the window that is actually
     /// stable (ending strictly before the measured resync point) rather
     /// than the full 30 ticks.
@@ -2123,7 +2123,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(16));
         }
 
-        // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+        // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
         // cooldowns now persist as remainders instead of pessimistically
         // seeding full cooldown at spawn, so a fresh character's "onslaught"
         // is castable immediately — no cooldown-clearing wait needed. The
@@ -2249,7 +2249,7 @@ mod tests {
     }
 
     /// Networking rework 4, finding 3
-    /// (`docs/reviews/plan-networking-rework-4-2026-07-14.md`): the loss
+    /// (`docs/reviews/networking/plan-networking-rework-4-2026-07-14.md`): the loss
     /// probes (`server/vordar-server/tests/loss.rs`) measure arrival gaps and
     /// intent-ack lag only — nothing measures what a player actually SEES: the
     /// per-tick rendered motion of a remote entity under loss and jitter. A

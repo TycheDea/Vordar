@@ -118,7 +118,7 @@ fn phase2_simulated_latency() {
     });
 }
 
-// Regression test for Finding 2 of docs/reviews/audit-networking-2026-07-11.md:
+// Regression test for Finding 2 of docs/reviews/networking/audit-networking-2026-07-11.md:
 // an honest client's direction that lands a few ULP over unit length (exactly
 // what glam's f32 `normalize()` produces for ordinary camera-yaw inputs) must
 // still move the player. A strict `> 1.0` reject silently drops every one of
@@ -200,7 +200,7 @@ fn phase4_scheduled_aoe() {
     let b_id = b.player_id.unwrap();
     a.wait_for("A sees B", Duration::from_secs(5), |bot| bot.last_snapshot.contains_key(&b_id));
 
-    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: every fresh
+    // Finding 8 of docs/reviews/networking/audit-networking-2026-07-11.md: every fresh
     // spawn now pessimistically starts its abilities on full cooldown, so
     // "cleave" isn't castable in the instant after login — clear it first.
     std::thread::sleep(Duration::from_millis(3200));
@@ -271,7 +271,7 @@ fn phase4_scheduled_aoe() {
     assert_eq!(b.mechanics.len(), count_before, "backdated cast must be rejected");
 }
 
-// Regression test for Finding 5 of docs/reviews/audit-networking-2026-07-11.md:
+// Regression test for Finding 5 of docs/reviews/networking/audit-networking-2026-07-11.md:
 // MechanicScheduled/HitResult used to `broadcast` to EVERY connection
 // regardless of distance — a cheating client got a zone-wide radar off
 // telegraph positions, and aggregate mechanic traffic scaled O(players ×
@@ -585,7 +585,7 @@ fn ravager_onslaught_dashes_and_resolves() {
     let target = *a.last_snapshot.get(&b_id).unwrap();
     let start_dist = (glam::Vec2::new(start.x, start.z) - glam::Vec2::new(target.x, target.z)).length();
 
-    // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
     // cooldowns now persist as remainders instead of pessimistically seeding
     // full cooldown at spawn, so a fresh character's "onslaught" is castable
     // immediately — no clearing wait needed.
@@ -674,7 +674,7 @@ fn phase6_health_persists_in_db() {
     let victim_id = victim.player_id.unwrap();
     atk.wait_for("atk sees victim", Duration::from_secs(5), |b| b.last_snapshot.contains_key(&victim_id));
 
-    // Finding 8 of docs/reviews/audit-networking-2026-07-11.md: every fresh
+    // Finding 8 of docs/reviews/networking/audit-networking-2026-07-11.md: every fresh
     // spawn now pessimistically starts its abilities on full cooldown, so
     // "cleave" isn't castable in the instant after login — clear it first.
     std::thread::sleep(Duration::from_millis(3200));
@@ -792,7 +792,7 @@ fn phase6_restart_durability() {
     );
 }
 
-// Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md: cooldowns
+// Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: cooldowns
 // used to live only in the connection's in-memory `PlayerConn.last_cast`
 // (audit finding 8's pessimistic fix seeded every ability on full cooldown
 // at spawn instead of persisting the true remainder). Cooldowns now persist
@@ -882,7 +882,7 @@ impl System for RejectMirror {
     }
 }
 
-// Finding 18 of docs/reviews/audit-networking-2026-07-11.md: validate_intent's
+// Finding 18 of docs/reviews/networking/audit-networking-2026-07-11.md: validate_intent's
 // callers only `log::debug!`/`log::warn!` a rejected intent — nothing fed the
 // `NetMetrics` the operational-blindness fix (finding 3) claims to expose, so
 // a client sending invalid intents was as invisible to metrics as one behaving
@@ -931,7 +931,7 @@ fn finding18_invalid_intent_increments_reject_counter() {
     assert!(rejects.load(Ordering::Relaxed) >= 1, "an invalid intent must be counted in NetMetrics::rejects");
 }
 
-// Finding 3 of docs/reviews/plan-networking-rework-1-2026-07-13.md: `Login`
+// Finding 3 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: `Login`
 // used to carry only a bare name, so anyone who knew a character's name could
 // take over — or kick — its session (`phase6_login_takeover` above exercises
 // the LEGITIMATE version of this same mechanism). A same-name login must now
@@ -994,7 +994,7 @@ fn wrong_token_cannot_kick_or_impersonate() {
     assert!(guarded.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
 }
 
-// Finding 4 of docs/reviews/plan-networking-rework-1-2026-07-13.md: nothing
+// Finding 4 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: nothing
 // throttled repeated bad-credential login attempts — a client could probe
 // names/tokens as fast as the message token bucket allowed. Failed logins
 // (here: token mismatches) now count against a per-IP budget; once
@@ -1063,7 +1063,7 @@ fn login_failures_are_rate_limited() {
     assert!(keeper.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
 }
 
-// Finding 1 of docs/reviews/plan-networking-rework-5-2026-07-13.md: every
+// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: every
 // wire entity id used to be raw hecs `Entity` bits (`entity.to_bits().get()`
 // at net_plugin.rs's Welcome/HitResult/EntityDied/snapshot-gather sites) —
 // always >= 2^32 because of the generation bits packed into the upper half,
@@ -1099,7 +1099,7 @@ fn replication_ids_are_compact() {
     }
 }
 
-// Finding 3 of docs/reviews/plan-networking-rework-5-2026-07-13.md: hp used
+// Finding 3 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: hp used
 // to flatten to a plain `i32` with 0 doing double duty for "no Health
 // component" and "dead at 0 HP" (net_plugin.rs's old
 // `hp.map(|h| h.current).unwrap_or(0)`). A Health-less replicated entity (the
@@ -1150,7 +1150,7 @@ fn hp_none_distinguishes_health_less_entities() {
     );
 }
 
-// Finding 4 of docs/reviews/plan-networking-rework-5-2026-07-13.md:
+// Finding 4 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
 // `EntityState.prefab` used to repeat the full prefab name string on every
 // single AOI enter. A per-zone `ServerMsg::PrefabTable` is now sent once per
 // connection immediately after `Welcome`, and `EntityState.prefab` rides as a
@@ -1194,7 +1194,7 @@ fn prefab_table_binds_u16_refs() {
     );
 }
 
-// Finding 5 of docs/reviews/plan-networking-rework-5-2026-07-13.md: a
+// Finding 5 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: a
 // permanent size gate on steady-state snapshot frames. Findings 1-4 compacted
 // wire entity ids (u32, not raw hecs bits), quantized positions (WirePos),
 // made hp an explicit Option (no more 0-as-"no Health"), and replaced a
@@ -1264,7 +1264,7 @@ fn crowd_snapshot_fits_datagram_budget() {
     );
 }
 
-// Finding 5 of docs/reviews/plan-networking-rework-3-2026-07-13.md:
+// Finding 5 of docs/reviews/networking/plan-networking-rework-3-2026-07-13.md:
 // `ClientMsg::MoveIntent` was replaced by `ClientMsg::MoveIntents`, a batch
 // of up to 3 entries (this tick's plus the two previous) sent via datagram
 // every Input tick — a lost datagram is fully recovered by the next tick's

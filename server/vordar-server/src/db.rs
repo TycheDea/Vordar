@@ -683,7 +683,7 @@ mod tests {
         }
     }
 
-    /// Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    /// Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
     /// cooldowns are now persisted as remainders in the new `cooldowns`
     /// column (RON-encoded `HashMap<String, u64>`). A save carrying a
     /// non-empty cooldowns map must survive a full close/reopen of the
@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(loaded.record.cooldowns, cooldowns, "cooldown remainders must survive a reopen");
     }
 
-    /// Finding 2 of docs/reviews/plan-networking-rework-1-2026-07-13.md: a
+    /// Finding 2 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: a
     /// fresh name's first `login` has nothing to compare against, so it
     /// claims the account (stores `sha256(token)`) and grants — same as
     /// `load_or_create` would, just through the verified path.

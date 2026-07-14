@@ -1,6 +1,6 @@
 # Plan: Wire format waste: 5-byte-minimum entity ids, repeated prefab strings, unquantized absolute states — 2026-07-13
 
-Source: docs/reviews/reworks-networking-2026-07-11.md finding 5.
+Source: docs/reviews/networking/reworks-networking-2026-07-11.md finding 5.
 
 ## Ideal end state
 
@@ -328,7 +328,7 @@ that rework 3 (snapshots on datagrams) is physically blocked on today.
 ### 5. Crowd-snapshot size gate: steady-state full snapshot ≤ 1100 bytes
 
 - **Evidence:** The rework's acceptance criterion lives in the queue note of
-  `docs/reviews/reworks-networking-2026-07-11.md`: "QUIC datagrams carry
+  `docs/reviews/networking/reworks-networking-2026-07-11.md`: "QUIC datagrams carry
   ~1.2 KB and crowd snapshots are ~2.2 KB today, so [rework] 3's
   snapshots-on-datagrams step is physically impossible until 5's compaction
   shrinks them under the MTU." The measurement hook exists —

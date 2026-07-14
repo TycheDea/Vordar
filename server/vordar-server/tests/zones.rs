@@ -207,7 +207,7 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
         bot.pump();
         std::thread::sleep(Duration::from_millis(16));
     }
-    // Finding 1 of docs/reviews/plan-networking-rework-1-2026-07-13.md:
+    // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
     // cooldowns now persist as remainders restored across a zone transfer
     // instead of pessimistically seeding full cooldown at spawn, so a
     // never-cast "cleave" is castable immediately after the transfer — no

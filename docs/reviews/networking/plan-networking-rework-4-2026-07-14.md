@@ -1,6 +1,6 @@
 # Plan: No jitter buffer or extrapolation — remote entities freeze at every late snapshot — 2026-07-14
 
-Source: docs/reviews/reworks-networking-2026-07-11.md finding 4.
+Source: docs/reviews/networking/reworks-networking-2026-07-11.md finding 4.
 
 ## Ideal end state
 
@@ -292,7 +292,7 @@ as a regression gate.
 - **Evidence:** `docs/online-play.mmd:19` — node R2 reads "interpolate remote
   entities<br/>between snapshot positions", describing the deleted
   one-interval lerp; the queue note in
-  `docs/reviews/reworks-networking-2026-07-11.md` requires every plan from
+  `docs/reviews/networking/reworks-networking-2026-07-11.md` requires every plan from
   this queue to update `docs/online-play.mmd` + SVG when it changes the
   online-play flow (the diagram was converged by audit finding 19).
   `docs/online-play.svg` is the rendered copy; `scripts/render-mmd.sh` renders

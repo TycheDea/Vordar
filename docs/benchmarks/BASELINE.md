@@ -196,7 +196,7 @@ soak: bots=400 input_hz=60.0 input_p99_ms=18.73 post_hz=60.0 post_p99_ms=20.31 k
   per-client snapshot rate) — see the architecture note above.
 
 ### Packet-loss probe — `loss` (real QUIC, below-QUIC datagram drop, gap C;
-before/after networking rework 3, `docs/reviews/plan-networking-rework-3-2026-07-13.md`)
+before/after networking rework 3, `docs/reviews/networking/plan-networking-rework-3-2026-07-13.md`)
 
 **Downstream (server→client) inter-snapshot gaps**, one wandering mover + one lossy
 observer, 30 s window per (RTT, loss) cell.
@@ -307,7 +307,7 @@ clients above 200 ms).
 
 ### Remote render smoothness probe — `remote_render_smoothness_under_loss_probe`
 (client, real QUIC; networking rework 4,
-`docs/reviews/plan-networking-rework-4-2026-07-14.md` finding 3)
+`docs/reviews/networking/plan-networking-rework-4-2026-07-14.md` finding 3)
 
 The gap-C loss probes above measure arrival gaps and intent-ack lag only —
 neither says what a player actually SEES. This probe drives a real headless

@@ -1,4 +1,4 @@
-// Finding 3 of docs/reviews/plan-networking-rework-8-2026-07-12.md: killing
+// Finding 3 of docs/reviews/networking/plan-networking-rework-8-2026-07-12.md: killing
 // the process today loses up to a full autosave window (~30 s) of every
 // online player's state — there is no code path that saves *all* connected
 // players and stops the sim loop. The fix: a shared `ShutdownFlag` resource,

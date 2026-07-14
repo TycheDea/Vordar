@@ -1,6 +1,6 @@
 # Plan: Every message class rides one reliable ordered stream — head-of-line blocking by design — 2026-07-13
 
-Source: docs/reviews/reworks-networking-2026-07-11.md finding 3.
+Source: docs/reviews/networking/reworks-networking-2026-07-11.md finding 3.
 
 ## Ideal end state
 
@@ -373,7 +373,7 @@ retransmit cycles, and BASELINE.md records the before/after evidence.
 
 - **Evidence:** Step 1 of this plan recorded the stream-snapshot WAN
   numbers in `docs/benchmarks/BASELINE.md`'s loss-probe section; the queue
-  note in `docs/reviews/reworks-networking-2026-07-11.md:30-33` requires
+  note in `docs/reviews/networking/reworks-networking-2026-07-11.md:30-33` requires
   every plan that changes the online-play flow to update
   `docs/online-play.mmd` + SVG (the diagram's edge labels at the bottom —
   "move · cast intents", "snapshots (prefab table indices) · welcome · hit
@@ -410,6 +410,6 @@ retransmit cycles, and BASELINE.md records the before/after evidence.
   wherever BASELINE.md:204-209 recorded it ("the datagram snapshot path was
   **not built**" is now false); (4) update `docs/online-play.mmd` and
   regenerate the SVG; (5) strike rework 3 in the queue note of
-  `docs/reviews/reworks-networking-2026-07-11.md` with the plan filename
+  `docs/reviews/networking/reworks-networking-2026-07-11.md` with the plan filename
   and step count, following the existing strike format; (6) workspace green
   (probe remains `--ignored`; everything else untouched).

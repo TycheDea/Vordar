@@ -1,6 +1,6 @@
 # Plan: Persistence lifecycle: schema migrations, graceful shutdown, durability classes — 2026-07-12
 
-Source: docs/reviews/reworks-networking-2026-07-11.md finding 8.
+Source: docs/reviews/networking/reworks-networking-2026-07-11.md finding 8.
 
 ## Ideal end state
 
