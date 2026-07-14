@@ -18,7 +18,7 @@ systems, resources, tests, files, and content folders.
 
 > **Cross-type queue** (spans this file and `reworks-hygiene-2026-07-14.md`; mirrored
 > there verbatim):
-> **finding 1 → ~~rework 1~~ → ~~rework 2~~ → rework 3 → finding 2 → finding 3 → rework 4 →
+> **finding 1 → ~~rework 1~~ → ~~rework 2~~ → ~~rework 3~~ → finding 2 → finding 3 → rework 4 →
 > finding 4 → finding 5 → finding 6 → finding 7 → finding 8 → finding 9 → finding 10 →
 > finding 11 → finding 12 → finding 13 → finding 14 → finding 15 → finding 16.**
 > Finding 1 first: every comment cleanup (4-7) applies the policy it defines, and every
@@ -167,10 +167,9 @@ systems, resources, tests, files, and content folders.
 
 - **Evidence:** `client/vordar-client/src/body.rs:66-68` — "TEMP (anim feel-check)…
   Remove with the MeshRenderSyncSystem pose log" plus its `log::info!`;
-  `smirk/engine-renderer/src/mesh.rs:776` `log_accum` field, L796-803 and L869-874 the
-  accompanying log blocks ("Remove once the character animates on screen" — the
-  character animates on screen); `smirk/engine-renderer/src/lib.rs:747-752` a multi-line
-  TODO describing a future refactor (subsumed by rework 3).
+  `smirk/engine-renderer/src/mesh/sync.rs` — the `log_accum` field and its two
+  log blocks in `MeshRenderSyncSystem` ("Remove once the character animates on screen");
+  (the lib.rs TODO was deleted by rework 3).
 - **Ideal:** no self-flagged-for-removal code survives its purpose.
 - **Gap:** three pieces of debug scaffolding shipped past their expiry, one TODO that
   duplicates a filed rework.
