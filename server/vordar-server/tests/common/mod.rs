@@ -6,13 +6,17 @@ use engine_app::scheduler::System;
 use engine_core::prefab::queue_prefab_spawn;
 use engine_core::traits::Resources;
 use engine_core::World;
-use engine_net::{ClientEvent, Impairment, NetClient};
+use engine_net::{ClientEvent, Impairment, NetClient, NetMetrics};
 use glam::{Vec2, Vec3};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vordar_game::zones::{validate_zones, PortalDef, ZoneDef, ZonesDef};
 use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION};
+use vordar_server::db::{DbHandle, DbWorker};
+use vordar_server::net::NetServerState;
 
 pub fn workspace_root() {
     // Prefabs load from content/ relative to cwd — run as if from workspace root.
@@ -492,4 +496,110 @@ impl System for PopulateSystem {
             queue_prefab_spawn(resources, self.prefab.clone(), pos);
         }
     }
+}
+
+/// Mirrors one `NetMetrics` atomic counter into a plain atomic every tick —
+/// systems can't return values, so this smuggles a live count out to the
+/// harness, which samples it directly around a measurement window. `select`
+/// picks the field (e.g. `|m| &m.rejects`, `|m| &m.busy_micros`).
+pub struct MetricMirror {
+    pub dest: Arc<AtomicU64>,
+    pub select: fn(&NetMetrics) -> &AtomicU64,
+}
+
+impl System for MetricMirror {
+    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
+        let state = resources.get::<NetServerState>().expect("NetServerState not installed");
+        let metrics = state.metrics();
+        self.dest.store((self.select)(&metrics).load(Ordering::Relaxed), Ordering::Relaxed);
+    }
+}
+
+/// Percentile `p` (0.0-1.0) of `values`, sorted ascending in place.
+pub fn percentile(values: &mut [f64], p: f64) -> f64 {
+    values.sort_by(|a, b| a.total_cmp(b));
+    let idx = ((values.len() as f64 * p) as usize).min(values.len() - 1);
+    values[idx]
+}
+
+/// Join `handle` on a helper thread so a hang past `timeout` fails the test
+/// instead of blocking it forever; `label` names the joined thread in the
+/// panic message.
+pub fn join_with_deadline<T: Send + 'static>(handle: std::thread::JoinHandle<T>, timeout: Duration, label: &str) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(handle.join());
+    });
+    rx.recv_timeout(timeout)
+        .unwrap_or_else(|_| panic!("{label} did not exit within the deadline"))
+        .unwrap_or_else(|_| panic!("{label} panicked instead of shutting down cleanly"))
+}
+
+/// Raw (non-`Bot`) login probe: dials `addr` directly, sends `Login{name,
+/// token}`, and waits up to `timeout` for either `LoginDenied` or `Welcome` —
+/// the attacker/prober shape shared by the credential-mismatch and
+/// rate-limit tests. Asserts a `Welcome` never arrives; `on_tick` runs once
+/// per poll cycle so a caller can keep an unrelated victim bot pumped
+/// alongside the probe.
+pub fn raw_login_probe(
+    addr: SocketAddr,
+    name: &str,
+    token: AccountToken,
+    timeout: Duration,
+    mut on_tick: impl FnMut(),
+) -> LoginDenyReason {
+    let mut attacker = NetClient::connect(addr, PROTOCOL_VERSION).expect("attacker connect");
+    let mut denied = None;
+    let mut got_welcome = false;
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline && denied.is_none() && !got_welcome {
+        for event in attacker.poll() {
+            match event {
+                ClientEvent::Connected => {
+                    attacker.send(encode(&ClientMsg::Login { name: name.to_owned(), token }));
+                }
+                ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
+                    Some(ServerMsg::LoginDenied { reason }) => denied = Some(reason),
+                    Some(ServerMsg::Welcome { .. }) => got_welcome = true,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        on_tick();
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert!(!got_welcome, "the attacker must never receive a Welcome");
+    denied.expect("attacker must receive a LoginDenied answer, not silence")
+}
+
+/// Shared multi-zone bring-up: builds a two-zone directory (`start`/`east`,
+/// matching `test_zones()`), opens one `DbWorker`, mints one world-time
+/// origin, and spawns one thread per zone via `per_zone` — the injection
+/// point for whatever a specific test varies (a `ShutdownFlag`, a
+/// `supervise_zone` wrapper, a chapter install), since the setup above never
+/// does. Returns the zone `JoinHandle`s (in `zones`' order) and the
+/// `DbWorker`, which the caller must keep alive for as long as any zone
+/// thread runs — `mem::forget` it for a fire-and-forget bring-up, or hold it
+/// to `drop` after joining every handle.
+pub fn spawn_zones(
+    zones: Vec<ZoneDef>,
+    start_addr: SocketAddr,
+    east_addr: SocketAddr,
+    db_path: &str,
+    mut per_zone: impl FnMut(SocketAddr, DbHandle, ZoneDef, HashMap<String, SocketAddr>, Instant) -> std::thread::JoinHandle<()>,
+) -> (Vec<std::thread::JoinHandle<()>>, DbWorker) {
+    let directory: HashMap<String, SocketAddr> =
+        HashMap::from([("start".to_owned(), start_addr), ("east".to_owned(), east_addr)]);
+    let worker = DbWorker::spawn(db_path).expect("db open");
+    let world_origin = Instant::now();
+    let handles = zones
+        .into_iter()
+        .map(|zone| {
+            let addr = directory[&zone.name];
+            per_zone(addr, worker.handle(), zone, directory.clone(), world_origin)
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    (handles, worker)
 }

@@ -3,32 +3,13 @@
 
 mod common;
 
-use common::{name_token, workspace_root, Bot};
-use engine_app::scheduler::{Phase, System, SystemOrder};
-use engine_core::traits::Resources;
-use engine_core::World;
-use engine_net::{ClientEvent, NetClient};
+use common::{name_token, raw_login_probe, workspace_root, Bot, MetricMirror};
+use engine_app::scheduler::{Phase, SystemOrder};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION};
-use vordar_server::net::NetServerState;
-
-/// Mirrors the network-layer reject counter (`engine_net::NetMetrics::rejects`)
-/// into a plain atomic every tick — same smuggling trick as the soak harness's
-/// `BusyMirror`, since a running `App` never hands values back across the
-/// thread boundary it runs on.
-struct RejectMirror {
-    dest: Arc<AtomicU64>,
-}
-
-impl System for RejectMirror {
-    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
-        let state = resources.get::<NetServerState>().expect("NetServerState not installed");
-        self.dest.store(state.metrics().rejects.load(Ordering::Relaxed), Ordering::Relaxed);
-    }
-}
+use vordar_protocol::{encode, ClientMsg, LoginDenyReason, MoveIntentEntry};
 
 // Finding 18 of docs/reviews/networking/audit-networking-2026-07-11.md: validate_intent's
 // callers only `log::debug!`/`log::warn!` a rejected intent — nothing fed the
@@ -45,7 +26,11 @@ fn invalid_intent_increments_reject_counter() {
         let rejects = rejects.clone();
         std::thread::spawn(move || {
             let mut app = vordar_server::build_server_app(addr, ":memory:");
-            app.add_system(RejectMirror { dest: rejects }, Phase::Input, SystemOrder::Default);
+            app.add_system(
+                MetricMirror { dest: rejects, select: |m| &m.rejects },
+                Phase::Input,
+                SystemOrder::Default,
+            );
             app.run_headless(60.0, Some(1200));
         });
     }
@@ -105,32 +90,12 @@ fn wrong_token_cannot_kick_or_impersonate() {
     // Attacker: same name, a token that does NOT match "guarded"'s.
     let mut wrong_token = name_token("guarded");
     wrong_token[0] ^= 0xFF;
-    let mut attacker = NetClient::connect(addr, PROTOCOL_VERSION).expect("attacker connect");
-    let mut denied = None;
-    let mut got_welcome = false;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && denied.is_none() && !got_welcome {
-        for event in attacker.poll() {
-            match event {
-                ClientEvent::Connected => {
-                    attacker.send(encode(&ClientMsg::Login { name: "guarded".into(), token: wrong_token }));
-                }
-                ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
-                    Some(ServerMsg::LoginDenied { reason }) => denied = Some(reason),
-                    Some(ServerMsg::Welcome { .. }) => got_welcome = true,
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-        std::thread::sleep(Duration::from_millis(16));
-    }
+    let denied = raw_login_probe(addr, "guarded", wrong_token, Duration::from_secs(5), || {});
     assert_eq!(
         denied,
-        Some(LoginDenyReason::BadCredentials),
+        LoginDenyReason::BadCredentials,
         "the attacker must be denied a Welcome, not silently ignored or granted"
     );
-    assert!(!got_welcome, "the attacker must never receive a Welcome");
 
     // The victim must be completely untouched: still online, still getting
     // snapshots, never kicked.
@@ -166,34 +131,12 @@ fn login_failures_are_rate_limited() {
 
     // Six raw (non-Bot) connections in sequence, each presenting the same
     // wrong token for "keeper" — the first five are credential failures, the
-    // sixth must be turned away on the rate-limit gate alone.
+    // sixth must be turned away on the rate-limit gate alone. Each probe
+    // keeps the victim's connection alive and pumped throughout, not just
+    // checked at the very end.
     let mut reasons: Vec<LoginDenyReason> = Vec::new();
     for _ in 0..6 {
-        let mut attacker = NetClient::connect(addr, PROTOCOL_VERSION).expect("attacker connect");
-        let mut denied = None;
-        let mut got_welcome = false;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline && denied.is_none() && !got_welcome {
-            for event in attacker.poll() {
-                match event {
-                    ClientEvent::Connected => {
-                        attacker.send(encode(&ClientMsg::Login { name: "keeper".into(), token: wrong_token }));
-                    }
-                    ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
-                        Some(ServerMsg::LoginDenied { reason }) => denied = Some(reason),
-                        Some(ServerMsg::Welcome { .. }) => got_welcome = true,
-                        _ => {}
-                    },
-                    _ => {}
-                }
-            }
-            // Keep the victim's connection alive and pumped throughout the
-            // probing loop, not just checked at the very end.
-            keeper.pump();
-            std::thread::sleep(Duration::from_millis(16));
-        }
-        assert!(!got_welcome, "the attacker must never receive a Welcome");
-        reasons.push(denied.expect("attacker must receive a LoginDenied answer, not silence"));
+        reasons.push(raw_login_probe(addr, "keeper", wrong_token, Duration::from_secs(5), || keeper.pump()));
     }
 
     assert_eq!(

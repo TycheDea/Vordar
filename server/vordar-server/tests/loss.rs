@@ -14,7 +14,7 @@
 
 mod common;
 
-use common::Bot;
+use common::{percentile, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -25,10 +25,6 @@ const WINDOW: Duration = Duration::from_secs(30);
 /// retransmit cycle costs a much larger fraction of the 100 ms snapshot
 /// period.
 const WAN_RTTS: [Duration; 2] = [Duration::from_millis(50), Duration::from_millis(200)];
-
-fn pct(sorted: &[f64], p: f64) -> f64 {
-    sorted[((sorted.len() as f64 * p) as usize).min(sorted.len() - 1)]
-}
 
 #[test]
 #[ignore = "loss probe — run with --release --ignored"]
@@ -85,14 +81,13 @@ fn loss_probe_inter_snapshot_gaps() {
                 rtt.as_millis(),
                 gaps.len() + 1
             );
-            gaps.sort_by(|a, b| a.total_cmp(b));
-            let p99 = pct(&gaps, 0.99);
+            let p99 = percentile(&mut gaps, 0.99);
             println!(
                 "rtt={:>3}ms loss={:>2.0}%  snapshots={}  gap_ms p50={:.0} p99={:.0} max={:.0}",
                 rtt.as_millis(),
                 loss * 100.0,
                 gaps.len() + 1,
-                pct(&gaps, 0.50),
+                percentile(&mut gaps, 0.50),
                 p99,
                 gaps.last().unwrap(),
             );

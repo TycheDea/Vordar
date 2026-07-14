@@ -9,16 +9,14 @@
 
 mod common;
 
-use common::{temp_db, test_zones, walk_into_portal, workspace_root, Bot};
+use common::{join_with_deadline, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::Resources;
 use engine_core::World;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vordar_server::db::DbWorker;
 use vordar_server::net::ShutdownFlag;
 use vordar_server::{build_zone_app, supervise_zone};
 
@@ -45,42 +43,28 @@ fn a_panicked_zone_restarts_on_the_same_address_and_a_fresh_connection_succeeds(
     let flag = Arc::new(AtomicBool::new(false));
     let trigger = Arc::new(AtomicBool::new(false));
 
-    let directory: HashMap<String, SocketAddr> =
-        HashMap::from([("start".to_owned(), start_addr), ("east".to_owned(), east_addr)]);
-    let worker = DbWorker::spawn(&db).expect("db open");
-    let world_origin = Instant::now();
-
-    let handles: Vec<(String, _)> = test_zones()
-        .into_iter()
-        .map(|zone| {
-            let addr = directory[&zone.name];
-            let directory = directory.clone();
-            let handle = worker.handle();
-            let name = zone.name.clone();
-            let is_start = zone.name == "start";
-            let zone_flag = flag.clone();
-            let zone_trigger = trigger.clone();
-            let join = std::thread::spawn(move || {
-                let watchdog_name = zone.name.clone();
-                // A fresh clone kept separate from `zone_flag` itself: the
-                // supervisor borrows `zone_flag` for the whole call below,
-                // so the rebuildable closure must move a clone, not the
-                // borrowed original.
-                let app_flag = zone_flag.clone();
-                supervise_zone(&watchdog_name, &zone_flag, move || {
-                    let mut app =
-                        build_zone_app(addr, handle.fork(), zone.clone(), directory.clone(), world_origin);
-                    app.insert_resource(ShutdownFlag(app_flag.clone()));
-                    if is_start {
-                        app.add_system(PanicOnce(zone_trigger.clone()), Phase::Update, SystemOrder::Default);
-                    }
-                    app.run_headless(60.0, None);
-                });
+    let (handles, worker) = spawn_zones(test_zones(), start_addr, east_addr, &db, |addr, handle, zone, directory, world_origin| {
+        let is_start = zone.name == "start";
+        let zone_flag = flag.clone();
+        let zone_trigger = trigger.clone();
+        std::thread::spawn(move || {
+            let watchdog_name = zone.name.clone();
+            // A fresh clone kept separate from `zone_flag` itself: the
+            // supervisor borrows `zone_flag` for the whole call below, so
+            // the rebuildable closure must move a clone, not the borrowed
+            // original.
+            let app_flag = zone_flag.clone();
+            supervise_zone(&watchdog_name, &zone_flag, move || {
+                let mut app =
+                    build_zone_app(addr, handle.fork(), zone.clone(), directory.clone(), world_origin);
+                app.insert_resource(ShutdownFlag(app_flag.clone()));
+                if is_start {
+                    app.add_system(PanicOnce(zone_trigger.clone()), Phase::Update, SystemOrder::Default);
+                }
+                app.run_headless(60.0, None);
             });
-            (name, join)
         })
-        .collect();
-    std::thread::sleep(Duration::from_millis(300));
+    });
 
     let mut victim = Bot::connect_as(start_addr, "victim");
     victim.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -123,14 +107,8 @@ fn a_panicked_zone_restarts_on_the_same_address_and_a_fresh_connection_succeeds(
     // shared shutdown flag: a clean return from run_headless ends
     // supervision with no restart.
     flag.store(true, Ordering::SeqCst);
-    for (name, handle) in handles {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(handle.join());
-        });
-        rx.recv_timeout(Duration::from_secs(10))
-            .unwrap_or_else(|_| panic!("zone '{name}' did not exit within the deadline"))
-            .unwrap_or_else(|_| panic!("zone '{name}' panicked instead of shutting down cleanly"));
+    for handle in handles {
+        join_with_deadline(handle, Duration::from_secs(10), "zone thread");
     }
     drop(worker);
 

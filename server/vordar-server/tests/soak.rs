@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::Bot;
+use common::{percentile, Bot, MetricMirror};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::Resources;
 use engine_core::World;
@@ -17,7 +17,6 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use vordar_server::net::NetServerState;
 
 /// Bot count — override with VORDAR_SOAK_BOTS (default 200) for scaling runs.
 fn soak_bots() -> usize {
@@ -49,28 +48,6 @@ impl System for PhaseMeter {
         }
         self.last = Some(now);
     }
-}
-
-/// Mirrors the network thread's cumulative busy-time counter (see
-/// `engine_net::NetMetrics::busy_micros`) into a plain atomic every tick —
-/// systems can't return values, so this smuggles the live count out to the
-/// harness, which samples it directly around the measurement window
-/// (networking audit 2026-07-11, finding 14 step 1: network-thread busy-time
-/// instrumentation).
-struct BusyMirror {
-    dest: Arc<AtomicU64>,
-}
-
-impl System for BusyMirror {
-    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
-        let state = resources.get::<NetServerState>().expect("NetServerState not installed");
-        self.dest.store(state.metrics().busy_micros.load(Ordering::Relaxed), Ordering::Relaxed);
-    }
-}
-
-fn p99(intervals: &mut [f64]) -> f64 {
-    intervals.sort_by(|a, b| a.total_cmp(b));
-    intervals[(intervals.len() * 99) / 100 - 1]
 }
 
 /// Deterministic wander: direction from a per-bot LCG, re-rolled every 30
@@ -154,7 +131,11 @@ fn phase7_soak_200_bots_hold_tick_budget() {
                 Phase::PostUpdate,
                 SystemOrder::Last,
             );
-            app.add_system(BusyMirror { dest: busy_micros }, Phase::Input, SystemOrder::Default);
+            app.add_system(
+                MetricMirror { dest: busy_micros, select: |m| &m.busy_micros },
+                Phase::Input,
+                SystemOrder::Default,
+            );
             // ≥90 s of sim at 60 Hz — covers ramp-up + window + walk + slack;
             // scaled with the bot count so bigger runs get a longer ramp.
             app.run_headless(60.0, Some(5400.max(total_bots as u64 * 27)));
@@ -235,11 +216,11 @@ fn phase7_soak_200_bots_hold_tick_budget() {
     // then the budget assertions. ──
     let mut input = input_intervals.lock().unwrap().clone();
     let input_hz = input.len() as f64 / WINDOW.as_secs_f64();
-    eprintln!("input: {} runs ({input_hz:.1} Hz), p99 interval {:.1} ms", input.len(), p99(&mut input) * 1e3);
+    eprintln!("input: {} runs ({input_hz:.1} Hz), p99 interval {:.1} ms", input.len(), percentile(&mut input, 0.99) * 1e3);
 
     let mut post = post_intervals.lock().unwrap().clone();
     let post_hz = post.len() as f64 / WINDOW.as_secs_f64();
-    eprintln!("postupdate: {} runs ({post_hz:.1} Hz), p99 interval {:.1} ms", post.len(), p99(&mut post) * 1e3);
+    eprintln!("postupdate: {} runs ({post_hz:.1} Hz), p99 interval {:.1} ms", post.len(), percentile(&mut post, 0.99) * 1e3);
 
     // Network-thread busy time (networking audit 2026-07-11, finding 14 step
     // 1): the crowd's connection handling, frame codec, and broadcast fan-out
@@ -254,15 +235,19 @@ fn phase7_soak_200_bots_hold_tick_budget() {
         / sampled.len() as f64 / WINDOW.as_secs_f64() / 1024.0;
     println!(
         "soak: bots={total_bots} input_hz={input_hz:.1} input_p99_ms={:.2} post_hz={post_hz:.1} post_p99_ms={:.2} kb_s_per_client={avg_kb_s:.1} net_busy_pct={busy_pct:.1}",
-        p99(&mut input) * 1e3,
-        p99(&mut post) * 1e3,
+        percentile(&mut input, 0.99) * 1e3,
+        percentile(&mut post, 0.99) * 1e3,
     );
 
     assert!(
         (58.0..=62.0).contains(&input_hz),
         "movement tick rate out of budget: {input_hz:.1} Hz"
     );
-    assert!(p99(&mut input) < 0.025, "input p99 interval {:.1} ms ≥ 25 ms", p99(&mut input) * 1e3);
+    assert!(
+        percentile(&mut input, 0.99) < 0.025,
+        "input p99 interval {:.1} ms ≥ 25 ms",
+        percentile(&mut input, 0.99) * 1e3
+    );
     assert!(post_hz >= 9.0, "snapshot phase rate out of budget: {post_hz:.1} Hz");
     assert!(
         busy_after > busy_before,

@@ -8,14 +8,12 @@
 
 mod common;
 
-use common::{settle, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
-use std::collections::HashMap;
+use common::{join_with_deadline, settle, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vordar_server::build_zone_app;
-use vordar_server::db::DbWorker;
 use vordar_server::net::ShutdownFlag;
 
 #[test]
@@ -58,13 +56,7 @@ fn shutdown_flag_saves_all_players_and_returns_from_run_headless() {
 
     // Join with a deadline: before the fix, run_headless(_, None) never
     // returns and this would hang forever.
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(server_thread.join());
-    });
-    rx.recv_timeout(Duration::from_secs(10))
-        .expect("server thread did not exit within the deadline after the shutdown flag was set")
-        .expect("server thread panicked");
+    join_with_deadline(server_thread, Duration::from_secs(10), "server thread");
 
     // The client must observe the connection close (NetServer's Drop, wired
     // by finding 1, fires when the App drops moments after run_headless
@@ -102,28 +94,16 @@ fn shared_flag_drains_both_zones_and_worker_drop_returns() {
     let db = temp_db("shutdown-multizone");
     let flag = Arc::new(AtomicBool::new(false));
 
-    let directory: HashMap<String, SocketAddr> =
-        HashMap::from([("start".to_owned(), start_addr), ("east".to_owned(), east_addr)]);
-    let worker = DbWorker::spawn(&db).expect("db open");
-    let world_origin = Instant::now();
-
-    let handles: Vec<_> = test_zones()
-        .into_iter()
-        .map(|zone| {
-            let addr = directory[&zone.name];
-            let directory = directory.clone();
-            let handle = worker.handle();
-            let zone_flag = flag.clone();
-            std::thread::spawn(move || {
-                let mut app = build_zone_app(addr, handle, zone, directory, world_origin);
-                app.insert_resource(ShutdownFlag(zone_flag));
-                // No tick budget — only the shared shutdown flag can end
-                // either zone's loop.
-                app.run_headless(60.0, None);
-            })
+    let (handles, worker) = spawn_zones(test_zones(), start_addr, east_addr, &db, |addr, handle, zone, directory, world_origin| {
+        let zone_flag = flag.clone();
+        std::thread::spawn(move || {
+            let mut app = build_zone_app(addr, handle, zone, directory, world_origin);
+            app.insert_resource(ShutdownFlag(zone_flag));
+            // No tick budget — only the shared shutdown flag can end
+            // either zone's loop.
+            app.run_headless(60.0, None);
         })
-        .collect();
-    std::thread::sleep(Duration::from_millis(300));
+    });
 
     // Stays in start, walking away from start's portal (x=10) so it never
     // transfers — its final save must be a genuine start-zone position.
@@ -166,13 +146,7 @@ fn shared_flag_drains_both_zones_and_worker_drop_returns() {
 
     let per_zone_deadline = Duration::from_secs(10);
     for handle in handles {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(handle.join());
-        });
-        rx.recv_timeout(per_zone_deadline)
-            .expect("zone thread did not exit within the deadline after the shutdown flag was set")
-            .expect("zone thread panicked");
+        join_with_deadline(handle, per_zone_deadline, "zone thread");
     }
 
     // No mem::forget (unlike tests/zones.rs's harness, which leaks the

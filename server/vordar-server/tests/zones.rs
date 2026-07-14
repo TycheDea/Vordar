@@ -3,37 +3,28 @@
 
 mod common;
 
-use common::{temp_db, test_zones, walk_into_portal, workspace_root, Bot, PopulateSystem};
+use common::{spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, SystemOrder};
 use glam::Vec3;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_game::zones::validate_zones;
-use vordar_server::db::DbWorker;
 use vordar_server::build_zone_app;
 
 /// Spawn one zone App per thread (built ON its thread — Apps don't move),
 /// sharing one DB worker and one world-time origin, exactly like main.rs.
 fn spawn_zone_server(start_addr: SocketAddr, east_addr: SocketAddr, db_path: &str, ticks: u64) {
-    let directory: HashMap<String, SocketAddr> =
-        HashMap::from([("start".to_owned(), start_addr), ("east".to_owned(), east_addr)]);
-    let worker = DbWorker::spawn(db_path).expect("db open");
-    let world_origin = Instant::now();
-    for zone in test_zones() {
-        let addr = directory[&zone.name];
-        let directory = directory.clone();
-        let handle = worker.handle();
+    let (_, worker) = spawn_zones(test_zones(), start_addr, east_addr, db_path, |addr, handle, zone, directory, world_origin| {
         std::thread::spawn(move || {
             build_zone_app(addr, handle, zone, directory, world_origin).run_headless(60.0, Some(ticks));
-        });
-    }
+        })
+    });
     // The worker must outlive the zone threads; its Drop would block this
     // test until every zone burns through its tick budget. Saves are
     // processed promptly while running — only shutdown flushing is lost,
     // and no Phase 7 test depends on it.
     std::mem::forget(worker);
-    std::thread::sleep(Duration::from_millis(300));
 }
 
 // The shipped topology must satisfy the same structural rules the test
@@ -151,14 +142,7 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
     // same way main.rs installs zone chapters.
     let mut zones = test_zones();
     zones[1].chapter = Some("chapter02".into());
-    let directory: HashMap<String, SocketAddr> =
-        HashMap::from([("start".to_owned(), start_addr), ("east".to_owned(), east_addr)]);
-    let worker = DbWorker::spawn(":memory:").expect("db open");
-    let world_origin = Instant::now();
-    for zone in zones {
-        let addr = directory[&zone.name];
-        let directory = directory.clone();
-        let handle = worker.handle();
+    let (_, worker) = spawn_zones(zones, start_addr, east_addr, ":memory:", |addr, handle, zone, directory, world_origin| {
         std::thread::spawn(move || {
             let chapter = zone.chapter.clone();
             let mut app = build_zone_app(addr, handle, zone, directory, world_origin);
@@ -168,10 +152,9 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
                     .unwrap();
             }
             app.run_headless(60.0, Some(3600));
-        });
-    }
+        })
+    });
     std::mem::forget(worker);
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect_as(start_addr, "traveler");
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
