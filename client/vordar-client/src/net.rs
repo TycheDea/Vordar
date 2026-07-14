@@ -12,7 +12,7 @@
 // phases run Fixed(60), so one sent intent maps 1:1 to one local integration
 // step.
 
-use crate::{orbit_and_follow, read_move_dir};
+use crate::read_move_dir;
 use engine_app::app::App;
 use engine_app::events::EventBus;
 use engine_app::plugin::Plugin;
@@ -32,7 +32,6 @@ use vordar_game::events::MoveIntent;
 use vordar_game::motion::MovementSystem;
 use vordar_game::player::{movement_velocity, PlayerMovementSystem};
 use vordar_game::Player;
-use vordar_game::world::{active_event, day_night_light, WorldEventsDef};
 use vordar_protocol::{
     decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION,
     SNAPSHOT_HZ, TICK_HZ,
@@ -124,7 +123,7 @@ impl Plugin for NetClientPlugin {
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         .add_system(NetSendInputSystem, Phase::Input, SystemOrder::after::<NetReceiveSystem>())
         .add_system(AbilityCastSystem::new(), Phase::Input, SystemOrder::after::<NetSendInputSystem>())
-        .insert_resource(WorldTime { offset_micros: 0, synced: false })
+        .insert_resource(crate::world_time::WorldTime { offset_micros: 0, synced: false })
         .insert_resource(crate::CastState::new())
         .insert_resource(crate::presentation::CurrentZone("start".into()))
         .insert_resource(vordar_game::zones::load_zones("content/zones/zones.ron"))
@@ -147,9 +146,9 @@ impl Plugin for NetClientPlugin {
         .add_system(crate::weapons::WeaponAttachSystem::default(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
         // Impact beats fire where despawning projectiles died (before the flush).
         .add_system(crate::vfx::ImpactBurstSystem, Phase::DespawnFlush, SystemOrder::First)
-        .add_system(NetCameraFollowSystem, Phase::RenderSync, SystemOrder::First)
+        .add_system(crate::NetCameraFollowSystem, Phase::RenderSync, SystemOrder::First)
         .add_system(TelegraphFillSystem, Phase::RenderSync, SystemOrder::First)
-        .add_system(DayNightSystem, Phase::RenderSync, SystemOrder::First);
+        .add_system(crate::world_time::DayNightSystem, Phase::RenderSync, SystemOrder::First);
         crate::ui::install(app);
         if self.predict {
             // The shared simulation moves our own player. Remote players stay
@@ -272,6 +271,12 @@ impl NetClientState {
 
     fn own_entity(&self) -> Option<Entity> {
         self.own_id.and_then(|id| self.entities.get(&id).copied())
+    }
+
+    /// The synced server clock, if the connection has one — `None` while
+    /// disconnected or before the handshake's clock sync completes.
+    pub(crate) fn server_now_micros(&self) -> Option<u64> {
+        self.client.as_ref().and_then(|c| c.server_now_micros())
     }
 }
 
@@ -418,7 +423,7 @@ impl System for NetReceiveSystem {
                         log::info!("mechanic {mechanic} hit {} entities", hits.len());
                     }
                     Some(ServerMsg::WorldClock { world_micros, at_server_micros }) => {
-                        let wt = resources.get_mut::<WorldTime>().unwrap();
+                        let wt = resources.get_mut::<crate::world_time::WorldTime>().unwrap();
                         wt.offset_micros = world_micros as i64 - at_server_micros as i64;
                         wt.synced = true;
                     }
@@ -496,7 +501,7 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     // `None` hard-snaps it fresh off the new zone's first snapshot
     // (networking rework 4, finding 1).
     state.playback = None;
-    resources.get_mut::<WorldTime>().unwrap().synced = false;
+    resources.get_mut::<crate::world_time::WorldTime>().unwrap().synced = false;
 }
 
 /// Tear down the old zone's replicated world and reconnect to the new one.
@@ -895,53 +900,6 @@ impl System for NetCorrectionSystem {
         if let Ok(mut transform) = world.get::<&mut Transform>(entity) {
             transform.position += step;
         }
-    }
-}
-
-/// World-clock mapping received from the server: world time = synced server
-/// time + offset. World time drives day/night and world-event tint as pure
-/// local functions (DESIGN.md §4).
-pub struct WorldTime {
-    offset_micros: i64,
-    synced: bool,
-}
-
-/// Drives the light uniform from world time: the day/night cycle, overridden
-/// by the active world event's tint. Pure function of the synced clock and
-/// shared event defs — every client shows the same sky at the same instant,
-/// including clients that joined mid-event.
-pub struct DayNightSystem;
-
-impl System for DayNightSystem {
-    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
-        let world_now = {
-            let wt = resources.get::<WorldTime>().unwrap();
-            if !wt.synced {
-                return;
-            }
-            let state = resources.get::<NetClientState>().unwrap();
-            let Some(server_now) = state.client.as_ref().and_then(|c| c.server_now_micros()) else { return };
-            (server_now as i64 + wt.offset_micros).max(0) as u64
-        };
-        let world_seconds = world_now as f64 * 1e-6;
-
-        let (dir, color, ambient) = match resources.get::<WorldEventsDef>() {
-            Some(def) => match active_event(def, world_seconds) {
-                Some(i) => {
-                    // Event tint: keep the current sun angle, swap the mood.
-                    let fraction = (world_seconds.rem_euclid(def.day_seconds) / def.day_seconds) as f32;
-                    let (dir, _, _) = day_night_light(fraction);
-                    (dir, def.events[i].ambient, 0.3)
-                }
-                None => {
-                    let fraction = (world_seconds.rem_euclid(def.day_seconds) / def.day_seconds) as f32;
-                    day_night_light(fraction)
-                }
-            },
-            // No defs loaded: fall back to a fixed-length cycle.
-            None => day_night_light((world_seconds.rem_euclid(120.0) / 120.0) as f32),
-        };
-        engine_renderer::set_light(dir, color, ambient, resources);
     }
 }
 
@@ -1350,21 +1308,6 @@ fn sample_buffer(buffer: &NetBuffer, cursor: f64) -> (Vec3, Vec3) {
     (last_pos, Vec3::ZERO) // unreachable: cursor is bounded by the checks above
 }
 
-/// Follows our own player (identified by the Welcome message) at its
-/// interpolated render position. Runs Phase::RenderSync — see
-/// CameraFollowSystem for why the camera must move at render cadence.
-pub struct NetCameraFollowSystem;
-
-impl System for NetCameraFollowSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
-        let target = {
-            let state = resources.get::<NetClientState>().unwrap();
-            state.own_entity().and_then(|e| crate::render_position(world, e, resources))
-        };
-        orbit_and_follow(target, resources, delta);
-    }
-}
-
 /// Benchmark seam (vordar-benches only): exposes the private snapshot-apply /
 /// reconciliation machinery so the client hot path is measurable headless.
 /// The NetClientState's socket points at an unroutable address — nothing the
@@ -1442,6 +1385,7 @@ pub mod bench {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world_time::WorldTime;
     use vordar_protocol::WirePos;
 
     const DT: f32 = 1.0 / 60.0;

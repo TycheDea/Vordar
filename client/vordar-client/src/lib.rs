@@ -14,6 +14,7 @@ pub mod react;
 pub mod ui;
 pub mod vfx;
 pub mod weapons;
+pub mod world_time;
 
 use engine_app::app::App;
 use engine_app::events::EventBus;
@@ -193,6 +194,18 @@ impl System for CameraFollowSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
         let player = world.query::<(Entity, &Player)>().iter().next().map(|(e, _)| e);
         let target = player.and_then(|e| render_position(world, e, resources));
+        orbit_and_follow(target, resources, delta);
+    }
+}
+
+/// Follows our own player (identified by the Welcome message) at its
+/// interpolated render position. Runs Phase::RenderSync — see
+/// CameraFollowSystem for why the camera must move at render cadence.
+pub struct NetCameraFollowSystem;
+
+impl System for NetCameraFollowSystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
+        let target = net::own_entity(resources).and_then(|e| render_position(world, e, resources));
         orbit_and_follow(target, resources, delta);
     }
 }
