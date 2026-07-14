@@ -1,0 +1,20 @@
+# Workspace test-runner config for cargo-nextest (the workers' full-suite gate:
+# `cargo nextest run --workspace` + `cargo test --doc --workspace`; nextest does
+# not run doc-tests).
+#
+# The vordar-server integration binaries spin real servers with closed-loop
+# bots; their tests are timing-sensitive under CPU contention (see
+# phase7_5_rend_kills_camped_enemy's history), so they run in a capped test
+# group instead of nextest's full default parallelism. The client lib's two
+# real-server e2e tests share the same sensitivity.
+
+[test-groups]
+realtime = { max-threads = 4 }
+
+[[profile.default.overrides]]
+filter = 'package(vordar-server) and kind(test)'
+test-group = 'realtime'
+
+[[profile.default.overrides]]
+filter = 'package(vordar-client) and kind(lib)'
+test-group = 'realtime'

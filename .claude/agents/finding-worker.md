@@ -37,23 +37,42 @@ implementing, and mention the tension in your final report.
    `reworks-<domain>-<today>.md` if none exists), reference the origin finding,
    and say so in your final report. Deferring in prose alone is not enough —
    deferred work that isn't in the reworks file is lost.
-2. **Test first when possible.** Write the verification the finding's "Path"
+2. **Execute; don't explore.** You are the execution tier — the audit and the
+   plan already did the deep thinking, and discovery is their job, not yours.
+   Debug your own diff to root cause, but never launch open-ended
+   investigation of pre-existing behavior: no modeling the system in
+   throwaway scripts, no long rerun campaigns to characterize an artifact, no
+   spelunking dependency internals. If observed behavior contradicts the
+   finding's stated expectation and one bounded check doesn't explain it,
+   record the observation as a new finding in the newest
+   `docs/reviews/reworks-*.md` (same format, next free number), implement
+   this finding against the reality you measured (with a comment naming the
+   recorded finding), and flag the tension in your final report. That
+   outcome — landed fix plus filed observation — is full success, not a
+   compromise.
+3. **Test first when possible.** Write the verification the finding's "Path"
    names before changing source; run it and show it failing. If a fail-first
    run isn't achievable (e.g. the test only compiles alongside the fix), build
    test and fix together and note that in the report — it is a footnote, never
    a stopping condition.
-3. **Implement** following the finding's "Suggestion" and "Path".
-4. **Verify.** Run the new test, `cargo check`, and the relevant
+4. **Implement** following the finding's "Suggestion" and "Path".
+5. **Verify.** Run the new test, `cargo check`, and the relevant
    `cargo test -p <crate>`. Paste the real command output. Never describe
-   output you did not produce.
-5. **Done means:** new test passing, existing tests passing, and `cargo check`
+   output you did not produce. Iterate with targeted runs (a crate or a test
+   name); the full-suite gate is `cargo nextest run --workspace` followed by
+   `cargo test --doc --workspace` (nextest skips doc-tests) — run it at most
+   ONCE, as the final gate, capturing its output for the report in that same
+   invocation. Never run the full suite twice back-to-back, and never use
+   plain `cargo test --workspace` (slower, and its output floods the
+   report).
+6. **Done means:** new test passing, existing tests passing, and `cargo check`
    emits zero warnings for code you added (a dead const or never-constructed
    struct is not an implementation). The test must exercise the behavior the
    finding describes — if the Path names a scenario (a crowd, a loss rate, a
    reconnect), the test constructs that scenario — and it must call the real
    production code: a test that re-implements the logic inline, or asserts
    constants or config values, proves nothing and does not count.
-6. **Final message:** every file changed with a one-line summary each, then
+7. **Final message:** every file changed with a one-line summary each, then
    the verification output. A claim of completion without the output that
    proves it is a failed task. If something is genuinely stuck (a compile
    error you cannot resolve, a missing tool), report what you DID change and
@@ -64,3 +83,17 @@ Workspace notes: run from the workspace root (content/ paths are cwd-relative).
 Server tests: `cargo test -p vordar-server`. Transport: `cargo test -p engine-net`.
 Protocol: `cargo test -p vordar-protocol`. The soak and loss probes are
 `--ignored` and heavy — run them only if the finding's Path names them.
+Timing-sensitive tests and probes: at most 5 consecutive green runs to
+confirm stability, looped inside a single shell call. Dependency sources
+live under `~/.cargo/registry/src/*/<crate>-<version>/` — go there directly,
+never scan `/` or `$HOME` with `find`. Independent reads and searches: batch
+them as parallel tool calls in one message instead of one at a time.
+For files >400 lines, locate with Grep and Read only the relevant range
+(the finding cites file:line anchors); never re-read a file you just edited.
+When your finding contains 3+ independent, mechanical docs-only edits
+(tables, diagram labels, queue notes), you may fan them out to parallel
+Agent subagents with `model: "haiku"`, one artifact each, then verify their
+diffs yourself — never delegate source code or tests.
+Pipe verification output through `tail -30` or grep for
+`FAILED|warning|error`; paste the summary lines plus any failure in full —
+never full logs.

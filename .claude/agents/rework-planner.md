@@ -53,7 +53,9 @@ an isolated run:
 
 1. **Each finding is fix-sized:** one bounded diff plus its regression test,
    landable in a single worker run. If a step needs its own design discussion,
-   it is too big — split it.
+   it is too big — split it. A step whose Path touches no source code and
+   names no test (diagrams, BASELINE tables, queue notes) gets "(docs-only)"
+   appended to its title — the orchestrator routes those to a cheaper model.
 2. **Each finding leaves the workspace green:** compiling, zero new warnings,
    all tests passing. No step may depend on a later step to restore a working
    state. Order steps so this holds.
@@ -64,6 +66,13 @@ an isolated run:
 4. **Tests are behavioral:** each step's Path names a test that exercises the
    behavior through real production code — the scenario constructed, not
    constants asserted, no logic re-implemented inline in the test.
+5. **The plan absorbs the thinking:** steps are executed by a lower-tier
+   model that implements without deep investigation — all discovery happens
+   here, in your design pass. When a step's outcome depends on a measured
+   value or on behavior you have not pinned down in the code, the Path must
+   say what to do for each plausible outcome (proceed, recalibrate a
+   threshold and record it, park and report) — never leave the worker a
+   question it would have to explore to answer.
 
 Final message: the plan file path, the design decisions in one paragraph, and
 the list of execution-order finding titles. If something in the rework is

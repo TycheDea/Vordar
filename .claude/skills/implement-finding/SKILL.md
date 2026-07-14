@@ -8,10 +8,17 @@ work. You do not read the report, extract finding text, edit files, or run
 fixes yourself.
 
 The arguments give a finding number N and optionally a report path REPORT.
-When no path is given, use the newest `docs/reviews/audit-*.md` by filename
-date (list the directory to find it — do not open the file). REPORT may also
+When no path is given, list `docs/reviews/audit-*.md` (do not open the
+files): if the matches all belong to one domain (the segment between
+`audit-` and the date), use the newest by filename date; if more than one
+domain matches, stop and ask the user which report they mean. REPORT may also
 be a plan file produced by /plan-rework (`docs/reviews/plan-*.md`) — its
 "Findings (execution order)" section uses the same finding format.
+
+Before spawning, grep REPORT for its `### N.` heading line — reading that
+single title line is the ONLY permitted look inside the file. If the title
+contains "(docs-only)", pass `model: "haiku"` in the Agent call; otherwise
+pass no model.
 
 Spawn ONE finding-worker subagent (Agent tool, subagent_type
 "finding-worker") with exactly this task, substituting N and REPORT:
