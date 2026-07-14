@@ -71,7 +71,7 @@ impl Camera {
 
     /// Dolly in/out. Scales the orthographic extent in lockstep so zoom
     /// works in every projection mode. Limits come from the game's
-    /// CameraConfig (see zoom_camera in lib.rs).
+    /// CameraConfig (see `zoom_camera`).
     pub(crate) fn zoom(&mut self, delta: f32, min_radius: f32, max_radius: f32) {
         let before = self.radius;
         self.radius = (self.radius + delta).clamp(min_radius, max_radius);

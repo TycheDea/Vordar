@@ -33,6 +33,17 @@ pub(crate) const PARTICLE_INSTANCE_SIZE: usize = size_of::<ParticleInstance>(); 
 /// Atlas grid dimension (cells per side).
 pub const ATLAS_GRID: u32 = 4;
 
+/// World-space particle instances for this display frame. A game-side system
+/// (the client's particle sim) rebuilds `instances` every frame in
+/// Phase::RenderSync; RenderSystem uploads and draws them after the opaque
+/// passes — `instances[..additive_count]` with the additive pipeline, the
+/// rest premultiplied-alpha. Anything past MAX_PARTICLES is ignored.
+#[derive(Default)]
+pub struct ParticleDrawList {
+    pub instances:      Vec<ParticleInstance>,
+    pub additive_count: usize,
+}
+
 /// Per-pass resources beyond the camera: atlas, scene depth (for the soft
 /// fade), and the fade params.
 pub(crate) fn create_particle_fx_bind_group_layout(device: &Device) -> BindGroupLayout {
