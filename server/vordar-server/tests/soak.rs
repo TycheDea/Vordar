@@ -17,7 +17,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use vordar_server::net_plugin::NetServerState;
+use vordar_server::net::NetServerState;
 
 /// Bot count — override with VORDAR_SOAK_BOTS (default 200) for scaling runs.
 fn soak_bots() -> usize {

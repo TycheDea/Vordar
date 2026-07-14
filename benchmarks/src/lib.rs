@@ -2,7 +2,7 @@
 //
 // Everything here is deterministic (LCG layouts, no rand) so runs are
 // comparable across machines and commits. Sizes mirror the real tuning:
-// cell_size 10.0 (PhysicsPlugin), AOI radius 40.0 (net_plugin), hitboxes
+// cell_size 10.0 (PhysicsPlugin), AOI radius 40.0 (server net module), hitboxes
 // Sphere r=0.5 (content prefabs).
 
 use engine_app::events::EventBus;
@@ -19,7 +19,7 @@ use hecs::Entity;
 pub const DT: f32 = 1.0 / 60.0;
 /// Matches PhysicsPlugin's SpatialGrid::new(10.0).
 pub const CELL_SIZE: f32 = 10.0;
-/// Matches net_plugin's AOI_RADIUS.
+/// Matches the server net module's AOI_RADIUS.
 pub const AOI_RADIUS: f32 = 40.0;
 
 /// Prefabs load from content/ relative to cwd — run as if from workspace root

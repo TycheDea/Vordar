@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vordar_server::db::DbWorker;
-use vordar_server::net_plugin::ShutdownFlag;
+use vordar_server::net::ShutdownFlag;
 use vordar_server::{build_zone_app, supervise_zone};
 
 /// Panics exactly once across every zone rebuild: `swap` only fires the

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vordar_server::build_zone_app;
 use vordar_server::db::DbWorker;
-use vordar_server::net_plugin::ShutdownFlag;
+use vordar_server::net::ShutdownFlag;
 
 #[test]
 fn shutdown_flag_saves_all_players_and_returns_from_run_headless() {

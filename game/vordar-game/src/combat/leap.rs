@@ -1,6 +1,6 @@
 // Leap — the gap-closer's movement half. A LeapImpulse overrides the
 // entity's velocity for `remaining` seconds; the arrival AOE is an ordinary
-// Mechanic scheduled at the same instant (net_plugin's Leap cast arm derives
+// Mechanic scheduled at the same instant (the server's Leap cast arm derives
 // both from the same cast time, so they complete together without either
 // referencing the other).
 //

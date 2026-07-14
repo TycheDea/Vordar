@@ -7,7 +7,7 @@ edition = "2021"
 name = "vordar_server"
 
 [features]
-# Exposes net_plugin internals to vordar-benches (net_plugin::bench module).
+# Exposes server net-module internals to vordar-benches (net::bench module).
 # Never enabled by normal builds.
 bench-internals = []
 

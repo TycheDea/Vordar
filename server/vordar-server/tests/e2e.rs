@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION};
-use vordar_server::net_plugin::NetServerState;
+use vordar_server::net::NetServerState;
 
 #[test]
 fn phase1_end_to_end() {
@@ -1065,7 +1065,7 @@ fn login_failures_are_rate_limited() {
 
 // Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: every
 // wire entity id used to be raw hecs `Entity` bits (`entity.to_bits().get()`
-// at net_plugin.rs's Welcome/HitResult/EntityDied/snapshot-gather sites) —
+// at the server net module's Welcome/HitResult/EntityDied/snapshot-gather sites) —
 // always >= 2^32 because of the generation bits packed into the upper half,
 // hence a 5+ byte postcard varint on every single reference. A zone-local
 // `ReplIds` allocator now hands out small, monotonic `u32` ids instead. This
@@ -1101,7 +1101,7 @@ fn replication_ids_are_compact() {
 
 // Finding 3 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: hp used
 // to flatten to a plain `i32` with 0 doing double duty for "no Health
-// component" and "dead at 0 HP" (net_plugin.rs's old
+// component" and "dead at 0 HP" (the server's old
 // `hp.map(|h| h.current).unwrap_or(0)`). A Health-less replicated entity (the
 // "bolt" prefab: Transform+Hitbox+PrefabId, no Health) must be indistinguishable
 // on the wire from *absent hp*, not from "hp is 0" — which the old i32 format
@@ -1199,7 +1199,7 @@ fn prefab_table_binds_u16_refs() {
 // wire entity ids (u32, not raw hecs bits), quantized positions (WirePos),
 // made hp an explicit Option (no more 0-as-"no Health"), and replaced a
 // repeated prefab name string with a u16 table index — together meant to
-// bring a full 64-entry `states` frame (MAX_SNAPSHOT_STATES, net_plugin.rs)
+// bring a full 64-entry `states` frame (the server's MAX_SNAPSHOT_STATES)
 // comfortably under the ~1.2 KB QUIC datagram budget that rework 3
 // (snapshots on datagrams) is physically blocked on today. Against the
 // pre-rework wire format this exact scenario (a 100-entity crowd, steady
@@ -1211,7 +1211,7 @@ fn crowd_snapshot_fits_datagram_budget() {
     let addr: SocketAddr = "127.0.0.1:25192".parse().unwrap();
 
     // 100 "player" NPCs on rings of radius 5-25 around the origin — all
-    // comfortably inside the bot's AOI_RADIUS (40, net_plugin.rs).
+    // comfortably inside the bot's AOI_RADIUS (40, the server's AOI_RADIUS).
     let mut positions: Vec<glam::Vec3> = Vec::new();
     for ring in 0..10 {
         let radius = 5.0 + ring as f32 * (20.0 / 9.0); // 10 rings, 5.0..=25.0
@@ -1230,7 +1230,7 @@ fn crowd_snapshot_fits_datagram_budget() {
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
-    // MAX_SNAPSHOT_STATES = 64 (net_plugin.rs): with 101 entities in the AOI
+    // MAX_SNAPSHOT_STATES = 64 (the server): with 101 entities in the AOI
     // (100 NPCs + the bot's own player), the crowd-throttle round-robin caps
     // `states` at the full budget — the worst case this gate must measure.
     bot.wait_for("crowd throttle budget reached", Duration::from_secs(10), |b| {

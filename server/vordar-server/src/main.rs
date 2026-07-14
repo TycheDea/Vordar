@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use vordar_game::chapter::ChapterRegistry;
 use vordar_server::db::DbWorker;
-use vordar_server::net_plugin::ShutdownFlag;
+use vordar_server::net::ShutdownFlag;
 use vordar_server::{build_zone_app, join_zone_threads, supervise_zone, TICK_HZ};
 
 /// Every chapter this binary can host. Linking a new chapter crate +

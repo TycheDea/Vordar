@@ -13,14 +13,14 @@
 // ever computed from intents.
 
 pub mod db;
-pub mod net_plugin;
+pub mod net;
 
 use db::DbHandle;
 use engine_app::app::App;
 use engine_app::prefab_plugin::PrefabPlugin;
 use engine_net::{NetLimits, NetServer};
 use engine_physics::PhysicsPlugin;
-use net_plugin::NetServerPlugin;
+use net::NetServerPlugin;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
@@ -73,7 +73,7 @@ pub fn build_zone_app(
     app.add_plugin(PhysicsPlugin)
         .add_plugin(PrefabPlugin)
         .add_plugin(CoreGamePlugin);
-    net_plugin::install(&mut app, server, db, None, zone, directory, world_origin);
+    net::install(&mut app, server, db, None, zone, directory, world_origin);
     app
 }
 

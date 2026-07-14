@@ -26,7 +26,7 @@ use vordar_game::player::Player;
 use vordar_game::Mechanic;
 use vordar_protocol::PROTOCOL_VERSION;
 use vordar_server::db::DbWorker;
-use vordar_server::net_plugin::{bench as seam, MechanicResolveSystem, SnapshotBroadcastSystem};
+use vordar_server::net::{bench as seam, MechanicResolveSystem, SnapshotBroadcastSystem};
 
 /// Everyone inside half_extent 14 is mutually within AOI_RADIUS=40 (max
 /// pairwise distance ≈ 39.6) — the soak test's worst-case crowd shape.
