@@ -8,12 +8,13 @@ work. You do not read the report, extract finding text, edit files, or run
 fixes yourself.
 
 The arguments give a finding number N and optionally a report path REPORT.
-When no path is given, list `docs/reviews/audit-*.md` (do not open the
-files): if the matches all belong to one domain (the segment between
-`audit-` and the date), use the newest by filename date; if more than one
-domain matches, stop and ask the user which report they mean. REPORT may also
-be a plan file produced by /plan-rework (`docs/reviews/plan-*.md`) — its
-"Findings (execution order)" section uses the same finding format.
+Reports live in per-domain folders: `docs/reviews/<domain>/`. When no path is
+given, list `docs/reviews/*/audit-*.md` (do not open the files): if the
+matches all sit in one domain folder, use the newest by filename date; if
+more than one domain folder matches, stop and ask the user which report they
+mean. REPORT may also be a plan file produced by /plan-rework
+(`docs/reviews/<domain>/plan-*.md`) — its "Findings (execution order)"
+section uses the same finding format.
 
 Before spawning, grep REPORT for its `### N.` heading line — reading that
 single title line is the ONLY permitted look inside the file. If the title

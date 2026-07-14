@@ -20,8 +20,8 @@ finding's own Suggestion or Path turns out to fight the codebase when you study
 it, say so in the Design decisions section and plan the better design instead;
 a wall in the spec is information, never something to shim around.
 
-Write the plan to `docs/reviews/plan-<domain>-rework-<N>-YYYY-MM-DD.md`
-(today's date; `<domain>` and `<N>` from the source report and finding).
+Write the plan to `docs/reviews/<domain>/plan-<domain>-rework-<N>-YYYY-MM-DD.md`
+(today's date; `<domain>` is the source report's folder, `<N>` the finding).
 Structure:
 
 ```

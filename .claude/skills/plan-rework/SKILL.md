@@ -8,10 +8,11 @@ You do not read the reworks report, extract finding text, or design anything
 yourself.
 
 The arguments give a rework finding number N and optionally a reworks report
-path REPORT. When no path is given, list `docs/reviews/reworks-*.md` (do not
-open the files): if the matches all belong to one domain (the segment between
-`reworks-` and the date), use the newest by filename date; if more than one
-domain matches, stop and ask the user which report they mean.
+path REPORT. Reports live in per-domain folders: `docs/reviews/<domain>/`.
+When no path is given, list `docs/reviews/*/reworks-*.md` (do not open the
+files): if the matches all sit in one domain folder, use the newest by
+filename date; if more than one domain folder matches, stop and ask the user
+which report they mean.
 
 Spawn ONE rework-planner subagent (Agent tool, subagent_type "rework-planner")
 with exactly this task, substituting N and REPORT:

@@ -5,15 +5,13 @@ description: Master-level audit of code hygiene — comment discipline, file/fol
 
 You are a master of large-Rust-codebase organization for multi-year projects: module design that keeps responsibilities singular as code grows, file and folder layout a newcomer can navigate by intuition, comment discipline where every comment earns its place by stating something the code cannot, and the relentless pruning (dead code, stale names, drifted placement) that keeps a codebase the same size as its ideas. You judge organization by one measure: for any behavior, a skilled developer who has never seen this repo finds the code that owns it on the first guess, and nothing they read on the way lies to them or wastes their time.
 
-## Mission
+This skill runs under the shared audit contract: read `.claude/skills/audit-base.md` FIRST and follow it — mission, non-negotiables, method, and report format all live there. Parameters for this audit:
 
-Find improvements and suggestions — of any kind, at any scale — in the comment discipline, file/module/folder structure, code placement, naming, and dead-weight of this workspace's source. You implement nothing. Your sole deliverable is a written report.
-
-## Non-negotiables
-
-1. **No laziness.** You read the actual source, not just file names or module trees. Every finding cites concrete evidence (`file:line`, a specific comment, a specific function in the wrong home). Generic hygiene advice that could apply to any repo is forbidden — if a finding doesn't reference something specific you saw here, delete it. Incomplete coverage is a failed audit.
-2. **The bar is the best possible final state.** Judge everything against the top of the top: a comment set where deleting any one loses real information and adding none is needed, modules whose names fully predict their contents, no file whose size hides its structure. Never write "this is enough", "good enough for now", "sufficient for the current state", or any equivalent middle-ground framing. If something falls short of the ideal, it is a finding, no matter how many steps lie between here and there. Distance to the ideal is recorded, never used as an excuse to lower the bar.
-3. **Report only. No implementations.** The only file you may create is the report. You must not modify source, comments, or file layout — not even "trivial" fixes you notice along the way.
+- **Domain:** `hygiene` (reports live in `docs/reviews/hygiene/`)
+- **Report title:** Code Hygiene Audit
+- **Ordering impact axis:** long-term navigability and change-safety
+- **Ideal-end-state hint:** what "top of the top" looks like for this workspace's organization
+- **Sweep:** crate by crate: read the module tree first, predict from names alone what each module should contain, then read the source and record every surprise — each surprise is evidence for a finding.
 
 ## Scope
 
@@ -31,61 +29,7 @@ Find improvements and suggestions — of any kind, at any scale — in the comme
 - Naming consistency: one convention for systems, components, resources, events, tests, and files — every deviation named.
 - Folder structure: directories whose contents outgrew their name, siblings that should be one, single-file directories that should be flattened.
 
-## Method
+## Extra requirements
 
-1. Check `docs/reviews/` for the most recent `audit-hygiene-*.md` and `reworks-hygiene-*.md` reports. Carry forward every unresolved finding (re-verify each; drop resolved ones and say so).
-2. Sweep the full scope crate by crate. For each crate: read the module tree first, predict from names alone what each module should contain, then read the source and record every surprise — each surprise is evidence for a finding.
-3. For each finding, define the ideal end state first, then measure the gap.
-4. Weigh findings by impact on long-term navigability and change-safety — but ORDER them in the report by implementation order: a finding goes before another when implementing it first makes the other easier, safer, or properly testable (the comment policy and any split that other findings' diffs would land inside go first, dependents after). Among findings with no dependency between them, higher impact goes first. Never order by ease of fixing. State the reason inline (e.g. "before finding 5: the split decides which file finding 5 edits") whenever a dependency, not impact, decided the position.
-5. Headless verification only — never launch the game. Structure claims are verified by reading; where a claim needs a compile check (dead code, unused pub), say exactly what command would confirm it.
-
-## Report
-
-Split findings into two categories and two files (today's date):
-
-- `docs/reviews/audit-hygiene-YYYY-MM-DD.md` - **fixes and small changes**: findings a
-  worker can land surgically in one run - a bounded diff plus a regression test, no new
-  subsystem, no schema/protocol redesign, no cross-crate architecture shift.
-- `docs/reviews/reworks-hygiene-YYYY-MM-DD.md` - **reworks and big new features**:
-  findings that need a design pass before anyone should write code (a live-module
-  split, a cross-crate move, a folder restructure). These are consumed by
-  /plan-rework, which turns one rework into a plan of fix-sized steps that
-  /implement-finding can then execute one by one.
-
-When one finding contains both (a surgical step plus rework-scale follow-ons), put the
-surgical step in the fixes file and the follow-ons in the reworks file, each referencing
-the other. Number findings independently within each file. The implementation-order
-note is ONE cross-type sequence spanning BOTH files - dependencies cross the
-fix/rework boundary (a rework can be the prerequisite of a fix and vice versa) - so
-write a single ordered queue mixing `finding N` (fixes file) and `rework N` (reworks
-file) entries, placed under the fixes file's "## Findings (implementation order)"
-heading and mirrored verbatim in the reworks file. A rework whose own gate is unmet
-(e.g. gated on a measurement not yet taken) is listed as parked with its gate stated,
-not given a position. Both files use this structure:
-
-```
-# Code Hygiene Audit — YYYY-MM-DD
-
-## Ideal end state
-<2–5 sentences: what "top of the top" looks like for this workspace's organization>
-
-## Findings (implementation order)
-### 1. <title>
-- **Evidence:** file:line references and what you observed
-- **Ideal:** what the best possible version looks like
-- **Gap:** why the current state falls short
-- **Suggestion:** concrete direction (no changes made — this is a recommendation)
-- **Path:** the steps from here to the ideal, however many there are
-
-## Carried forward from previous report
-<unresolved prior findings, re-verified>
-
-## Resolved since last report
-<prior findings that no longer apply>
-```
-
-Every finding must be actionable by a developer who reads only the report. A hygiene
-finding's regression proof is the compile/test gate staying green plus the structural
-claim being checkable by reading (name the file:line the reviewer should look at);
-behavior must never change — if a finding would change behavior, it belongs to a
-different audit.
+- Hygiene findings never change behavior — if a finding would change behavior, it belongs to a different audit. A hygiene finding's regression proof is the compile/test gate staying green plus the structural claim being checkable by reading (name the file:line the reviewer should look at).
+- Ordering note: the comment policy, and any file split that other findings' diffs would land inside, go first — state the dependency inline as the base requires.

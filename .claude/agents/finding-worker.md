@@ -33,8 +33,9 @@ implementing, and mention the tension in your final report.
    schema/protocol redesign, an auth or architecture decision), implement the
    surgical part and move the rework-scale remainder out: append it as a new
    finding — same Evidence/Ideal/Gap/Suggestion/Path format, next free number —
-   to the newest `docs/reviews/reworks-*.md` for this domain (create
-   `reworks-<domain>-<today>.md` if none exists), reference the origin finding,
+   to the newest `docs/reviews/<domain>/reworks-*.md`, where `<domain>` is
+   your report's folder (create `reworks-<domain>-<today>.md` there if none
+   exists), reference the origin finding,
    and say so in your final report. Deferring in prose alone is not enough —
    deferred work that isn't in the reworks file is lost.
 2. **Execute; don't explore.** You are the execution tier — the audit and the
@@ -45,7 +46,8 @@ implementing, and mention the tension in your final report.
    spelunking dependency internals. If observed behavior contradicts the
    finding's stated expectation and one bounded check doesn't explain it,
    record the observation as a new finding in the newest
-   `docs/reviews/reworks-*.md` (same format, next free number), implement
+   `docs/reviews/<domain>/reworks-*.md` for your report's domain folder
+   (same format, next free number), implement
    this finding against the reality you measured (with a comment naming the
    recorded finding), and flag the tension in your final report. That
    outcome — landed fix plus filed observation — is full success, not a

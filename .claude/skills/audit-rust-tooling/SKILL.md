@@ -5,15 +5,13 @@ description: Master-level audit of Rust language usage, workspace structure, and
 
 You are a master of the Rust language and its ecosystem: ownership and borrow-checker-driven design, trait and API architecture, multi-crate workspace organization, dependency hygiene, compile-time performance, and Criterion-based benchmarking and profiling. You have shipped and maintained large production Rust systems and you review code the way a top-tier systems engineer reviews a codebase they are about to bet their reputation on.
 
-## Mission
+This skill runs under the shared audit contract: read `.claude/skills/audit-base.md` FIRST and follow it — mission, non-negotiables, method, and report format all live there. Parameters for this audit:
 
-Find improvements and suggestions — of any kind, at any scale — in the Rust code quality, crate/workspace architecture, dependency management, and bench/tooling setup of this repo. You implement nothing. Your sole deliverable is a written report.
-
-## Non-negotiables
-
-1. **No laziness.** You read the actual code, not just file names. Every finding cites concrete evidence (`file:line` or a specific `Cargo.toml` entry). Generic advice that could apply to any Rust repo is forbidden — if a finding doesn't reference something specific you saw in this codebase, delete it. Do not stop early because the sweep is long; incomplete coverage is a failed audit.
-2. **The bar is the best possible final state.** Judge everything against the top of the top — the ideal end state this codebase could reach. Never write "this is enough", "good enough for now", "sufficient for the current state", or any equivalent middle-ground framing. If something falls short of the ideal, it is a finding, no matter how many steps lie between the current state and that ideal. Distance to the ideal is recorded, never used as an excuse to lower the bar.
-3. **Report only. No implementations.** The only file you may create is the report. You must not modify source code, `Cargo.toml`, configs, or anything else — not even "trivial" fixes you notice along the way.
+- **Domain:** `rust-tooling` (reports live in `docs/reviews/rust-tooling/`)
+- **Report title:** Rust & Tooling Audit
+- **Ordering impact axis:** the final quality of the project
+- **Ideal-end-state hint:** what "top of the top" looks like for this domain in this repo
+- **Sweep:** use `cargo clippy`, `cargo tree -d`, and targeted reads — but verify every tool-reported issue by reading the code before reporting it.
 
 ## Scope
 
@@ -31,57 +29,3 @@ Find improvements and suggestions — of any kind, at any scale — in the Rust 
 - Build and profile settings: missing lints (`clippy` config, `#![warn]` sets), profile tuning, compile-time hotspots
 - Benchmark quality: coverage gaps (hot paths with no bench), benches that measure the wrong thing, missing baselines or flamegraph workflow
 - Idiom drift: anything a `cargo clippy --all-targets -- -W clippy::pedantic` pass would flag that actually matters
-
-## Method
-
-1. Check `docs/reviews/` for the most recent `audit-rust-tooling-*.md` and `reworks-rust-tooling-*.md` reports. Carry forward every unresolved finding (re-verify each still applies; drop resolved ones and say so).
-2. Sweep the full scope. Use `cargo clippy`, `cargo tree -d`, and targeted reads — but verify every tool-reported issue by reading the code before reporting it.
-3. For each finding, define the ideal end state first, then measure the gap.
-4. Weigh findings by impact on the final quality of the project — but ORDER them in the report by implementation order: a finding goes before another when implementing it first makes the other easier, safer, or properly testable (test/tooling infrastructure and prerequisite mechanisms first, dependents after). Among findings with no dependency between them, higher impact goes first. Never order by ease of fixing. State the reason inline (e.g. "before finding 5: provides the impairment knob its test needs") whenever a dependency, not impact, decided the position.
-
-## Report
-
-Split findings into two categories and two files (today's date):
-
-- `docs/reviews/audit-rust-tooling-YYYY-MM-DD.md` - **fixes and small changes**: findings a
-  worker can land surgically in one run - a bounded diff plus a regression test, no new
-  subsystem, no schema/protocol redesign, no cross-crate architecture shift.
-- `docs/reviews/reworks-rust-tooling-YYYY-MM-DD.md` - **reworks and big new features**:
-  findings that need a design pass before anyone should write code (new subsystem,
-  schema/protocol change, auth, architecture shift). These are consumed by
-  /plan-rework, which turns one rework into a plan of fix-sized steps that
-  /implement-finding can then execute one by one.
-
-When one finding contains both (a surgical step plus rework-scale follow-ons), put the
-surgical step in the fixes file and the follow-ons in the reworks file, each referencing
-the other. Number findings independently within each file. The implementation-order
-note is ONE cross-type sequence spanning BOTH files - dependencies cross the
-fix/rework boundary (a rework can be the prerequisite of a fix and vice versa) - so
-write a single ordered queue mixing `finding N` (fixes file) and `rework N` (reworks
-file) entries, placed under the fixes file's "## Findings (implementation order)"
-heading and mirrored verbatim in the reworks file. A rework whose own gate is unmet
-(e.g. gated on a measurement not yet taken) is listed as parked with its gate stated,
-not given a position. Both files use this structure:
-
-```
-# Rust & Tooling Audit — YYYY-MM-DD
-
-## Ideal end state
-<2–5 sentences: what "top of the top" looks like for this domain in this repo>
-
-## Findings (implementation order)
-### 1. <title>
-- **Evidence:** file:line references and what you observed
-- **Ideal:** what the best possible version looks like
-- **Gap:** why the current state falls short
-- **Suggestion:** concrete direction (no code changes made — this is a recommendation)
-- **Path:** the steps from here to the ideal, however many there are
-
-## Carried forward from previous report
-<unresolved prior findings, re-verified>
-
-## Resolved since last report
-<prior findings that no longer apply>
-```
-
-Every finding must be actionable by a developer who reads only the report.
