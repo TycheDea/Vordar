@@ -1,33 +1,8 @@
-// glTF mesh rendering — the "real models" path next to the primitive pool.
-//
-// Two stages, split so the parse is testable without a GPU device:
-//   CPU: load_gltf_data(path) -> MeshData   (gltf::import, node transforms
-//        baked into vertices, per-primitive base-color material)
-//   GPU: MeshStore::get_or_load uploads MeshData into vertex/index buffers
-//        and a bind group per primitive (reuses the texture BGL).
-//
-// Unlike the SdfInstance pool there is no slot bookkeeping: the draw list is
-// rebuilt from live entities every frame by MeshRenderSyncSystem, so despawn
-// needs no hook and instancing falls out of grouping by mesh index.
-
 use crate::anim::{AnimationClip, Interp, Joint, JointTracks, LocalTransform, Skeleton, Track};
-use crate::mesh_pipeline::{MaterialUniform, MeshInstance, MeshVertex};
-use crate::mipgen::MipGenerator;
-use crate::skinned_pipeline::{SkinnedMeshInstance, SkinnedVertex, MAX_JOINT_MATRICES, MAX_SKINNED_INSTANCES};
+use crate::mesh_pipeline::MeshVertex;
 use crate::tangent::generate_tangents;
-use crate::texture::{self, ColorTexture};
-use crate::RendererState;
-use engine_app::scheduler::{InterpolationAlpha, System};
-use engine_core::components::{AnimationPlayer, PreviousTransform, RenderMesh, Transform};
-use engine_core::traits::Resources;
-use engine_core::World;
 use glam::{Mat3, Mat4, Quat, Vec3};
-use hecs::Entity;
 use std::collections::HashMap;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use wgpu::{BindGroup, BindGroupLayout, Buffer, BufferUsages, Device, Queue};
-
-// ── CPU stage ─────────────────────────────────────────────────────────────────
 
 /// RGBA8 pixels, sRGB-encoded (glTF base-color convention).
 pub struct ImageData {
@@ -469,147 +444,6 @@ fn to_rgba8(img: &gltf::image::Data) -> Option<ImageData> {
     Some(ImageData { width: img.width, height: img.height, pixels })
 }
 
-// ── GPU stage ─────────────────────────────────────────────────────────────────
-
-pub(crate) struct GpuPrimitive {
-    pub(crate) vertex_buffer: Buffer,
-    pub(crate) index_buffer:  Buffer,
-    pub(crate) index_count:   u32,
-    // Textures + factor uniform kept alive alongside their bind group.
-    pub(crate) _textures:          Vec<ColorTexture>,
-    pub(crate) _material_buffer:   Buffer,
-    pub(crate) material_bind_group: BindGroup,
-}
-
-/// CPU-side animation data kept next to a skinned GpuMesh so sampling needs no
-/// GPU access. Present iff the mesh is skinned.
-pub(crate) struct CpuSkin {
-    pub(crate) skeleton: Skeleton,
-    pub(crate) clips:    Vec<AnimationClip>,
-}
-
-pub(crate) struct GpuMesh {
-    pub(crate) primitives: Vec<GpuPrimitive>,
-    /// Some => primitives' vertex buffers hold `SkinnedVertex` and the mesh
-    /// draws with the skinned pipeline; None => static (Phase-A) path.
-    pub(crate) skin: Option<CpuSkin>,
-}
-
-/// One material texture slot: the image (sRGB or linear, mipped) when the
-/// asset has one, else a 1×1 neutral default so the bind group is complete.
-fn slot_texture(
-    device:  &Device,
-    queue:   &Queue,
-    mipgen:  &MipGenerator,
-    image:   &Option<ImageData>,
-    srgb:    bool,
-    neutral: [u8; 4],
-) -> ColorTexture {
-    match image {
-        Some(img) => texture::create_rgba_texture_mipped(
-            device, queue, mipgen, img.width, img.height, &img.pixels, srgb,
-        ),
-        None => texture::create_rgba_texture(device, queue, 1, 1, &neutral, false),
-    }
-}
-
-pub(crate) fn upload_mesh(
-    device: &Device,
-    queue:  &Queue,
-    layout: &BindGroupLayout,
-    mipgen: &MipGenerator,
-    data:   MeshData,
-) -> GpuMesh {
-    let skinned = data.skeleton.is_some();
-    let primitives = data.primitives.iter().map(|p| {
-        // Skinned meshes upload SkinnedVertex (adds joints/weights); static
-        // meshes upload MeshVertex directly.
-        let vertex_buffer = if skinned {
-            let verts: Vec<SkinnedVertex> = p.vertices.iter().enumerate().map(|(i, v)| {
-                let sk = p.skin.as_ref().map(|s| s[i]).unwrap_or(VertexSkin {
-                    joints:  [0, 0, 0, 0],
-                    weights: [1.0, 0.0, 0.0, 0.0],
-                });
-                SkinnedVertex {
-                    position: v.position,
-                    normal:   v.normal,
-                    uv:       v.uv,
-                    tangent:  v.tangent,
-                    joints:   sk.joints,
-                    weights:  sk.weights,
-                }
-            }).collect();
-            device.create_buffer_init(&BufferInitDescriptor {
-                label:    Some("Skinned Vertex Buffer"),
-                contents: bytemuck::cast_slice(&verts),
-                usage:    BufferUsages::VERTEX,
-            })
-        } else {
-            device.create_buffer_init(&BufferInitDescriptor {
-                label:    Some("Mesh Vertex Buffer"),
-                contents: bytemuck::cast_slice(&p.vertices),
-                usage:    BufferUsages::VERTEX,
-            })
-        };
-        let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label:    Some("Mesh Index Buffer"),
-            contents: bytemuck::cast_slice(&p.indices),
-            usage:    BufferUsages::INDEX,
-        });
-
-        // The five material textures (VQ-A2/C2): sRGB for color-like slots,
-        // linear for data-like slots; 1×1 neutral defaults where absent.
-        let m = &p.material;
-        let albedo   = slot_texture(device, queue, mipgen, &m.base_color_image, true, [255; 4]);
-        let normal   = slot_texture(device, queue, mipgen, &m.normal_image, false, [128, 128, 255, 255]);
-        let mr       = slot_texture(device, queue, mipgen, &m.metallic_roughness_image, false, [255; 4]);
-        let emissive = slot_texture(device, queue, mipgen, &m.emissive_image, true, [255; 4]);
-        let ao       = slot_texture(device, queue, mipgen, &m.occlusion_image, false, [255; 4]);
-
-        let uniform = MaterialUniform {
-            base_color: m.base_color_factor,
-            emissive: [
-                m.emissive_factor[0] * m.emissive_strength,
-                m.emissive_factor[1] * m.emissive_strength,
-                m.emissive_factor[2] * m.emissive_strength,
-                0.0,
-            ],
-            mr: [m.metallic_factor, m.roughness_factor, m.alpha_cutoff, 0.0],
-        };
-        let material_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label:    Some("Material Uniform"),
-            contents: bytemuck::cast_slice(&[uniform]),
-            usage:    BufferUsages::UNIFORM,
-        });
-
-        let material_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label:   Some("Material Bind Group"),
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&albedo.view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&albedo.sampler) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&normal.view) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&mr.view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&emissive.view) },
-                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&ao.view) },
-                wgpu::BindGroupEntry { binding: 6, resource: material_buffer.as_entire_binding() },
-            ],
-        });
-
-        GpuPrimitive {
-            vertex_buffer,
-            index_buffer,
-            index_count: p.indices.len() as u32,
-            _textures: vec![albedo, normal, mr, emissive, ao],
-            _material_buffer: material_buffer,
-            material_bind_group,
-        }
-    }).collect();
-
-    let skin = data.skeleton.map(|skeleton| CpuSkin { skeleton, clips: data.clips });
-    GpuMesh { primitives, skin }
-}
-
 /// Decode a PNG/JPG from disk into tightly-packed RGBA8 — the seam for
 /// building procedural `MaterialData` (ground texture sets) outside glTF.
 pub fn load_image_rgba(path: &str) -> Result<ImageData, String> {
@@ -621,396 +455,16 @@ pub fn load_image_rgba(path: &str) -> Result<ImageData, String> {
     })
 }
 
-/// Loaded meshes keyed by asset path. Failed loads are cached as None so a
-/// bad path logs once, not every frame.
-#[derive(Default)]
-pub struct MeshStore {
-    by_path:           HashMap<String, Option<usize>>,
-    pub(crate) meshes: Vec<GpuMesh>,
-}
-
-impl MeshStore {
-    /// Upload procedurally-built mesh data under a synthetic key (e.g.
-    /// "zone-ground:start"). Re-registering a key uploads fresh data — zone
-    /// rebuilds replace their ground.
-    pub(crate) fn register(
-        &mut self,
-        device: &Device,
-        queue:  &Queue,
-        layout: &BindGroupLayout,
-        mipgen: &MipGenerator,
-        key:    &str,
-        data:   MeshData,
-    ) -> usize {
-        let idx = self.meshes.len();
-        self.meshes.push(upload_mesh(device, queue, layout, mipgen, data));
-        self.by_path.insert(key.to_owned(), Some(idx));
-        idx
-    }
-
-    pub(crate) fn get_or_load(
-        &mut self,
-        device: &Device,
-        queue:  &Queue,
-        layout: &BindGroupLayout,
-        mipgen: &MipGenerator,
-        path:   &str,
-    ) -> Option<usize> {
-        if let Some(&cached) = self.by_path.get(path) {
-            return cached;
-        }
-        let result = match load_gltf_data(path) {
-            Ok(data) => {
-                let idx = self.meshes.len();
-                self.meshes.push(upload_mesh(device, queue, layout, mipgen, data));
-                Some(idx)
-            }
-            Err(e) => {
-                log::error!("mesh load failed: {e}");
-                None
-            }
-        };
-        self.by_path.insert(path.to_owned(), result);
-        result
-    }
-}
-
-// ── Animation advance + skinning ────────────────────────────────────────────
-
-/// Advance an `AnimationPlayer` by `dt`, sample its current pose (crossfading
-/// out of `prev` if a blend is in progress), and return the joint palette plus
-/// the bones' armature-space globals (pre-inverse-bind — what attachment
-/// sockets need). Pure orchestration over `anim`'s sampling math — no GPU access.
-fn pose_player(player: &mut AnimationPlayer, skin: &CpuSkin, dt: f32) -> (Vec<Mat4>, Vec<Mat4>) {
-    let n = skin.skeleton.joint_count();
-    let clip_by_name = |name: &str| skin.clips.iter().find(|c| c.name == name);
-    let Some(cur_clip) = clip_by_name(&player.clip).or_else(|| skin.clips.first()) else {
-        return (vec![Mat4::IDENTITY; n], vec![Mat4::IDENTITY; n]); // no clips: rest/bind pose
-    };
-
-    player.time += dt * player.speed;
-    if player.looping && cur_clip.duration > 0.0 {
-        player.time = player.time.rem_euclid(cur_clip.duration);
-    } else {
-        player.time = player.time.clamp(0.0, cur_clip.duration); // hold last frame
-    }
-    let cur_pose = crate::anim::sample_pose(&skin.skeleton, cur_clip, player.time);
-
-    let pose = if player.prev.is_some() {
-        player.blend_t += dt;
-        let w = (player.blend_t / player.blend_dur).clamp(0.0, 1.0);
-        let (pname, ptime) = {
-            let p = player.prev.as_ref().unwrap();
-            (p.clip.clone(), p.time)
-        };
-        let blended = match clip_by_name(&pname).or_else(|| skin.clips.first()) {
-            Some(pc) => {
-                let prev_pose = crate::anim::sample_pose(&skin.skeleton, pc, ptime);
-                crate::anim::blend_poses(&prev_pose, &cur_pose, w)
-            }
-            None => cur_pose,
-        };
-        if w >= 1.0 {
-            player.prev = None;
-        }
-        blended
-    } else {
-        cur_pose
-    };
-
-    let globals = crate::anim::global_transforms(&skin.skeleton, &pose);
-    let palette = globals
-        .iter()
-        .zip(&skin.skeleton.joints)
-        .map(|(g, j)| *g * j.inverse_bind)
-        .collect();
-    (palette, globals)
-}
-
-// ── Per-frame draw lists ────────────────────────────────────────────────────
-
-/// Built by MeshRenderSyncSystem each display frame, consumed by RenderSystem.
-/// `ranges` are (mesh index, first instance, instance count) into `instances`.
-#[derive(Default)]
-pub struct MeshDrawList {
-    pub(crate) instances: Vec<MeshInstance>,
-    pub(crate) ranges:    Vec<(usize, u32, u32)>,
-}
-
-/// The skinned counterpart: each instance additionally names a `joint_base`
-/// offset into the flat `joints` palette (one contiguous block per instance).
-#[derive(Default)]
-pub struct SkinnedDrawList {
-    pub(crate) instances: Vec<SkinnedMeshInstance>,
-    pub(crate) joints:    Vec<[[f32; 4]; 4]>,
-    pub(crate) ranges:    Vec<(usize, u32, u32)>,
-}
-
-/// Bone names published as attachment sockets each frame. Game code narrows or
-/// widens this to the bones it actually reads.
-pub struct SocketConfig {
-    pub bones: Vec<String>,
-}
-
-impl Default for SocketConfig {
-    fn default() -> Self {
-        Self { bones: vec!["handslot.r".into(), "handslot.l".into(), "head".into()] }
-    }
-}
-
-/// World-space bone transforms (`model · global[joint]`) for every skinned
-/// entity posed this display frame, keyed by the bone names in `SocketConfig`.
-/// Rebuilt by `MeshRenderSyncSystem`; consumers treat a missing entry as "no
-/// socket this frame" and fall back to an entity-relative offset.
-#[derive(Default)]
-pub struct SocketTransforms(pub HashMap<Entity, HashMap<String, Mat4>>);
-
-/// Collects every (Transform, RenderMesh) entity into the draw lists, loading
-/// meshes on first sight. Static meshes go to MeshDrawList; skinned meshes are
-/// posed (advancing their AnimationPlayer) and go to SkinnedDrawList. Position
-/// is lerped against PreviousTransform exactly like RenderSyncSystem.
-pub struct MeshRenderSyncSystem {
-    // Scratch, reused across frames.
-    items:         Vec<(usize, MeshInstance)>,
-    skinned_items: Vec<(usize, SkinnedMeshInstance)>,
-    // TEMP (anim feel-check): throttles a ~1 Hz log of each skinned player's clip.
-    log_accum: f32,
-    /// Throttles the 80%-of-cap warning (VQ-F2) to ~once per 5 s.
-    warn_accum: f32,
-}
-
-impl MeshRenderSyncSystem {
-    pub fn new() -> Self {
-        Self { items: Vec::new(), skinned_items: Vec::new(), log_accum: 0.0, warn_accum: 0.0 }
-    }
-}
-
-impl System for MeshRenderSyncSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
-        // Headless / pre-window: renderer resources absent, nothing to sync.
-        if resources.get::<RendererState>().is_none() {
-            return;
-        }
-        let alpha = resources.get::<InterpolationAlpha>().map(|a| a.0).unwrap_or(1.0);
-
-        // TEMP (anim feel-check): once ~a second, log each skinned player's clip
-        // so a headless dev can confirm the live pose is advancing. Remove once
-        // the character animates on screen.
-        self.log_accum += delta;
-        let should_log = self.log_accum >= 1.0;
-        if should_log {
-            self.log_accum = 0.0;
-        }
-
-        // Take the stores out so they can borrow device/queue from RendererState
-        // (Resources allows one borrow at a time; owned meanwhile).
-        let Some(mut store) = resources.get_mut::<MeshStore>().map(std::mem::take) else { return };
-        let mut list = resources.get_mut::<MeshDrawList>().map(std::mem::take).unwrap_or_default();
-        let mut skinned = resources.get_mut::<SkinnedDrawList>().map(std::mem::take).unwrap_or_default();
-        let socket_bones: Vec<String> = resources
-            .get::<SocketConfig>()
-            .map(|c| c.bones.clone())
-            .unwrap_or_default();
-        let mut sockets = resources.get_mut::<SocketTransforms>().map(std::mem::take).unwrap_or_default();
-        sockets.0.clear();
-        list.instances.clear();
-        list.ranges.clear();
-        skinned.instances.clear();
-        skinned.joints.clear();
-        skinned.ranges.clear();
-        self.items.clear();
-        self.skinned_items.clear();
-
-        // Skinned entities lacking a player: attach a default after the query.
-        let mut needs_player: Vec<Entity> = Vec::new();
-
-        {
-            let state = resources.get::<RendererState>().expect("checked above");
-            for (entity, transform, prev, mesh, player) in world
-                .query::<(Entity, &Transform, Option<&PreviousTransform>, &RenderMesh, Option<&mut AnimationPlayer>)>()
-                .iter()
-            {
-                let Some(idx) = store.get_or_load(
-                    &state.device, &state.queue, &state.material_bgl, &state.mipgen, &mesh.asset,
-                )
-                else { continue };
-                let render_pos = match prev {
-                    Some(p) => p.position.lerp(transform.position, alpha),
-                    None    => transform.position,
-                };
-                let model = Transform {
-                    position: render_pos,
-                    rotation: transform.rotation,
-                    scale:    transform.scale,
-                }.to_model_matrix();
-                let tint = [mesh.tint.x, mesh.tint.y, mesh.tint.z, 1.0];
-
-                match store.meshes[idx].skin.as_ref() {
-                    // Static mesh — Phase-A path.
-                    None => self.items.push((idx, MeshInstance {
-                        model: model.to_cols_array_2d(),
-                        tint,
-                    })),
-                    // Skinned mesh — needs an AnimationPlayer to pose.
-                    Some(cpu_skin) => {
-                        let Some(player) = player else {
-                            needs_player.push(entity); // render next frame, once attached
-                            continue;
-                        };
-                        let n = cpu_skin.skeleton.joint_count();
-                        // Respect the palette/instance caps.
-                        if self.skinned_items.len() >= MAX_SKINNED_INSTANCES
-                            || skinned.joints.len() + n > MAX_JOINT_MATRICES
-                        {
-                            continue;
-                        }
-                        let joint_base = skinned.joints.len() as u32;
-                        let (mats, globals) = pose_player(player, cpu_skin, delta);
-                        if should_log {
-                            log::info!(
-                                "skinned anim: clip={:?} time={:.2} blend={:.2} joints={}",
-                                player.clip, player.time, player.blend_t, mats.len()
-                            );
-                        }
-                        skinned.joints.extend(mats.iter().map(|m| m.to_cols_array_2d()));
-                        // Publish the configured attachment sockets for this entity.
-                        if !socket_bones.is_empty() {
-                            let entry = sockets.0.entry(entity).or_default();
-                            for bone in &socket_bones {
-                                if let Some(j) = cpu_skin
-                                    .skeleton
-                                    .joints
-                                    .iter()
-                                    .position(|jt| jt.name == *bone)
-                                {
-                                    entry.insert(bone.clone(), model * globals[j]);
-                                }
-                            }
-                        }
-                        self.skinned_items.push((idx, SkinnedMeshInstance {
-                            model: model.to_cols_array_2d(),
-                            tint,
-                            joint_base,
-                            _pad: [0; 3],
-                        }));
-                    }
-                }
-            }
-        }
-
-        for entity in needs_player {
-            let _ = world.insert_one(entity, AnimationPlayer::default());
-        }
-
-        // Group by mesh so each mesh draws as one instanced call.
-        self.items.sort_by_key(|(idx, _)| *idx);
-        for (idx, inst) in self.items.drain(..) {
-            let first = list.instances.len() as u32;
-            match list.ranges.last_mut() {
-                Some((last_idx, _, count)) if *last_idx == idx => *count += 1,
-                _ => list.ranges.push((idx, first, 1)),
-            }
-            list.instances.push(inst);
-        }
-        self.skinned_items.sort_by_key(|(idx, _)| *idx);
-        for (idx, inst) in self.skinned_items.drain(..) {
-            let first = skinned.instances.len() as u32;
-            match skinned.ranges.last_mut() {
-                Some((last_idx, _, count)) if *last_idx == idx => *count += 1,
-                _ => skinned.ranges.push((idx, first, 1)),
-            }
-            skinned.instances.push(inst);
-        }
-
-        // Cap guardrails (VQ-F2): meter in the dev overlay, throttled warning
-        // past 80% — the seam that flags the future enemy influx early.
-        let skinned_count = skinned.instances.len();
-        if let Some(stats) = resources.get_mut::<engine_app::dev_stats::DevStats>() {
-            stats.set("skinned", format!("{skinned_count}/{MAX_SKINNED_INSTANCES}"));
-        }
-        self.warn_accum += delta;
-        if skinned_count * 10 > MAX_SKINNED_INSTANCES * 8 && self.warn_accum >= 5.0 {
-            self.warn_accum = 0.0;
-            log::warn!(
-                "skinned instances at {skinned_count}/{MAX_SKINNED_INSTANCES} (>80% of the engine cap)"
-            );
-        }
-
-        resources.insert(store);
-        resources.insert(list);
-        resources.insert(skinned);
-        resources.insert(sockets);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Build a minimal single-triangle GLB by hand: one node (translated by
-    /// (1,2,3)) with positions/normals/uvs/u16 indices and a solid
-    /// baseColorFactor material. Exercises the whole CPU stage without
-    /// depending on asset files or a GPU.
-    fn write_test_glb(path: &std::path::Path) {
-        let mut bin: Vec<u8> = Vec::new();
-        let positions: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
-        let normals:   [[f32; 3]; 3] = [[0.0, 0.0, 1.0]; 3];
-        let uvs:       [[f32; 2]; 3] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
-        let indices:   [u16; 3]      = [0, 1, 2];
-        for v in positions.iter().flatten() { bin.extend_from_slice(&v.to_le_bytes()); }
-        for v in normals.iter().flatten()   { bin.extend_from_slice(&v.to_le_bytes()); }
-        for v in uvs.iter().flatten()       { bin.extend_from_slice(&v.to_le_bytes()); }
-        for i in indices                    { bin.extend_from_slice(&i.to_le_bytes()); }
-
-        let json = format!(r#"{{
-            "asset": {{"version": "2.0"}},
-            "scene": 0,
-            "scenes": [{{"nodes": [0]}}],
-            "nodes": [{{"mesh": 0, "translation": [1, 2, 3]}}],
-            "meshes": [{{"primitives": [{{
-                "attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}},
-                "indices": 3, "material": 0
-            }}]}}],
-            "materials": [{{"pbrMetallicRoughness": {{"baseColorFactor": [0.2, 0.4, 0.8, 1.0]}},
-                            "alphaMode": "MASK", "alphaCutoff": 0.35}}],
-            "buffers": [{{"byteLength": {bin_len}}}],
-            "bufferViews": [
-                {{"buffer": 0, "byteOffset": 0,  "byteLength": 36}},
-                {{"buffer": 0, "byteOffset": 36, "byteLength": 36}},
-                {{"buffer": 0, "byteOffset": 72, "byteLength": 24}},
-                {{"buffer": 0, "byteOffset": 96, "byteLength": 6}}
-            ],
-            "accessors": [
-                {{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
-                  "min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 0.0]}},
-                {{"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"}},
-                {{"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"}},
-                {{"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}}
-            ]
-        }}"#, bin_len = bin.len());
-
-        let mut json_bytes = json.into_bytes();
-        while json_bytes.len() % 4 != 0 { json_bytes.push(b' '); }
-        while bin.len() % 4 != 0 { bin.push(0); }
-
-        let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
-        let mut glb = Vec::with_capacity(total);
-        glb.extend_from_slice(&0x46546C67u32.to_le_bytes()); // magic "glTF"
-        glb.extend_from_slice(&2u32.to_le_bytes());
-        glb.extend_from_slice(&(total as u32).to_le_bytes());
-        glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
-        glb.extend_from_slice(&0x4E4F534Au32.to_le_bytes()); // "JSON"
-        glb.extend_from_slice(&json_bytes);
-        glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
-        glb.extend_from_slice(&0x004E4942u32.to_le_bytes()); // "BIN\0"
-        glb.extend_from_slice(&bin);
-        std::fs::write(path, glb).unwrap();
-    }
+    use crate::anim::{joint_matrices, sample_pose};
+    use engine_core::components::AnimationPlayer;
 
     #[test]
     fn loads_triangle_glb_with_baked_node_transform() {
         let path = std::env::temp_dir().join("vordar_mesh_test_triangle.glb");
-        write_test_glb(&path);
+        crate::mesh::test_glb::write_test_glb(&path);
 
         let data = load_gltf_data(path.to_str().unwrap()).unwrap();
         assert_eq!(data.primitives.len(), 1);
@@ -1038,103 +492,10 @@ mod tests {
         assert!(load_gltf_data("does/not/exist.glb").is_err());
     }
 
-    /// Hand-build a skinned + animated GLB: three vertices stacked on +Y, a
-    /// two-joint chain (root at origin, child at +1 Y), and a clip that rotates
-    /// the root 90° about Z over one second. Proves the whole skinning CPU
-    /// stage — skin hierarchy, inverse binds, animation channels, and the
-    /// bake-branch (skinned vertices stay in mesh-local space) — without a GPU.
-    fn write_skinned_glb(path: &std::path::Path) {
-        // Pad to 4 bytes, append, return (offset, len).
-        fn push(bin: &mut Vec<u8>, data: &[u8]) -> (usize, usize) {
-            while bin.len() % 4 != 0 { bin.push(0); }
-            let off = bin.len();
-            bin.extend_from_slice(data);
-            (off, data.len())
-        }
-        fn f32s(v: &[f32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
-        fn u16s(v: &[u16]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
-
-        let mut bin = Vec::new();
-        let (pos_off, pos_len) = push(&mut bin, &f32s(&[0.0, 0.0, 0.0,  0.0, 1.0, 0.0,  0.0, 2.0, 0.0]));
-        let (joi_off, joi_len) = push(&mut bin, &u16s(&[0, 0, 0, 0,  1, 0, 0, 0,  1, 0, 0, 0]));
-        let (wei_off, wei_len) = push(&mut bin, &f32s(&[1.0, 0.0, 0.0, 0.0,  1.0, 0.0, 0.0, 0.0,  1.0, 0.0, 0.0, 0.0]));
-        let (idx_off, idx_len) = push(&mut bin, &u16s(&[0, 1, 2]));
-        // Inverse binds (column-major): joint0 = I, joint1 = translate(0,-1,0).
-        let ibm = f32s(&[
-            1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0,  0.0, 0.0, 1.0,
-            1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, -1.0, 0.0, 1.0,
-        ]);
-        let (ibm_off, ibm_len) = push(&mut bin, &ibm);
-        let (ti_off, ti_len) = push(&mut bin, &f32s(&[0.0, 1.0]));
-        let s = std::f32::consts::FRAC_1_SQRT_2;
-        let (ro_off, ro_len) = push(&mut bin, &f32s(&[0.0, 0.0, 0.0, 1.0,  0.0, 0.0, s, s]));
-
-        let json = format!(r#"{{
-            "asset": {{"version": "2.0"}},
-            "scene": 0,
-            "scenes": [{{"nodes": [0, 1]}}],
-            "nodes": [
-                {{"mesh": 0, "skin": 0}},
-                {{"translation": [0, 0, 0], "children": [2]}},
-                {{"translation": [0, 1, 0]}}
-            ],
-            "skins": [{{"joints": [1, 2], "inverseBindMatrices": 4}}],
-            "meshes": [{{"primitives": [{{
-                "attributes": {{"POSITION": 0, "JOINTS_0": 1, "WEIGHTS_0": 2}},
-                "indices": 3
-            }}]}}],
-            "animations": [{{
-                "name": "Spin",
-                "channels": [{{"sampler": 0, "target": {{"node": 1, "path": "rotation"}}}}],
-                "samplers": [{{"input": 5, "output": 6, "interpolation": "LINEAR"}}]
-            }}],
-            "buffers": [{{"byteLength": {bin_len}}}],
-            "bufferViews": [
-                {{"buffer": 0, "byteOffset": {pos_off}, "byteLength": {pos_len}}},
-                {{"buffer": 0, "byteOffset": {joi_off}, "byteLength": {joi_len}}},
-                {{"buffer": 0, "byteOffset": {wei_off}, "byteLength": {wei_len}}},
-                {{"buffer": 0, "byteOffset": {idx_off}, "byteLength": {idx_len}}},
-                {{"buffer": 0, "byteOffset": {ibm_off}, "byteLength": {ibm_len}}},
-                {{"buffer": 0, "byteOffset": {ti_off}, "byteLength": {ti_len}}},
-                {{"buffer": 0, "byteOffset": {ro_off}, "byteLength": {ro_len}}}
-            ],
-            "accessors": [
-                {{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
-                  "min": [0.0, 0.0, 0.0], "max": [0.0, 2.0, 0.0]}},
-                {{"bufferView": 1, "componentType": 5123, "count": 3, "type": "VEC4"}},
-                {{"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC4"}},
-                {{"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}},
-                {{"bufferView": 4, "componentType": 5126, "count": 2, "type": "MAT4"}},
-                {{"bufferView": 5, "componentType": 5126, "count": 2, "type": "SCALAR",
-                  "min": [0.0], "max": [1.0]}},
-                {{"bufferView": 6, "componentType": 5126, "count": 2, "type": "VEC4"}}
-            ]
-        }}"#, bin_len = bin.len());
-
-        let mut json_bytes = json.into_bytes();
-        while json_bytes.len() % 4 != 0 { json_bytes.push(b' '); }
-        while bin.len() % 4 != 0 { bin.push(0); }
-
-        let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
-        let mut glb = Vec::with_capacity(total);
-        glb.extend_from_slice(&0x46546C67u32.to_le_bytes());
-        glb.extend_from_slice(&2u32.to_le_bytes());
-        glb.extend_from_slice(&(total as u32).to_le_bytes());
-        glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
-        glb.extend_from_slice(&0x4E4F534Au32.to_le_bytes());
-        glb.extend_from_slice(&json_bytes);
-        glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
-        glb.extend_from_slice(&0x004E4942u32.to_le_bytes());
-        glb.extend_from_slice(&bin);
-        std::fs::write(path, glb).unwrap();
-    }
-
     #[test]
     fn loads_skinned_animated_glb() {
-        use crate::anim::{joint_matrices, sample_pose};
-
         let path = std::env::temp_dir().join("vordar_mesh_test_skinned.glb");
-        write_skinned_glb(&path);
+        crate::mesh::test_glb::write_skinned_glb(&path);
         let data = load_gltf_data(path.to_str().unwrap()).unwrap();
 
         // Skeleton: two joints, child parented to root.
@@ -1190,8 +551,6 @@ mod tests {
     /// extraction on production data. Skips if absent.
     #[test]
     fn loads_skinned_fox_asset_if_present() {
-        use crate::anim::joint_matrices;
-
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/fox.glb");
         if !std::path::Path::new(path).exists() {
             return;
@@ -1207,7 +566,7 @@ mod tests {
         }
         // Every clip poses to a full, finite joint palette.
         for clip in &data.clips {
-            let pose = crate::anim::sample_pose(skel, clip, clip.duration * 0.5);
+            let pose = sample_pose(skel, clip, clip.duration * 0.5);
             let mats = joint_matrices(skel, &pose);
             assert_eq!(mats.len(), skel.joint_count());
             assert!(mats.iter().all(|m| m.is_finite()), "clip {} produced NaN", clip.name);
@@ -1220,8 +579,6 @@ mod tests {
     /// baked onto the armature is picked up (feet grounded, character scaled).
     #[test]
     fn loads_human_character_asset_if_present() {
-        use crate::anim::joint_matrices;
-
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.glb");
         if !std::path::Path::new(path).exists() {
             return;
@@ -1259,7 +616,7 @@ mod tests {
         assert!(skel.root.x_axis.x < 1.0 && skel.root.x_axis.x > 0.0, "scaled down");
         // Every clip poses to a full, finite palette.
         for clip in &data.clips {
-            let pose = crate::anim::sample_pose(skel, clip, clip.duration * 0.5);
+            let pose = sample_pose(skel, clip, clip.duration * 0.5);
             let mats = joint_matrices(skel, &pose);
             assert!(mats.iter().all(|m| m.is_finite()), "clip {} produced NaN", clip.name);
         }
@@ -1276,11 +633,11 @@ mod tests {
             return;
         }
         let data = load_gltf_data(path).unwrap();
-        let skin = CpuSkin { skeleton: data.skeleton.unwrap(), clips: data.clips };
+        let skin = super::super::CpuSkin { skeleton: data.skeleton.unwrap(), clips: data.clips };
         for clip in ["idle", "walk", "run"] {
             let mut player = AnimationPlayer { clip: clip.into(), ..Default::default() };
-            let (a, _) = pose_player(&mut player, &skin, 0.0);
-            let (b, _) = pose_player(&mut player, &skin, 0.25);
+            let (a, _) = super::super::pose_player(&mut player, &skin, 0.0);
+            let (b, _) = super::super::pose_player(&mut player, &skin, 0.25);
             let moved = a.iter().zip(&b).any(|(x, y)| !x.abs_diff_eq(*y, 1e-4));
             assert!(moved, "clip {clip} must move the skeleton as time advances");
         }

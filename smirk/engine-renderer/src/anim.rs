@@ -1,7 +1,7 @@
 // Skeletal animation — the pure runtime math, deliberately free of glTF and
-// wgpu so it unit-tests without a GPU device (same discipline as mesh.rs's CPU
-// stage). mesh.rs constructs `Skeleton` + `AnimationClip` from a glTF file;
-// this module samples, blends, and skins them.
+// wgpu so it unit-tests without a GPU device (same discipline as the glTF
+// import stage). `load_gltf_data` constructs `Skeleton` + `AnimationClip`
+// from a glTF file; this module samples, blends, and skins them.
 //
 // Coordinate convention (standard linear-blend skinning): a skinned vertex
 // stays in mesh-local space and is placed by the joint palette. For joint j:
@@ -69,7 +69,7 @@ impl Skeleton {
 }
 
 /// glTF keyframe interpolation. CUBICSPLINE is downsampled to Linear at load
-/// time (see mesh.rs), so the runtime only needs these two.
+/// time (see `load_gltf_data`), so the runtime only needs these two.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Interp {
     Linear,
