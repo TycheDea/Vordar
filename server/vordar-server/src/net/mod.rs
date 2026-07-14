@@ -17,15 +17,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
-use vordar_game::combat::buff::{ravager_mods, RavagerRageSystem};
+use vordar_game::combat::buff::RavagerRageSystem;
 use vordar_game::combat::leap::{leap_velocity, LeapImpulse};
 use vordar_game::combat::projectile::spawn_projectile;
-use vordar_game::combat::stats::{compute_damage, DamageType};
-use vordar_game::events::{DamageDealt, MoveIntent};
+use vordar_game::combat::stats::DamageType;
+use vordar_game::events::MoveIntent;
 use vordar_game::player::class::{ClassId, ClassLibrary, DEFAULT_CLASS};
-use vordar_game::player::movement_velocity;
 use vordar_game::skills::AbilityEffect;
-use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
+use vordar_game::Mechanic;
 use vordar_game::world::WorldTimeRes;
 use vordar_game::zones::ZoneDef;
 use vordar_protocol::{
@@ -36,11 +35,13 @@ use vordar_protocol::{
 mod autosave;
 mod broadcast;
 mod login;
+mod mechanics;
 mod repl_ids;
 mod shutdown;
 mod transfer;
 
 pub use broadcast::SnapshotBroadcastSystem;
+pub use mechanics::MechanicResolveSystem;
 pub use shutdown::ShutdownFlag;
 
 use autosave::AutosaveSystem;
@@ -72,8 +73,6 @@ const AOI_RADIUS: f32 = 40.0;
 /// Applied-intent history kept per connection for mechanic-resolve rewind
 /// (~530 ms at 60 Hz — covers MAX_REWIND plus resolve-tick slack).
 const HISTORY_CAP: usize = 32;
-/// Fixed server tick duration — each applied intent integrates exactly this.
-const TICK_DT: f32 = 1.0 / 60.0;
 /// PostUpdate runs at the sim rate; the 10 Hz systems below self-gate on it.
 /// Defined from `vordar_protocol::TICK_HZ` (networking rework 4, finding 1):
 /// the client's playback cursor treats that constant as the rate ticks
@@ -871,120 +870,6 @@ fn queue_move_intents(pc: &mut PlayerConn, entries: &[MoveIntentEntry], recv_mic
             pc.queue.pop_front();
         }
     }
-}
-
-/// The scheduled-snapshot test (DESIGN.md §3): at the first resolve tick past
-/// each mechanic's T, decide who was inside its area AT T — players via
-/// stamp-based rewind through their applied-intent history (an input stamped
-/// ≤ T counts even though it arrived after T: favor-the-defender), NPCs at
-/// their current server-driven position. Damage flows through Health, so
-/// deaths take the existing HealthDepleted/despawn path.
-pub struct MechanicResolveSystem {
-    ticks: u64,
-}
-
-impl MechanicResolveSystem {
-    pub fn new() -> Self {
-        Self { ticks: 0 }
-    }
-}
-
-impl System for MechanicResolveSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        // PostUpdate runs at POST_HZ; resolve keeps its 10 Hz cadence.
-        let due_now = self.ticks % STAGGER == 0;
-        self.ticks += 1;
-        if !due_now {
-            return;
-        }
-        let now = resources.get::<NetServerState>().unwrap().server.now_micros();
-
-        let due: Vec<(Entity, Mechanic, Vec3)> = world
-            .query::<(Entity, &Transform, &Mechanic)>()
-            .iter()
-            .filter(|(_, _, m)| now >= m.resolve_at_micros)
-            .map(|(e, t, m)| (e, *m, t.position))
-            .collect();
-        if due.is_empty() {
-            return;
-        }
-
-        for (mech_entity, mech, center) in due {
-            // Rewind to T, but never further back from now than the cap —
-            // high-latency players get degraded forgiveness, not infinite rewind.
-            let t_eff = mech.resolve_at_micros.max(now.saturating_sub(MAX_REWIND_MICROS));
-
-            let targets: Vec<(Entity, Vec3)> = world
-                .query::<(Entity, &Transform, &Health)>()
-                .iter()
-                .filter(|&(e, ..)| e != mech.caster)
-                .map(|(e, t, _)| (e, t.position))
-                .collect();
-
-            let mut hit_entities: Vec<Entity> = Vec::new();
-            {
-                let state = resources.get::<NetServerState>().unwrap();
-                for (entity, pos) in targets {
-                    let pos_at_t = match state.conns.values().find(|pc| pc.entity == entity) {
-                        Some(pc) => {
-                            let speed = world.get::<&Player>(entity).map(|p| p.speed).unwrap_or(0.0);
-                            rewound_position(pos, speed, &pc.history, t_eff)
-                        }
-                        None => pos,
-                    };
-                    if pos_at_t.distance_squared(center) <= mech.radius * mech.radius {
-                        hit_entities.push(entity);
-                    }
-                }
-            }
-
-            for &entity in &hit_entities {
-                let dmg = {
-                    let atk = world.get::<&CombatStats>(mech.caster).ok();
-                    let def = world.get::<&CombatStats>(entity).ok();
-                    let seed = mech.id ^ entity.to_bits().get().rotate_left(21);
-                    let (bonus_power, mult) = ravager_mods(world, mech.caster, entity);
-                    let base = compute_damage(mech.damage + bonus_power, mech.damage_type, atk.as_deref(), def.as_deref(), seed);
-                    (base as f32 * mult).round() as i32
-                };
-                if let Ok(mut health) = world.get::<&mut Health>(entity) {
-                    health.current -= dmg;
-                    resources
-                        .get_mut::<EventBus>()
-                        .unwrap()
-                        .emit(DamageDealt { attacker: mech.caster, target: entity, amount: dmg });
-                }
-                // Targeted damage wakes passive enemies, same as projectiles.
-                if world.get::<&Enemy>(entity).is_ok() {
-                    let _ = world.insert_one(entity, Provoked);
-                }
-            }
-
-            log::info!("mechanic {} resolved: {} hit", mech.id, hit_entities.len());
-            let state = resources.get_mut::<NetServerState>().unwrap();
-            let hits: Vec<u32> = hit_entities.iter().map(|&e| state.repl_ids.id_for(e)).collect();
-            let frame = encode(&ServerMsg::HitResult { mechanic: mech.id, hits });
-            for c in aoi_conns(&state.conns, world, center) {
-                state.server.send(c, frame.clone());
-            }
-            let _ = world.despawn(mech_entity);
-        }
-    }
-}
-
-/// Walk the applied-intent history backwards, undoing every tick whose intent
-/// was STAMPED after `t_eff`. Each entry is exactly one tick of integration
-/// (the 1-intent-per-tick queue model), so this reconstructs the position the
-/// player had committed to by time T on their own synced clock.
-fn rewound_position(current: Vec3, speed: f32, history: &VecDeque<(u64, Vec2)>, t_eff: u64) -> Vec3 {
-    let mut pos = current;
-    for &(stamp, dir) in history.iter().rev() {
-        if stamp <= t_eff {
-            break;
-        }
-        pos -= movement_velocity(dir, speed) * TICK_DT;
-    }
-    pos
 }
 
 /// Benchmark seam (vordar-benches only): exposes just enough of the private
