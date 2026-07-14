@@ -11,6 +11,7 @@ pub mod net;
 pub mod pose;
 pub mod presentation;
 pub mod react;
+pub mod telegraph;
 pub mod ui;
 pub mod vfx;
 pub mod weapons;
