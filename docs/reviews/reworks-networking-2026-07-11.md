@@ -9,12 +9,16 @@ retroactively from the deferred remainders of implemented findings 7 and 8.
 
 > **Cross-type queue** (all 20 fix-sized findings of
 > `audit-networking-2026-07-11.md` are done, so this file is the whole
-> remaining queue): **~~8~~ → ~~10~~ → ~~1~~ → ~~5~~ → 3 → 4 → 7 → 2 → 6.**
+> remaining queue): **~~8~~ → ~~10~~ → ~~1~~ → ~~5~~ → ~~3~~ → 4 → 7 → 2 → 6.**
 > 8 done 2026-07-12 (plan-networking-rework-8-2026-07-12.md, 5 steps),
 > 10 done 2026-07-13 (plan-networking-rework-10-2026-07-12.md, 3 steps),
 > 1 done 2026-07-13 (plan-networking-rework-1-2026-07-13.md, 5 steps),
 > 5 done 2026-07-13 (plan-networking-rework-5-2026-07-13.md, 5 steps;
 > steady-state crowd snapshot measured 576 B, rework 3's MTU gate cleared).
+> 3 done 2026-07-14 (plan-networking-rework-3-2026-07-13.md, 6 steps; snapshot
+> states + intent ack and move intents now ride datagrams, clock pings moved off
+> the writer queue, and the WAN-RTT after-probe shows inter-snapshot gaps bound
+> to cadence multiples instead of retransmit cycles).
 > 8 first because two entries depend on it: 10 is blocked on its `NetServer`
 > shutdown path, and 1's schema changes (accounts table, cooldown columns) need
 > its `user_version` migration runner. 10 right after 8 while the shutdown work

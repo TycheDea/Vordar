@@ -87,9 +87,11 @@ flowchart TB
   CP -.-> SHARED
   SM -.-> SHARED
 
-  CS ==>|"login"| SE
-  CS ==>|"move · cast intents"| SV
-  SB ==>|"snapshots (prefab table indices) · welcome · hit results"| CRECV
+  CS ==>|"login · reliable stream"| SE
+  CS ==>|"cast intents · reliable stream"| SV
+  CS ==>|"move intents · datagrams, last-3 redundancy"| SV
+  SB ==>|"state snapshots + ack · datagrams, latest-wins"| CRECV
+  SB ==>|"AOI enters/leaves · welcome · prefab table · hit results · reliable stream"| CRECV
   SB ==>|"world clock (synced time)"| CVIS
   SDEATH ==>|"EntityDied · re-Welcome (respawn)"| CDEATH
   SX ==>|"redirect: wrong zone at login"| CLIENT

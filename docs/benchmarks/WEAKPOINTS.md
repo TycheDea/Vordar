@@ -40,15 +40,24 @@ driving phase is faster. Combined with the cheap-gather fix (`query_radius_into`
 the known-set): **soak 400-bot input p99 went from 51.25 ms to 18.73 ms**
 (budget 25 ms) — the gate that defined this item is now passed.
 
-### 4. Snapshots ride reliable-ordered QUIC streams (head-of-line blocking) — evaluated, not built
-Gap C's below-QUIC loss probe (see below) measured the actual head-of-line cost:
-even at 5 % receive-side loss with 50 ms simulated RTT, the worst inter-snapshot
-gap was 164 ms — under one retransmit cycle, absorbed by the 100 ms snapshot
-cadence. The decision gate (p99 > 250 ms or max > 500 ms) was not met, so the
-datagram snapshot path was **not built**; reliable-stream snapshots stay. The
-`read_frame`/broadcast hygiene fixes noted in the original writeup (O(len)
-`buf.remove(0)`, per-connection payload clone) were fixed regardless — see gap C.
-Re-evaluate if RTT or loss assumptions change (e.g. mobile/satellite clients).
+### 4. Snapshots ride reliable-ordered QUIC streams (head-of-line blocking) — fixed
+Gap C's below-QUIC loss probe (see below) measured the actual head-of-line cost at
+50 ms RTT: even at 5 % receive-side loss, the worst inter-snapshot gap was 164 ms —
+under one retransmit cycle, absorbed by the 100 ms snapshot cadence. Re-probed at
+200 ms (WAN) RTT by networking rework 3
+(`docs/reviews/plan-networking-rework-3-2026-07-13.md`), the decision gate (p99 >
+250 ms or max > 500 ms) still was not numerically breached, but the underlying
+mechanism it approximates — a single lost packet stalling every later snapshot on
+the one reliable stream until the retransmit lands — was real (loss pushed max up
+40-75 ms over the 0 %-loss floor at both RTTs), so the rework built the datagram
+snapshot path anyway: `ServerMsg::Snapshot` (states + intent ack) now rides an
+unreliable QUIC datagram, latest-wins by a per-connection tick guard, while identity
+(`AoiDelta`: enters/leaves) stays on the reliable stream. After-probe numbers
+(`docs/benchmarks/BASELINE.md`) show gaps bound to cadence multiples (p99 ≤ 208 ms)
+regardless of RTT, and move intents gained matching last-3 redundancy on their own
+datagram lane. The `read_frame`/broadcast hygiene fixes noted in the original
+writeup (O(len) `buf.remove(0)`, per-connection payload clone) were fixed
+regardless — see gap C.
 
 ### A. Prefab spawn cost — measured and fixed
 `ComponentLoader` now parses each component's RON once per prefab and produces a

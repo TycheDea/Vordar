@@ -192,10 +192,15 @@ soak: bots=400 input_hz=60.0 input_p99_ms=18.73 post_hz=60.0 post_p99_ms=20.31 k
 - `post_hz` now reads 60.0 (the `PostUpdate` phase rate) rather than 10.0 (the
   per-client snapshot rate) — see the architecture note above.
 
-### Packet-loss probe — `loss` (real QUIC, below-QUIC datagram drop, gap C)
+### Packet-loss probe — `loss` (real QUIC, below-QUIC datagram drop, gap C;
+before/after networking rework 3, `docs/reviews/plan-networking-rework-3-2026-07-13.md`)
 
 **Downstream (server→client) inter-snapshot gaps**, one wandering mover + one lossy
-observer, 30 s window per (RTT, loss) cell:
+observer, 30 s window per (RTT, loss) cell.
+
+**Before** (`ServerMsg::Snapshot` on the one reliable stream — rework 3's finding 1,
+captured before any datagram lane exists; 50 ms rows are the original 2026-07-11
+measurement, kept for provenance):
 
 ```
 rtt= 50ms loss= 0%  snapshots=300  gap_ms p50=100 p99=116 max=117
@@ -208,24 +213,47 @@ rtt=200ms loss= 3%  snapshots=300  gap_ms p50=101 p99=160 max=166
 rtt=200ms loss= 5%  snapshots=300  gap_ms p50=101 p99=157 max=164
 ```
 
-The 50 ms rows are the original 2026-07-11 measurement (kept for provenance). The
-**200 ms rows are the pre-datagram baseline for rework 3** ("Every message class
-rides one reliable ordered stream — head-of-line blocking by design",
-`docs/reviews/plan-networking-rework-3-2026-07-13.md`), captured by that plan's
-finding 1 before any datagram lane exists. Decision gate for the datagram snapshot
-path (p99 > 250 ms or max > 500 ms at 1-5 % loss): at 200 ms RTT the worst observed
-is p99=160 ms / max=166 ms (3 % loss) — the gate is **not breached** by this
-measurement, which contradicts the plan's arithmetic expectation that one retransmit
-cycle at WAN RTT would exceed it. The rework proceeds regardless: the mechanism the
-gate approximates — a single lost packet still stalls every later snapshot on the
-one reliable stream until the retransmit lands — is visible directly in these rows
-(loss pushes max up 40-75 ms over the 0 %-loss floor at both RTTs) even though the
-numeric threshold holds. These rows are what rework 3's final after-probe compares
-against.
+Decision gate for the datagram snapshot path (p99 > 250 ms or max > 500 ms at
+1-5 % loss): at 200 ms RTT the worst observed was p99=160 ms / max=166 ms (3 % loss)
+— the gate was **not breached** by this before-measurement, which contradicted the
+plan's arithmetic expectation that one retransmit cycle at WAN RTT would exceed it.
+The rework proceeded regardless: the mechanism the gate approximates — a single lost
+packet stalling every later snapshot on the one reliable stream until the retransmit
+lands — was visible directly in these rows (loss pushed max up 40-75 ms over the
+0 %-loss floor at both RTTs) even though the numeric threshold held.
+
+**After** (`ServerMsg::Snapshot` on a datagram, latest-wins by tick — rework 3
+findings 2-5 landed; `loss_probe_inter_snapshot_gaps` now asserts `p99 <= 250 ms` at
+every cell as a permanent regression gate):
+
+```
+rtt= 50ms loss= 0%  snapshots=300  gap_ms p50=99  p99=113 max=115
+rtt= 50ms loss= 1%  snapshots=297  gap_ms p50=96  p99=200 max=203
+rtt= 50ms loss= 3%  snapshots=284  gap_ms p50=100 p99=207 max=300
+rtt= 50ms loss= 5%  snapshots=277  gap_ms p50=97  p99=204 max=298
+rtt=200ms loss= 0%  snapshots=300  gap_ms p50=101 p99=115 max=119
+rtt=200ms loss= 1%  snapshots=296  gap_ms p50=99  p99=197 max=202
+rtt=200ms loss= 3%  snapshots=284  gap_ms p50=100 p99=208 max=302
+rtt=200ms loss= 5%  snapshots=278  gap_ms p50=99  p99=204 max=294
+```
+
+p99 stays comfortably inside the 250 ms gate at both RTTs (worst 208 ms), and — the
+point of the rework — it no longer depends on RTT at all: a lost datagram is simply
+skipped, so gaps settle at cadence multiples (~100 ms with no consecutive loss,
+~200 ms with one, ~300 ms with two in a row) regardless of how long a retransmit
+would have taken. Max is *higher* than the before numbers at 3-5 % loss (298-302 ms
+vs 163-193 ms) — expected and correct: the old stream redelivered a lost snapshot
+after one retransmit cycle (bounded by RTT) and every later snapshot queued behind
+it; the new datagram path never redelivers, so a rare run of 2-3 consecutive losses
+costs 2-3 cadence periods outright instead of one bounded stall. Both stay far under
+the 500 ms max gate.
 
 **Upstream (client→server) applied-intent lag**
 (`Snapshot::last_processed_seq` vs the bot's own send counter, in ticks),
-8 s window per (RTT, loss) cell:
+8 s window per (RTT, loss) cell.
+
+**Before** (`ClientMsg::MoveIntent`, one per tick on the one reliable stream —
+rework 3's finding 1):
 
 ```
 rtt= 50ms upstream loss= 0%  lag p50=6  p99=9  max=9
@@ -240,12 +268,36 @@ rtt=200ms upstream loss= 5%  lag p50=13 p99=16 max=17
 rtt=200ms upstream loss=60%  lag p50=21 p99=43 max=46
 ```
 
-At realistic WAN loss (0-5 %) applied-intent lag stays within a couple of ticks of
+At realistic WAN loss (0-5 %) applied-intent lag stayed within a couple of ticks of
 the 0 %-loss baseline at both RTTs — QUIC's retransmission recovers within roughly
-one snapshot period at these rates, same conclusion the original 50 ms-only probe
-reached. `EXTREME_LOSS` (60 %) exists only to prove the stall mechanism is real:
-lag roughly quadruples over baseline at both RTTs (41 vs 9 ticks at 50 ms RTT; 46
-vs 16 ticks at 200 ms RTT).
+one snapshot period at these rates. `EXTREME_LOSS` (60 %) proved the stall mechanism
+was real: lag roughly quadrupled over baseline at both RTTs (41 vs 9 ticks at 50 ms
+RTT; 46 vs 16 ticks at 200 ms RTT).
+
+**After** (`ClientMsg::MoveIntents`, last-3 redundancy on a datagram — rework 3
+finding 5 landed; `loss_probe_upstream_intent_lag` now asserts `EXTREME_LOSS` lag
+stays `> baseline` (impairment still reaches the transport) but `< baseline * 3`
+(redundancy bounds the damage) as a permanent regression gate):
+
+```
+rtt= 50ms upstream loss= 0%  lag p50=6  p99=9  max=9
+rtt= 50ms upstream loss= 1%  lag p50=6  p99=9  max=9
+rtt= 50ms upstream loss= 3%  lag p50=6  p99=9  max=10
+rtt= 50ms upstream loss= 5%  lag p50=6  p99=9  max=10
+rtt= 50ms upstream loss=60%  lag p50=8  p99=14 max=14
+rtt=200ms upstream loss= 0%  lag p50=13 p99=16 max=17
+rtt=200ms upstream loss= 1%  lag p50=13 p99=16 max=17
+rtt=200ms upstream loss= 3%  lag p50=13 p99=16 max=16
+rtt=200ms upstream loss= 5%  lag p50=13 p99=16 max=17
+rtt=200ms upstream loss=60%  lag p50=15 p99=20 max=22
+```
+
+The improvement is the point of finding 5: at `EXTREME_LOSS` (60 %), applied-intent
+lag now stays within ~1.5x of the 0 %-loss baseline at both RTTs (14 vs 9 ticks at
+50 ms RTT; 22 vs 17 ticks at 200 ms RTT) instead of roughly quadrupling — last-3
+redundancy means a seq is only truly lost if all three datagrams carrying it drop,
+so the applied ack keeps pace with the send counter instead of queuing behind a
+stalled reliable stream.
 
 Re-probe if RTT or loss assumptions change materially (e.g. mobile/satellite
 clients above 200 ms).
@@ -268,7 +320,8 @@ Ranked by how soon each path becomes the limiter, post-fix:
    now passes at 18.7 ms p99 vs a 25 ms budget), enemy AI (idle/aggro paths no
    longer scale with player count), separation (~40 ns/pair), prefab spawn (677 ns/
    spawn), client apply_snapshot (941 ns at A=64), grid rebuild/query, postcard
-   encode/decode, packet loss up to 5 % (164 ms worst-case gap vs a 250/500 ms gate).
+   encode/decode, packet loss up to 5 % at both 50 ms and 200 ms RTT (208 ms p99 /
+   302 ms max worst-case datagram-snapshot gap vs a 250/500 ms gate — rework 3).
 
 Implication for future work: with structural items #1–#4 fixed, the sim has broad
 headroom at the design point (200 players, 200 NPCs). The next real constraint is
