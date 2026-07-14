@@ -15,7 +15,7 @@ use engine_net::{ConnId, NetLimits, NetMetrics, NetServer, ServerEvent};
 use glam::{Vec2, Vec3};
 use hecs::Entity;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -34,6 +34,12 @@ use vordar_protocol::{
     decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, MoveIntentEntry, ServerMsg,
     WirePos, PROTOCOL_VERSION, SNAPSHOT_HZ, TICK_HZ,
 };
+
+mod login;
+mod repl_ids;
+
+use login::LoginFailures;
+use repl_ids::ReplIds;
 
 /// Lag-compensation rewind cap (DESIGN.md §3): high-latency players get
 /// degraded forgiveness, not infinite rewind.
@@ -180,45 +186,6 @@ struct PlayerConn {
     rr_cursor: usize,
 }
 
-/// Zone-local wire ids for hecs entities (protocol v10, networking rework 5
-/// finding 1): hecs `Entity` bits are always ≥ 2³² (the generation packed
-/// into the upper half), forcing a 5+ byte postcard varint on every wire
-/// reference. `id_for` assigns a small monotonic `u32` the first time any
-/// wire message references an entity; ids are shared zone-wide (not per
-/// connection) since some frames — `HitResult`, `EntityDied` — are encoded
-/// once and cloned to many connections. Ids are never reused: hecs
-/// generations mean a reused `Entity` slot compares unequal to the old one
-/// stored here, so `sweep` can drop a despawned entity's entry without any
-/// risk of a stale id later aliasing a new entity.
-struct ReplIds {
-    by_entity: HashMap<Entity, u32>,
-    next: u32,
-}
-
-impl ReplIds {
-    fn new() -> Self {
-        Self { by_entity: HashMap::new(), next: 1 }
-    }
-
-    /// The existing wire id for `entity`, or a freshly assigned one.
-    fn id_for(&mut self, entity: Entity) -> u32 {
-        if let Some(&id) = self.by_entity.get(&entity) {
-            return id;
-        }
-        let id = self.next;
-        self.next += 1;
-        self.by_entity.insert(entity, id);
-        id
-    }
-
-    /// Drop entries for entities no longer alive — bolts and dead enemies
-    /// despawn continuously, so without this the map would grow unboundedly
-    /// over a zone's lifetime.
-    fn sweep(&mut self, world: &World) {
-        self.by_entity.retain(|&entity, _| world.contains(entity));
-    }
-}
-
 pub struct NetServerState {
     server: NetServer,
     db: DbHandle,
@@ -333,54 +300,6 @@ fn cooldown_remainders(ready: &HashMap<String, u64>, now: u64) -> HashMap<String
             (remaining > 0).then(|| (id.clone(), remaining))
         })
         .collect()
-}
-
-/// Failure window for the per-IP login rate limiter (networking rework 1,
-/// finding 4): failure timestamps older than this are pruned before every
-/// check.
-const LOGIN_FAIL_WINDOW_MICROS: u64 = 10_000_000;
-/// Failures within the window before further logins from that IP are denied
-/// `RateLimited`.
-const MAX_LOGIN_FAILURES: usize = 5;
-
-/// Failed-login ledger, per source IP (networking rework 1, finding 4):
-/// bounds credential brute-force / name-probing without touching successful
-/// logins — every multi-bot test, the 200-bot soak, and the dev single-player
-/// pack log in from 127.0.0.1, so a limit on SUCCESSFUL logins would need
-/// config plumbing through every server constructor just to keep the
-/// workspace green. Only failures count.
-struct LoginFailures {
-    by_ip: HashMap<IpAddr, VecDeque<u64>>,
-}
-
-impl LoginFailures {
-    fn new() -> Self {
-        Self { by_ip: HashMap::new() }
-    }
-
-    /// Record a failed login attempt from `ip` at server time `now`.
-    fn record(&mut self, ip: IpAddr, now: u64) {
-        self.by_ip.entry(ip).or_default().push_back(now);
-    }
-
-    /// Prune stamps older than `LOGIN_FAIL_WINDOW_MICROS` and report whether
-    /// `ip` is currently over `MAX_LOGIN_FAILURES` within the window. An IP
-    /// whose stamps all age out is dropped from the map entirely — pruning
-    /// happens on every login attempt (the Login arm calls this before
-    /// anything else), so the ledger cannot grow unboundedly across a long
-    /// server lifetime.
-    fn is_limited(&mut self, ip: IpAddr, now: u64) -> bool {
-        let Some(stamps) = self.by_ip.get_mut(&ip) else { return false };
-        while stamps.front().is_some_and(|&t| now.saturating_sub(t) > LOGIN_FAIL_WINDOW_MICROS) {
-            stamps.pop_front();
-        }
-        let limited = stamps.len() >= MAX_LOGIN_FAILURES;
-        let empty = stamps.is_empty();
-        if empty {
-            self.by_ip.remove(&ip);
-        }
-        limited
-    }
 }
 
 /// Connections whose player is within AOI range of `center` — the interest-
@@ -1718,74 +1637,5 @@ mod tests {
         assert!(!remainders.contains_key("exactly_now"), "an elapsed cooldown must not persist");
         assert!(!remainders.contains_key("long_expired"), "an already-expired cooldown must not persist");
         assert_eq!(remainders.len(), 1, "only the still-cooling skill should remain: {remainders:?}");
-    }
-
-    /// Finding 4 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md, with
-    /// fabricated timestamps (no real 10 s sleeps): `LoginFailures` must
-    /// tolerate `MAX_LOGIN_FAILURES - 1` failures, deny at
-    /// `MAX_LOGIN_FAILURES` within the window, and forget the IP entirely
-    /// once every stamp has aged out — a stale, empty ledger entry must not
-    /// linger forever.
-    #[test]
-    fn login_failures_deny_at_five_and_forget_after_the_window_drains() {
-        let ip: IpAddr = "203.0.113.7".parse().unwrap();
-        let mut failures = LoginFailures::new();
-        let t0 = 1_000_000_000u64;
-
-        for i in 0..4u64 {
-            failures.record(ip, t0 + i);
-        }
-        assert!(!failures.is_limited(ip, t0 + 4), "4 failures within the window must not be limited");
-
-        failures.record(ip, t0 + 4);
-        assert!(failures.is_limited(ip, t0 + 4), "the 5th failure within the window must be limited");
-
-        let after_window = t0 + 4 + LOGIN_FAIL_WINDOW_MICROS + 1;
-        assert!(!failures.is_limited(ip, after_window), "failures aged out of the window must not still be limited");
-        assert!(
-            !failures.by_ip.contains_key(&ip),
-            "an IP with no failures left in the window must be dropped, not merely zeroed"
-        );
-    }
-
-    /// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
-    /// `ReplIds` must hand back the SAME id on every subsequent lookup of an
-    /// entity, and assign distinct, monotonically increasing ids to distinct
-    /// entities — the wire-compactness contract the whole finding rests on.
-    #[test]
-    fn repl_ids_assign_stable_monotonic_ids() {
-        let mut world = World::new();
-        let e1 = world.spawn(());
-        let e2 = world.spawn(());
-        let mut ids = ReplIds::new();
-
-        let id1_first = ids.id_for(e1);
-        let id1_again = ids.id_for(e1);
-        assert_eq!(id1_first, id1_again, "the same entity must always get the same wire id");
-
-        let id2 = ids.id_for(e2);
-        assert_ne!(id1_first, id2, "distinct entities must get distinct wire ids");
-        assert!(id2 > id1_first, "ids are assigned monotonically as entities are first referenced");
-    }
-
-    /// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
-    /// `sweep` must drop a despawned entity's mapping, and a fresh entity
-    /// (even one that reuses the despawned entity's hecs slot at a new
-    /// generation) must get a BRAND NEW id — never the stale one — so a
-    /// lingering client reference can never alias a different live entity.
-    #[test]
-    fn repl_ids_sweep_drops_despawned_and_never_reuses_ids() {
-        let mut world = World::new();
-        let e1 = world.spawn(());
-        let mut ids = ReplIds::new();
-        let id1 = ids.id_for(e1);
-
-        world.despawn(e1).unwrap();
-        ids.sweep(&world);
-        assert!(!ids.by_entity.contains_key(&e1), "a despawned entity's id mapping must be forgotten");
-
-        let e2 = world.spawn(()); // may reuse e1's hecs slot at a new generation
-        let id2 = ids.id_for(e2);
-        assert_ne!(id1, id2, "a fresh entity must never be handed a stale wire id");
     }
 }
