@@ -7,9 +7,7 @@
 // Welcomed, a second zone is completely unaffected, and the shared shutdown
 // flag still drains everything cleanly afterward.
 
-mod common;
-
-use common::{join_with_deadline, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
+use test_support::{join_with_deadline, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::Resources;
 use engine_core::World;

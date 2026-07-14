@@ -6,9 +6,7 @@
 //
 //   cargo test -p vordar-server --release --test soak -- --ignored --nocapture
 
-mod common;
-
-use common::{percentile, Bot, MetricMirror};
+use test_support::{percentile, Bot, MetricMirror};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::Resources;
 use engine_core::World;
@@ -98,7 +96,7 @@ fn drive(mut bots: Vec<(Bot, Wander)>, stop: Arc<AtomicBool>) -> std::thread::Jo
 #[test]
 #[ignore = "soak — run with --release --ignored"]
 fn phase7_soak_200_bots_hold_tick_budget() {
-    common::workspace_root();
+    test_support::workspace_root();
     if cfg!(debug_assertions) {
         eprintln!("WARNING: soak running in debug — results will not be representative");
     }

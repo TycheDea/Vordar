@@ -2,9 +2,7 @@
 // datagram budgets, intent redundancy. Isolated from connectivity, combat, and
 // persistence concerns.
 
-mod common;
-
-use common::{settle, workspace_root, Bot, PopulateSystem};
+use test_support::{settle, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, SystemOrder};
 use std::net::SocketAddr;
 use std::time::Duration;

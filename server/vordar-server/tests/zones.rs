@@ -1,9 +1,7 @@
 // Phase 7 e2e: multi-zone server, portal transfer handoff, login routing,
 // shared world clock, and snapshot throttling under crowd load.
 
-mod common;
-
-use common::{spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot, PopulateSystem};
+use test_support::{spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, SystemOrder};
 use glam::Vec3;
 use std::collections::HashSet;

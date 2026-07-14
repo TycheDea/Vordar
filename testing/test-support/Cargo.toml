@@ -1,0 +1,14 @@
+[package]
+name    = "test-support"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+engine-core     = { path = "../../smirk/engine-core" }
+engine-app      = { path = "../../smirk/engine-app", default-features = false }
+engine-net      = { path = "../../smirk/engine-net" }
+vordar-game     = { path = "../../game/vordar-game" }
+vordar-protocol = { path = "../../game/vordar-protocol" }
+vordar-server   = { path = "../../server/vordar-server" }
+glam            = { workspace = true }

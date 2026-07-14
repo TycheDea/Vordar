@@ -6,9 +6,7 @@
 // sets `AppExit` within the same tick `run_headless` checks it, so the loop
 // returns with the final saves already queued in the `DbWorker`.
 
-mod common;
-
-use common::{join_with_deadline, settle, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
+use test_support::{join_with_deadline, settle, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

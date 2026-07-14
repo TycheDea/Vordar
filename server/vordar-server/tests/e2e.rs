@@ -13,9 +13,7 @@
 //   phase5_world_clock_and_blood_moon — world time + scripted events
 //   far_bot_never_sees_out_of_aoi_mechanic — AOI scope for damage telegraphs
 
-mod common;
-
-use common::{settle, workspace_root, Bot, PopulateSystem};
+use test_support::{settle, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;

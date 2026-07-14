@@ -1,9 +1,7 @@
 // Security and metrics tests: login validation, rate limiting, reject counting.
 // Isolated from connectivity, combat, and persistence concerns.
 
-mod common;
-
-use common::{name_token, raw_login_probe, workspace_root, Bot, MetricMirror};
+use test_support::{name_token, raw_login_probe, workspace_root, Bot, MetricMirror};
 use engine_app::scheduler::{Phase, SystemOrder};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};

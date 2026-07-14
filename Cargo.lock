@@ -3943,6 +3943,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-support"
+version = "0.1.0"
+dependencies = [
+ "engine-app",
+ "engine-core",
+ "engine-net",
+ "glam 0.32.1",
+ "vordar-game",
+ "vordar-protocol",
+ "vordar-server",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4378,6 +4391,7 @@ dependencies = [
  "ron",
  "rusqlite",
  "sha2",
+ "test-support",
  "vordar-game",
  "vordar-protocol",
 ]

@@ -12,9 +12,7 @@
 //
 //   cargo test -p vordar-server --release --test loss -- --ignored --nocapture
 
-mod common;
-
-use common::{percentile, Bot};
+use test_support::{percentile, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -29,7 +27,7 @@ const WAN_RTTS: [Duration; 2] = [Duration::from_millis(50), Duration::from_milli
 #[test]
 #[ignore = "loss probe — run with --release --ignored"]
 fn loss_probe_inter_snapshot_gaps() {
-    common::workspace_root();
+    test_support::workspace_root();
     if cfg!(debug_assertions) {
         eprintln!("WARNING: loss probe running in debug — results will not be representative");
     }
@@ -52,7 +50,7 @@ fn loss_probe_inter_snapshot_gaps() {
             let name = format!("observer-{}-{}", rtt.as_millis(), (loss * 100.0).round() as u32);
             let mut observer = Bot::connect_impaired_as(addr, &name, rtt, loss);
             observer.wait_for("observer welcomed", Duration::from_secs(30), |b| b.player_id.is_some());
-            common::settle(&mut observer, Duration::from_secs(2));
+            test_support::settle(&mut observer, Duration::from_secs(2));
             observer.snapshot_at.clear();
 
             // The mover oscillates near spawn (stays inside the observer's AOI).
@@ -138,7 +136,7 @@ const EXTREME_LOSS: f32 = 0.6;
 #[test]
 #[ignore = "loss probe — run with --release --ignored"]
 fn loss_probe_upstream_intent_lag() {
-    common::workspace_root();
+    test_support::workspace_root();
     if cfg!(debug_assertions) {
         eprintln!("WARNING: loss probe running in debug — results will not be representative");
     }
@@ -158,7 +156,7 @@ fn loss_probe_upstream_intent_lag() {
             let name = format!("upstreamer-{}-{}", rtt.as_millis(), (loss * 100.0).round() as u32);
             let mut bot = Bot::connect_upstream_impaired_as(addr, &name, rtt, loss);
             bot.wait_for("bot welcomed", Duration::from_secs(30), |b| b.player_id.is_some());
-            common::settle(&mut bot, Duration::from_secs(2));
+            test_support::settle(&mut bot, Duration::from_secs(2));
 
             let mut dir = glam::Vec2::X;
             let mut lags: Vec<u32> = Vec::new();

@@ -1,9 +1,7 @@
 // Persistence tests: character saves, reconnection, restarts, cooldown remainders.
 // Isolated from connectivity, combat, and wire-format concerns.
 
-mod common;
-
-use common::{settle, temp_db, workspace_root, Bot};
+use test_support::{settle, temp_db, workspace_root, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 

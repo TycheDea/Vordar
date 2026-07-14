@@ -1,9 +1,7 @@
 // Combat mechanics tests: scheduled AOE, rend, onslaught. Isolated from
 // connectivity, persistence, and wire-format concerns.
 
-mod common;
-
-use common::{settle, workspace_root, Bot};
+use test_support::{settle, workspace_root, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_protocol::{encode, ClientMsg};
