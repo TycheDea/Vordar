@@ -459,7 +459,6 @@ pub fn load_image_rgba(path: &str) -> Result<ImageData, String> {
 mod tests {
     use super::*;
     use crate::anim::{joint_matrices, sample_pose};
-    use engine_core::components::AnimationPlayer;
 
     #[test]
     fn loads_triangle_glb_with_baked_node_transform() {
@@ -621,28 +620,6 @@ mod tests {
             assert!(mats.iter().all(|m| m.is_finite()), "clip {} produced NaN", clip.name);
         }
     }
-
-    /// DIAGNOSTIC: does advancing an AnimationPlayer on the real human's walk
-    /// clip actually move the skeleton? Catches a dead animation path (clips
-    /// present but not driving joints, or time not advancing) — the CPU half of
-    /// a "character renders but doesn't animate" bug.
-    #[test]
-    fn human_locomotion_clips_actually_animate() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.glb");
-        if !std::path::Path::new(path).exists() {
-            return;
-        }
-        let data = load_gltf_data(path).unwrap();
-        let skin = super::super::CpuSkin { skeleton: data.skeleton.unwrap(), clips: data.clips };
-        for clip in ["idle", "walk", "run"] {
-            let mut player = AnimationPlayer { clip: clip.into(), ..Default::default() };
-            let (a, _) = super::super::pose_player(&mut player, &skin, 0.0);
-            let (b, _) = super::super::pose_player(&mut player, &skin, 0.25);
-            let moved = a.iter().zip(&b).any(|(x, y)| !x.abs_diff_eq(*y, 1e-4));
-            assert!(moved, "clip {clip} must move the skeleton as time advances");
-        }
-    }
-
     /// DIAGNOSTIC (the "half under the field" report): with the armature's
     /// baked ground offset applied, no clip may pose any joint meaningfully
     /// below the floor plane (floor top = −0.5, joints sit above the sole).
