@@ -31,6 +31,9 @@ VORDAR_SOAK_BOTS=400 cargo test -p vordar-server --release --test soak -- --igno
 
 # Packet-loss probe (real QUIC, below-QUIC datagram drop, 50 ms and 200 ms simulated RTT):
 cargo test -p vordar-server --release --test loss -- --ignored --nocapture
+
+# Remote render smoothness probe (real QUIC, WAN-impaired observer):
+cargo test -p vordar-client --release -- --ignored --nocapture remote_render_smoothness_under_loss_probe
 ```
 
 Criterion's raw baselines live in `target/criterion` (gitignored); this file is
@@ -301,6 +304,40 @@ stalled reliable stream.
 
 Re-probe if RTT or loss assumptions change materially (e.g. mobile/satellite
 clients above 200 ms).
+
+### Remote render smoothness probe — `remote_render_smoothness_under_loss_probe`
+(client, real QUIC; networking rework 4,
+`docs/reviews/plan-networking-rework-4-2026-07-14.md` finding 3)
+
+The gap-C loss probes above measure arrival gaps and intent-ack lag only —
+neither says what a player actually SEES. This probe drives a real headless
+server, a real unimpaired "mover" bot walking ±X at 6 u/s (reversing every
+~2.17 s to stay in the 40-unit AOI), and a real WAN-impaired "observer"
+(100 ms RTT, 30 ms jitter, 3 % downstream loss) running the actual client
+systems (`NetReceiveSystem` + `NetInterpolateSystem`, `predict: false`) — it
+records the mover entity's rendered `Transform.position` after every Update
+tick over a 20 s window and asserts two permanent regression gates:
+
+- the longest run of consecutive zero-motion ticks (step < 1e-4) is `<= 5`
+  ticks (~83 ms — the pre-rework-4 client froze 10-18 ticks at every
+  late/lost snapshot instead);
+- p99 per-tick step is `<= 1.5x` nominal (0.15 u at 6 u/s/60 Hz — the
+  pre-rework-4 client's catch-up steps ran ~2x).
+
+```
+remote render smoothness: ticks=1200 step_u p50=0.1094 p99=0.1102 max=0.1467 longest_zero_run=0
+```
+
+Both gates pass with wide margin (p50/p99 sit almost exactly on the 0.1 u
+nominal step, and the window recorded zero freeze ticks at all in this run —
+the tick-indexed playback buffer (finding 1) and capped extrapolation
+(finding 2) absorb the WAN jitter/loss entirely inside interpolation). Sanity
+checked by temporarily zeroing `INTERP_DELAY_TICKS` (no buffer slack at all):
+the probe fails hard (p99 rises to ~0.30 u, close to 3x nominal), confirming
+the gates actually detect the freeze/warble regime they're meant to catch.
+
+Run: `cargo test -p vordar-client --release -- --ignored --nocapture
+remote_render_smoothness_under_loss_probe`.
 
 ## Budget shares & where the limits are
 

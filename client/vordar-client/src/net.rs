@@ -2185,4 +2185,290 @@ mod tests {
              corrections under SNAP_DISTANCE ({SNAP_DISTANCE})"
         );
     }
+
+    /// Nearest-rank percentile helper for the smoothness probe below — mirrors
+    /// `server/vordar-server/tests/loss.rs`'s `pct`.
+    fn pct(sorted: &[f32], p: f64) -> f32 {
+        sorted[((sorted.len() as f64 * p) as usize).min(sorted.len() - 1)]
+    }
+
+    /// Sleeps until the next precise 60 Hz tick boundary, then advances
+    /// `next` by exactly one tick. The connection-wait loops elsewhere in
+    /// this file pace themselves with a flat 16 ms sleep, which drifts ~4 %
+    /// fast against the true 16.667 ms tick — harmless for a coarse "did the
+    /// Welcome arrive yet" wait, but enough drift for an extra render call to
+    /// occasionally land inside the smoothness probe's degenerate
+    /// reversal-cancellation window (see `mover_tick`'s doc comment),
+    /// spuriously inflating its measured zero-motion run by one tick.
+    fn pace_tick(next: &mut Instant) {
+        *next += Duration::from_secs_f64(1.0 / TICK_HZ as f64);
+        let now = Instant::now();
+        if *next > now {
+            std::thread::sleep(*next - now);
+        } else {
+            *next = now; // fell behind — resync instead of trying to catch up
+        }
+    }
+
+    /// Sends the mover's next `ClientMsg::MoveIntents` datagram — the same
+    /// last-3 redundancy ring `NetSendInputSystem` keeps (net.rs:1203-1212) —
+    /// and reverses `dir`'s X sign every ~2 s so the mover walks back and
+    /// forth instead of leaving the observer's AOI (networking rework 4,
+    /// finding 3's smoothness probe). 2170 ms, not a whole multiple of the
+    /// 100 ms `SNAPSHOT_HZ` cadence, so a reversal's phase against the sample
+    /// boundaries drifts instead of relocking to the same offset every cycle.
+    /// `dir`'s Z component is a small constant (never reversed): a pure ±X
+    /// flip can make one buffered sample nearly *identical* to its neighbor
+    /// whenever the flip lands near a sample's midpoint (out, then most of
+    /// the way back, within one 100 ms interval) — a real linear-
+    /// interpolation artifact, not a freeze regression, but one that (when it
+    /// coincides with a lost/late next sample) can extrapolate from that
+    /// near-zero velocity for longer than this probe's zero-motion gate
+    /// allows. The steady Z drift guarantees no two samples are ever exactly
+    /// equal, so the interpolated segment is always genuinely moving.
+    fn mover_tick(
+        client: &NetClient,
+        seq: &mut u32,
+        ring: &mut VecDeque<MoveIntentEntry>,
+        dir: &mut Vec2,
+        last_reverse: &mut Instant,
+    ) {
+        const REVERSE_INTERVAL: Duration = Duration::from_millis(2170);
+        if last_reverse.elapsed() >= REVERSE_INTERVAL {
+            dir.x = -dir.x;
+            *last_reverse = Instant::now();
+        }
+        let Some(t_server_micros) = client.server_now_micros() else { return };
+        *seq += 1;
+        ring.push_back(MoveIntentEntry { seq: *seq, t_server_micros, dir: *dir });
+        if ring.len() > MOVE_RING_LEN {
+            ring.pop_front();
+        }
+        let intents: Vec<MoveIntentEntry> = ring.iter().cloned().collect();
+        client.send_datagram(encode(&ClientMsg::MoveIntents { intents }));
+    }
+
+    /// Networking rework 4, finding 3
+    /// (`docs/reviews/plan-networking-rework-4-2026-07-14.md`): the loss
+    /// probes (`server/vordar-server/tests/loss.rs`) measure arrival gaps and
+    /// intent-ack lag only — nothing measures what a player actually SEES: the
+    /// per-tick rendered motion of a remote entity under loss and jitter. A
+    /// real headless server, a real "mover" (a second raw `NetClient`, the
+    /// kicker pattern above) streaming `MoveIntents` datagrams ±X at 6 u/s,
+    /// and a real WAN-impaired "observer" running the actual client systems
+    /// (`NetReceiveSystem` + `NetInterpolateSystem`, `predict: false` — a
+    /// non-predicting own player is buffered like any remote) prove the
+    /// fixed-delay playback buffer (findings 1-2) keeps the rendered path
+    /// continuous instead of freezing/warbling at every late or lost
+    /// snapshot. Permanent regression gates, run like the loss probes:
+    /// `cargo test -p vordar-client --release -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "loss probe — run with --release --ignored --nocapture"]
+    fn remote_render_smoothness_under_loss_probe() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::env::set_current_dir(&root).unwrap();
+        if cfg!(debug_assertions) {
+            eprintln!("WARNING: loss probe running in debug — results will not be representative");
+        }
+
+        const SPEED: f32 = 6.0;
+        const WINDOW: Duration = Duration::from_secs(20);
+        const SETTLE: Duration = Duration::from_secs(2);
+
+        let addr: SocketAddr = "127.0.0.1:25404".parse().unwrap();
+        std::thread::spawn(move || {
+            vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(60 * 60));
+        });
+        std::thread::sleep(Duration::from_millis(300));
+
+        // The mover: a second raw NetClient (the kicker pattern above) that
+        // logs in and streams MoveIntents — unimpaired; only the observer's
+        // connection below carries the WAN impairment.
+        let mut mover = NetClient::connect(addr, PROTOCOL_VERSION).expect("mover connect");
+        let mut mover_seq = 0u32;
+        let mut mover_ring: VecDeque<MoveIntentEntry> = VecDeque::new();
+        // Small constant Z drift alongside the ±X reversal — see
+        // `mover_tick`'s doc comment for why this is needed.
+        let mut mover_dir = Vec2::new(1.0, 0.1).normalize();
+        let mut last_reverse = Instant::now();
+        let mover_id = {
+            let mut id = None;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                for ev in mover.poll() {
+                    match ev {
+                        ClientEvent::Connected => {
+                            mover.send(encode(&ClientMsg::Login {
+                                name: "smoothness-mover".into(),
+                                token: name_token("smoothness-mover"),
+                            }));
+                        }
+                        ClientEvent::Message(data) => {
+                            if let Some(ServerMsg::Welcome { player_id }) = decode::<ServerMsg>(&data) {
+                                id = Some(player_id);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if id.is_some() {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "mover never got its Welcome");
+                std::thread::sleep(Duration::from_millis(16));
+            }
+            id.unwrap()
+        };
+
+        // The observer: the onslaught test's world verbatim (prefab registry
+        // + real NetReceiveSystem/NetInterpolateSystem), connected WAN-
+        // impaired (100 ms RTT, 30 ms jitter, 3 % downstream loss).
+        let mut registry = engine_core::prefab::ComponentRegistry::new();
+        engine_core::prefab::register_core_components(&mut registry);
+        registry.register::<Player>("Player");
+        registry.register::<vordar_game::enemies::Enemy>("Enemy");
+        registry.register::<vordar_game::ContactDamage>("ContactDamage");
+        registry.register::<vordar_game::CombatStats>("CombatStats");
+        registry.register::<vordar_game::class::ClassId>("Class");
+        registry.register::<vordar_game::class::RaceId>("Race");
+        registry.register::<vordar_game::vfx::VfxTrail>("VfxTrail");
+        let mut prefabs = engine_core::prefab::PrefabLibrary::new();
+        prefabs.load_dir("content/prefabs");
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(registry);
+        resources.insert(prefabs);
+        resources.insert(DespawnQueue::new());
+        resources.insert(Time::new());
+        resources.insert(WorldTime { offset_micros: 0, synced: false });
+        resources.insert(NetClientState {
+            client: Some(
+                NetClient::connect_impaired(addr, PROTOCOL_VERSION, engine_net::Impairment {
+                    rtt: Duration::from_millis(100),
+                    jitter: Duration::from_millis(30),
+                    downstream_loss: 0.03,
+                    ..Default::default()
+                })
+                .expect("observer connect"),
+            ),
+            server_addr: addr,
+            user: "smoothness-observer".into(),
+            token: name_token("smoothness-observer"),
+            login_denied: false,
+            own_id: None,
+            entities: HashMap::new(),
+            prefab_names: Vec::new(),
+            seq: 0,
+            predict: false,
+            pending: VecDeque::new(),
+            move_ring: VecDeque::new(),
+            correction: Vec3::ZERO,
+            simulated_rtt: Duration::from_millis(100),
+            reconnect: None,
+            latest_state_tick: 0,
+            playback: None,
+        });
+
+        let mut recv = NetReceiveSystem;
+        let mut render_sys = NetInterpolateSystem;
+        // Precise 60 Hz pacing (see `pace_tick`) — shared across every loop
+        // below so the whole run stays on one continuous tick boundary
+        // instead of drifting at each stage transition.
+        let mut next_tick = Instant::now();
+
+        // Welcome + clock sync, same wait the onslaught test uses.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            recv.run(&mut world, &mut resources, DT);
+            let ready = {
+                let state = resources.get::<NetClientState>().unwrap();
+                state.own_id.is_some() && state.client.as_ref().unwrap().server_now_micros().is_some()
+            };
+            if ready {
+                break;
+            }
+            assert!(Instant::now() < deadline, "observer never got Welcome + clock sync");
+            pace_tick(&mut next_tick);
+        }
+
+        // Wait for the mover's own entity to enter the observer's AOI.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mover_entity = loop {
+            mover_tick(&mover, &mut mover_seq, &mut mover_ring, &mut mover_dir, &mut last_reverse);
+            let _ = mover.poll();
+            recv.run(&mut world, &mut resources, DT);
+            render_sys.run(&mut world, &mut resources, DT);
+            if let Some(&e) = resources.get::<NetClientState>().unwrap().entities.get(&mover_id) {
+                break e;
+            }
+            assert!(Instant::now() < deadline, "observer never saw the mover's entity (id {mover_id}) in its AOI");
+            pace_tick(&mut next_tick);
+        };
+
+        // Let the buffer/playback cursor lock onto its steady-state delay
+        // before recording (mirrors loss.rs's `common::settle`).
+        let settle_deadline = Instant::now() + SETTLE;
+        while Instant::now() < settle_deadline {
+            mover_tick(&mover, &mut mover_seq, &mut mover_ring, &mut mover_dir, &mut last_reverse);
+            let _ = mover.poll();
+            recv.run(&mut world, &mut resources, DT);
+            render_sys.run(&mut world, &mut resources, DT);
+            pace_tick(&mut next_tick);
+        }
+
+        // The measurement window: record the mover entity's rendered
+        // Transform.position after every Update tick.
+        let mut prev_pos = world.get::<&Transform>(mover_entity).unwrap().position;
+        let mut steps: Vec<f32> = Vec::new();
+        let mut zero_run = 0u32;
+        let mut max_zero_run = 0u32;
+        let window_deadline = Instant::now() + WINDOW;
+        while Instant::now() < window_deadline {
+            mover_tick(&mover, &mut mover_seq, &mut mover_ring, &mut mover_dir, &mut last_reverse);
+            let _ = mover.poll();
+            recv.run(&mut world, &mut resources, DT);
+            render_sys.run(&mut world, &mut resources, DT);
+
+            let pos = world.get::<&Transform>(mover_entity).unwrap().position;
+            let step = (pos - prev_pos).length();
+            steps.push(step);
+            if step < 1e-4 {
+                zero_run += 1;
+                max_zero_run = max_zero_run.max(zero_run);
+            } else {
+                zero_run = 0;
+            }
+            prev_pos = pos;
+
+            pace_tick(&mut next_tick);
+        }
+
+        assert!(steps.len() > 500, "smoothness probe only recorded {} ticks — window too short", steps.len());
+        let nominal = SPEED / 60.0;
+        steps.sort_by(|a, b| a.total_cmp(b));
+        let p50 = pct(&steps, 0.50);
+        let p99 = pct(&steps, 0.99);
+        let max = *steps.last().unwrap();
+        println!(
+            "remote render smoothness: ticks={} step_u p50={:.4} p99={:.4} max={:.4} longest_zero_run={}",
+            steps.len(),
+            p50,
+            p99,
+            max,
+            max_zero_run
+        );
+        // Permanent regression gates (networking rework 4, finding 3): the
+        // pre-rework-4 client froze 10-18 ticks at every late/lost snapshot
+        // and then caught up at ~2x steps — both margins are >=2x here.
+        assert!(
+            max_zero_run <= 5,
+            "longest zero-motion run {max_zero_run} ticks exceeds the 5-tick (~83 ms) freeze gate"
+        );
+        assert!(
+            p99 <= 1.5 * nominal,
+            "p99 per-tick step {p99:.4} exceeds 1.5x nominal ({:.4}) — catch-up warble regression",
+            1.5 * nominal
+        );
+    }
 }
