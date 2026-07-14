@@ -1,7 +1,7 @@
 // NetServerPlugin — the seam between engine-net and the simulation.
 
 use crate::db::{CharacterRecord, DbHandle, DbLoaded, DbLoginOutcome, DbWorker};
-use engine_app::app::{App, AppExit};
+use engine_app::app::App;
 use engine_app::events::{EventBus, HealthDepleted};
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, System, SystemOrder};
@@ -16,7 +16,7 @@ use glam::{Vec2, Vec3};
 use hecs::Entity;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 use vordar_game::combat::buff::{ravager_mods, RavagerRageSystem};
@@ -29,17 +29,25 @@ use vordar_game::player::movement_velocity;
 use vordar_game::skills::AbilityEffect;
 use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
 use vordar_game::world::WorldTimeRes;
-use vordar_game::zones::{portal_hit, ZoneDef};
+use vordar_game::zones::ZoneDef;
 use vordar_protocol::{
     decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, MoveIntentEntry, ServerMsg,
     WirePos, PROTOCOL_VERSION, SNAPSHOT_HZ, TICK_HZ,
 };
 
+mod autosave;
 mod login;
 mod repl_ids;
+mod shutdown;
+mod transfer;
 
+pub use shutdown::ShutdownFlag;
+
+use autosave::AutosaveSystem;
 use login::LoginFailures;
 use repl_ids::ReplIds;
+use shutdown::ShutdownSystem;
+use transfer::ZoneTransferSystem;
 
 /// Lag-compensation rewind cap (DESIGN.md §3): high-latency players get
 /// degraded forgiveness, not infinite rewind.
@@ -83,8 +91,6 @@ const POST_HZ: f32 = TICK_HZ;
 /// run (still SNAPSHOT_HZ per client) — the fan-out cost splits into STAGGER
 /// slices instead of landing on one tick.
 const STAGGER: u64 = (POST_HZ / SNAPSHOT_HZ) as u64;
-/// Autosave every Nth PostUpdate run (60 Hz → ~30 s).
-const AUTOSAVE_TICKS: u64 = 1800;
 
 pub struct NetServerPlugin {
     pub addr: SocketAddr,
@@ -989,71 +995,6 @@ fn rewound_position(current: Vec3, speed: f32, history: &VecDeque<(u64, Vec2)>, 
     pos
 }
 
-/// Portal handoff (Phase 7): persist → despawn → redirect. The character is
-/// saved into the TARGET zone at the portal's arrival point, the body leaves
-/// this zone, and the client is told where to log in next. The CLIENT closes
-/// the connection — kicking here could outrace the Redirect frame (the
-/// Phase 6 takeover lesson). The eventual Disconnected finds no PlayerConn,
-/// so no stale save can clobber the transfer save.
-pub struct ZoneTransferSystem {
-    ticks: u64,
-}
-
-impl ZoneTransferSystem {
-    pub fn new() -> Self {
-        Self { ticks: 0 }
-    }
-}
-
-impl System for ZoneTransferSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        // PostUpdate runs at POST_HZ; transfers keep their 10 Hz cadence.
-        let due_now = self.ticks % STAGGER == 0;
-        self.ticks += 1;
-        if !due_now {
-            return;
-        }
-        let transfers: Vec<ConnId> = {
-            let state = resources.get::<NetServerState>().unwrap();
-            if state.zone.portals.is_empty() {
-                return;
-            }
-            state.conns.iter()
-                .filter(|(_, pc)| {
-                    world.get::<&Transform>(pc.entity)
-                        .is_ok_and(|tr| portal_hit(&state.zone.portals, tr.position).is_some())
-                })
-                .map(|(&conn, _)| conn)
-                .collect()
-        };
-
-        for conn in transfers {
-            let state = resources.get_mut::<NetServerState>().unwrap();
-            let Some(pc) = state.conns.get(&conn) else { continue };
-            let Ok(pos) = world.get::<&Transform>(pc.entity).map(|tr| tr.position) else { continue };
-            let portal = portal_hit(&state.zone.portals, pos).unwrap().clone();
-            let Some(&addr) = state.directory.get(&portal.target_zone) else {
-                // Content validation makes this unreachable; never strand the
-                // player in a half-transferred state over a config bug.
-                log::error!("portal targets unlisted zone '{}' — ignoring", portal.target_zone);
-                continue;
-            };
-            let pc = state.conns.remove(&conn).unwrap();
-            let health = world.get::<&Health>(pc.entity).map(|hp| hp.current).unwrap_or(100);
-            // Save FIRST: the FIFO db queue puts this ahead of the relogin
-            // load the redirected client is about to trigger in the target.
-            let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
-            state.db.save(
-                pc.name.clone(),
-                CharacterRecord { zone: portal.target_zone.clone(), pos: portal.target_pos, health, cooldowns },
-            );
-            state.server.send(conn, encode(&ServerMsg::Redirect { zone: portal.target_zone.clone(), addr }));
-            resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
-            log::info!("conn {conn}: '{}' transfers to zone '{}' via portal", pc.name, portal.target_zone);
-        }
-    }
-}
-
 /// Pick which AOI entries get a position update this snapshot: everything if
 /// the crowd fits the budget, else the `nearest` closest entries (by dist²,
 /// id-tiebroken) plus a round-robin rotation over the rest. Returns selected
@@ -1286,84 +1227,6 @@ impl System for DeathBroadcastSystem {
     }
 }
 
-/// Whether `conn`'s autosave falls due on this PostUpdate `tick` — spreads a
-/// crowd's saves across the whole AUTOSAVE_TICKS window (same trick as
-/// SnapshotBroadcastSystem's STAGGER, `conn % STAGGER == tick % STAGGER`
-/// above) instead of every connection landing on the exact same tick and
-/// bursting the DB worker's FIFO request channel, queuing any relogin load
-/// behind the whole wave (networking audit 2026-07-11, finding 13).
-fn autosave_due(conn: ConnId, tick: u64) -> bool {
-    conn % AUTOSAVE_TICKS == tick % AUTOSAVE_TICKS
-}
-
-/// Periodic character persistence: over each AUTOSAVE_TICKS window (~30 s),
-/// hand each connected player's position + health to the DB worker — one
-/// save per connection per window, staggered by `autosave_due` so a crowd's
-/// saves don't all land on the same tick. Fire-and-forget — disconnect-save
-/// covers the gap on clean exits.
-pub struct AutosaveSystem {
-    ticks: u64,
-}
-
-impl System for AutosaveSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let tick = self.ticks;
-        self.ticks += 1;
-        let state = resources.get_mut::<NetServerState>().unwrap();
-        for (&conn, pc) in &state.conns {
-            if !autosave_due(conn, tick) {
-                continue;
-            }
-            if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
-                state.db.save(
-                    pc.name.clone(),
-                    CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
-                );
-            }
-        }
-    }
-}
-
-/// Process-wide shutdown signal (networking rework 8, finding 3): `main`
-/// shares one `Arc<AtomicBool>` with its OS signal handler and inserts a
-/// clone into every zone App. Absent from every existing test/bench, which is
-/// exactly how `ShutdownSystem` tells "no shutdown wired" apart from "not
-/// shutting down yet".
-pub struct ShutdownFlag(pub Arc<AtomicBool>);
-
-/// On the shared flag: save every connected player's live state — the same
-/// save the disconnect path performs (`ServerEvent::Disconnected` above), just
-/// for everyone at once — and request the App's exit. Registered
-/// unconditionally by `install()`; a no-op wherever `ShutdownFlag` is absent
-/// or still false. No client notification here: `NetServer`'s Drop (finding
-/// 1) closes every connection with a reason when the App drops moments later.
-pub struct ShutdownSystem;
-
-impl System for ShutdownSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let flagged = resources.get::<ShutdownFlag>().is_some_and(|f| f.0.load(Ordering::Relaxed));
-        if !flagged {
-            return;
-        }
-        let state = resources.get_mut::<NetServerState>().unwrap();
-        let saved = state.conns.len();
-        for pc in state.conns.values() {
-            // Players still in `state.loading` have no entity yet — nothing
-            // to save.
-            if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
-                state.db.save(
-                    pc.name.clone(),
-                    CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
-                );
-            }
-        }
-        log::info!("zone '{}': shutdown flag set, saved {saved} connected player(s), requesting app exit", state.zone.name);
-        resources.get_mut::<AppExit>().unwrap().0 = true;
-    }
-}
-
 /// Benchmark seam (vordar-benches only): exposes just enough of the private
 /// snapshot/mechanic machinery to measure it. Sends to the fabricated ConnIds
 /// are silently dropped by engine-net's router (no such connection), so the
@@ -1586,36 +1449,6 @@ mod tests {
             metrics.rejects.load(Ordering::Relaxed), 1,
             "the future-stamped entry must still be counted as a reject"
         );
-    }
-
-    /// Regression test for the autosave burst (networking audit
-    /// 2026-07-11, finding 13). Before this fix, `AutosaveSystem` gated on
-    /// the global tick alone (`self.ticks % AUTOSAVE_TICKS != 0`), so every
-    /// connected player was handed to the DB worker on the exact same tick —
-    /// a crowd's worth of saves bursting the FIFO request channel and
-    /// queuing any relogin load behind the whole wave. `autosave_due` must
-    /// give each connection exactly one due tick per window, but spread a
-    /// crowd's due ticks across more than one tick of the window.
-    #[test]
-    fn autosave_spreads_a_crowd_across_the_window_instead_of_bursting() {
-        let conns: Vec<ConnId> = (1..=50).collect();
-        let mut due_ticks: HashSet<u64> = HashSet::new();
-        let mut due_count: HashMap<ConnId, u32> = HashMap::new();
-        for tick in 0..AUTOSAVE_TICKS {
-            for &conn in &conns {
-                if autosave_due(conn, tick) {
-                    due_ticks.insert(tick);
-                    *due_count.entry(conn).or_insert(0) += 1;
-                }
-            }
-        }
-        // Every connection autosaves exactly once per window.
-        for &conn in &conns {
-            assert_eq!(due_count.get(&conn).copied().unwrap_or(0), 1, "conn {conn} did not save exactly once");
-        }
-        // The 50-strong crowd's saves land on more than one tick — not a
-        // single-tick burst.
-        assert!(due_ticks.len() > 1, "all autosaves landed on the same tick: {due_ticks:?}");
     }
 
     /// Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
