@@ -2,13 +2,12 @@
 
 use crate::db::{CharacterRecord, DbHandle, DbLoaded, DbLoginOutcome, DbWorker};
 use engine_app::app::App;
-use engine_app::events::{EventBus, HealthDepleted};
+use engine_app::events::EventBus;
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_app::tick_rate::TickRate;
 use engine_core::components::{Health, Transform};
-use engine_core::prefab::{spawn_prefab, PrefabId, PrefabLibrary};
-use engine_core::spatial::SpatialGrid;
+use engine_core::prefab::{spawn_prefab, PrefabLibrary};
 use engine_core::traits::{DespawnQueue, Resources, SpawnContext};
 use engine_core::World;
 use engine_net::{ConnId, NetLimits, NetMetrics, NetServer, ServerEvent};
@@ -16,7 +15,6 @@ use glam::{Vec2, Vec3};
 use hecs::Entity;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 use vordar_game::combat::buff::{ravager_mods, RavagerRageSystem};
@@ -31,19 +29,22 @@ use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
 use vordar_game::world::WorldTimeRes;
 use vordar_game::zones::ZoneDef;
 use vordar_protocol::{
-    decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, MoveIntentEntry, ServerMsg,
-    WirePos, PROTOCOL_VERSION, SNAPSHOT_HZ, TICK_HZ,
+    decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg,
+    PROTOCOL_VERSION, SNAPSHOT_HZ, TICK_HZ,
 };
 
 mod autosave;
+mod broadcast;
 mod login;
 mod repl_ids;
 mod shutdown;
 mod transfer;
 
+pub use broadcast::SnapshotBroadcastSystem;
 pub use shutdown::ShutdownFlag;
 
 use autosave::AutosaveSystem;
+use broadcast::DeathBroadcastSystem;
 use login::LoginFailures;
 use repl_ids::ReplIds;
 use shutdown::ShutdownSystem;
@@ -71,15 +72,6 @@ const AOI_RADIUS: f32 = 40.0;
 /// Applied-intent history kept per connection for mechanic-resolve rewind
 /// (~530 ms at 60 Hz — covers MAX_REWIND plus resolve-tick slack).
 const HISTORY_CAP: usize = 32;
-/// Crowd throttling: at most this many `states` entries per snapshot. Only
-/// positions are capped — enters/leaves/known stay full-AOI, or the diff
-/// protocol would corrupt. ~64 × 17 B × 10 Hz ≈ 11 KB/s per client steady
-/// state, regardless of crowd size.
-const MAX_SNAPSHOT_STATES: usize = 64;
-/// Of the budget, the nearest N entities are always included; the rest of
-/// the AOI shares the remaining slots round-robin (full refresh within
-/// ~500 ms even in a 200-crowd; playback interpolation absorbs the lower rate).
-const NEAREST_GUARANTEED: usize = 32;
 /// Fixed server tick duration — each applied intent integrates exactly this.
 const TICK_DT: f32 = 1.0 / 60.0;
 /// PostUpdate runs at the sim rate; the 10 Hz systems below self-gate on it.
@@ -995,238 +987,6 @@ fn rewound_position(current: Vec3, speed: f32, history: &VecDeque<(u64, Vec2)>, 
     pos
 }
 
-/// Pick which AOI entries get a position update this snapshot: everything if
-/// the crowd fits the budget, else the `nearest` closest entries (by dist²,
-/// id-tiebroken) plus a round-robin rotation over the rest. Returns selected
-/// indices into `entries` and the advanced cursor. Pure — unit-tested.
-fn select_states(entries: &[(u32, f32)], cursor: usize, max: usize, nearest: usize) -> (Vec<usize>, usize) {
-    if entries.len() <= max {
-        return ((0..entries.len()).collect(), cursor);
-    }
-    let mut by_dist: Vec<usize> = (0..entries.len()).collect();
-    by_dist.sort_by(|&a, &b| {
-        entries[a].1.total_cmp(&entries[b].1).then(entries[a].0.cmp(&entries[b].0))
-    });
-    let mut selected: Vec<usize> = by_dist[..nearest].to_vec();
-    let in_nearest: HashSet<usize> = selected.iter().copied().collect();
-    // The rotation pool in stable id order, so the cursor sweeps the same
-    // sequence between snapshots and every entity refreshes within
-    // ceil(pool / budget) snapshots.
-    let mut pool: Vec<usize> = (0..entries.len()).filter(|i| !in_nearest.contains(i)).collect();
-    pool.sort_by_key(|&i| entries[i].0);
-    let budget = max - nearest;
-    for k in 0..budget {
-        selected.push(pool[(cursor + k) % pool.len()]);
-    }
-    (selected, cursor + budget)
-}
-
-pub struct SnapshotBroadcastSystem {
-    /// Per-run scratch, reused across runs: grid candidates, the dedupe set,
-    /// and the id set swapped with each conn's `known` (no per-conn realloc).
-    aoi_scratch: Vec<Entity>,
-    seen: HashSet<Entity>,
-    current_ids: HashSet<u32>,
-}
-
-impl SnapshotBroadcastSystem {
-    pub fn new() -> Self {
-        Self { aoi_scratch: Vec::new(), seen: HashSet::new(), current_ids: HashSet::new() }
-    }
-}
-
-impl System for SnapshotBroadcastSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let (tick, conn_players): (u64, Vec<(ConnId, Entity)>) = {
-            let state = resources.get_mut::<NetServerState>().unwrap();
-            state.tick += 1;
-            // Periodic world-clock re-sync (every ~10 s at POST_HZ).
-            if state.tick % 600 == 0 {
-                // Same cadence sweeps ReplIds: entities despawned since the
-                // last sweep (bolts, dead enemies) stop holding a wire id.
-                state.repl_ids.sweep(world);
-                let at_server_micros = state.server.now_micros();
-                let world_micros = state.world_at(at_server_micros);
-                state.server.broadcast(encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
-
-                // Periodic net metrics dump — the operational visibility the
-                // dead NetMetrics facade claimed but never provided.
-                let m = state.server.metrics();
-                log::info!(
-                    "net metrics: frames_in={} frames_out={} bytes_in={} bytes_out={} rejects={} writer_queue_depth={} busy_micros={}",
-                    m.frames_in.load(Ordering::Relaxed),
-                    m.frames_out.load(Ordering::Relaxed),
-                    m.bytes_in.load(Ordering::Relaxed),
-                    m.bytes_out.load(Ordering::Relaxed),
-                    m.rejects.load(Ordering::Relaxed),
-                    m.writer_queue_depth.load(Ordering::Relaxed),
-                    m.busy_micros.load(Ordering::Relaxed),
-                );
-            }
-            // Stagger: only this tick's slice of connections is served — each
-            // conn still gets exactly SNAPSHOT_HZ snapshots per second.
-            let tick = state.tick;
-            let conns = state.conns.iter()
-                .filter(|&(&conn, _)| conn % STAGGER == tick % STAGGER)
-                .map(|(&conn, pc)| (conn, pc.entity))
-                .collect();
-            (tick, conns)
-        };
-        if conn_players.is_empty() {
-            return;
-        }
-
-        // Per-client AOI: grid cells are coarse and multi-cell entities appear
-        // more than once, so dedupe and apply the exact radius test — a fuzzy
-        // border would make entities flap in and out between snapshots.
-        let mut per_conn: Vec<(ConnId, Vec<(Entity, Vec3, Option<i32>, f32)>)> = Vec::with_capacity(conn_players.len());
-        {
-            let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
-            // One view for the whole gather: the replication filter (PrefabId),
-            // position, and health come from a single lookup per candidate.
-            let mut repl_q = world.query::<(&Transform, &PrefabId, Option<&Health>)>();
-            let repl_view = repl_q.view();
-            for &(conn, player) in &conn_players {
-                let Ok(center) = world.get::<&Transform>(player).map(|t| t.position) else { continue };
-                self.aoi_scratch.clear();
-                grid.query_radius_into(center, AOI_RADIUS, &mut self.aoi_scratch);
-                self.seen.clear();
-                let mut current: Vec<(Entity, Vec3, Option<i32>, f32)> = Vec::with_capacity(self.aoi_scratch.len());
-                for &entity in &self.aoi_scratch {
-                    if !self.seen.insert(entity) {
-                        continue;
-                    }
-                    let Some((t, _, hp)) = repl_view.get(entity) else { continue };
-                    let dist_sq = t.position.distance_squared(center);
-                    if dist_sq > AOI_RADIUS * AOI_RADIUS {
-                        continue;
-                    }
-                    // None = no Health component (protocol v12) — never
-                    // flattened to 0, which used to conflate "no Health" with
-                    // "dead".
-                    let hp = hp.map(|h| h.current);
-                    current.push((entity, t.position, hp, dist_sq));
-                }
-                per_conn.push((conn, current));
-            }
-        }
-
-        let state = resources.get_mut::<NetServerState>().unwrap();
-        for (conn, current) in per_conn {
-            // Resolve each AOI candidate's zone-local wire id (assigning a
-            // fresh monotonic one on first reference) before touching this
-            // connection's PlayerConn — done here, not in the gather block
-            // above, because that block only holds an immutable SpatialGrid
-            // borrow of `resources`, not the `&mut NetServerState` id_for needs.
-            let ids: Vec<u32> = current.iter().map(|&(entity, ..)| state.repl_ids.id_for(entity)).collect();
-            let current: Vec<(u32, Entity, Vec3, Option<i32>, f32)> = ids
-                .into_iter()
-                .zip(current)
-                .map(|(id, (entity, pos, hp, dist_sq))| (id, entity, pos, hp, dist_sq))
-                .collect();
-            let Some(pc) = state.conns.get_mut(&conn) else { continue };
-            let by_name = state.prefab_table.as_ref().map(|(_, by_name)| by_name);
-
-            self.current_ids.clear();
-            self.current_ids.extend(current.iter().map(|&(id, ..)| id));
-            let leaves: Vec<u32> = pc.known.difference(&self.current_ids).copied().collect();
-            let enters: Vec<EntityState> = current
-                .iter()
-                .filter(|(id, ..)| !pc.known.contains(id))
-                .filter_map(|&(id, entity, pos, hp, _)| {
-                    let prefab_name = world.get::<&PrefabId>(entity).ok()?.0.clone();
-                    // A miss is unreachable in practice — spawn_prefab always
-                    // attaches PrefabId from the same PrefabLibrary the table
-                    // was built from (protocol v13, networking rework 5
-                    // finding 4) — but skip rather than crash the whole
-                    // snapshot over a content-bug edge case.
-                    let prefab = match by_name.and_then(|m| m.get(&prefab_name)) {
-                        Some(&idx) => idx,
-                        None => {
-                            log::error!("prefab '{prefab_name}' missing from the zone's prefab table");
-                            return None;
-                        }
-                    };
-                    Some(EntityState { id, prefab, pos: WirePos(pos), hp })
-                })
-                .collect();
-            // Crowd throttling: only `states` is budgeted — identity (enters/
-            // leaves/known) must track the full AOI or the diff corrupts.
-            let entries: Vec<(u32, f32)> = current.iter().map(|&(id, _, _, _, d)| (id, d)).collect();
-            let (selected, cursor) = select_states(&entries, pc.rr_cursor, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
-            pc.rr_cursor = cursor;
-            let states: Vec<EntityPos> = selected
-                .into_iter()
-                .map(|i| {
-                    let (id, _, pos, hp, _) = current[i];
-                    EntityPos { id, pos: WirePos(pos), hp }
-                })
-                .collect();
-            // The old known set becomes next conn's current_ids scratch.
-            std::mem::swap(&mut pc.known, &mut self.current_ids);
-
-            // Identity delta rides the reliable stream (ordering with
-            // PrefabTable/Welcome is what makes the diff protocol sound) and
-            // only when non-empty — steady state then sends no stream
-            // traffic at all (protocol v14, networking rework 3 finding 4).
-            if !enters.is_empty() || !leaves.is_empty() {
-                state.server.send(conn, encode(&ServerMsg::AoiDelta { tick, enters, leaves }));
-            }
-            // State update rides an unreliable datagram every snapshot
-            // interval: a lost one is simply skipped, since the next cadence
-            // supersedes it — this is the head-of-line blocking this rework
-            // exists to remove.
-            let last_processed_seq = pc.applied_seq;
-            state.server.send_datagram(conn, encode(&ServerMsg::Snapshot {
-                tick,
-                last_processed_seq,
-                states,
-            }));
-        }
-    }
-}
-
-/// Broadcasts `EntityDied` (v8) for entities whose Health depleted this tick.
-/// Phase::DespawnFlush, First — after DeathSystem emitted the event
-/// (CollisionResolve) but before the flush removes the entity, so its final
-/// position is still readable. Snapshots stop mentioning the entity the same
-/// tick; this message is the client's only death signal (corpse + burst).
-/// Sent only to connections whose known set contains the entity.
-pub struct DeathBroadcastSystem;
-
-impl System for DeathBroadcastSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let deaths: Vec<(Entity, Vec3)> = resources
-            .get::<EventBus>()
-            .map(|bus| {
-                bus.read::<HealthDepleted>()
-                    .filter_map(|e| {
-                        let pos = world.get::<&Transform>(e.entity).ok()?.position;
-                        Some((e.entity, pos))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        if deaths.is_empty() {
-            return;
-        }
-        let state = resources.get_mut::<NetServerState>().unwrap();
-        for (entity, pos) in deaths {
-            let id = state.repl_ids.id_for(entity);
-            let msg = encode(&ServerMsg::EntityDied { id, pos });
-            let targets: Vec<ConnId> = state
-                .conns
-                .iter()
-                .filter(|(_, pc)| pc.known.contains(&id))
-                .map(|(&conn, _)| conn)
-                .collect();
-            for conn in targets {
-                state.server.send(conn, msg.clone());
-            }
-        }
-    }
-}
-
 /// Benchmark seam (vordar-benches only): exposes just enough of the private
 /// snapshot/mechanic machinery to measure it. Sends to the fabricated ConnIds
 /// are silently dropped by engine-net's router (no such connection), so the
@@ -1236,8 +996,8 @@ impl System for DeathBroadcastSystem {
 pub mod bench {
     use super::*;
 
-    pub const MAX_STATES: usize = MAX_SNAPSHOT_STATES;
-    pub const NEAREST: usize = NEAREST_GUARANTEED;
+    pub const MAX_STATES: usize = broadcast::MAX_SNAPSHOT_STATES;
+    pub const NEAREST: usize = broadcast::NEAREST_GUARANTEED;
     pub const AOI: f32 = AOI_RADIUS;
     pub const STAGGER_TICKS: u64 = STAGGER;
 
@@ -1247,7 +1007,7 @@ pub mod bench {
         max: usize,
         nearest: usize,
     ) -> (Vec<usize>, usize) {
-        super::select_states(entries, cursor, max, nearest)
+        broadcast::select_states(entries, cursor, max, nearest)
     }
 
     /// NetServerState with one PlayerConn per entity, keyed by fabricated
@@ -1293,56 +1053,7 @@ pub mod bench {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `n` entries with id = index and distance growing with the index.
-    fn entries(n: usize) -> Vec<(u32, f32)> {
-        (0..n).map(|i| (i as u32, i as f32)).collect()
-    }
-
-    #[test]
-    fn small_crowds_pass_through_untouched() {
-        let e = entries(MAX_SNAPSHOT_STATES);
-        let (sel, cursor) = select_states(&e, 5, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
-        assert_eq!(sel.len(), e.len());
-        assert_eq!(cursor, 5);
-    }
-
-    #[test]
-    fn nearest_always_included_over_budget() {
-        let e = entries(200);
-        for cursor in [0, 7, 1000] {
-            let (sel, _) = select_states(&e, cursor, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
-            assert_eq!(sel.len(), MAX_SNAPSHOT_STATES);
-            for i in 0..NEAREST_GUARANTEED {
-                assert!(sel.contains(&i), "nearest entry {i} missing at cursor {cursor}");
-            }
-        }
-    }
-
-    #[test]
-    fn rotation_refreshes_every_entity() {
-        let e = entries(200);
-        let pool = e.len() - NEAREST_GUARANTEED; // 168
-        let budget = MAX_SNAPSHOT_STATES - NEAREST_GUARANTEED; // 32
-        let rounds = pool.div_ceil(budget); // ceil(168/32) = 6
-        let mut cursor = 0;
-        let mut seen: HashSet<usize> = HashSet::new();
-        for _ in 0..rounds {
-            let (sel, next) = select_states(&e, cursor, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
-            seen.extend(sel);
-            cursor = next;
-        }
-        // Every entry got at least one position update within the window.
-        assert_eq!(seen.len(), e.len());
-    }
-
-    #[test]
-    fn no_duplicate_indices_in_selection() {
-        let e = entries(70); // barely over budget: pool of 38, budget 32
-        let (sel, _) = select_states(&e, 31, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
-        let unique: HashSet<usize> = sel.iter().copied().collect();
-        assert_eq!(unique.len(), sel.len());
-    }
+    use std::sync::atomic::Ordering;
 
     /// Regression test for the seq=0 replay wedge (networking audit
     /// 2026-07-11, finding 16). `last_seq: 0` is the connection's "nothing
