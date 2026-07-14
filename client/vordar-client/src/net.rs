@@ -1,12 +1,16 @@
 // Networked-client plugin — replicates the server's world into this one.
 //
-// Phase 2 model: remote entities are server-driven, interpolated between
-// snapshot positions (NetLerp). Our OWN player is predicted: each Input tick
-// we send the intent AND emit it locally, so the shared vordar-game movement
-// systems apply it immediately. Snapshots then reconcile: rebase onto the
-// server's authoritative position and replay the intents the server hasn't
-// processed yet (`last_processed_seq`). Both phases run Fixed(60), so one
-// sent intent maps 1:1 to one local integration step.
+// Phase 2 model: remote entities are server-driven — each carries a
+// tick-indexed sample buffer (NetBuffer) and is rendered by a playback
+// cursor a fixed ~200 ms behind the newest received snapshot tick
+// (NetInterpolateSystem), absorbing jitter and single-datagram loss without
+// freezing or warbling (networking rework 4, finding 1). Our OWN player is
+// predicted: each Input tick we send the intent AND emit it locally, so the
+// shared vordar-game movement systems apply it immediately. Snapshots then
+// reconcile: rebase onto the server's authoritative position and replay the
+// intents the server hasn't processed yet (`last_processed_seq`). Both
+// phases run Fixed(60), so one sent intent maps 1:1 to one local integration
+// step.
 
 use crate::{orbit_and_follow, read_move_dir};
 use engine_app::app::App;
@@ -31,7 +35,7 @@ use vordar_game::Player;
 use vordar_game::world::{active_event, day_night_light, WorldEventsDef};
 use vordar_protocol::{
     decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION,
-    SNAPSHOT_HZ,
+    SNAPSHOT_HZ, TICK_HZ,
 };
 
 /// Reconciliation error below this is ignored — local prediction is trusted
@@ -130,6 +134,7 @@ impl Plugin for NetClientPlugin {
             correction: Vec3::ZERO,
             simulated_rtt: self.simulated_rtt,
             latest_state_tick: 0,
+            playback: None,
         })
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         .add_system(NetSendInputSystem, Phase::Input, SystemOrder::after::<NetReceiveSystem>())
@@ -139,7 +144,7 @@ impl Plugin for NetClientPlugin {
         .insert_resource(crate::presentation::CurrentZone("start".into()))
         .insert_resource(vordar_game::zones::load_zones("content/zones/zones.ron"))
         .insert_resource(crate::vfx::ParticleSim::new())
-        .add_system(NetLerpSystem, Phase::Update, SystemOrder::First)
+        .add_system(NetInterpolateSystem, Phase::Update, SystemOrder::First)
         .add_system(crate::presentation::ZoneDressingSystem::new(), Phase::Update, SystemOrder::Default)
         .add_system(crate::body::BodyComposeSystem, Phase::Update, SystemOrder::Default)
         .add_system(crate::react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
@@ -163,10 +168,10 @@ impl Plugin for NetClientPlugin {
         crate::ui::install(app);
         if self.predict {
             // The shared simulation moves our own player. Remote players stay
-            // NetLerp-driven: no intents are emitted for them, so the shared
-            // systems hold their velocity at zero. LeapSystem mirrors the
-            // server's dash override so an Onslaught moves the own view
-            // immediately instead of waiting a round-trip.
+            // playback-driven (NetInterpolateSystem): no intents are emitted
+            // for them, so the shared systems hold their velocity at zero.
+            // LeapSystem mirrors the server's dash override so an Onslaught
+            // moves the own view immediately instead of waiting a round-trip.
             app.add_system(PlayerMovementSystem, Phase::Update, SystemOrder::First)
                 .add_system(vordar_game::combat::leap::LeapSystem, Phase::Update, SystemOrder::Default)
                 .add_system(MovementSystem, Phase::Update, SystemOrder::Last)
@@ -238,6 +243,12 @@ pub struct NetClientState {
     /// Reset in `teardown_replicated_world` so a redirect/reconnect doesn't
     /// compare against the old zone's ticks.
     latest_state_tick: u64,
+    /// The render playback cursor, in server-tick units — `None` until the
+    /// first tick it's driven, which hard-snaps it to
+    /// `latest_state_tick as f64 - INTERP_DELAY_TICKS` instead of slewing
+    /// from an arbitrary start. Reset to `None` in `teardown_replicated_world`
+    /// alongside `latest_state_tick` (networking rework 4, finding 1).
+    playback: Option<f64>,
 }
 
 impl NetClientState {
@@ -259,12 +270,66 @@ pub(crate) fn reconnect_attempt(resources: &Resources) -> Option<u32> {
     resources.get::<NetClientState>().and_then(|s| s.reconnect.as_ref().map(|r| r.attempt))
 }
 
-/// Interpolation between the last two snapshot positions (component on every
-/// replicated entity except a predicted own player; drives Transform).
-struct NetLerp {
-    from: Vec3,
-    to: Vec3,
-    t: f32,
+/// Cap on `NetBuffer`'s sample ring — bounded even if no consumer runs (e.g.
+/// a criterion bench loop), so memory stays flat regardless of how long a
+/// connection lives (networking rework 4, finding 1).
+const NET_BUFFER_CAP: usize = 16;
+
+/// Playback runs this many ticks behind the newest received `Snapshot.tick`
+/// — 2 snapshot intervals (200 ms). Chosen so a *single* lost/late snapshot
+/// datagram (the common case since snapshots went unreliable, networking
+/// rework 3) stays entirely inside interpolation; only 2+ consecutive losses
+/// dip into extrapolation (finding 2). Networking rework 4, finding 1.
+const INTERP_DELAY_TICKS: f64 = 2.0 * (TICK_HZ / SNAPSHOT_HZ) as f64;
+
+/// Bound on how far the playback cursor's per-tick advance may deviate from
+/// the nominal `delta * TICK_HZ`, as a fraction of that nominal advance — the
+/// slew that keeps the cursor tracking `latest_state_tick -
+/// INTERP_DELAY_TICKS` always reads as a smooth change of pace, never a pop.
+const MAX_SLEW_FRACTION: f64 = 0.10;
+
+/// Divergence (in ticks) beyond which the playback cursor gives up slewing
+/// and hard-snaps to the target delay instead — a reconnect or a stall long
+/// enough that smooth catch-up would take too long to be worth it.
+const RESYNC_TICKS: f64 = 30.0;
+
+/// Tick-indexed position history for a replicated (non-predicted) entity —
+/// component on every replicated entity except a predicted own player.
+/// `NetInterpolateSystem` renders `Transform.position` a fixed
+/// `INTERP_DELAY_TICKS` behind the newest sample by interpolating the
+/// bracketing pair; `apply_aoi_delta` seeds this on AOI entry and
+/// `apply_states` pushes into it afterward. Samples always arrive in
+/// strictly increasing tick order (the tick guard in `apply_states` sees to
+/// that), so insertion is a plain push; capped at `NET_BUFFER_CAP` so it
+/// stays memory-flat even if nothing ever consumes it (networking rework 4,
+/// finding 1).
+struct NetBuffer {
+    samples: VecDeque<(u64, Vec3)>,
+}
+
+impl NetBuffer {
+    /// A freshly entered entity's buffer: one sample, so playback holds at
+    /// the entry position until the first real snapshot sample brackets it.
+    fn seeded(tick: u64, pos: Vec3) -> Self {
+        let mut samples = VecDeque::with_capacity(NET_BUFFER_CAP);
+        samples.push_back((tick, pos));
+        Self { samples }
+    }
+
+    /// Pushes a new sample, skipping it if `tick` would not keep the ring
+    /// strictly increasing (guards both an out-of-order caller and the
+    /// dry-recovery synthetic sample of finding 2).
+    fn push(&mut self, tick: u64, pos: Vec3) {
+        if let Some(&(back_tick, _)) = self.samples.back() {
+            if tick <= back_tick {
+                return;
+            }
+        }
+        if self.samples.len() >= NET_BUFFER_CAP {
+            self.samples.pop_front();
+        }
+        self.samples.push_back((tick, pos));
+    }
 }
 
 pub struct NetReceiveSystem;
@@ -313,8 +378,8 @@ impl System for NetReceiveSystem {
                         log::info!("prefab table received: {} prefabs", names.len());
                         resources.get_mut::<NetClientState>().unwrap().prefab_names = names;
                     }
-                    Some(ServerMsg::AoiDelta { enters, leaves, .. }) => {
-                        apply_aoi_delta(world, resources, enters, leaves);
+                    Some(ServerMsg::AoiDelta { tick, enters, leaves }) => {
+                        apply_aoi_delta(world, resources, tick, enters, leaves);
                     }
                     Some(ServerMsg::Snapshot { tick, last_processed_seq, states }) => {
                         apply_states(world, resources, tick, last_processed_seq, states);
@@ -402,6 +467,10 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     // old zone's ticks would drop every snapshot until it catches up
     // (protocol v14, networking rework 3 finding 4).
     state.latest_state_tick = 0;
+    // The playback cursor is meaningless against a new connection's ticks —
+    // `None` hard-snaps it fresh off the new zone's first snapshot
+    // (networking rework 4, finding 1).
+    state.playback = None;
     resources.get_mut::<WorldTime>().unwrap().synced = false;
 }
 
@@ -541,7 +610,10 @@ fn handle_entity_died(world: &mut World, resources: &mut Resources, id: u32, pos
 /// networking rework 3 finding 4): entities entering or leaving the AOI.
 /// Identity (prefab) is sent once here; `apply_states` keeps positions
 /// current afterward. Stream ordering means this never needs a tick guard.
-fn apply_aoi_delta(world: &mut World, resources: &mut Resources, enters: Vec<EntityState>, leaves: Vec<u32>) {
+/// `tick` seeds an entering entity's `NetBuffer` (networking rework 4,
+/// finding 1) so playback has a sample to hold at before the first real
+/// `Snapshot` for it arrives.
+fn apply_aoi_delta(world: &mut World, resources: &mut Resources, tick: u64, enters: Vec<EntityState>, leaves: Vec<u32>) {
     // Take the map instead of cloning it — nothing below reads it through
     // NetClientState, and it is written back at the end of this function.
     // prefab_names is small (a handful of short strings) and cloned once per
@@ -564,9 +636,9 @@ fn apply_aoi_delta(world: &mut World, resources: &mut Resources, enters: Vec<Ent
         };
         match spawn_prefab(prefab_name, enter.pos.0, &mut SpawnContext { world, resources }) {
             Ok(entity) => {
-                // A predicted own player is moved by the simulation, not the lerp.
+                // A predicted own player is moved by the simulation, not the buffer.
                 if !is_own_predicted {
-                    let _ = world.insert_one(entity, NetLerp { from: enter.pos.0, to: enter.pos.0, t: 1.0 });
+                    let _ = world.insert_one(entity, NetBuffer::seeded(tick, enter.pos.0));
                 }
                 // Seed replicated health (v8) so the hit-react watcher starts
                 // from the server's value, not the prefab's. `None` (v12)
@@ -637,29 +709,23 @@ fn apply_states(
         }
     }
 
-    // Snapshot-derived velocity estimates for the lerped entities, so
-    // locomotion/facing can animate remote characters (their sim Velocity is
-    // never driven). Collected inside the view borrow, inserted after it.
-    let mut net_motions: Vec<(Entity, Vec3)> = Vec::new();
+    // Positions land in each addressed entity's tick-indexed sample buffer;
+    // NetInterpolateSystem renders Transform.position (and derives NetMotion
+    // from the active segment's slope) at a fixed delay behind the newest
+    // sample instead of restarting a lerp from wherever the entity is
+    // currently displayed (networking rework 4, finding 1).
     {
-        // One view for the whole batch instead of two world.gets per entity.
-        let mut lerp_q = world.query::<(&mut NetLerp, &Transform)>();
-        let mut lerp_view = lerp_q.view();
+        // One view for the whole batch instead of a world.get per entity.
+        let mut buf_q = world.query::<&mut NetBuffer>();
+        let mut buf_view = buf_q.view();
         for state in &states {
             if own_state.is_some_and(|(own, _)| state.id == own) {
                 continue;
             }
             let Some(&entity) = known.get(&state.id) else { continue };
-            // Restart the lerp from wherever the entity is currently displayed.
-            let Some((lerp, transform)) = lerp_view.get_mut(entity) else { continue };
-            net_motions.push((entity, (state.pos.0 - transform.position) * SNAPSHOT_HZ as f32));
-            lerp.from = transform.position;
-            lerp.to = state.pos.0;
-            lerp.t = 0.0;
+            let Some(buffer) = buf_view.get_mut(entity) else { continue };
+            buffer.push(tick, state.pos.0);
         }
-    }
-    for (entity, velocity) in net_motions {
-        let _ = world.insert_one(entity, crate::locomotion::NetMotion { velocity });
     }
 
     if let Some((own, server_pos)) = own_state {
@@ -1148,17 +1214,85 @@ impl System for NetSendInputSystem {
     }
 }
 
-/// Advances every replicated entity toward its latest snapshot position over
-/// one snapshot interval.
-pub struct NetLerpSystem;
+/// Renders every replicated entity a fixed `INTERP_DELAY_TICKS` behind the
+/// newest received snapshot tick by interpolating its `NetBuffer` sample
+/// ring, instead of restarting a one-interval lerp from wherever the entity
+/// is currently displayed (the old `NetLerpSystem`, which is what converted
+/// jitter into speed warble on every late arrival). Also writes `NetMotion`
+/// with the active segment's velocity — zero while holding at the first or
+/// newest sample; extrapolation past the newest sample is finding 2.
+/// Networking rework 4, finding 1.
+pub struct NetInterpolateSystem;
 
-impl System for NetLerpSystem {
-    fn run(&mut self, world: &mut World, _resources: &mut Resources, delta: f32) {
-        for (lerp, transform) in world.query::<(&mut NetLerp, &mut Transform)>().iter() {
-            lerp.t = (lerp.t + delta * SNAPSHOT_HZ).min(1.0);
-            transform.position = lerp.from.lerp(lerp.to, lerp.t);
+impl System for NetInterpolateSystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
+        let cursor = {
+            let state = resources.get_mut::<NetClientState>().unwrap();
+            let cursor = advance_playback(state.playback, state.latest_state_tick, delta);
+            state.playback = Some(cursor);
+            cursor
+        };
+
+        // Collected inside the view borrow, inserted after it (matches the
+        // insert-after-view pattern `apply_states` used for the old NetLerp
+        // velocity estimate).
+        let mut net_motions: Vec<(Entity, Vec3)> = Vec::new();
+        for (entity, buffer, transform) in world.query::<(Entity, &NetBuffer, &mut Transform)>().iter() {
+            let (pos, velocity) = sample_buffer(buffer, cursor);
+            transform.position = pos;
+            net_motions.push((entity, velocity));
+        }
+        for (entity, velocity) in net_motions {
+            let _ = world.insert_one(entity, crate::locomotion::NetMotion { velocity });
         }
     }
+}
+
+/// One Update tick's worth of playback-cursor advance: nominally `delta *
+/// TICK_HZ` ticks, slewed toward `latest_state_tick as f64 -
+/// INTERP_DELAY_TICKS` within `±MAX_SLEW_FRACTION` of that nominal advance so
+/// catching up never pops — except `playback == None` (never driven) or a
+/// divergence past `RESYNC_TICKS`, which hard-snap to the target instead of
+/// slewing toward it. Networking rework 4, finding 1.
+fn advance_playback(playback: Option<f64>, latest_state_tick: u64, delta: f32) -> f64 {
+    let target = latest_state_tick as f64 - INTERP_DELAY_TICKS;
+    let Some(prev) = playback else { return target };
+    let error = target - prev;
+    if error.abs() > RESYNC_TICKS {
+        return target;
+    }
+    let nominal = delta as f64 * TICK_HZ as f64;
+    let max_correction = nominal * MAX_SLEW_FRACTION;
+    prev + nominal + error.clamp(-max_correction, max_correction)
+}
+
+/// Position and velocity at fractional server `tick` position `cursor`
+/// inside `buffer`'s sample ring: holds at the first sample when `cursor` is
+/// before it, holds at the newest sample when `cursor` is past it (capped
+/// extrapolation instead of holding is finding 2), else linearly
+/// interpolates the bracketing pair. Velocity is that segment's slope, zero
+/// while holding. Networking rework 4, finding 1.
+fn sample_buffer(buffer: &NetBuffer, cursor: f64) -> (Vec3, Vec3) {
+    let samples = &buffer.samples;
+    let Some(&(first_tick, first_pos)) = samples.front() else {
+        return (Vec3::ZERO, Vec3::ZERO); // never seeded — nothing to render yet
+    };
+    if cursor <= first_tick as f64 {
+        return (first_pos, Vec3::ZERO);
+    }
+    let &(last_tick, last_pos) = samples.back().unwrap();
+    if cursor >= last_tick as f64 {
+        return (last_pos, Vec3::ZERO);
+    }
+    for (a, b) in samples.iter().zip(samples.iter().skip(1)) {
+        if cursor <= b.0 as f64 {
+            let span = (b.0 - a.0) as f64;
+            let t = ((cursor - a.0 as f64) / span) as f32;
+            let velocity = (b.1 - a.1) / (span as f32 / TICK_HZ);
+            return (a.1.lerp(b.1, t), velocity);
+        }
+    }
+    (last_pos, Vec3::ZERO) // unreachable: cursor is bounded by the checks above
 }
 
 /// Follows our own player (identified by the Welcome message) at its
@@ -1209,6 +1343,7 @@ pub mod bench {
             simulated_rtt: Duration::ZERO,
             reconnect: None,
             latest_state_tick: 0,
+            playback: None,
         }
     }
 
@@ -1229,8 +1364,14 @@ pub mod bench {
         state.pending.push_back(PendingIntent { seq, dir, dt, leap: None });
     }
 
-    pub fn apply_aoi_delta(world: &mut World, resources: &mut Resources, enters: Vec<EntityState>, leaves: Vec<u32>) {
-        super::apply_aoi_delta(world, resources, enters, leaves);
+    pub fn apply_aoi_delta(
+        world: &mut World,
+        resources: &mut Resources,
+        tick: u64,
+        enters: Vec<EntityState>,
+        leaves: Vec<u32>,
+    ) {
+        super::apply_aoi_delta(world, resources, tick, enters, leaves);
     }
 
     pub fn apply_states(
@@ -1278,13 +1419,111 @@ mod tests {
         token
     }
 
+    /// Networking rework 4, finding 1: a late or jittered snapshot arrival
+    /// must never freeze the entity nor make it "catch up" at compressed
+    /// speed (jitter → speed warble) — this drives the real receive path
+    /// (`apply_states`) and the real render system directly, one Update tick
+    /// (`delta = 1/60`) per loop iteration, no network, no sleeps. A remote
+    /// entity moves +X at a steady 6 u/s; the server samples it every 6
+    /// ticks (100 ms, `SNAPSHOT_HZ`) at `pos.x = tick / 60 * 6.0`, but each
+    /// sample's arrival is jittered by a deterministic pattern in [-2, +2]
+    /// ticks (including a late-by-2 arrival) relative to its nominal 6k
+    /// arrival tick. After a 30-tick warmup the render step every tick must
+    /// stay within [0.5, 1.5] × the nominal per-tick displacement, and total
+    /// displacement over the window must track the true speed within 5 %.
+    #[test]
+    fn fixed_delay_playback_rides_through_jittered_arrivals() {
+        const SPEED: f32 = 6.0;
+        const CADENCE_TICKS: u64 = 6; // SNAPSHOT_HZ = 10 Hz at TICK_HZ = 60 Hz
+        const WARMUP_TICKS: u32 = 30;
+        const WINDOW_TICKS: u32 = 180;
+        // Deterministic jitter pattern in [-2, +2], includes a late-by-2 arrival.
+        const JITTER: [i64; 6] = [0, 2, -2, 1, -1, 0];
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+
+        let remote = world.spawn((Transform::new(Vec3::ZERO), NetBuffer::seeded(0, Vec3::ZERO)));
+        let mut entities = HashMap::new();
+        entities.insert(1u32, remote);
+
+        resources.insert(NetClientState {
+            client: None,
+            server_addr: "127.0.0.1:9".parse().unwrap(),
+            user: "unit-test".into(),
+            token: [0u8; 32],
+            login_denied: false,
+            own_id: None,
+            entities,
+            prefab_names: Vec::new(),
+            seq: 0,
+            predict: false,
+            pending: VecDeque::new(),
+            move_ring: VecDeque::new(),
+            correction: Vec3::ZERO,
+            simulated_rtt: Duration::ZERO,
+            reconnect: None,
+            latest_state_tick: 0,
+            playback: None,
+        });
+
+        let mut render_sys = NetInterpolateSystem;
+        let mut next_k: u64 = 1;
+        let total_ticks = WARMUP_TICKS + WINDOW_TICKS;
+        let mut window_positions: Vec<Vec3> = Vec::new();
+
+        for client_tick in 0..total_ticks {
+            // Deliver every sample whose jittered arrival tick is due now.
+            loop {
+                let server_tick = CADENCE_TICKS * next_k;
+                let jitter = JITTER[(next_k as usize - 1) % JITTER.len()];
+                let arrival_tick = (server_tick as i64 + jitter).max(0) as u64;
+                if arrival_tick != client_tick as u64 {
+                    break;
+                }
+                let pos = Vec3::new(server_tick as f32 / 60.0 * SPEED, 0.0, 0.0);
+                apply_states(&mut world, &mut resources, server_tick, 0, vec![EntityPos { id: 1, pos: WirePos(pos), hp: None }]);
+                next_k += 1;
+            }
+            render_sys.run(&mut world, &mut resources, DT);
+            if client_tick >= WARMUP_TICKS {
+                window_positions.push(world.get::<&Transform>(remote).unwrap().position);
+            }
+        }
+
+        let nominal_step = SPEED * DT;
+        let mut max_step = 0.0f32;
+        let mut min_step = f32::MAX;
+        for pair in window_positions.windows(2) {
+            let step = (pair[1] - pair[0]).length();
+            max_step = max_step.max(step);
+            min_step = min_step.min(step);
+        }
+        assert!(
+            min_step >= 0.5 * nominal_step,
+            "a step froze or shrank too far below nominal: min_step={min_step:.4}, nominal={nominal_step:.4}"
+        );
+        assert!(
+            max_step <= 1.5 * nominal_step,
+            "a step warbled too far above nominal: max_step={max_step:.4}, nominal={nominal_step:.4}"
+        );
+
+        let displacement = (*window_positions.last().unwrap() - *window_positions.first().unwrap()).x;
+        let window_secs = (window_positions.len() - 1) as f32 * DT;
+        let expected = SPEED * window_secs;
+        assert!(
+            (displacement - expected).abs() <= 0.05 * expected,
+            "total displacement drifted from true speed: got {displacement:.3}, expected {expected:.3}"
+        );
+    }
+
     /// Networking rework 3, finding 4: `Snapshot` now rides an unreliable
     /// datagram, so a stale/reordered copy must never regress state. This
     /// drives the real `apply_states` receive path directly (no
     /// reimplemented logic, no network): a fresh snapshot at tick 20 puts a
     /// remote entity at P2, then a stale snapshot at tick 10 (a LOWER
     /// `last_processed_seq` too) tries to put it at P1. Without the tick
-    /// guard, the remote entity's `NetLerp` target would regress to P1 and
+    /// guard, the remote entity's `NetBuffer` would regress to P1 and
     /// `reconcile_own` would re-run against the stale ack.
     #[test]
     fn apply_states_drops_a_stale_snapshot_tick() {
@@ -1292,7 +1531,7 @@ mod tests {
         let mut resources = Resources::new();
 
         // A remote (non-own) replicated entity — the general states-apply path.
-        let remote = world.spawn((Transform::new(Vec3::ZERO), NetLerp { from: Vec3::ZERO, to: Vec3::ZERO, t: 1.0 }));
+        let remote = world.spawn((Transform::new(Vec3::ZERO), NetBuffer::seeded(0, Vec3::ZERO)));
         // Our own predicted player — exercises reconcile_own in the same call.
         let own = world.spawn((Transform::new(Vec3::ZERO), Player { speed: 6.0 }));
 
@@ -1317,6 +1556,7 @@ mod tests {
             simulated_rtt: Duration::ZERO,
             reconnect: None,
             latest_state_tick: 0,
+            playback: None,
         });
 
         let p2 = Vec3::new(5.0, 0.0, 0.0);
@@ -1331,8 +1571,8 @@ mod tests {
             ],
         );
 
-        let lerp_after_20 = world.get::<&NetLerp>(remote).unwrap().to;
-        assert!((lerp_after_20 - p2).length() < 1e-6, "tick 20 must land at P2: {lerp_after_20:?}");
+        let newest_after_20 = world.get::<&NetBuffer>(remote).unwrap().samples.back().unwrap().1;
+        assert!((newest_after_20 - p2).length() < 1e-6, "tick 20 must land at P2: {newest_after_20:?}");
         assert_eq!(
             resources.get::<NetClientState>().unwrap().pending.len(),
             0,
@@ -1355,10 +1595,10 @@ mod tests {
             ],
         );
 
-        let lerp_after_stale = world.get::<&NetLerp>(remote).unwrap().to;
+        let newest_after_stale = world.get::<&NetBuffer>(remote).unwrap().samples.back().unwrap().1;
         assert!(
-            (lerp_after_stale - p2).length() < 1e-6,
-            "stale snapshot must not move the lerp target off P2: {lerp_after_stale:?}"
+            (newest_after_stale - p2).length() < 1e-6,
+            "stale snapshot must not move the buffer's newest sample off P2: {newest_after_stale:?}"
         );
         let pending_seqs: Vec<u32> =
             resources.get::<NetClientState>().unwrap().pending.iter().map(|p| p.seq).collect();
@@ -1489,6 +1729,7 @@ mod tests {
             simulated_rtt: Duration::ZERO,
             reconnect: None,
             latest_state_tick: 0,
+            playback: None,
         });
 
         let mut recv = NetReceiveSystem;
@@ -1657,6 +1898,7 @@ mod tests {
             simulated_rtt: Duration::from_millis(150),
             reconnect: None,
             latest_state_tick: 0,
+            playback: None,
         });
 
         let mut recv = NetReceiveSystem;

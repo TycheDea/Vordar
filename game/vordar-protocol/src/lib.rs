@@ -24,6 +24,13 @@ pub type AccountToken = [u8; 32];
 /// uses it to pace interpolation between snapshots.
 pub const SNAPSHOT_HZ: f32 = 10.0;
 
+/// Rate at which `AoiDelta.tick` / `Snapshot.tick` advance — both are stamped
+/// from the server's `NetServerState.tick`, a PostUpdate counter incremented
+/// once per fixed sim tick. The client needs this to convert a tick delta
+/// into wall-clock time for its playback cursor (networking rework 4,
+/// finding 1).
+pub const TICK_HZ: f32 = 60.0;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMsg {
     /// This tick's movement intent plus up to the two previous (ascending

@@ -3,10 +3,10 @@
 // fed fabricated snapshot payloads through vordar-client's bench-internals
 // seam; the NetClientState's socket points nowhere.
 //
-// apply_snapshot clones the whole id→entity map per snapshot and restarts
-// every remote entity's NetLerp (two world.gets each); reconcile_own replays
-// up to 240 pending intents. The client runs on the weakest hardware in the
-// system, so these are foundation numbers.
+// apply_snapshot clones the whole id→entity map per snapshot and pushes into
+// every addressed remote entity's NetBuffer (one world.get each);
+// reconcile_own replays up to 240 pending intents. The client runs on the
+// weakest hardware in the system, so these are foundation numbers.
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use engine_core::components::Transform;
@@ -39,9 +39,10 @@ fn client_resources() -> Resources {
     resources
 }
 
-/// Steady state at A ∈ {64, 200} replicated entities: every snapshot restarts
-/// each entity's lerp (and today clones the whole entities map). The input
-/// Vec is rebuilt untimed per iteration, matching decode's fresh allocation.
+/// Steady state at A ∈ {64, 200} replicated entities: every snapshot pushes
+/// a sample into each entity's NetBuffer (and today clones the whole
+/// entities map). The input Vec is rebuilt untimed per iteration, matching
+/// decode's fresh allocation.
 fn bench_apply_states(c: &mut Criterion) {
     workspace_root();
     let mut group = c.benchmark_group("client/apply_snapshot");
@@ -52,14 +53,14 @@ fn bench_apply_states(c: &mut Criterion) {
         seam::set_prefab_table(&mut client_state, vec!["bolt".into()]);
         resources.insert(client_state);
         // Build the replicated set through the real enters path so every
-        // entity carries NetLerp.
+        // entity carries NetBuffer.
         let spots = positions(a, CROWD, 7);
         let enters: Vec<EntityState> = spots
             .iter()
             .enumerate()
             .map(|(i, &pos)| EntityState { id: i as u32 + 1, prefab: 0, pos: WirePos(pos), hp: None })
             .collect();
-        seam::apply_aoi_delta(&mut world, &mut resources, enters, Vec::new());
+        seam::apply_aoi_delta(&mut world, &mut resources, 0, enters, Vec::new());
 
         let states: Vec<EntityPos> = spots
             .iter()
@@ -106,12 +107,12 @@ fn bench_apply_enters(c: &mut Criterion) {
                     .map(|(i, &pos)| EntityState { id: next_id + i as u32, prefab: 0, pos: WirePos(pos), hp: None })
                     .collect();
                 let t = Instant::now();
-                seam::apply_aoi_delta(&mut world, &mut resources, enters, Vec::new());
+                seam::apply_aoi_delta(&mut world, &mut resources, 0, enters, Vec::new());
                 total += t.elapsed();
                 // Untimed: leave + flush so the map stays small and ids fresh.
                 let leaves: Vec<u32> = (next_id..next_id + 64).collect();
                 next_id += 64;
-                seam::apply_aoi_delta(&mut world, &mut resources, Vec::new(), leaves);
+                seam::apply_aoi_delta(&mut world, &mut resources, 0, Vec::new(), leaves);
                 let pairs: Vec<_> = resources.get_mut::<DespawnQueue>().unwrap().0.drain(..).collect();
                 for (entity, _) in pairs {
                     world.despawn(entity).ok();

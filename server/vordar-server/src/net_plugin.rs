@@ -32,7 +32,7 @@ use vordar_game::world::WorldTimeRes;
 use vordar_game::zones::{portal_hit, ZoneDef};
 use vordar_protocol::{
     decode, encode, AccountToken, ClientMsg, EntityPos, EntityState, LoginDenyReason, MoveIntentEntry, ServerMsg,
-    WirePos, PROTOCOL_VERSION, SNAPSHOT_HZ,
+    WirePos, PROTOCOL_VERSION, SNAPSHOT_HZ, TICK_HZ,
 };
 
 /// Lag-compensation rewind cap (DESIGN.md §3): high-latency players get
@@ -64,12 +64,15 @@ const HISTORY_CAP: usize = 32;
 const MAX_SNAPSHOT_STATES: usize = 64;
 /// Of the budget, the nearest N entities are always included; the rest of
 /// the AOI shares the remaining slots round-robin (full refresh within
-/// ~500 ms even in a 200-crowd; NetLerp absorbs the lower rate).
+/// ~500 ms even in a 200-crowd; playback interpolation absorbs the lower rate).
 const NEAREST_GUARANTEED: usize = 32;
 /// Fixed server tick duration — each applied intent integrates exactly this.
 const TICK_DT: f32 = 1.0 / 60.0;
 /// PostUpdate runs at the sim rate; the 10 Hz systems below self-gate on it.
-const POST_HZ: f32 = 60.0;
+/// Defined from `vordar_protocol::TICK_HZ` (networking rework 4, finding 1):
+/// the client's playback cursor treats that constant as the rate ticks
+/// advance at, so the two must never drift apart.
+const POST_HZ: f32 = TICK_HZ;
 /// Snapshot stagger: each connection is served every STAGGER-th PostUpdate
 /// run (still SNAPSHOT_HZ per client) — the fan-out cost splits into STAGGER
 /// slices instead of landing on one tick.
