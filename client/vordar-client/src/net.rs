@@ -122,7 +122,7 @@ impl Plugin for NetClientPlugin {
         app.insert_resource(state)
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         .add_system(NetSendInputSystem, Phase::Input, SystemOrder::after::<NetReceiveSystem>())
-        .add_system(AbilityCastSystem::new(), Phase::Input, SystemOrder::after::<NetSendInputSystem>())
+        .add_system(crate::cast::AbilityCastSystem::new(), Phase::Input, SystemOrder::after::<NetSendInputSystem>())
         .insert_resource(crate::world_time::WorldTime { offset_micros: 0, synced: false })
         .insert_resource(crate::CastState::new())
         .insert_resource(crate::presentation::CurrentZone("start".into()))
@@ -277,6 +277,23 @@ impl NetClientState {
     /// disconnected or before the handshake's clock sync completes.
     pub(crate) fn server_now_micros(&self) -> Option<u64> {
         self.client.as_ref().and_then(|c| c.server_now_micros())
+    }
+
+    /// Whether our own player is locally predicted (vs. server-driven).
+    pub(crate) fn predicting(&self) -> bool {
+        self.predict
+    }
+
+    /// Stamps, seqs, and sends a `ClientMsg::CastIntent` for `skill` at
+    /// `target`. Returns false (no send, no seq bump) if the clock isn't
+    /// synced yet — same gate `NetSendInputSystem` uses for movement intents.
+    pub(crate) fn send_cast_intent(&mut self, skill: String, target: Vec2) -> bool {
+        let Some(t_server_micros) = self.server_now_micros() else { return false };
+        self.seq += 1;
+        if let Some(client) = &self.client {
+            client.send(encode(&ClientMsg::CastIntent { seq: self.seq, t_server_micros, skill, target }));
+        }
+        true
     }
 }
 
@@ -903,163 +920,12 @@ impl System for NetCorrectionSystem {
     }
 }
 
-/// Keys for the edge-triggered ability slots (slot 1, slot 2). Slot 0 is the
-/// LMB held-repeat attack.
-const SLOT_KEYS: [winit::keyboard::KeyCode; 2] =
-    [winit::keyboard::KeyCode::KeyQ, winit::keyboard::KeyCode::KeyE];
-
-/// Casts the local class's abilities at the cursor's ground point: slot 0
-/// auto-fires while LMB is held (at the cooldown rate), later slots are
-/// edge-triggered keys (Q, E). Targets for ranged-capped effects are clamped
-/// so an honest cast is never rejected. The client gate is display/traffic
-/// hygiene — the server re-validates class, cooldown, and range.
-pub struct AbilityCastSystem {
-    /// Edge state per keyed slot.
-    was_down: [bool; SLOT_KEYS.len()],
-}
-
-impl AbilityCastSystem {
-    pub fn new() -> Self {
-        Self { was_down: [false; SLOT_KEYS.len()] }
-    }
-}
-
-impl System for AbilityCastSystem {
-    fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
-        /// Slot metadata for the local class.
-        struct SlotMeta {
-            id: String,
-            /// Range clamp for targeted effects.
-            range: Option<f32>,
-            cooldown_secs: f32,
-            /// Leap cast time if it's a dash (drives the optimistic impulse).
-            leap_micros: Option<u64>,
-            /// Per-ability cast animation (cosmetic).
-            anim: Option<String>,
-            anim_secs: Option<f32>,
-        }
-        let Some(class) = crate::local_class(world, resources) else { return };
-        let slots: Vec<SlotMeta> = {
-            let Some(library) = resources.get::<vordar_game::class::ClassLibrary>() else { return };
-            library
-                .abilities_of(&class)
-                .iter()
-                .map(|a| {
-                    let (range, leap_micros) = match &a.effect {
-                        vordar_game::skills::AbilityEffect::Scheduled { max_range, .. } => (Some(*max_range), None),
-                        vordar_game::skills::AbilityEffect::Projectile { .. } => (None, None),
-                        vordar_game::skills::AbilityEffect::Leap { max_range, cast_micros, .. } => {
-                            (Some(*max_range), Some(*cast_micros))
-                        }
-                    };
-                    SlotMeta {
-                        id: a.id.clone(),
-                        range,
-                        cooldown_secs: a.cooldown_micros as f32 / 1e6,
-                        leap_micros,
-                        anim: a.anim.clone(),
-                        anim_secs: a.anim_secs,
-                    }
-                })
-                .collect()
-        };
-        {
-            let cooldowns: Vec<f32> = slots.iter().map(|s| s.cooldown_secs).collect();
-            let cast = resources.get_mut::<crate::CastState>().unwrap();
-            cast.sync(&class, &cooldowns);
-            cast.tick(delta);
-        }
-
-        let mut triggered: Vec<usize> = Vec::new();
-        let lmb = resources
-            .get::<engine_app::input::MouseState>()
-            .map(|m| m.is_pressed(winit::event::MouseButton::Left))
-            .unwrap_or(false);
-        if lmb {
-            triggered.push(0);
-        }
-        for (i, key) in SLOT_KEYS.iter().enumerate() {
-            let down = resources
-                .get::<engine_app::input::KeyboardState>()
-                .map(|kb| kb.is_pressed(*key))
-                .unwrap_or(false);
-            if down && !self.was_down[i] {
-                triggered.push(i + 1);
-            }
-            self.was_down[i] = down;
-        }
-        triggered.retain(|&s| {
-            s < slots.len() && resources.get::<crate::CastState>().map(|c| c.ready(s)).unwrap_or(false)
-        });
-        if triggered.is_empty() {
-            return;
-        }
-
-        let Some(cursor) = resources.get::<engine_app::input::MouseState>().and_then(|m| m.cursor()) else {
-            return;
-        };
-        let Some(ground) = engine_renderer::screen_to_ground(cursor, resources) else { return };
-        let Some(origin) = own_entity(resources)
-            .and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
-        else {
-            return;
-        };
-
-        for slot in triggered {
-            let SlotMeta { id, range, leap_micros, anim, anim_secs, .. } = &slots[slot];
-            let from = Vec2::new(origin.x, origin.z);
-            let mut target = Vec2::new(ground.x, ground.z);
-            if let Some(max_range) = range {
-                let offset = target - from;
-                if offset.length() > *max_range {
-                    target = from + offset.normalize() * *max_range;
-                }
-            }
-            let (own, predict) = {
-                let state = resources.get_mut::<NetClientState>().unwrap();
-                let Some(t_server_micros) = state.client.as_ref().and_then(|c| c.server_now_micros()) else {
-                    return;
-                };
-                state.seq += 1;
-                if let Some(client) = &state.client {
-                    client.send(encode(&ClientMsg::CastIntent {
-                        seq: state.seq,
-                        t_server_micros,
-                        skill: id.clone(),
-                        target,
-                    }));
-                }
-                (state.own_entity(), state.predict)
-            };
-            resources.get_mut::<crate::CastState>().unwrap().fire(slot);
-            if let Some(entity) = own {
-                crate::pose::trigger_swing(world, entity);
-                // Skinned-mesh cast animation (per-ability clip) — no-op if not animated.
-                crate::locomotion::trigger_attack_clip(world, entity, anim.as_deref(), *anim_secs);
-                // Turn toward the cast target (cosmetic, works while standing).
-                crate::locomotion::aim_at(world, entity, Vec3::new(target.x, 0.0, target.y));
-                let tint = crate::vfx::class_tint(resources, &class);
-                crate::vfx::cast_burst(world, resources, entity, id, tint);
-            }
-            // Optimistic dash: same deterministic velocity math the server
-            // runs, so reconciliation only ever sees ordinary drift. Rare
-            // server-side rejects surface as a correction snap.
-            if let (Some(cast_micros), Some(entity), true) = (leap_micros, own, predict) {
-                let cast_secs = *cast_micros as f32 / 1e6;
-                let to = Vec3::new(target.x, 0.0, target.y);
-                let velocity = vordar_game::combat::leap::leap_velocity(origin, to, cast_secs);
-                start_predicted_leap(world, resources, entity, velocity, cast_secs);
-            }
-        }
-    }
-}
-
 /// Inserts the client-predicted LeapImpulse for a dash cast and retags this
 /// tick's already-recorded PendingIntent (NetSendInputSystem runs earlier in
 /// the same Input phase, before the dash existed) so replay reproduces the
 /// dash from its very first tick too, not just the ticks after — networking
 /// audit 2026-07-11, finding 11.
-fn start_predicted_leap(world: &mut World, resources: &mut Resources, entity: Entity, velocity: Vec3, cast_secs: f32) {
+pub(crate) fn start_predicted_leap(world: &mut World, resources: &mut Resources, entity: Entity, velocity: Vec3, cast_secs: f32) {
     let _ = world.insert_one(entity, vordar_game::combat::LeapImpulse { velocity, remaining: cast_secs });
     if let Some(state) = resources.get_mut::<NetClientState>() {
         if let Some(pending) = state.pending.back_mut() {
@@ -1945,18 +1811,7 @@ mod tests {
         // projection) this headless test has none of — then Update phase, so
         // the dash begins immediately this same tick like the real system.
         run_input(&mut world, &mut resources);
-        {
-            let state = resources.get_mut::<NetClientState>().unwrap();
-            let t_server_micros = state.client.as_ref().unwrap().server_now_micros().unwrap();
-            state.seq += 1;
-            let seq = state.seq;
-            state.client.as_ref().unwrap().send(encode(&ClientMsg::CastIntent {
-                seq,
-                t_server_micros,
-                skill: "onslaught".into(),
-                target: cast_target,
-            }));
-        }
+        assert!(resources.get_mut::<NetClientState>().unwrap().send_cast_intent("onslaught".into(), cast_target));
         start_predicted_leap(&mut world, &mut resources, entity, velocity, cast_secs);
         run_update(&mut world, &mut resources);
 
