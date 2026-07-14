@@ -1,6 +1,6 @@
 # Plan: Collision-aware prediction replay — 2026-07-14
 
-*Stale as of 2026-07-14: hygiene rework 1 decomposed client net.rs into the `net/` module family — every net.rs citation below predates it. Re-run /plan-rework for this finding before executing.*
+*Stale as of 2026-07-14: hygiene reworks 1 and 2 decomposed client net.rs and server net_plugin.rs into module families — the citations below predate them. Re-run /plan-rework for this finding before executing.*
 
 Source: `docs/reviews/networking/reworks-networking-2026-07-11.md` finding 7.
 
