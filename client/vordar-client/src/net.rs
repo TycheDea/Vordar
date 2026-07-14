@@ -117,25 +117,10 @@ impl Plugin for NetClientPlugin {
                     (None, Some(Reconnect { attempt: 1, retry_at: Instant::now() + reconnect_backoff(1) }))
                 }
             };
-        app.insert_resource(NetClientState {
-            client,
-            server_addr: self.server_addr,
-            reconnect,
-            user: self.user.clone(),
-            token: self.token,
-            login_denied: false,
-            own_id: None,
-            entities: HashMap::new(),
-            prefab_names: Vec::new(),
-            seq: 0,
-            predict: self.predict,
-            pending: VecDeque::new(),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: self.simulated_rtt,
-            latest_state_tick: 0,
-            playback: None,
-        })
+        let mut state =
+            NetClientState::new(client, self.server_addr, self.user.clone(), self.token, self.predict, self.simulated_rtt);
+        state.reconnect = reconnect;
+        app.insert_resource(state)
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         .add_system(NetSendInputSystem, Phase::Input, SystemOrder::after::<NetReceiveSystem>())
         .add_system(AbilityCastSystem::new(), Phase::Input, SystemOrder::after::<NetSendInputSystem>())
@@ -252,6 +237,39 @@ pub struct NetClientState {
 }
 
 impl NetClientState {
+    /// Builds a fresh session-state struct with every bookkeeping field at
+    /// its connect-time default; callers set the few fields they care about
+    /// on the returned value (all callers are inside `net`, so private-field
+    /// assignment compiles).
+    pub(crate) fn new(
+        client: Option<NetClient>,
+        server_addr: SocketAddr,
+        user: String,
+        token: AccountToken,
+        predict: bool,
+        simulated_rtt: Duration,
+    ) -> Self {
+        NetClientState {
+            client,
+            server_addr,
+            user,
+            token,
+            login_denied: false,
+            own_id: None,
+            entities: HashMap::new(),
+            prefab_names: Vec::new(),
+            seq: 0,
+            predict,
+            pending: VecDeque::new(),
+            move_ring: VecDeque::new(),
+            correction: Vec3::ZERO,
+            simulated_rtt,
+            reconnect: None,
+            latest_state_tick: 0,
+            playback: None,
+        }
+    }
+
     fn own_entity(&self) -> Option<Entity> {
         self.own_id.and_then(|id| self.entities.get(&id).copied())
     }
@@ -1361,27 +1379,16 @@ pub mod bench {
     /// and write the state fields.
     pub fn state_for_bench(own_id: Option<u32>, predict: bool) -> NetClientState {
         let server_addr = "127.0.0.1:9".parse().unwrap();
-        NetClientState {
-            client: Some(
-                NetClient::connect(server_addr, PROTOCOL_VERSION).expect("bench NetClient"),
-            ),
+        let mut state = NetClientState::new(
+            Some(NetClient::connect(server_addr, PROTOCOL_VERSION).expect("bench NetClient")),
             server_addr,
-            user: "bench".into(),
-            token: [0u8; 32],
-            login_denied: false,
-            own_id,
-            entities: HashMap::new(),
-            prefab_names: Vec::new(),
-            seq: 0,
+            "bench".into(),
+            [0u8; 32],
             predict,
-            pending: VecDeque::new(),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: Duration::ZERO,
-            reconnect: None,
-            latest_state_tick: 0,
-            playback: None,
-        }
+            Duration::ZERO,
+        );
+        state.own_id = own_id;
+        state
     }
 
     /// server-id → local-entity mapping (the enters path builds this normally).
@@ -1484,25 +1491,10 @@ mod tests {
         let mut entities = HashMap::new();
         entities.insert(1u32, remote);
 
-        resources.insert(NetClientState {
-            client: None,
-            server_addr: "127.0.0.1:9".parse().unwrap(),
-            user: "unit-test".into(),
-            token: [0u8; 32],
-            login_denied: false,
-            own_id: None,
-            entities,
-            prefab_names: Vec::new(),
-            seq: 0,
-            predict: false,
-            pending: VecDeque::new(),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: Duration::ZERO,
-            reconnect: None,
-            latest_state_tick: 0,
-            playback: None,
-        });
+        let mut state =
+            NetClientState::new(None, "127.0.0.1:9".parse().unwrap(), "unit-test".into(), [0u8; 32], false, Duration::ZERO);
+        state.entities = entities;
+        resources.insert(state);
 
         let mut render_sys = NetInterpolateSystem;
         let mut next_k: u64 = 1;
@@ -1605,25 +1597,10 @@ mod tests {
         let mut entities = HashMap::new();
         entities.insert(1u32, remote);
 
-        resources.insert(NetClientState {
-            client: None,
-            server_addr: "127.0.0.1:9".parse().unwrap(),
-            user: "unit-test".into(),
-            token: [0u8; 32],
-            login_denied: false,
-            own_id: None,
-            entities,
-            prefab_names: Vec::new(),
-            seq: 0,
-            predict: false,
-            pending: VecDeque::new(),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: Duration::ZERO,
-            reconnect: None,
-            latest_state_tick: 0,
-            playback: None,
-        });
+        let mut state =
+            NetClientState::new(None, "127.0.0.1:9".parse().unwrap(), "unit-test".into(), [0u8; 32], false, Duration::ZERO);
+        state.entities = entities;
+        resources.insert(state);
 
         let mut render_sys = NetInterpolateSystem;
         let mut positions: Vec<Vec3> = Vec::with_capacity(TOTAL_TICKS);
@@ -1713,25 +1690,12 @@ mod tests {
         entities.insert(1u32, remote);
         entities.insert(2u32, own);
 
-        resources.insert(NetClientState {
-            client: None,
-            server_addr: "127.0.0.1:9".parse().unwrap(),
-            user: "unit-test".into(),
-            token: [0u8; 32],
-            login_denied: false,
-            own_id: Some(2),
-            entities,
-            prefab_names: Vec::new(),
-            seq: 0,
-            predict: true,
-            pending: VecDeque::from(vec![intent(48, Vec2::X), intent(49, Vec2::X)]),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: Duration::ZERO,
-            reconnect: None,
-            latest_state_tick: 0,
-            playback: None,
-        });
+        let mut state =
+            NetClientState::new(None, "127.0.0.1:9".parse().unwrap(), "unit-test".into(), [0u8; 32], true, Duration::ZERO);
+        state.own_id = Some(2);
+        state.entities = entities;
+        state.pending = VecDeque::from(vec![intent(48, Vec2::X), intent(49, Vec2::X)]);
+        resources.insert(state);
 
         let p2 = Vec3::new(5.0, 0.0, 0.0);
         apply_states(
@@ -1886,25 +1850,14 @@ mod tests {
         resources.insert(DespawnQueue::new());
         resources.insert(Time::new());
         resources.insert(WorldTime { offset_micros: 0, synced: false });
-        resources.insert(NetClientState {
-            client: Some(NetClient::connect(addr, PROTOCOL_VERSION).expect("victim connect")),
-            server_addr: addr,
-            user: "reconnect-victim".into(),
-            token: name_token("reconnect-victim"),
-            login_denied: false,
-            own_id: None,
-            entities: HashMap::new(),
-            prefab_names: Vec::new(),
-            seq: 0,
-            predict: false,
-            pending: VecDeque::new(),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: Duration::ZERO,
-            reconnect: None,
-            latest_state_tick: 0,
-            playback: None,
-        });
+        resources.insert(NetClientState::new(
+            Some(NetClient::connect(addr, PROTOCOL_VERSION).expect("victim connect")),
+            addr,
+            "reconnect-victim".into(),
+            name_token("reconnect-victim"),
+            false,
+            Duration::ZERO,
+        ));
 
         let mut recv = NetReceiveSystem;
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -2052,28 +2005,17 @@ mod tests {
         resources.insert(WorldTime { offset_micros: 0, synced: false });
         resources.insert(EventBus::new());
         resources.insert(engine_app::input::KeyboardState::new());
-        resources.insert(NetClientState {
-            client: Some(
+        resources.insert(NetClientState::new(
+            Some(
                 NetClient::connect_with_latency(addr, PROTOCOL_VERSION, Duration::from_millis(150))
                     .expect("dasher connect"),
             ),
-            server_addr: addr,
-            user: "onslaught-dasher".into(),
-            token: name_token("onslaught-dasher"),
-            login_denied: false,
-            own_id: None,
-            entities: HashMap::new(),
-            prefab_names: Vec::new(),
-            seq: 0,
-            predict: true,
-            pending: VecDeque::new(),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: Duration::from_millis(150),
-            reconnect: None,
-            latest_state_tick: 0,
-            playback: None,
-        });
+            addr,
+            "onslaught-dasher".into(),
+            name_token("onslaught-dasher"),
+            true,
+            Duration::from_millis(150),
+        ));
 
         let mut recv = NetReceiveSystem;
         let mut send = NetSendInputSystem;
@@ -2342,8 +2284,8 @@ mod tests {
         resources.insert(DespawnQueue::new());
         resources.insert(Time::new());
         resources.insert(WorldTime { offset_micros: 0, synced: false });
-        resources.insert(NetClientState {
-            client: Some(
+        resources.insert(NetClientState::new(
+            Some(
                 NetClient::connect_impaired(addr, PROTOCOL_VERSION, engine_net::Impairment {
                     rtt: Duration::from_millis(100),
                     jitter: Duration::from_millis(30),
@@ -2352,23 +2294,12 @@ mod tests {
                 })
                 .expect("observer connect"),
             ),
-            server_addr: addr,
-            user: "smoothness-observer".into(),
-            token: name_token("smoothness-observer"),
-            login_denied: false,
-            own_id: None,
-            entities: HashMap::new(),
-            prefab_names: Vec::new(),
-            seq: 0,
-            predict: false,
-            pending: VecDeque::new(),
-            move_ring: VecDeque::new(),
-            correction: Vec3::ZERO,
-            simulated_rtt: Duration::from_millis(100),
-            reconnect: None,
-            latest_state_tick: 0,
-            playback: None,
-        });
+            addr,
+            "smoothness-observer".into(),
+            name_token("smoothness-observer"),
+            false,
+            Duration::from_millis(100),
+        ));
 
         let mut recv = NetReceiveSystem;
         let mut render_sys = NetInterpolateSystem;
