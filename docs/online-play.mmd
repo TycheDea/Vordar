@@ -16,7 +16,7 @@ flowchart TB
     subgraph CRECV["on snapshot from server"]
       direction TB
       R1["spawn / despawn replicated entities<br/>(entered / left the area of interest)"]
-      R2["interpolate remote entities<br/>between snapshot positions"]
+      R2["buffer snapshot positions by tick;<br/>render remotes at a fixed ~200 ms delay,<br/>brief capped extrapolation on loss"]
       R3["reconcile own player:<br/>rebase onto authoritative position,<br/>replay not-yet-processed intents"]
       R4{"prediction error?"}
       R5["within trust band → keep prediction"]
