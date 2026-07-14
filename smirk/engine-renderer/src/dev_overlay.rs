@@ -1,8 +1,8 @@
 // Dev overlay — F3 toggles a small stats panel (top-left, egui).
 //
 // DevOverlaySystem handles the toggle and publishes renderer-side counters
-// into DevStats; the actual drawing happens inside RenderSystem's egui frame
-// (see lib.rs) because the egui context lives in RendererState.
+// into DevStats; the actual drawing happens inside RenderSystem's egui pass
+// because the egui context lives in RendererState.
 
 use crate::instance::InstancePool;
 use engine_app::dev_stats::DevStats;
