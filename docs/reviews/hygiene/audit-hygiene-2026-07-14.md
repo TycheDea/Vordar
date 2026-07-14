@@ -18,7 +18,7 @@ systems, resources, tests, files, and content folders.
 
 > **Cross-type queue** (spans this file and `reworks-hygiene-2026-07-14.md`; mirrored
 > there verbatim):
-> **finding 1 → rework 1 → rework 2 → rework 3 → finding 2 → finding 3 → rework 4 →
+> **finding 1 → ~~rework 1~~ → rework 2 → rework 3 → finding 2 → finding 3 → rework 4 →
 > finding 4 → finding 5 → finding 6 → finding 7 → finding 8 → finding 9 → finding 10 →
 > finding 11 → finding 12 → finding 13 → finding 14 → finding 15 → finding 16.**
 > Finding 1 first: every comment cleanup (4-7) applies the policy it defines, and every
