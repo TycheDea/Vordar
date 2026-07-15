@@ -5,8 +5,7 @@ edition = "2021"
 
 [lib]
 name = "chapter_01"
-# No unit tests or doctests ship here; skip building the empty test binaries.
-test    = false
+# No doctests ship here; skip building the doctest binary.
 doctest = false
 
 [dependencies]

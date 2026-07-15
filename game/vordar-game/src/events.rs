@@ -26,3 +26,12 @@ pub struct DamageDealt {
     pub target: Entity,
     pub amount: i32,
 }
+
+/// Kill attribution — emitted by DeathSystem for the entity whose
+/// DamageDealt most recently targeted the victim this tick (last-hit wins).
+/// Consumer: per-player progression stats (e.g. chapter-01's XpGrantSystem).
+#[derive(Clone, Copy, Debug)]
+pub struct Killed {
+    pub victim: Entity,
+    pub killer: Entity,
+}

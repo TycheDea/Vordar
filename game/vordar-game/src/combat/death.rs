@@ -3,6 +3,7 @@
 // Runs after ContactDamageSystem in Phase::CollisionResolve.
 // Separating damage application from death handling keeps both systems focused.
 
+use crate::events::{DamageDealt, Killed};
 use engine_app::events::{EventBus, HealthDepleted};
 use engine_app::scheduler::System;
 use engine_core::components::Health;
@@ -35,8 +36,22 @@ impl System for DeathSystem {
         );
 
         for entity in self.dead.drain(..) {
+            // Last-hit attribution: the most recent DamageDealt targeting this
+            // entity this tick is credited with the kill.
+            let killer = resources
+                .get::<EventBus>()
+                .unwrap()
+                .read::<DamageDealt>()
+                .filter(|d| d.target == entity)
+                .last()
+                .map(|d| d.attacker);
+
             // Emit event first so other systems in the same phase can react this frame.
-            resources.get_mut::<EventBus>().unwrap().emit(HealthDepleted { entity });
+            let bus = resources.get_mut::<EventBus>().unwrap();
+            bus.emit(HealthDepleted { entity });
+            if let Some(killer) = killer {
+                bus.emit(Killed { victim: entity, killer });
+            }
 
             // Take the OnDeath component out of the world (consumed — fires once).
             let on_death = world.remove::<(OnDeath,)>(entity).ok().map(|(od,)| od.0);
