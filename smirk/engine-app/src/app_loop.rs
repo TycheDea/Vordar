@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
+use winit::event::{ElementState, StartCause, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 use crate::app::App;
@@ -149,27 +149,84 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // Frame limiter: sleep until the per-frame budget is exhausted.
-                // None = resolve from the current monitor's refresh rate on-the-fly (not stored in config).
+                let now   = Instant::now();
+                let delta = now.duration_since(self.last_tick).as_secs_f32().min(0.1);
+                self.last_tick = now;
+                self.tick(delta);
+
+                // Frame limiter: park the event loop until the per-frame budget
+                // elapses (see about_to_wait) rather than blocking-sleeping the
+                // winit thread — input keeps pumping while we wait.
+                // None max_fps = resolve from the current monitor's refresh rate
+                // on-the-fly (not stored in config).
                 let max_fps = self.resources.get::<WindowConfig>().and_then(|c| c.max_fps)
                     .or_else(|| self.window.as_ref()
                         .and_then(|w| w.current_monitor())
                         .and_then(|m| m.refresh_rate_millihertz())
                         .map(|mhz| (mhz / 1000).max(30)));
-                if let Some(fps) = max_fps {
-                    let budget  = Duration::from_secs_f64(1.0 / fps as f64);
-                    let elapsed = self.last_tick.elapsed();
-                    if elapsed < budget {
-                        std::thread::sleep(budget - elapsed);
-                    }
-                }
-                let now   = Instant::now();
-                let delta = now.duration_since(self.last_tick).as_secs_f32().min(0.1);
-                self.last_tick = now;
-                self.tick(delta);
-                if let Some(w) = &self.window { w.request_redraw(); }
+                self.next_frame = next_frame_deadline(now, max_fps);
             }
             _ => {}
+        }
+    }
+
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
+        // The WaitUntil deadline fired: drive the next frame's redraw.
+        if let StartCause::ResumeTimeReached { .. } = cause {
+            if let Some(w) = &self.window { w.request_redraw(); }
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        match self.next_frame {
+            // Cap resolved: sleep the OS timer to the deadline, waking early for
+            // any input event so it is processed without a frame of latency.
+            Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+            // No cap: redraw as fast as the loop allows.
+            None => {
+                if let Some(w) = &self.window { w.request_redraw(); }
+                event_loop.set_control_flow(ControlFlow::Poll);
+            }
+        }
+    }
+}
+
+/// Next-frame deadline for the WaitUntil limiter: the tick's start instant plus
+/// the per-frame budget. `None` (no cap resolved) means redraw as fast as the
+/// event loop allows. Because deadlines are anchored to each tick's start, a run
+/// with no overruns produces exactly `max_fps` ticks per wall-clock second.
+fn next_frame_deadline(tick_start: Instant, max_fps: Option<u32>) -> Option<Instant> {
+    max_fps.map(|fps| tick_start + Duration::from_secs_f64(1.0 / fps as f64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unlimited_fps_has_no_deadline() {
+        assert!(next_frame_deadline(Instant::now(), None).is_none());
+    }
+
+    #[test]
+    fn deadline_cadence_matches_max_fps() {
+        // Simulate an overrun-free run: each frame's tick starts at the previous
+        // frame's deadline. Every frame must be paced to exactly one budget of
+        // 1/max_fps, and the count over one wall-clock second must land on
+        // max_fps (±1 tick from nanosecond budget rounding).
+        for fps in [30u32, 60, 144] {
+            let budget = Duration::from_secs_f64(1.0 / fps as f64);
+            let start = Instant::now();
+            let one_second = start + Duration::from_secs(1);
+            let mut tick_start = start;
+            let mut ticks = 0u32;
+            while let Some(deadline) = next_frame_deadline(tick_start, Some(fps)) {
+                assert_eq!(deadline - tick_start, budget, "per-frame budget for {fps} fps");
+                if deadline > one_second { break; }
+                ticks += 1;
+                tick_start = deadline;
+            }
+            assert!(ticks.abs_diff(fps) <= 1, "cadence for {fps} fps: got {ticks}");
         }
     }
 }

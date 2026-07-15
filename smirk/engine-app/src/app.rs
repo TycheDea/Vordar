@@ -44,6 +44,12 @@ pub struct App {
     pub(crate) last_tick:      std::time::Instant,
     #[cfg(feature = "winit")]
     pub(crate) window:         Option<std::sync::Arc<winit::window::Window>>,
+    /// Deadline for the next frame tick. The winit limiter parks the event
+    /// loop on `ControlFlow::WaitUntil(next_frame)` instead of blocking-sleep,
+    /// so input is pumped the instant it arrives. `None` = redraw as fast as
+    /// the loop allows (no cap resolved yet, or unlimited).
+    #[cfg(feature = "winit")]
+    pub(crate) next_frame:     Option<std::time::Instant>,
     #[cfg(feature = "winit")]
     pub(crate) on_init:        Vec<Box<dyn FnOnce(&std::sync::Arc<winit::window::Window>, &mut Resources)>>,
     #[cfg(feature = "winit")]
@@ -89,6 +95,8 @@ impl App {
             last_tick:      std::time::Instant::now(),
             #[cfg(feature = "winit")]
             window:         None,
+            #[cfg(feature = "winit")]
+            next_frame:     None,
             #[cfg(feature = "winit")]
             on_init:        Vec::new(),
             #[cfg(feature = "winit")]
