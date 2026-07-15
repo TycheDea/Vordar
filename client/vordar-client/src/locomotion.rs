@@ -19,6 +19,8 @@ use glam::{Quat, Vec2};
 use hecs::Entity;
 use std::f32::consts::{PI, TAU};
 
+use crate::net::NetMotion;
+
 /// Which clips this character uses for each locomotion state, and the speed
 /// thresholds between them (world units/sec).
 #[derive(Clone)]
@@ -89,7 +91,6 @@ pub fn aim_at(world: &mut World, entity: Entity, target: glam::Vec3) {
 
 /// Estimated velocity for entities the local sim doesn't move (remote,
 /// snapshot-lerped players), written by `net::interpolate::NetInterpolateSystem`.
-pub use crate::net::NetMotion;
 
 /// The velocity locomotion/facing should animate from: the sim's when it is
 /// actually moving the entity (local/predicted player), else the

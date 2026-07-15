@@ -12,9 +12,6 @@ use engine_core::components::SubShape;
 use glam::Vec3;
 use std::collections::HashMap;
 
-// Re-export from the race module.
-pub use super::race::{RaceId, RaceLibrary, RaceModel};
-
 /// Fallback class for entities with no `ClassId` (ad-hoc test entities that
 /// never spawned from a real prefab).
 pub const DEFAULT_CLASS: &str = "human";

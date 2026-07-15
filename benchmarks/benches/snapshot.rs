@@ -26,7 +26,7 @@ use vordar_game::player::Player;
 use vordar_game::Mechanic;
 use vordar_protocol::PROTOCOL_VERSION;
 use vordar_server::db::DbWorker;
-use vordar_server::net::{bench as seam, MechanicResolveSystem, SnapshotBroadcastSystem};
+use vordar_server::net::bench as seam;
 
 /// Everyone inside half_extent 14 is mutually within AOI_RADIUS=40 (max
 /// pairwise distance ≈ 39.6) — the soak test's worst-case crowd shape.
@@ -93,7 +93,7 @@ fn bench_broadcast(c: &mut Criterion) {
             prime_grid(&mut world, &mut resources);
             resources.insert(seam::state_with_fake_conns(server, worker.handle(), &players));
 
-            let mut sys = SnapshotBroadcastSystem::new();
+            let mut sys = seam::SnapshotBroadcastSystem::new();
             // One full stagger round populates every conn's known set —
             // bench the steady state.
             for _ in 0..seam::STAGGER_TICKS {
@@ -149,7 +149,7 @@ fn bench_mechanic_resolve(c: &mut Criterion) {
                         // world stationary across iterations.
                         Mechanic { id: 1, radius: 50.0, damage: 0, damage_type: Default::default(), resolve_at_micros: 0, caster },
                     ));
-                    let mut sys = MechanicResolveSystem::new();
+                    let mut sys = seam::MechanicResolveSystem::new();
                     let t = Instant::now();
                     sys.run(&mut world, &mut resources, DT);
                     total += t.elapsed();

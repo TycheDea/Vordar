@@ -34,13 +34,12 @@ mod transfer;
 #[doc(hidden)]
 pub mod bench;
 
-pub use broadcast::SnapshotBroadcastSystem;
-pub use mechanics::MechanicResolveSystem;
 pub use shutdown::ShutdownFlag;
 
 use autosave::AutosaveSystem;
-use broadcast::DeathBroadcastSystem;
+use broadcast::{DeathBroadcastSystem, SnapshotBroadcastSystem};
 use login::LoginFailures;
+use mechanics::MechanicResolveSystem;
 use receive::NetReceiveSystem;
 use repl_ids::ReplIds;
 use shutdown::ShutdownSystem;

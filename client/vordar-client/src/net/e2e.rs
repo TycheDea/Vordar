@@ -35,7 +35,7 @@ fn insert_game_prefabs(resources: &mut Resources) {
     registry.register::<vordar_game::ContactDamage>("ContactDamage");
     registry.register::<vordar_game::CombatStats>("CombatStats");
     registry.register::<vordar_game::class::ClassId>("Class");
-    registry.register::<vordar_game::class::RaceId>("Race");
+    registry.register::<vordar_game::player::race::RaceId>("Race");
     registry.register::<vordar_game::vfx::VfxTrail>("VfxTrail");
     let mut prefabs = engine_core::prefab::PrefabLibrary::new();
     prefabs.load_dir("content/prefabs");

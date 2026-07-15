@@ -3,6 +3,8 @@
 /// are silently dropped by engine-net's router (no such connection), so the
 /// benches measure the full sim-thread cost with zero network I/O.
 use super::*;
+pub use super::broadcast::SnapshotBroadcastSystem;
+pub use super::mechanics::MechanicResolveSystem;
 
 pub const MAX_STATES: usize = broadcast::MAX_SNAPSHOT_STATES;
 pub const NEAREST: usize = broadcast::NEAREST_GUARANTEED;
