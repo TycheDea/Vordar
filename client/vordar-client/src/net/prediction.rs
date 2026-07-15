@@ -24,18 +24,16 @@ const CORRECTION_HALF_LIFE: f32 = 0.15;
 /// Safety bound on unacknowledged intents (~4 s at 60 Hz). Hitting it means
 /// the server stopped acking; predicting further is pointless.
 const MAX_PENDING_INTENTS: usize = 240;
-/// Last-3 redundancy depth for `ClientMsg::MoveIntents` (protocol v15,
-/// networking rework 3 finding 5): this tick's entry plus the two previous,
-/// sent via datagram every Input tick — a single lost datagram is fully
-/// recovered by the next tick's batch.
+/// Last-3 redundancy depth for `ClientMsg::MoveIntents`: this tick's entry
+/// plus the two previous, sent via datagram every Input tick — a single lost
+/// datagram is fully recovered by the next tick's batch.
 pub(super) const MOVE_RING_LEN: usize = 3;
 
 /// An intent sent to the server but not yet covered by `last_processed_seq`.
 /// Replayed on top of each snapshot of our own player. `leap` mirrors a
 /// LeapImpulse active on the entity when this tick's intent was recorded —
 /// replay reproduces the dash's straight-line displacement instead of
-/// dead-reckoning plain WASD movement through it (networking audit
-/// 2026-07-11, finding 11).
+/// dead-reckoning plain WASD movement through it.
 pub(super) struct PendingIntent {
     pub(super) seq: u32,
     pub(super) dir: Vec2,
@@ -68,12 +66,11 @@ pub(super) fn reconcile_own(
         let still_reconciling_a_dash = state.pending.iter().any(|p| p.leap.is_some());
         (replay_position(server_pos, speed, state.pending.iter()), still_reconciling_a_dash)
     };
-    // Collision response isn't replayed (finding 11 — full collision-in-replay
-    // is rework-scale, `reworks-networking-2026-07-11.md` finding 7): mid-dash
-    // the free-flight `replayed` position and a wall-clamped real one can
-    // differ for reasons that aren't mispredictions, so corrections stay
-    // suppressed until the server has caught up on the whole dash instead of
-    // tugging every snapshot.
+    // Collision response isn't replayed here: mid-dash the free-flight
+    // `replayed` position and a wall-clamped real one can differ for reasons
+    // that aren't mispredictions, so corrections stay suppressed until the
+    // server has caught up on the whole dash instead of tugging every
+    // snapshot.
     if still_reconciling_a_dash {
         return;
     }
@@ -97,9 +94,8 @@ pub(super) fn reconcile_own(
 
 /// Position after replaying pending intents on top of the server's
 /// authoritative position — the same movement rule the simulation runs,
-/// including a leap override where one was active (finding 11) — collision
-/// response is the one part of the shared rule still unreplayed (rework-scale,
-/// `reworks-networking-2026-07-11.md` finding 7).
+/// including a leap override where one was active — collision response is
+/// the one part of the shared rule still unreplayed.
 fn replay_position<'a>(
     server_pos: Vec3,
     speed: f32,
@@ -166,8 +162,7 @@ impl System for NetCorrectionSystem {
 /// Inserts the client-predicted LeapImpulse for a dash cast and retags this
 /// tick's already-recorded PendingIntent (NetSendInputSystem runs earlier in
 /// the same Input phase, before the dash existed) so replay reproduces the
-/// dash from its very first tick too, not just the ticks after — networking
-/// audit 2026-07-11, finding 11.
+/// dash from its very first tick too, not just the ticks after.
 pub(crate) fn start_predicted_leap(world: &mut World, resources: &mut Resources, entity: Entity, velocity: Vec3, cast_secs: f32) {
     let _ = world.insert_one(entity, vordar_game::combat::LeapImpulse { velocity, remaining: cast_secs });
     if let Some(state) = resources.get_mut::<NetClientState>() {
@@ -197,9 +192,9 @@ impl System for NetSendInputSystem {
                 state.move_ring.pop_front();
             }
             if let Some(client) = &state.client {
-                // Rides the unreliable datagram lane with last-3 redundancy
-                // (protocol v15, networking rework 3 finding 5): a single
-                // lost datagram is fully recovered by the next tick's batch.
+                // Rides the unreliable datagram lane with last-3 redundancy:
+                // a single lost datagram is fully recovered by the next
+                // tick's batch.
                 let intents: Vec<MoveIntentEntry> = state.move_ring.iter().cloned().collect();
                 client.send_datagram(encode(&ClientMsg::MoveIntents { intents }));
             }
@@ -210,10 +205,10 @@ impl System for NetSendInputSystem {
                 // is recorded means the Update-phase LeapSystem (later this
                 // same tick) will override this tick's velocity too — mirror
                 // that into the pending record so replay reconstructs the
-                // dash instead of dead-reckoning plain movement (networking
-                // audit 2026-07-11, finding 11). A dash that starts THIS tick
-                // is retagged onto this same entry by `start_predicted_leap`,
-                // called later in this same Input phase.
+                // dash instead of dead-reckoning plain movement. A dash that
+                // starts THIS tick is retagged onto this same entry by
+                // `start_predicted_leap`, called later in this same Input
+                // phase.
                 let leap = world.get::<&vordar_game::combat::leap::LeapImpulse>(entity).ok().map(|l| l.velocity);
                 state.pending.push_back(PendingIntent { seq: state.seq, dir, dt: delta, leap });
                 if state.pending.len() > MAX_PENDING_INTENTS {
@@ -258,14 +253,12 @@ mod tests {
         assert!((a - b).length() < 1e-6);
     }
 
-    /// Networking audit 2026-07-11, finding 11: at 150 ms RTT an Onslaught
-    /// (cast_secs 0.4 s, content/classes/ravager.ron) replays ~9 unacked
-    /// intents while the dash is in flight. Folding plain WASD movement
-    /// through them (the pre-fix behaviour, `leap: None` throughout) misses
-    /// the dash's real displacement by more than SNAP_DISTANCE — exactly the
-    /// mid-dash teleport the finding describes. Leap-aware replay
-    /// (`leap: Some(velocity)`) must instead land exactly where the dash
-    /// actually went.
+    /// At 150 ms RTT an Onslaught (cast_secs 0.4 s, content/classes/ravager.ron)
+    /// replays ~9 unacked intents while the dash is in flight. Folding plain
+    /// WASD movement through them (`leap: None` throughout) misses the
+    /// dash's real displacement by more than SNAP_DISTANCE — a mid-dash
+    /// teleport. Leap-aware replay (`leap: Some(velocity)`) must instead
+    /// land exactly where the dash actually went.
     #[test]
     fn replay_reconstructs_a_dash_leap_instead_of_dead_reckoning_wasd() {
         let dash_velocity = Vec3::new(30.0, 0.0, 0.0); // 12 units over a 0.4 s cast

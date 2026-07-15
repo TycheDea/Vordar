@@ -4,7 +4,7 @@
 // tick-indexed sample buffer (NetBuffer) and is rendered by a playback
 // cursor a fixed ~200 ms behind the newest received snapshot tick
 // (NetInterpolateSystem), absorbing jitter and single-datagram loss without
-// freezing or warbling (networking rework 4, finding 1). Our OWN player is
+// freezing or warbling. Our OWN player is
 // predicted: each Input tick we send the intent AND emit it locally, so the
 // shared vordar-game movement systems apply it immediately. Snapshots then
 // reconcile: rebase onto the server's authoritative position and replay the
@@ -55,15 +55,14 @@ pub struct NetClientPlugin {
     pub simulated_rtt: Duration,
     /// Character name sent as the first message after connect.
     pub user: String,
-    /// Account credential presented with `user` on every `Login` (networking
-    /// rework 1, finding 3) — see `credentials::load_or_mint`.
+    /// Account credential presented with `user` on every `Login` — see
+    /// `credentials::load_or_mint`.
     pub token: AccountToken,
 }
 
 impl Plugin for NetClientPlugin {
     fn build(&self, app: &mut App) {
-        // A failed first connect no longer panics (networking audit
-        // 2026-07-11, finding 7): fall back to the same reconnect state
+        // A failed first connect falls back to the same reconnect state
         // machine that handles a later drop, so a transient failure (server
         // not up yet, brief DNS/route hiccup) resolves in the background
         // instead of crashing the client before a single frame renders.
@@ -125,15 +124,13 @@ impl Plugin for NetClientPlugin {
 
 pub struct NetClientState {
     /// None while the connection is down (initial connect failure, or an
-    /// unexpected drop awaiting a redial) — networking audit 2026-07-11,
-    /// finding 7.
+    /// unexpected drop awaiting a redial).
     client: Option<NetClient>,
     /// Address to redial after an unexpected disconnect. A zone Redirect
     /// overwrites this with the new zone's address.
     server_addr: SocketAddr,
     user: String,
-    /// Account credential presented on every `Login` (networking rework 1,
-    /// finding 3).
+    /// Account credential presented on every `Login`.
     token: AccountToken,
     /// Set once a `LoginDenied` arrives — stops `handle_disconnected` and
     /// `maybe_reconnect` from scheduling further redials: retrying with the
@@ -142,8 +139,8 @@ pub struct NetClientState {
     own_id: Option<u32>,
     /// server entity id → local entity
     entities: HashMap<u32, Entity>,
-    /// This zone's prefab name table (protocol v13, networking rework 5
-    /// finding 4): index = the `u16` `EntityState::prefab` rides on the wire.
+    /// This zone's prefab name table: index = the `u16`
+    /// `EntityState::prefab` rides on the wire.
     /// Empty until `ServerMsg::PrefabTable` arrives (right after `Welcome`,
     /// before the first `Snapshot`); cleared on teardown so a redirect or
     /// reconnect adopts the new zone's table instead of the old one's.
@@ -151,11 +148,10 @@ pub struct NetClientState {
     seq: u32,
     predict: bool,
     pending: VecDeque<PendingIntent>,
-    /// Last `MOVE_RING_LEN` sent `MoveIntentEntry`s, oldest first (protocol
-    /// v15, networking rework 3 finding 5) — resent every tick as the
-    /// `ClientMsg::MoveIntents` batch. Cleared in `teardown_replicated_world`
-    /// alongside `seq` so a redirect/reconnect starts a fresh window instead
-    /// of resending the old connection's seqs.
+    /// Last `MOVE_RING_LEN` sent `MoveIntentEntry`s, oldest first — resent
+    /// every tick as the `ClientMsg::MoveIntents` batch. Cleared in
+    /// `teardown_replicated_world` alongside `seq` so a redirect/reconnect
+    /// starts a fresh window instead of resending the old connection's seqs.
     move_ring: VecDeque<MoveIntentEntry>,
     /// Outstanding reconciliation error, folded into the predicted position a
     /// little each Update tick by NetCorrectionSystem.
@@ -167,9 +163,9 @@ pub struct NetClientState {
     /// the UI to show a "reconnecting" indicator (`reconnect_attempt`).
     reconnect: Option<Reconnect>,
     /// Highest `ServerMsg::Snapshot.tick` applied so far. `Snapshot` rides an
-    /// unreliable datagram (protocol v14, networking rework 3 finding 4), so
-    /// a copy can arrive late or out of order; any snapshot whose tick is not
-    /// strictly greater is dropped before any field is read (ack included).
+    /// unreliable datagram, so a copy can arrive late or out of order; any
+    /// snapshot whose tick is not strictly greater is dropped before any
+    /// field is read (ack included).
     /// Reset in `teardown_replicated_world` so a redirect/reconnect doesn't
     /// compare against the old zone's ticks.
     latest_state_tick: u64,
@@ -177,7 +173,7 @@ pub struct NetClientState {
     /// first tick it's driven, which hard-snaps it to
     /// `latest_state_tick as f64 - INTERP_DELAY_TICKS` instead of slewing
     /// from an arbitrary start. Reset to `None` in `teardown_replicated_world`
-    /// alongside `latest_state_tick` (networking rework 4, finding 1).
+    /// alongside `latest_state_tick`.
     playback: Option<f64>,
 }
 
@@ -250,8 +246,7 @@ pub(crate) fn own_entity(resources: &Resources) -> Option<Entity> {
 }
 
 /// Current reconnect attempt number, for the UI banner. None while connected
-/// (or offline — no NetClientState at all): networking audit 2026-07-11,
-/// finding 7.
+/// (or offline — no NetClientState at all).
 pub(crate) fn reconnect_attempt(resources: &Resources) -> Option<u32> {
     resources.get::<NetClientState>().and_then(|s| s.reconnect.as_ref().map(|r| r.attempt))
 }

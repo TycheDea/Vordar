@@ -24,8 +24,7 @@ use vordar_protocol::{decode, encode, ClientMsg, ServerMsg, PROTOCOL_VERSION};
 /// ordinary blip (brief loss, a moment of server-side hiccup) clears fast.
 const RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 /// Backoff cap so a genuinely dead server doesn't spin the network thread,
-/// while still retrying at a steady cadence (networking audit 2026-07-11,
-/// finding 7: disconnect used to be a log line with no recovery at all).
+/// while still retrying at a steady cadence.
 const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(8);
 /// How long a redial is given to resolve (Connected or Disconnected) before
 /// the backoff timer is allowed to fire again — must clear engine-net's own
@@ -54,7 +53,7 @@ pub(super) struct NetReceiveSystem;
 impl System for NetReceiveSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         // A due redial happens on its own clock, independent of any event
-        // arriving this tick (networking audit 2026-07-11, finding 7).
+        // arriving this tick.
         maybe_reconnect(resources);
 
         let events = {
@@ -118,11 +117,10 @@ impl System for NetReceiveSystem {
                         apply::handle_entity_died(world, resources, id, pos);
                     }
                     Some(ServerMsg::LoginDenied { reason }) => {
-                        // Denials are messages, not kicks (networking rework
-                        // 1, finding 3): the server leaves the connection
-                        // open, so WE close it — same lesson as Redirect and
-                        // the Phase-6 takeover, a server-side kick could
-                        // outrace this frame. `login_denied` then stops
+                        // Denials are messages, not kicks: the server leaves
+                        // the connection open, so WE close it — same lesson
+                        // as Redirect, since a server-side kick could outrace
+                        // this frame. `login_denied` then stops
                         // `handle_disconnected` from scheduling a redial that
                         // would only be denied again with the same credential.
                         log::error!("login denied: {reason:?}");
@@ -151,8 +149,8 @@ impl System for NetReceiveSystem {
 
 /// Despawns every replicated entity and telegraph visual and resets the
 /// per-connection reconciliation state. Shared by a zone Redirect and an
-/// unexpected disconnect (networking audit 2026-07-11, finding 7): both leave
-/// the client needing a fresh AOI rebuild off the next Welcome.
+/// unexpected disconnect: both leave the client needing a fresh AOI rebuild
+/// off the next Welcome.
 fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     let telegraphs: Vec<hecs::Entity> = world.query::<(hecs::Entity, &crate::telegraph::TelegraphVisual)>().iter().map(|(e, _)| e).collect();
     let replicated: Vec<hecs::Entity> = resources.get::<NetClientState>().unwrap().entities.values().copied().collect();
@@ -171,22 +169,19 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     // A redirect/reconnect lands in a different zone with a different
     // PrefabLibrary; clearing here forces the fresh table off the new
     // connection's Welcome instead of resolving enters against the old
-    // zone's indices (protocol v13, networking rework 5 finding 4).
+    // zone's indices.
     state.prefab_names.clear();
     // Fresh connection, fresh validation stream (per-connection on the server).
     state.seq = 0;
-    // The new connection starts its own last-3 redundancy window (protocol
-    // v15, networking rework 3 finding 5) — resending the old connection's
-    // seqs would just be silently skipped server-side, but there is no
-    // reason to carry them over.
+    // The new connection starts its own last-3 redundancy window — resending
+    // the old connection's seqs would just be silently skipped server-side,
+    // but there is no reason to carry them over.
     state.move_ring.clear();
     // The new connection's tick sequence starts over — comparing against the
-    // old zone's ticks would drop every snapshot until it catches up
-    // (protocol v14, networking rework 3 finding 4).
+    // old zone's ticks would drop every snapshot until it catches up.
     state.latest_state_tick = 0;
     // The playback cursor is meaningless against a new connection's ticks —
-    // `None` hard-snaps it fresh off the new zone's first snapshot
-    // (networking rework 4, finding 1).
+    // `None` hard-snaps it fresh off the new zone's first snapshot.
     state.playback = None;
     resources.get_mut::<crate::world_time::WorldTime>().unwrap().synced = false;
 }
@@ -204,10 +199,9 @@ fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, add
     state.reconnect = None;
     // Dropping the old NetClient closes the QUIC connection — the server sees
     // a normal Disconnected (which finds no PlayerConn and does nothing). A
-    // failed redial here no longer panics: it falls into the same reconnect
-    // state machine an unexpected drop uses (networking audit 2026-07-11,
-    // finding 7) instead of crashing with the character already persisted
-    // into the target zone.
+    // failed redial here falls into the same reconnect state machine an
+    // unexpected drop uses, instead of crashing with the character already
+    // persisted into the target zone.
     match NetClient::connect_with_latency(addr, PROTOCOL_VERSION, state.simulated_rtt) {
         Ok(client) => state.client = Some(client),
         Err(e) => {
@@ -225,8 +219,6 @@ fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, add
 /// An unexpected disconnect (server killed, brief network loss, redial
 /// failure): tear down the replicated world exactly like a zone Redirect,
 /// then schedule (or advance) a backoff-retried redial of the same address.
-/// Networking audit 2026-07-11, finding 7 — this used to be a bare log line
-/// with no recovery.
 fn handle_disconnected(world: &mut World, resources: &mut Resources) {
     teardown_replicated_world(world, resources);
     let state = resources.get_mut::<NetClientState>().unwrap();
@@ -245,7 +237,7 @@ fn handle_disconnected(world: &mut World, resources: &mut Resources) {
 /// Redials `state.server_addr` once the current backoff/grace window has
 /// elapsed. Runs every Input tick regardless of which events (if any) were
 /// just drained — a due retry has nothing to do with the last message
-/// received. Networking audit 2026-07-11, finding 7.
+/// received.
 fn maybe_reconnect(resources: &mut Resources) {
     let state = resources.get_mut::<NetClientState>().unwrap();
     if state.login_denied {

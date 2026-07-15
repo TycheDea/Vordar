@@ -24,8 +24,7 @@ pub fn map_entity(state: &mut NetClientState, id: u32, entity: Entity) {
 
 /// Seeds the client's cached prefab name table directly — bypasses the
 /// `ServerMsg::PrefabTable` wire round trip so benches can build `enters`
-/// with `u16` refs against a known table (protocol v13, networking
-/// rework 5 finding 4).
+/// with `u16` refs against a known table.
 pub fn set_prefab_table(state: &mut NetClientState, names: Vec<String>) {
     state.prefab_names = names;
 }

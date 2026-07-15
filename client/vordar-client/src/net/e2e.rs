@@ -43,19 +43,18 @@ fn insert_game_prefabs(resources: &mut Resources) {
     resources.insert(prefabs);
 }
 
-/// Networking audit 2026-07-11, finding 7: "disconnect is a log line, no
-/// reconnect, no teardown" — this drives a real server, a real
-/// `NetClient` connection, and the real `NetReceiveSystem` (no
+/// Exercises the reconnect path end to end — this drives a real server, a
+/// real `NetClient` connection, and the real `NetReceiveSystem` (no
 /// reimplemented logic). A second login under the same character name
 /// makes the server's existing session-takeover kick the first
 /// connection (mirrors `phase6_login_takeover` in vordar-server's e2e
 /// suite) — a genuine, unannounced disconnect. engine-net's listening
-/// socket is never released once bound (findings 13/14/18 — no shutdown
-/// story), so an in-process bind/drop/rebind on the same port isn't
-/// possible; kicking the connection is the closest headless equivalent
-/// of "the server process restarted" that exercises the same
-/// Disconnected → teardown → backoff-redial → relogin path. The victim
-/// must notice, tear down, and relogin entirely on its own.
+/// socket is never released once bound (no shutdown story), so an
+/// in-process bind/drop/rebind on the same port isn't possible; kicking
+/// the connection is the closest headless equivalent of "the server
+/// process restarted" that exercises the same Disconnected → teardown →
+/// backoff-redial → relogin path. The victim must notice, tear down, and
+/// relogin entirely on its own.
 #[test]
 fn kicked_connection_reconnects_and_relogs_in() {
     workspace_root();
@@ -93,8 +92,7 @@ fn kicked_connection_reconnects_and_relogs_in() {
     // without flushing pending stream writes, so dropping right after
     // `send` can race the Login frame right off the wire. `Bot` derives
     // the same token from the name, so this takeover satisfies the
-    // token-match requirement (networking rework 1, finding 3)
-    // automatically.
+    // token-match requirement automatically.
     let mut kicker = Bot::connect_as(addr, "reconnect-victim");
     kicker.wait_for("kicker Welcome", Duration::from_secs(5), |b| b.player_id.is_some());
     drop(kicker);
@@ -110,8 +108,8 @@ fn kicked_connection_reconnects_and_relogs_in() {
         assert!(Instant::now() < deadline, "the kick was never detected as a disconnect");
         std::thread::sleep(Duration::from_millis(16));
     }
-    // Torn down immediately, not left dangling — the frozen-world half
-    // of this finding's gap.
+    // Torn down immediately, not left dangling with a stale own_id while
+    // the reconnect is still in flight.
     assert!(
         resources.get::<NetClientState>().unwrap().own_id.is_none(),
         "an unexpected disconnect must clear own_id right away"
@@ -132,13 +130,11 @@ fn kicked_connection_reconnects_and_relogs_in() {
     assert_ne!(first_id, second_id, "reconnect must relogin into a fresh body");
 }
 
-/// Networking audit 2026-07-11, finding 11: "Prediction replay models
-/// plain movement only — leaps ... produce snaps at real latency." A real
-/// headless server plus a real predicting `NetClient` (150 ms simulated
-/// RTT, the finding's own number) cast a real Onslaught (the Ravager's
-/// gap-closer, `content/classes/ravager.ron`: 0.4 s dash, 8 s cooldown,
-/// 12-unit range) and drive exactly the systems `NetClientPlugin`
-/// registers for a predicting player (`NetReceiveSystem`,
+/// At 150 ms simulated RTT, a real headless server plus a real predicting
+/// `NetClient` cast a real Onslaught (the Ravager's gap-closer,
+/// `content/classes/ravager.ron`: 0.4 s dash, 8 s cooldown, 12-unit range)
+/// and drive exactly the systems `NetClientPlugin` registers for a
+/// predicting player (`NetReceiveSystem`,
 /// `NetSendInputSystem`, `PlayerMovementSystem`, `LeapSystem`,
 /// `MovementSystem`, `NetCorrectionSystem`) — no reimplemented logic.
 ///
@@ -239,13 +235,11 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
         std::thread::sleep(Duration::from_millis(16));
     }
 
-    // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
-    // cooldowns now persist as remainders instead of pessimistically
-    // seeding full cooldown at spawn, so a fresh character's "onslaught"
-    // is castable immediately — no cooldown-clearing wait needed. The
-    // predicted entity itself is still created only once the first
-    // Snapshot's `enters` list reaches this client (Welcome alone
-    // doesn't spawn it), so pump until it exists.
+    // Cooldowns persist as remainders rather than seeding a full cooldown
+    // at spawn, so a fresh character's "onslaught" is castable immediately
+    // — no cooldown-clearing wait needed. The predicted entity itself is
+    // still created only once the first Snapshot's `enters` list reaches
+    // this client (Welcome alone doesn't spawn it), so pump until it exists.
     let entity_deadline = Instant::now() + Duration::from_secs(2);
     while own_entity(&resources).is_none() {
         run_input(&mut world, &mut resources);
@@ -312,8 +306,7 @@ fn pace_tick(next: &mut Instant) {
 /// Sends the mover's next `ClientMsg::MoveIntents` datagram — the same
 /// last-3 redundancy ring `NetSendInputSystem` keeps — and reverses
 /// `dir`'s X sign every ~2 s so the mover walks back and forth instead of
-/// leaving the observer's AOI (networking rework 4, finding 3's
-/// smoothness probe). 2170 ms, not a whole multiple of the 100 ms
+/// leaving the observer's AOI. 2170 ms, not a whole multiple of the 100 ms
 /// `SNAPSHOT_HZ` cadence, so a reversal's phase against the sample
 /// boundaries drifts instead of relocking to the same offset every cycle.
 /// `dir`'s Z component is a small constant (never reversed): a pure ±X
@@ -335,19 +328,17 @@ fn drive_mover(mover: &mut Bot, dir: &mut Vec2, last_reverse: &mut Instant) {
     mover.pump();
 }
 
-/// Networking rework 4, finding 3
-/// (`docs/reviews/networking/plan-networking-rework-4-2026-07-14.md`): the loss
-/// probes (`server/vordar-server/tests/loss.rs`) measure arrival gaps and
-/// intent-ack lag only — nothing measures what a player actually SEES: the
-/// per-tick rendered motion of a remote entity under loss and jitter. A
-/// real headless server, a real "mover" (a second `Bot`, the kicker
-/// pattern above) streaming `MoveIntents` datagrams ±X at 6 u/s,
-/// and a real WAN-impaired "observer" running the actual client systems
+/// The loss probes (`server/vordar-server/tests/loss.rs`) measure arrival
+/// gaps and intent-ack lag only — nothing measures what a player actually
+/// SEES: the per-tick rendered motion of a remote entity under loss and
+/// jitter. A real headless server, a real "mover" (a second `Bot`, the
+/// kicker pattern above) streaming `MoveIntents` datagrams ±X at 6 u/s, and
+/// a real WAN-impaired "observer" running the actual client systems
 /// (`NetReceiveSystem` + `NetInterpolateSystem`, `predict: false` — a
 /// non-predicting own player is buffered like any remote) prove the
-/// fixed-delay playback buffer (findings 1-2) keeps the rendered path
-/// continuous instead of freezing/warbling at every late or lost
-/// snapshot. Permanent regression gates, run like the loss probes:
+/// fixed-delay playback buffer keeps the rendered path continuous instead
+/// of freezing/warbling at every late or lost snapshot. Permanent
+/// regression gates, run like the loss probes:
 /// `cargo test -p vordar-client --release -- --ignored --nocapture`.
 #[test]
 #[ignore = "loss probe — run with --release --ignored --nocapture"]
@@ -486,9 +477,9 @@ fn remote_render_smoothness_under_loss_probe() {
         max,
         max_zero_run
     );
-    // Permanent regression gates (networking rework 4, finding 3): the
-    // pre-rework-4 client froze 10-18 ticks at every late/lost snapshot
-    // and then caught up at ~2x steps — both margins are >=2x here.
+    // Permanent regression gates: an unbridged loss/jitter gap freezes
+    // 10-18 ticks at every late/lost snapshot and then catches up at ~2x
+    // steps — both margins here are >=2x that.
     assert!(
         max_zero_run <= 5,
         "longest zero-motion run {max_zero_run} ticks exceeds the 5-tick (~83 ms) freeze gate"

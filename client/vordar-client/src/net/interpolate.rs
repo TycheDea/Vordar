@@ -8,14 +8,13 @@ use super::*;
 
 /// Cap on `NetBuffer`'s sample ring — bounded even if no consumer runs (e.g.
 /// a criterion bench loop), so memory stays flat regardless of how long a
-/// connection lives (networking rework 4, finding 1).
+/// connection lives.
 const NET_BUFFER_CAP: usize = 16;
 
 /// Playback runs this many ticks behind the newest received `Snapshot.tick`
 /// — 2 snapshot intervals (200 ms). Chosen so a *single* lost/late snapshot
-/// datagram (the common case since snapshots went unreliable, networking
-/// rework 3) stays entirely inside interpolation; only 2+ consecutive losses
-/// dip into extrapolation (finding 2). Networking rework 4, finding 1.
+/// datagram (the common case on an unreliable datagram lane) stays entirely
+/// inside interpolation; only 2+ consecutive losses dip into extrapolation.
 const INTERP_DELAY_TICKS: f64 = 2.0 * (TICK_HZ / SNAPSHOT_HZ) as f64;
 
 /// Bound on how far the playback cursor's per-tick advance may deviate from
@@ -33,7 +32,7 @@ const RESYNC_TICKS: f64 = 30.0;
 /// ticks (250 ms) — matches the loss-probe gate (BASELINE.md's post-datagram
 /// probe shows max gaps ~300 ms at 5 % loss, i.e. two consecutive losses).
 /// Past this the entity holds at the capped point instead of continuing to
-/// dead-reckon indefinitely. Networking rework 4, finding 2.
+/// dead-reckon indefinitely.
 const EXTRAP_CAP_TICKS: f64 = 15.0;
 
 /// Tick-indexed position history for a replicated (non-predicted) entity —
@@ -44,8 +43,7 @@ const EXTRAP_CAP_TICKS: f64 = 15.0;
 /// `apply_states` pushes into it afterward. Samples always arrive in
 /// strictly increasing tick order (the tick guard in `apply_states` sees to
 /// that), so insertion is a plain push; capped at `NET_BUFFER_CAP` so it
-/// stays memory-flat even if nothing ever consumes it (networking rework 4,
-/// finding 1).
+/// stays memory-flat even if nothing ever consumes it.
 pub(super) struct NetBuffer {
     pub(super) samples: VecDeque<(u64, Vec3)>,
 }
@@ -61,7 +59,7 @@ impl NetBuffer {
 
     /// Pushes a new sample, skipping it if `tick` would not keep the ring
     /// strictly increasing (guards both an out-of-order caller and the
-    /// dry-recovery synthetic sample of finding 2).
+    /// dry-recovery synthetic sample).
     pub(super) fn push(&mut self, tick: u64, pos: Vec3) {
         if let Some(&(back_tick, _)) = self.samples.back() {
             if tick <= back_tick {
@@ -78,11 +76,10 @@ impl NetBuffer {
 /// Renders every replicated entity a fixed `INTERP_DELAY_TICKS` behind the
 /// newest received snapshot tick by interpolating its `NetBuffer` sample
 /// ring, instead of restarting a one-interval lerp from wherever the entity
-/// is currently displayed (the old `NetLerpSystem`, which is what converted
-/// jitter into speed warble on every late arrival). Also writes `NetMotion`
-/// with the active segment's velocity — zero while holding at the first
-/// sample or capped past the newest, the extrapolation velocity in between
-/// (networking rework 4, finding 2). Networking rework 4, finding 1.
+/// is currently displayed, which reads as speed warble on every late
+/// arrival. Also writes `NetMotion` with the active segment's velocity —
+/// zero while holding at the first sample or capped past the newest, the
+/// extrapolation velocity in between.
 pub(super) struct NetInterpolateSystem;
 
 impl System for NetInterpolateSystem {
@@ -94,9 +91,8 @@ impl System for NetInterpolateSystem {
             cursor
         };
 
-        // Collected inside the view borrow, inserted after it (matches the
-        // insert-after-view pattern `apply_states` used for the old NetLerp
-        // velocity estimate).
+        // Collected inside the view borrow, inserted after it: hecs's query
+        // borrow must be released before the world can be mutated again.
         let mut net_motions: Vec<(Entity, Vec3)> = Vec::new();
         for (entity, buffer, transform) in world.query::<(Entity, &NetBuffer, &mut Transform)>().iter() {
             let (pos, velocity) = sample_buffer(buffer, cursor);
@@ -114,7 +110,7 @@ impl System for NetInterpolateSystem {
 /// INTERP_DELAY_TICKS` within `±MAX_SLEW_FRACTION` of that nominal advance so
 /// catching up never pops — except `playback == None` (never driven) or a
 /// divergence past `RESYNC_TICKS`, which hard-snap to the target instead of
-/// slewing toward it. Networking rework 4, finding 1.
+/// slewing toward it.
 fn advance_playback(playback: Option<f64>, latest_state_tick: u64, delta: f32) -> f64 {
     let target = latest_state_tick as f64 - INTERP_DELAY_TICKS;
     let Some(prev) = playback else { return target };
@@ -130,11 +126,11 @@ fn advance_playback(playback: Option<f64>, latest_state_tick: u64, delta: f32) -
 /// Position and velocity at fractional server `tick` position `cursor`
 /// inside `buffer`'s sample ring: holds at the first sample when `cursor` is
 /// before it; past the newest sample it extrapolates at the last segment's
-/// velocity for up to `EXTRAP_CAP_TICKS`, then holds at the capped point
-/// (networking rework 4, finding 2 — a run of 2+ consecutive lost snapshot
-/// datagrams no longer freezes the entity outright); otherwise it linearly
-/// interpolates the bracketing pair. Velocity is that segment's slope, zero
-/// while holding at the first sample or capped past the newest.
+/// velocity for up to `EXTRAP_CAP_TICKS` (so a run of 2+ consecutive lost
+/// snapshot datagrams bridges instead of freezing the entity), then holds at
+/// the capped point; otherwise it linearly interpolates the bracketing pair.
+/// Velocity is that segment's slope, zero while holding at the first sample
+/// or capped past the newest.
 fn sample_buffer(buffer: &NetBuffer, cursor: f64) -> (Vec3, Vec3) {
     let samples = &buffer.samples;
     let Some(&(first_tick, first_pos)) = samples.front() else {
@@ -178,12 +174,12 @@ mod tests {
 
     const DT: f32 = 1.0 / 60.0;
 
-    /// Networking rework 4, finding 1: a late or jittered snapshot arrival
-    /// must never freeze the entity nor make it "catch up" at compressed
-    /// speed (jitter → speed warble) — this drives the real receive path
-    /// (`apply_states`) and the real render system directly, one Update tick
-    /// (`delta = 1/60`) per loop iteration, no network, no sleeps. A remote
-    /// entity moves +X at a steady 6 u/s; the server samples it every 6
+    /// A late or jittered snapshot arrival must never freeze the entity nor
+    /// make it "catch up" at compressed speed (jitter → speed warble) — this
+    /// drives the real receive path (`apply_states`) and the real render
+    /// system directly, one Update tick (`delta = 1/60`) per loop iteration,
+    /// no network, no sleeps. A remote entity moves +X at a steady 6 u/s;
+    /// the server samples it every 6
     /// ticks (100 ms, `SNAPSHOT_HZ`) at `pos.x = tick / 60 * 6.0`, but each
     /// sample's arrival is jittered by a deterministic pattern in [-2, +2]
     /// ticks (including a late-by-2 arrival) relative to its nominal 6k
@@ -261,37 +257,23 @@ mod tests {
         );
     }
 
-    /// Networking rework 4, finding 2: a run of 2+ consecutive lost snapshot
-    /// datagrams must not freeze the entity (extrapolation bridges it), and
-    /// the eventual real sample must resume playback without a pop. Same
-    /// deterministic harness as `fixed_delay_playback_rides_through_jittered_arrivals`
-    /// — drives `apply_states` / `NetInterpolateSystem` directly, one Update
-    /// tick (`delta = 1/60`) per loop iteration, no network, no sleeps. A
-    /// remote entity moves +X at 6 u/s; samples at server ticks 6 and 12
-    /// arrive at their natural client ticks, ticks 18 and 24 are never
-    /// delivered (the dry window this finding bridges), tick 30 arrives at
-    /// its natural client tick, and nothing more is ever delivered after
-    /// that (the buffer runs permanently dry).
+    /// A run of 2+ consecutive lost snapshot datagrams must not freeze the
+    /// entity (extrapolation bridges it), and the eventual real sample must
+    /// resume playback without a pop. Same deterministic harness as
+    /// `fixed_delay_playback_rides_through_jittered_arrivals` — drives
+    /// `apply_states` / `NetInterpolateSystem` directly, one Update tick
+    /// (`delta = 1/60`) per loop iteration, no network, no sleeps. A remote
+    /// entity moves +X at 6 u/s; samples at server ticks 6 and 12 arrive at
+    /// their natural client ticks, ticks 18 and 24 are never delivered, tick
+    /// 30 arrives at its natural client tick, and nothing more is ever
+    /// delivered after that (the buffer runs permanently dry).
     ///
-    /// Note on the held window's size: the finding's Path describes the
-    /// capped-then-held tail as "bit-identical across the final 30 ticks".
-    /// Measured against the real (unmodified-by-this-finding) playback
-    /// cursor, the capped position is bit-identical for only ~4 ticks
-    /// before `RESYNC_TICKS` (30, finding 1's `advance_playback`) fires:
-    /// once no more real samples ever arrive, `EXTRAP_CAP_TICKS +
-    /// INTERP_DELAY_TICKS` (15 + 12 = 27) sits only 3 ticks below
-    /// `RESYNC_TICKS` (30), so the shared cursor's hard-snap-to-target
-    /// follows the cap almost immediately and pulls the render back into
-    /// the pre-cap interpolation range — a periodic backward pop under a
-    /// genuinely sustained stall (reproduced empirically: pos holds at 4.5
-    /// for ticks 62-65, then pops back to 1.8 at tick 66). That is an
-    /// interaction between finding 1's RESYNC and finding 2's EXTRAP_CAP,
-    /// not something fixable within this finding's Suggestion (sampling-
-    /// function branches only) without touching `advance_playback` — filed
-    /// as `docs/reviews/networking/reworks-networking-2026-07-11.md` finding 11. This
-    /// test asserts bit-identical holding for the window that is actually
-    /// stable (ending strictly before the measured resync point) rather
-    /// than the full 30 ticks.
+    /// The held window asserted below is the last 3 of `TOTAL_TICKS` (65),
+    /// not the full `RESYNC_TICKS` (30), because once no more real samples
+    /// arrive, the shared playback cursor's resync hard-snap sits only 3
+    /// ticks past `EXTRAP_CAP_TICKS + INTERP_DELAY_TICKS` (27) and pulls the
+    /// render back into the pre-cap interpolation range — a periodic
+    /// backward pop under a sustained stall that this test stops short of.
     #[test]
     fn extrapolation_bridges_lost_snapshots_then_caps() {
         const SPEED: f32 = 6.0;
@@ -340,9 +322,8 @@ mod tests {
         let nominal_step = SPEED * DT;
 
         // (a) After tick 12's sample, the entity keeps advancing right
-        // through the dry window (18/24 never arrive) instead of freezing:
-        // this FAILS today (before this finding) with zero-steps once the
-        // cursor passes tick 12's sample around client tick 26.
+        // through the dry window (18/24 never arrive) instead of freezing
+        // once the cursor passes tick 12's sample around client tick 26.
         for tick in 13..30usize {
             let step = (positions[tick] - positions[tick - 1]).x;
             assert!(

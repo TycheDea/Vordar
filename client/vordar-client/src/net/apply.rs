@@ -54,19 +54,17 @@ pub(super) fn handle_entity_died(world: &mut World, resources: &mut Resources, i
     }
 }
 
-/// Reliable-stream half of a snapshot (`ServerMsg::AoiDelta`, protocol v14,
-/// networking rework 3 finding 4): entities entering or leaving the AOI.
-/// Identity (prefab) is sent once here; `apply_states` keeps positions
-/// current afterward. Stream ordering means this never needs a tick guard.
-/// `tick` seeds an entering entity's `NetBuffer` (networking rework 4,
-/// finding 1) so playback has a sample to hold at before the first real
+/// Reliable-stream half of a snapshot (`ServerMsg::AoiDelta`): entities
+/// entering or leaving the AOI. Identity (prefab) is sent once here;
+/// `apply_states` keeps positions current afterward. Stream ordering means
+/// this never needs a tick guard. `tick` seeds an entering entity's
+/// `NetBuffer` so playback has a sample to hold at before the first real
 /// `Snapshot` for it arrives.
 pub(super) fn apply_aoi_delta(world: &mut World, resources: &mut Resources, tick: u64, enters: Vec<EntityState>, leaves: Vec<u32>) {
     // Take the map instead of cloning it — nothing below reads it through
     // NetClientState, and it is written back at the end of this function.
     // prefab_names is small (a handful of short strings) and cloned once per
-    // delta — see ServerMsg::PrefabTable (protocol v13, networking rework
-    // 5 finding 4).
+    // delta — see ServerMsg::PrefabTable.
     let (mut known, own_id, predict, prefab_names) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
         (std::mem::take(&mut state.entities), state.own_id, state.predict, state.prefab_names.clone())
@@ -112,12 +110,11 @@ pub(super) fn apply_aoi_delta(world: &mut World, resources: &mut Resources, tick
     resources.get_mut::<NetClientState>().unwrap().entities = known;
 }
 
-/// Datagram half of a snapshot (`ServerMsg::Snapshot`, protocol v14,
-/// networking rework 3 finding 4): current position (+hp) of every entity in
-/// the AOI, plus the intent ack. Datagrams can arrive out of order, so any
-/// `tick` not strictly newer than the last one applied is dropped before any
-/// field is read (ack included) — the tick guard is what makes an
-/// unreliable, unordered lane safe to apply directly.
+/// Datagram half of a snapshot (`ServerMsg::Snapshot`): current position
+/// (+hp) of every entity in the AOI, plus the intent ack. Datagrams can
+/// arrive out of order, so any `tick` not strictly newer than the last one
+/// applied is dropped before any field is read (ack included) — the tick
+/// guard is what makes an unreliable, unordered lane safe to apply directly.
 pub(super) fn apply_states(
     world: &mut World,
     resources: &mut Resources,
@@ -161,12 +158,12 @@ pub(super) fn apply_states(
     // NetInterpolateSystem renders Transform.position (and derives NetMotion
     // from the active segment's slope) at a fixed delay behind the newest
     // sample instead of restarting a lerp from wherever the entity is
-    // currently displayed (networking rework 4, finding 1).
+    // currently displayed.
     {
         // One view for the whole batch instead of a world.get per entity.
         // Transform rides alongside NetBuffer so a dry-recovery synthetic
-        // sample (networking rework 4, finding 2) can capture where the
-        // entity is actually displayed before splicing in the real one.
+        // sample can capture where the entity is actually displayed before
+        // splicing in the real one.
         let mut buf_q = world.query::<(&mut NetBuffer, &Transform)>();
         let mut buf_view = buf_q.view();
         for state in &states {
@@ -180,9 +177,8 @@ pub(super) fn apply_states(
             // synthetic sample at the currently displayed position before
             // the real one so playback resumes by interpolating from where
             // the entity actually is instead of popping straight to the new
-            // sample (networking rework 4, finding 2). `NetBuffer::push`
-            // skips it if that tick wouldn't keep the ring strictly
-            // increasing.
+            // sample. `NetBuffer::push` skips it if that tick wouldn't keep
+            // the ring strictly increasing.
             if let Some(cursor) = cursor {
                 if buffer.samples.back().is_some_and(|&(back_tick, _)| (back_tick as f64) < cursor) {
                     buffer.push(cursor.floor() as u64, transform.position);
@@ -209,14 +205,13 @@ mod tests {
 
     const DT: f32 = 1.0 / 60.0;
 
-    /// Networking rework 3, finding 4: `Snapshot` now rides an unreliable
-    /// datagram, so a stale/reordered copy must never regress state. This
-    /// drives the real `apply_states` receive path directly (no
-    /// reimplemented logic, no network): a fresh snapshot at tick 20 puts a
-    /// remote entity at P2, then a stale snapshot at tick 10 (a LOWER
-    /// `last_processed_seq` too) tries to put it at P1. Without the tick
-    /// guard, the remote entity's `NetBuffer` would regress to P1 and
-    /// `reconcile_own` would re-run against the stale ack.
+    /// `Snapshot` rides an unreliable datagram, so a stale/reordered copy
+    /// must never regress state. This drives the real `apply_states`
+    /// receive path directly (no reimplemented logic, no network): a fresh
+    /// snapshot at tick 20 puts a remote entity at P2, then a stale snapshot
+    /// at tick 10 (a LOWER `last_processed_seq` too) tries to put it at P1.
+    /// Without the tick guard, the remote entity's `NetBuffer` would regress
+    /// to P1 and `reconcile_own` would re-run against the stale ack.
     #[test]
     fn apply_states_drops_a_stale_snapshot_tick() {
         let mut world = World::new();
