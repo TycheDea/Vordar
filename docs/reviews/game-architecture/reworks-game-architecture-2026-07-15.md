@@ -17,11 +17,14 @@ so chapter 20 is authored against the same model as chapter 1.
 Cross-type queue (mirrored verbatim from
 `audit-game-architecture-2026-07-15.md`):
 
-> **finding 1 → finding 2 → finding 3 → finding 4 (after 3: reuses the shared
+> **~~finding 1 → finding 2 → finding 3 → finding 4 (after 3: reuses the shared
 > step function) → finding 5 → finding 6 → finding 7 → finding 8 → finding 9
 > → finding 10 → finding 11 → finding 12 → finding 13 → rework 1 (after
 > finding 12: the XP-attribution fix is the surgical first step of the model
-> the rework designs).**
+> the rework designs)~~ — all done 2026-07-15: fixes 1–13 landed, rework 1's
+> plan (`plan-game-architecture-rework-1-2026-07-15.md`) executed in 6 steps,
+> loop-final gate 316/316. Rework 2 (filed mid-loop by finding 6's latch
+> sweep) remains open, not yet planned.**
 
 ### 1. A multiplayer population & progression model for chapter content
 
