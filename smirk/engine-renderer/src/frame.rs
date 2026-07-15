@@ -111,6 +111,10 @@ impl System for RenderSystem {
             };
             let raw_input = egui_winit.lock().unwrap().take_egui_input(w);
             let mut menu_actions: Vec<MenuAction> = Vec::new();
+            if menu_snap.as_ref().is_some_and(|m| m.quit_requested) {
+                menu_actions.push(MenuAction::Quit);
+                if let Some(m) = resources.get_mut::<MenuState>() { m.quit_requested = false; }
+            }
 
             // begin_pass/end_pass, NOT run_ui: run_ui wraps the frame in a
             // full-screen background Ui and allocates it as a central panel,

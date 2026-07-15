@@ -216,32 +216,10 @@ impl App {
         use winit::window::Window;
 
         if let Some(window) = self.resources.get::<Arc<Window>>() {
-            let fullscreen = match mode {
-                WindowMode::Windowed   => None,
-                WindowMode::Borderless => Some(winit::window::Fullscreen::Borderless(None)),
-                WindowMode::Fullscreen => window
-                    .current_monitor()
-                    .and_then(|m| {
-                        let (tw, th) = match self.resources.get::<WindowConfig>()
-                            .map(|c| c.resolution.clone())
-                            .unwrap_or(crate::config::Resolution::Fixed(1280, 720))
-                        {
-                            crate::config::Resolution::Fixed(w, h) => (w, h),
-                            crate::config::Resolution::Auto => {
-                                let s = m.size();
-                                (s.width, s.height)
-                            }
-                        };
-                        m.video_modes().min_by_key(|vm| {
-                            let s  = vm.size();
-                            let dw = (s.width  as i64 - tw as i64).abs();
-                            let dh = (s.height as i64 - th as i64).abs();
-                            dw + dh
-                        })
-                    })
-                    .map(|vm| winit::window::Fullscreen::Exclusive(vm))
-                    .or(Some(winit::window::Fullscreen::Borderless(None))),
-            };
+            let resolution = self.resources.get::<WindowConfig>()
+                .map(|c| c.resolution.clone())
+                .unwrap_or(crate::config::Resolution::Fixed(1280, 720));
+            let fullscreen = crate::config::resolve_fullscreen(&mode, &resolution, window.current_monitor());
             window.set_fullscreen(fullscreen);
         }
         if let Some(cfg) = self.resources.get_mut::<WindowConfig>() {

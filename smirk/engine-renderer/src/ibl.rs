@@ -135,14 +135,14 @@ impl Environment {
                 &cubemap, face, 0, 0.0,
             );
         }
-        let cube_view = cube_view(&cubemap);
+        let base_cube_view = cube_view(&cubemap);
 
         // 2. diffuse irradiance.
         let irradiance = create_cube(device, "IBL Irradiance", IRRADIANCE_SIZE, 1);
         for face in 0..6 {
             baker.bake_face(
                 device, queue, &baker.irradiance_pipeline,
-                None, Some(&cube_view),
+                None, Some(&base_cube_view),
                 &irradiance, face, 0, 0.0,
             );
         }
@@ -154,7 +154,7 @@ impl Environment {
             for face in 0..6 {
                 baker.bake_face(
                     device, queue, &baker.prefilter_pipeline,
-                    None, Some(&cube_view),
+                    None, Some(&base_cube_view),
                     &prefilter, face, mip, roughness,
                 );
             }
@@ -188,8 +188,8 @@ impl Environment {
             label:   Some("Environment Bind Group"),
             layout:  env_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&cube_view_of(&irradiance)) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&cube_view_of(&prefilter)) },
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&cube_view(&irradiance)) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&cube_view(&prefilter)) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&brdf.create_view(&Default::default())) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&sampler) },
             ],
@@ -198,7 +198,7 @@ impl Environment {
             label:   Some("Sky Bind Group"),
             layout:  sky_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&cube_view) },
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&base_cube_view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
             ],
         });
@@ -247,10 +247,6 @@ fn cube_view(texture: &wgpu::Texture) -> wgpu::TextureView {
         dimension: Some(wgpu::TextureViewDimension::Cube),
         ..Default::default()
     })
-}
-
-fn cube_view_of(texture: &wgpu::Texture) -> wgpu::TextureView {
-    cube_view(texture)
 }
 
 #[repr(C)]

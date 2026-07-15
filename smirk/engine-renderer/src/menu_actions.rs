@@ -3,7 +3,7 @@
 
 use crate::menu::{MenuAction, MenuScreen, MenuState, SettingsDraft};
 use crate::state::RendererState;
-use engine_app::config::{Resolution, WindowConfig, WindowMode};
+use engine_app::config::{resolve_fullscreen, Resolution, WindowConfig, WindowMode};
 use engine_core::traits::Resources;
 use std::sync::Arc;
 use winit::window::Window;
@@ -53,16 +53,7 @@ pub(crate) fn apply_menu_actions(actions: Vec<MenuAction>, resources: &mut Resou
                                 );
                             }
                         }
-                        let fullscreen = match new_cfg.mode {
-                            WindowMode::Windowed   => None,
-                            WindowMode::Borderless =>
-                                Some(winit::window::Fullscreen::Borderless(None)),
-                            WindowMode::Fullscreen =>
-                                w.current_monitor()
-                                 .and_then(|m| m.video_modes().next())
-                                 .map(winit::window::Fullscreen::Exclusive)
-                                 .or(Some(winit::window::Fullscreen::Borderless(None))),
-                        };
+                        let fullscreen = resolve_fullscreen(&new_cfg.mode, &new_cfg.resolution, w.current_monitor());
                         w.set_fullscreen(fullscreen);
                     }
                     // Apply vsync change to the wgpu surface

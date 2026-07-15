@@ -8,7 +8,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 use crate::app::App;
-use crate::config::{Resolution, WindowConfig, WindowMode, reload_config, save_window_config};
+use crate::config::{Resolution, WindowConfig, reload_config, save_window_config};
 use crate::input::{KeyboardState, MouseState};
 use crate::winit_processor::WinitEventProcessor;
 
@@ -25,24 +25,11 @@ impl ApplicationHandler for App {
                     .unwrap_or((1280, 720)),
             };
 
-            let fullscreen = match cfg.mode {
-                WindowMode::Windowed   => None,
-                WindowMode::Borderless => Some(winit::window::Fullscreen::Borderless(None)),
-                // Exclusive fullscreen: enumerate video modes and pick the closest match.
-                WindowMode::Fullscreen => event_loop
-                    .primary_monitor()
-                    .and_then(|m| {
-                        m.video_modes()
-                            .min_by_key(|vm| {
-                                let s  = vm.size();
-                                let dw = (s.width  as i64 - w as i64).abs();
-                                let dh = (s.height as i64 - h as i64).abs();
-                                dw + dh
-                            })
-                    })
-                    .map(|vm| winit::window::Fullscreen::Exclusive(vm))
-                    .or(Some(winit::window::Fullscreen::Borderless(None))), // fallback
-            };
+            let fullscreen = crate::config::resolve_fullscreen(
+                &cfg.mode,
+                &cfg.resolution,
+                event_loop.primary_monitor(),
+            );
 
             Window::default_attributes()
                 .with_title(cfg.title)

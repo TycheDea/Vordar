@@ -66,27 +66,31 @@ impl SettingsDraft {
 
 #[derive(Clone)]
 pub struct MenuState {
-    pub open:     bool,
-    pub screen:   MenuScreen,
-    pub selected: usize,
-    was_escape:   bool,
-    was_up:       bool,
-    was_down:     bool,
-    was_enter:    bool,
-    pub draft:    SettingsDraft,
+    pub open:          bool,
+    pub screen:        MenuScreen,
+    pub selected:      usize,
+    was_escape:        bool,
+    was_up:            bool,
+    was_down:          bool,
+    was_enter:         bool,
+    pub draft:         SettingsDraft,
+    /// Set by keyboard navigation; drained into `MenuAction::Quit` by
+    /// `RenderSystem` so `apply_menu_actions` stays the single exit site.
+    pub(crate) quit_requested: bool,
 }
 
 impl MenuState {
     pub fn new(cfg: &WindowConfig) -> Self {
         Self {
-            open:       false,
-            screen:     MenuScreen::Main,
-            selected:   0,
-            was_escape: false,
-            was_up:     false,
-            was_down:   false,
-            was_enter:  false,
-            draft:      SettingsDraft::from_config(cfg),
+            open:           false,
+            screen:         MenuScreen::Main,
+            selected:       0,
+            was_escape:     false,
+            was_up:         false,
+            was_down:       false,
+            was_enter:      false,
+            draft:          SettingsDraft::from_config(cfg),
+            quit_requested: false,
         }
     }
 }
@@ -335,7 +339,7 @@ impl System for MenuSystem {
                     menu.screen   = MenuScreen::Settings;
                     menu.selected = 0;
                 }
-                (MenuScreen::Main, _) => std::process::exit(0),                               // Quit
+                (MenuScreen::Main, _) => { menu.quit_requested = true; }                       // Quit — apply_menu_actions owns the exit
                 (MenuScreen::Settings, 0) => { /* SaveAndBack handled via action */ }
                 (MenuScreen::Settings, _) => {                                                  // Back
                     menu.screen   = MenuScreen::Main;

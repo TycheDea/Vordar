@@ -57,6 +57,40 @@ pub enum WindowMode {
     Fullscreen,
 }
 
+/// Resolve `mode` + `resolution` into a winit `Fullscreen` value for `monitor`.
+/// Exclusive fullscreen picks the video mode closest to the target size
+/// (`Auto` resolves to the monitor's native size); a missing monitor falls
+/// back to borderless.
+#[cfg(feature = "winit")]
+pub fn resolve_fullscreen(
+    mode:       &WindowMode,
+    resolution: &Resolution,
+    monitor:    Option<winit::monitor::MonitorHandle>,
+) -> Option<winit::window::Fullscreen> {
+    match mode {
+        WindowMode::Windowed   => None,
+        WindowMode::Borderless => Some(winit::window::Fullscreen::Borderless(None)),
+        WindowMode::Fullscreen => monitor
+            .and_then(|m| {
+                let (tw, th) = match resolution {
+                    Resolution::Fixed(w, h) => (*w, *h),
+                    Resolution::Auto => {
+                        let s = m.size();
+                        (s.width, s.height)
+                    }
+                };
+                m.video_modes().min_by_key(|vm| {
+                    let s  = vm.size();
+                    let dw = (s.width  as i64 - tw as i64).abs();
+                    let dh = (s.height as i64 - th as i64).abs();
+                    dw + dh
+                })
+            })
+            .map(winit::window::Fullscreen::Exclusive)
+            .or(Some(winit::window::Fullscreen::Borderless(None))),
+    }
+}
+
 /// Serialize a WindowConfig to RON format and write it to disk with a format header.
 /// Returns Ok(()) on success; returns Err with a message on any serialization or write error.
 pub fn save_window_config(path: &Path, config: &WindowConfig) -> Result<(), String> {
