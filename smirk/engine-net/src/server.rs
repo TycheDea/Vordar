@@ -453,6 +453,42 @@ async fn server_main(
     let _ = tokio::time::timeout(Duration::from_secs(3), endpoint.wait_idle()).await;
 }
 
+/// Handshake: the first frame must be `Hello` with a matching version —
+/// reply `HelloAck`, or send `Reject` (flushed before returning, so the
+/// reason reaches the client instead of being discarded by the close)
+/// on a mismatch.
+async fn handshake(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    version: u8,
+) -> Result<(), NetError> {
+    let (tag, payload) = read_frame_in(recv).await?;
+    match (tag, decode_ctrl(&payload)) {
+        (TAG_CTRL, Some(Ctrl::Hello { version: v })) if v == version => {}
+        (TAG_CTRL, Some(Ctrl::Hello { version: v })) => {
+            // A version mismatch must not be a silent close: send a Reject
+            // frame with the reason before dropping the connection so the
+            // client can surface it instead of being discarded by the close.
+            let reason = format!("version mismatch: client {v}, server {version}");
+            if write_frame(send, TAG_CTRL, &encode_ctrl(&Ctrl::Reject { reason: reason.clone() })).await.is_ok() {
+                // A bare `return` here would drop `connection`/`send` with no
+                // other handle left, which quinn treats as an implicit close
+                // that can discard the frame just queued above before it
+                // actually reaches the wire. `finish()` + `stopped()` waits
+                // for the peer to receive it first.
+                let _ = send.finish();
+                let _ = tokio::time::timeout(Duration::from_secs(2), send.stopped()).await;
+            }
+            return Err(NetError::Handshake(reason));
+        }
+        _ => return Err(NetError::Handshake("expected Hello".into())),
+    }
+    write_frame(send, TAG_CTRL, &encode_ctrl(&Ctrl::HelloAck))
+        .await
+        .map_err(|e| NetError::Handshake(e.to_string()))?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     incoming: quinn::Incoming,
@@ -472,31 +508,7 @@ async fn handle_connection(
         .await
         .map_err(|e| NetError::Handshake(e.to_string()))?;
 
-    // Handshake: first frame must be Hello with a matching version.
-    let (tag, payload) = read_frame_in(&mut recv).await?;
-    match (tag, decode_ctrl(&payload)) {
-        (TAG_CTRL, Some(Ctrl::Hello { version: v })) if v == version => {}
-        (TAG_CTRL, Some(Ctrl::Hello { version: v })) => {
-            // A version mismatch must not be a silent close: send a Reject
-            // frame with the reason before dropping the connection so the
-            // client can surface it instead of guessing.
-            let reason = format!("version mismatch: client {v}, server {version}");
-            if write_frame(&mut send, TAG_CTRL, &encode_ctrl(&Ctrl::Reject { reason: reason.clone() })).await.is_ok() {
-                // A bare `return` here would drop `connection`/`send` with no
-                // other handle left, which quinn treats as an implicit close
-                // that can discard the frame just queued above before it
-                // actually reaches the wire. `finish()` + `stopped()` waits
-                // for the peer to receive it first.
-                let _ = send.finish();
-                let _ = tokio::time::timeout(Duration::from_secs(2), send.stopped()).await;
-            }
-            return Err(NetError::Handshake(reason));
-        }
-        _ => return Err(NetError::Handshake("expected Hello".into())),
-    }
-    write_frame(&mut send, TAG_CTRL, &encode_ctrl(&Ctrl::HelloAck))
-        .await
-        .map_err(|e| NetError::Handshake(e.to_string()))?;
+    handshake(&mut send, &mut recv, version).await?;
 
     // Register the writer queue, announce the connection.
     let (write_tx, mut write_rx) = unbounded_channel::<(u8, Arc<Vec<u8>>)>();
