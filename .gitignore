@@ -31,6 +31,10 @@ Thumbs.db
 .pi/
 /tasks/
 
+# Locally-installed DirectXTex binary used for manual DDS conversion; no
+# workspace script invokes it, so it is not fetched or tracked here.
+/smirk/texconv.exe
+
 # Runtime data — server SQLite character database (+ WAL/SHM sidecars)
 /vordar.db
 /vordar.db-shm
