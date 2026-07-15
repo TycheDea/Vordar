@@ -19,7 +19,7 @@ use crate::player::race::{RaceId, RaceLibrary};
 use crate::player::{Player, PlayerMovementSystem};
 use crate::progression::{XpGrantSystem, XpReward};
 use crate::world::camp::CampSystem;
-use crate::world::wave_spawner::{ChapterSetupSystem, WaveSpawnerSystem};
+use crate::world::setup::ChapterSetupSystem;
 use engine_app::app::App;
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, SystemOrder};
@@ -65,8 +65,7 @@ impl Plugin for CoreGamePlugin {
             // Movement (Last) so a leap wins over input for its duration.
             .add_system(LeapSystem,           Phase::Update,           SystemOrder::Default)
             .add_system(EnemyAISystem::new(), Phase::Update,           SystemOrder::Default)
-            .add_system(WaveSpawnerSystem,    Phase::Update,           SystemOrder::Default)
-            // World-resident enemy populations; no-op without ActiveChapter.
+            // World-resident enemy populations; no-op without ChapterDef.
             .add_system(CampSystem::new(),    Phase::Update,           SystemOrder::Default)
             .add_system(ProjectileTtlSystem,  Phase::Update,           SystemOrder::Default)
             // No-op unless WorldTime + WorldEventsDef resources exist.

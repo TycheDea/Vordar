@@ -1,5 +1,5 @@
 // The world — its clock and timed events (below), plus how it is laid out
-// and populated: zones/portals, chapters, camps, wave spawning (submodules).
+// and populated: zones/portals, chapters, camps (submodules).
 //
 // World clock + timed world events (DESIGN.md §4): one authoritative world
 // time; events are deterministic shared definitions evaluated against it.
@@ -10,7 +10,7 @@
 pub mod camp;
 pub mod chapter;
 mod chapter_registry;
-pub mod wave_spawner;
+pub mod setup;
 pub mod zones;
 
 use engine_app::scheduler::System;

@@ -1,9 +1,7 @@
 // Chapter 1 — First Field (Phase 7.5).
 //
 // The world is POPULATED, not streamed at the player: camps hold a fixed
-// headcount at fixed places and refill on a timer (CampSystem). Waves are
-// retired — the list stays for tooling but empty means WaveSpawnerSystem
-// never fires. Camp layout rules:
+// headcount at fixed places and refill on a timer (CampSystem). Camp layout rules:
 //   - no camp's aggro bubble reaches the origin ring spawn (grunt aggro 10,
 //     imp aggro 12) — you choose when the fight starts;
 //   - the portal corridor along +X (portal at x=22) stays clear;
@@ -11,10 +9,6 @@
 //     replicating near spawn).
 (
     name: "Chapter 1 — First Field",
-    spawning: (
-        max_alive: 64,
-        waves: [],
-    ),
     initial_spawns: [],
     camps: [
         // North-east meadow pack — the first fight most players pick.

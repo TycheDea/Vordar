@@ -12,10 +12,6 @@
 //       mossbacks (passive) graze far east.
 (
     name: "Chapter 2 — Emberwood Rest",
-    spawning: (
-        max_alive: 32,
-        waves: [],
-    ),
     initial_spawns: [
         (prefab: "town_hall",    positions: [(10.0, 0.0, 0.0)]),
         (prefab: "cottage",      positions: [(4.0, 0.0, 6.5), (4.5, 0.0, -6.5), (15.0, 0.0, 7.0)]),

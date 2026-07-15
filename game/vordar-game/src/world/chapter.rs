@@ -1,6 +1,6 @@
-// Chapter content model — what to spawn, when, and how fast. Pure data,
-// loaded from RON. A chapter plugin inserts an ActiveChapter resource; the
-// wave spawner systems drive everything from it.
+// Chapter content model — what to spawn and where. Pure data, loaded from RON.
+// A chapter plugin inserts a ChapterDef resource; the setup and camp systems
+// consume it.
 //
 // Chapter registration and installation (how chapters link into the binary)
 // lives in chapter_registry.rs; this module re-exports it for compatibility.
@@ -11,7 +11,6 @@ use glam::Vec3;
 #[derive(serde::Deserialize)]
 pub struct ChapterDef {
     pub name:          String,
-    pub spawning:      SpawnConfig,
     #[serde(default)]
     pub initial_spawns: Vec<InitialSpawn>,
     /// World-resident enemy populations: fixed places, fixed headcount,
@@ -19,30 +18,6 @@ pub struct ChapterDef {
     #[serde(default)]
     pub camps: Vec<CampDef>,
 }
-
-#[derive(serde::Deserialize)]
-pub struct SpawnConfig {
-    /// Wave timers freeze while this many enemies are alive.
-    pub max_alive: usize,
-    pub waves:     Vec<WaveDef>,
-}
-
-#[derive(serde::Deserialize)]
-pub struct WaveDef {
-    /// Chapter seconds at which this wave activates.
-    #[serde(default)]
-    pub start_time:      f32,
-    /// Prefab id to spawn.
-    pub prefab:          String,
-    /// Seconds between spawns once active.
-    pub interval:        f32,
-    /// Ring radius around the player.
-    pub spawn_radius:    f32,
-    #[serde(default = "default_count")]
-    pub count_per_spawn: usize,
-}
-
-fn default_count() -> usize { 1 }
 
 #[derive(serde::Deserialize)]
 pub struct InitialSpawn {
@@ -69,27 +44,15 @@ pub fn camp_slot_pos(camp: &CampDef, i: usize) -> Vec3 {
     camp.center + Vec3::new(r * theta.cos(), 0.0, r * theta.sin())
 }
 
-/// Runtime state wrapping the loaded definition. Inserted as a resource by a
-/// chapter plugin; consumed by ChapterSetupSystem and WaveSpawnerSystem.
-pub struct ActiveChapter {
-    pub def:         ChapterDef,
-    pub elapsed:     f32,
-    pub wave_timers: Vec<f32>,
-    /// Rotating angle for ring placement — spreads consecutive spawns around the player.
-    pub spawn_angle: f32,
-    pub started:     bool,
-}
-
 /// Load a chapter RON file. Panics with a clear message on failure — a broken
 /// chapter is a content bug the author must see immediately, not a fallback.
-pub fn load_chapter(path: &str) -> ActiveChapter {
+pub fn load_chapter(path: &str) -> ChapterDef {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("chapter '{path}' unreadable: {e}"));
     let def: ChapterDef = ron::from_str(&text)
         .unwrap_or_else(|e| panic!("chapter '{path}' parse error: {e}"));
-    log::info!("chapter loaded: '{}' ({} waves)", def.name, def.spawning.waves.len());
-    let wave_timers = vec![0.0; def.spawning.waves.len()];
-    ActiveChapter { def, elapsed: 0.0, wave_timers, spawn_angle: 0.0, started: false }
+    log::info!("chapter loaded: '{}' ({} camps)", def.name, def.camps.len());
+    def
 }
 
 #[cfg(test)]
@@ -120,13 +83,13 @@ mod tests {
     }
 
     #[test]
-    fn camps_field_defaults_to_empty_on_old_chapters() {
-        let old_style = r#"(
-            name: "old",
-            spawning: ( max_alive: 5, waves: [] ),
+    fn minimal_chapter_parses_with_defaults() {
+        let minimal = r#"(
+            name: "minimal",
         )"#;
-        let def: ChapterDef = ron::from_str(old_style).unwrap();
-        assert!(def.camps.is_empty());
+        let def: ChapterDef = ron::from_str(minimal).unwrap();
+        assert_eq!(def.name, "minimal");
         assert!(def.initial_spawns.is_empty());
+        assert!(def.camps.is_empty());
     }
 }

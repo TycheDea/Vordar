@@ -1,9 +1,9 @@
 // CampSystem — keeps the world's resident enemy populations alive. Each
 // camp is `count` slots at deterministic golden-angle positions; a slot
-// whose entity died refills after `respawn_seconds`. No-op without an
-// ActiveChapter resource (networked display clients).
+// whose entity died refills after `respawn_seconds`. No-op without a
+// ChapterDef resource (networked display clients).
 
-use super::chapter::{camp_slot_pos, ActiveChapter};
+use super::chapter::{camp_slot_pos, ChapterDef};
 use engine_app::scheduler::System;
 use engine_core::prefab::spawn_prefab;
 use engine_core::traits::{Resources, SpawnQueue};
@@ -45,11 +45,10 @@ impl System for CampSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
         // (prefab, position, camp index, slot index) for slots due to spawn.
         let due: Vec<(String, Vec3, usize, usize)> = {
-            let Some(chapter) = resources.get::<ActiveChapter>() else { return };
+            let Some(chapter) = resources.get::<ChapterDef>() else { return };
             if !self.initialized {
                 self.initialized = true;
                 self.slots = chapter
-                    .def
                     .camps
                     .iter()
                     .map(|c| (0..c.count).map(|_| Slot { occupied: false, respawn_in: 0.0 }).collect())
@@ -60,7 +59,7 @@ impl System for CampSystem {
                 world.query::<&CampMember>().iter().map(|m| (m.camp, m.slot)).collect();
 
             let mut due = Vec::new();
-            for (ci, camp) in chapter.def.camps.iter().enumerate() {
+            for (ci, camp) in chapter.camps.iter().enumerate() {
                 for (si, slot) in self.slots[ci].iter_mut().enumerate() {
                     if occupied.contains(&(ci, si)) {
                         slot.occupied = true;
@@ -99,7 +98,7 @@ impl System for CampSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chapter::{CampDef, ChapterDef, SpawnConfig};
+    use crate::chapter::{CampDef, ChapterDef};
     use engine_core::prefab::{register_core_components, ComponentRegistry, PrefabDef, PrefabLibrary};
     use engine_core::traits::SpawnContext;
     use hecs::Entity;
@@ -112,23 +111,16 @@ mod tests {
             "dummy",
             ron::from_str::<PrefabDef>(r#"(components: { "Transform": () })"#).unwrap(),
         );
-        let chapter = ActiveChapter {
-            def: ChapterDef {
-                name: "test".into(),
-                spawning: SpawnConfig { max_alive: 10, waves: vec![] },
-                initial_spawns: vec![],
-                camps: vec![CampDef {
-                    prefab: "dummy".into(),
-                    center: Vec3::ZERO,
-                    radius: 2.0,
-                    count: 1,
-                    respawn_seconds,
-                }],
-            },
-            elapsed: 0.0,
-            wave_timers: vec![],
-            spawn_angle: 0.0,
-            started: true,
+        let chapter = ChapterDef {
+            name: "test".into(),
+            initial_spawns: vec![],
+            camps: vec![CampDef {
+                prefab: "dummy".into(),
+                center: Vec3::ZERO,
+                radius: 2.0,
+                count: 1,
+                respawn_seconds,
+            }],
         };
         let mut resources = Resources::new();
         resources.insert(registry);
