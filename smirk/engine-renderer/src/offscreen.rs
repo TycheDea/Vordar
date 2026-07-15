@@ -15,10 +15,11 @@ use crate::instance::SdfInstance;
 use crate::mesh::{self, MeshData};
 use crate::mesh_pipeline::{self, MeshInstance};
 use crate::mipgen::MipGenerator;
-use crate::pipeline::{self, INDICES};
-use crate::post::{self, TonemapPass, HDR_FORMAT, SCENE_SAMPLES};
+use crate::post::{TonemapPass, HDR_FORMAT, SCENE_SAMPLES};
+use crate::sdf_pipeline::{self, INDICES};
 use crate::shadow::{self, ShadowPipelines};
 use crate::skinned_pipeline;
+use crate::sky;
 use crate::texture;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -163,25 +164,25 @@ impl OffscreenRenderer {
             }],
         });
 
-        let texture_bgl  = pipeline::create_texture_bind_group_layout(device);
+        let texture_bgl  = sdf_pipeline::create_texture_bind_group_layout(device);
         let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
         let env_bgl      = crate::ibl::create_env_bind_group_layout(device);
-        let sky_bgl      = post::create_sky_bind_group_layout(device);
+        let sky_bgl      = sky::create_sky_bind_group_layout(device);
         let environment  = Environment::default_gray(device, &gpu.queue, &env_bgl, &sky_bgl);
         let mipgen       = MipGenerator::new(device);
 
         let sdf_pipeline =
-            pipeline::create_pipeline(device, HDR_FORMAT, &camera_bgl, &texture_bgl, &env_bgl);
+            sdf_pipeline::create_pipeline(device, HDR_FORMAT, &camera_bgl, &texture_bgl, &env_bgl);
         let mesh_pipeline =
             mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl);
-        let sky_pipeline = post::create_sky_pipeline(device, &camera_bgl, &sky_bgl);
+        let sky_pipeline = sky::create_sky_pipeline(device, &camera_bgl, &sky_bgl);
         let mut tonemap = TonemapPass::new(device, wgpu::TextureFormat::Rgba8Unorm);
         tonemap.set_exposure(&gpu.queue, 1.0);
 
         let white    = texture::create_default_white(device, &gpu.queue);
         let white_bg = texture::create_bind_group(device, &texture_bgl, &white);
-        let vertex_buffer = pipeline::create_vertex_buffer(device);
-        let index_buffer  = pipeline::create_index_buffer(device);
+        let vertex_buffer = sdf_pipeline::create_vertex_buffer(device);
+        let index_buffer  = sdf_pipeline::create_index_buffer(device);
 
         Some(Self {
             vertex_buffer,

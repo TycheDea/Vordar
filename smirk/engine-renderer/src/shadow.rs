@@ -86,7 +86,7 @@ impl ShadowPipelines {
     pub(crate) fn new(device: &Device, joint_bgl: &wgpu::BindGroupLayout) -> Self {
         use crate::instance::SdfInstance;
         use crate::mesh_pipeline::{MeshVertex, MESH_INSTANCE_SIZE};
-        use crate::pipeline::Vertex;
+        use crate::sdf_pipeline::Vertex;
         use crate::skinned_pipeline::{SKINNED_INSTANCE_SIZE, SKINNED_VERTEX_SIZE};
         use std::mem::size_of;
         use wgpu::VertexFormat::{Float32x3, Float32x4, Uint16x4, Uint32};

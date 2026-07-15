@@ -6,7 +6,7 @@ use crate::instance::{InstancePool, SdfInstance, INSTANCE_SIZE};
 use crate::menu::{draw_menu, MenuAction, MenuState};
 use crate::mesh::{MeshDrawList, MeshStore, SkinnedDrawList};
 use crate::particle_pipeline;
-use crate::pipeline::INDICES;
+use crate::sdf_pipeline::INDICES;
 use crate::shadow;
 use crate::state::{RendererState, MAX_MESH_INSTANCES};
 use crate::ui_layers::UiLayers;

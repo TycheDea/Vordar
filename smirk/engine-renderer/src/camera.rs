@@ -1,3 +1,8 @@
+// Camera state and its GPU-side uniforms: `Camera` (position/target/
+// projection), the `CameraUniform`/`LightUniform` buffers group 0 binds for
+// every scene pipeline, and `CycleCameraSystem` (the 'C' key handler that
+// steps ProjectionMode Perspective -> Isometric -> TopDown).
+
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,

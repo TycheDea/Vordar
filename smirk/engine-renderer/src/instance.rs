@@ -1,3 +1,8 @@
+// Per-instance GPU data and slot bookkeeping for the SDF-primitive pool:
+// `SdfInstance` is the 96-byte instance struct sdf_pipeline.rs steps the
+// vertex shader over; `InstancePool` hands out stable `InstanceSlot`s so
+// despawn/reuse never shifts another entity's instance index.
+
 use std::mem::size_of;
 
 // ── Per-instance GPU data ─────────────────────────────────────────────────────

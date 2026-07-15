@@ -1,3 +1,7 @@
+// SDF-primitive pipeline: the unit cube (`Vertex`, `VERTICES`, `INDICES`)
+// every shape instances, and `create_pipeline`, the render pipeline that
+// steps `SdfInstance` (instance.rs) through shape_type/shape_params.
+
 use crate::instance::SdfInstance;
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};

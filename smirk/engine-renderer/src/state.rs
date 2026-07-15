@@ -6,6 +6,7 @@ use engine_app::config::WindowConfig;
 use engine_app::winit_processor::WinitEventProcessor;
 use crate::bloom;
 use crate::camera::{self, Camera, CameraUniform, LightUniform};
+use crate::gpu_timer;
 use crate::ibl;
 use crate::instance::{InstancePool, SdfInstance};
 use crate::menu::MenuState;
@@ -13,10 +14,11 @@ use crate::mesh::{MeshDrawList, MeshStore, SkinnedDrawList, SocketConfig, Socket
 use crate::mesh_pipeline;
 use crate::mipgen;
 use crate::particle_pipeline;
-use crate::pipeline;
 use crate::post;
+use crate::sdf_pipeline;
 use crate::shadow;
 use crate::skinned_pipeline;
+use crate::sky;
 use crate::texture::{self, ColorTexture};
 use crate::ParticleDrawList;
 use glam::Vec3 as GlamVec3;
@@ -57,7 +59,7 @@ pub(crate) struct RendererState {
     pub(crate) hdr:     post::HdrTargets,
     pub(crate) tonemap: post::TonemapPass,
     pub(crate) bloom:   bloom::BloomPass,
-    pub(crate) gpu_timer: Option<post::GpuTimer>,
+    pub(crate) gpu_timer: Option<gpu_timer::GpuTimer>,
     // ── shadows (VQ-D3) ──
     pub(crate) shadow_view:       wgpu::TextureView,
     pub(crate) shadow_pipelines:  shadow::ShadowPipelines,
@@ -131,9 +133,9 @@ impl RendererState {
         let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
             camera::create_gpu_resources(&device, &camera, &shadow_view);
 
-        let vertex_buffer   = pipeline::create_vertex_buffer(&device);
-        let index_buffer    = pipeline::create_index_buffer(&device);
-        let texture_bgl     = pipeline::create_texture_bind_group_layout(&device);
+        let vertex_buffer   = sdf_pipeline::create_vertex_buffer(&device);
+        let index_buffer    = sdf_pipeline::create_index_buffer(&device);
+        let texture_bgl     = sdf_pipeline::create_texture_bind_group_layout(&device);
         let material_bgl    = mesh_pipeline::create_material_bind_group_layout(&device);
         let mipgen          = mipgen::MipGenerator::new(&device);
         let default_tex     = texture::create_default_white(&device, &queue);
@@ -142,11 +144,11 @@ impl RendererState {
         // HDR scene targets + post chain (VQ-D1/D4): every scene pipeline
         // renders MSAA into Rgba16Float; the tonemap pass owns the swapchain.
         let env_bgl = ibl::create_env_bind_group_layout(&device);
-        let sky_bgl = post::create_sky_bind_group_layout(&device);
+        let sky_bgl = sky::create_sky_bind_group_layout(&device);
         let environment = ibl::Environment::default_gray(&device, &queue, &env_bgl, &sky_bgl);
-        let sky_pipeline = post::create_sky_pipeline(&device, &camera_bgl, &sky_bgl);
+        let sky_pipeline = sky::create_sky_pipeline(&device, &camera_bgl, &sky_bgl);
         let hdr = post::HdrTargets::new(&device, size.width, size.height);
-        let gpu_timer = post::GpuTimer::new(&device, &queue);
+        let gpu_timer = gpu_timer::GpuTimer::new(&device, &queue);
         let bloom = bloom::BloomPass::new(&device, &hdr.resolve_view, size.width, size.height);
         let mut tonemap = post::TonemapPass::new(&device, format);
         tonemap.set_source(&device, &hdr.resolve_view, &bloom.output_view);
@@ -154,7 +156,7 @@ impl RendererState {
 
         let scene_format = post::HDR_FORMAT;
         let render_pipeline =
-            pipeline::create_pipeline(&device, scene_format, &camera_bgl, &texture_bgl, &env_bgl);
+            sdf_pipeline::create_pipeline(&device, scene_format, &camera_bgl, &texture_bgl, &env_bgl);
         let mesh_render_pipeline =
             mesh_pipeline::create_mesh_pipeline(&device, scene_format, &camera_bgl, &material_bgl, &env_bgl);
 

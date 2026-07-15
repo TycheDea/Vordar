@@ -1,3 +1,8 @@
+// Static glTF mesh pipeline: `MeshVertex` (position/normal/uv/tangent), the
+// per-instance `MeshInstance`, and the material bind group `MaterialUniform`
+// describes (base color factor + texture). Parallel to skinned_pipeline.rs
+// minus the joint palette.
+
 use std::mem::size_of;
 use wgpu::VertexFormat::{Float32x2, Float32x3, Float32x4};
 use wgpu::{

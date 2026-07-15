@@ -1,3 +1,8 @@
+// GPU texture creation and the shared `ColorTexture` bind-group unit: the
+// compressed-BC7 loader (`load_dds`), plain/mipped RGBA8 uploads, and the
+// procedural checker/white textures used when no asset is set. Every texture
+// shares one sampler configuration (`make_sampler`).
+
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindingResource, Device, Extent3d, FilterMode, MipmapFilterMode, Queue, Sampler,
