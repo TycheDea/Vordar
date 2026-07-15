@@ -23,7 +23,7 @@ pub(crate) enum Ctrl {
     HelloAck,
     /// Handshake failure with a reason the client can surface (e.g. version
     /// mismatch) — sent in place of `HelloAck` instead of just closing the
-    /// connection silently (networking audit 2026-07-11, finding 16).
+    /// connection silently.
     Reject { reason: String },
     Ping { t_client: u64 },
     Pong { t_client: u64, t_server: u64 },
@@ -114,14 +114,13 @@ pub(crate) fn server_crypto() -> Result<quinn::ServerConfig, NetError> {
         .map_err(|e| NetError::Tls(e.to_string()))?;
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic));
 
-    // Explicit transport limits (networking audit 2026-07-11, finding 4):
-    // quinn's defaults allow up to 100 concurrent bidi + 100 uni streams per
-    // connection, each able to buffer a stream's receive window of unread
-    // data — a client that opens extra streams the server never reads from
-    // (it only ever accepts the one bidi stream at `accept_bi()`) could hold
-    // up to ~100x that memory per connection. The protocol uses exactly one
-    // bidirectional stream and no unidirectional ones, so cap both at what
-    // is actually used.
+    // Explicit transport limits: quinn's defaults allow up to 100 concurrent
+    // bidi + 100 uni streams per connection, each able to buffer a stream's
+    // receive window of unread data — a client that opens extra streams the
+    // server never reads from (it only ever accepts the one bidi stream at
+    // `accept_bi()`) could hold up to ~100x that memory per connection. The
+    // protocol uses exactly one bidirectional stream and no unidirectional
+    // ones, so cap both at what is actually used.
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(1));
     transport.max_concurrent_uni_streams(quinn::VarInt::from_u32(0));

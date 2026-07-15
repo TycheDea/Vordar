@@ -11,7 +11,7 @@
 //     verification. Real certificates can be swapped in later without touching
 //     the API.
 //
-// Two lanes carry frames (networking rework 3, finding 2):
+// Two lanes carry frames:
 //   - Reliable ordered stream, per QUIC bidirectional stream:
 //       [u32 LE frame length][u8 tag][payload]
 //       tag 0 = control (postcard-encoded Ctrl), tag 1 = application bytes.

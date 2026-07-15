@@ -1,13 +1,13 @@
-// Post chain (VQ-D1): the HDR render targets the scene passes draw into, and
-// the tonemap pass that resolves them onto the swapchain. Bloom (Phase 4)
-// composites into the tonemap pass.
+// Post chain: the HDR render targets the scene passes draw into, and the
+// tonemap pass that resolves them onto the swapchain. Bloom composites into
+// the tonemap pass.
 
 use wgpu::{Device, Queue, TextureFormat};
 
 /// Scene color format — HDR, filterable, universally 4×-MSAA-capable.
 pub(crate) const HDR_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-/// Scene MSAA sample count (VQ-D4). WebGPU guarantees 4× support for
-/// rgba16float + depth32float; a knob here is the documented fallback seam.
+/// Scene MSAA sample count. WebGPU guarantees 4× support for rgba16float +
+/// depth32float; a knob here is the documented fallback seam.
 pub(crate) const SCENE_SAMPLES: u32 = 4;
 
 /// The offscreen targets one frame of scene rendering uses: multisampled HDR
@@ -290,9 +290,9 @@ pub(crate) fn create_sky_pipeline(
     })
 }
 
-/// GPU frame timing for the dev overlay (Phase 8): two timestamps bracket
-/// the frame (shadow-pass begin → tonemap-pass end). `None` when the adapter
-/// lacks TIMESTAMP_QUERY. Sampled sparsely and read with a blocking map —
+/// GPU frame timing for the dev overlay: two timestamps bracket the frame
+/// (shadow-pass begin → tonemap-pass end). `None` when the adapter lacks
+/// TIMESTAMP_QUERY. Sampled sparsely and read with a blocking map —
 /// dev-overlay-only cost.
 pub(crate) struct GpuTimer {
     pub(crate) query_set: wgpu::QuerySet,

@@ -31,9 +31,9 @@ enum Outgoing {
     To(ConnId, Arc<Vec<u8>>),
     All(Arc<Vec<u8>>),
     Kick(ConnId),
-    /// An unreliable datagram send (networking rework 3, finding 2) — already
-    /// tagged (`encode_datagram` applied in `NetServer::send_datagram`), so
-    /// the router only has to hand the bytes to quinn.
+    /// An unreliable datagram send — already tagged (`encode_datagram`
+    /// applied in `NetServer::send_datagram`), so the router only has to
+    /// hand the bytes to quinn.
     Datagram(ConnId, Vec<u8>),
 }
 
@@ -44,15 +44,15 @@ type ConnMap = Arc<
     Mutex<HashMap<ConnId, (UnboundedSender<(u8, Arc<Vec<u8>>)>, quinn::Connection, Arc<AtomicU64>)>>,
 >;
 /// Per-connection smoothed RTT, as an atomic handle owned directly by that
-/// connection's reader task — writes never take the map lock (networking
-/// audit 2026-07-11, finding 14 step 2). The map itself is only touched at
-/// connect (insert) and disconnect (remove), so the sim thread's reads
-/// essentially never contend with the network thread.
+/// connection's reader task — writes never take the map lock. The map
+/// itself is only touched at connect (insert) and disconnect (remove), so
+/// the sim thread's reads essentially never contend with the network
+/// thread.
 type RttMap = Arc<Mutex<HashMap<ConnId, Arc<AtomicU64>>>>;
-/// Source IP per live connection (networking rework 1, finding 4): populated
-/// once at connect, removed once at disconnect — the exact same lifecycle as
-/// `RttMap` above, so `NetServer::peer_ip` can attribute a failed login to an
-/// address without the sim tracking connection metadata of its own.
+/// Source IP per live connection: populated once at connect, removed once
+/// at disconnect — the exact same lifecycle as `RttMap` above, so
+/// `NetServer::peer_ip` can attribute a failed login to an address without
+/// the sim tracking connection metadata of its own.
 type PeerMap = Arc<Mutex<HashMap<ConnId, IpAddr>>>;
 /// Live connection count per source IP — reserved the instant a connection
 /// is accepted (before its handshake even completes) and released when it
@@ -75,13 +75,13 @@ pub struct NetServer {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-/// Bind-time connection-cap configuration (networking audit 2026-07-11,
-/// finding 20). `NetServer::bind`'s hard-coded caps and this struct's
-/// `Default` are the same hostile-client values — production keeps them
-/// untouched. An embedder that models a real crowd of distinct clients from
-/// one source IP (a soak harness, a stress CLI, a LAN deployment) states that
-/// trust model explicitly through `NetServer::bind_with_limits` instead of
-/// the transport weakening its own default.
+/// Bind-time connection-cap configuration. `NetServer::bind`'s hard-coded
+/// caps and this struct's `Default` are the same hostile-client values —
+/// production keeps them untouched. An embedder that models a real crowd of
+/// distinct clients from one source IP (a soak harness, a stress CLI, a LAN
+/// deployment) states that trust model explicitly through
+/// `NetServer::bind_with_limits` instead of the transport weakening its own
+/// default.
 #[derive(Clone, Copy, Debug)]
 pub struct NetLimits {
     pub max_connections: usize,
@@ -127,11 +127,11 @@ impl NetServer {
         Self::bind_with_limits(addr, version, NetLimits::default())
     }
 
-    /// Like [`NetServer::bind`], but with explicit connection-cap configuration
-    /// (networking audit 2026-07-11, finding 20) instead of the transport's
-    /// hostile-client defaults — e.g. a soak harness modeling many distinct
-    /// clients from one source IP raises `max_connections_per_ip` to its bot
-    /// count here rather than the transport weakening its own default.
+    /// Like [`NetServer::bind`], but with explicit connection-cap
+    /// configuration instead of the transport's hostile-client defaults —
+    /// e.g. a soak harness modeling many distinct clients from one source IP
+    /// raises `max_connections_per_ip` to its bot count here rather than the
+    /// transport weakening its own default.
     pub fn bind_with_limits(addr: SocketAddr, version: u8, limits: NetLimits) -> Result<Self, NetError> {
         let epoch = Instant::now();
         let (event_tx, event_rx) = unbounded_channel();
@@ -198,14 +198,14 @@ impl NetServer {
     }
 
     /// Send `data` to one connection via an unreliable QUIC datagram instead
-    /// of the reliable ordered stream (networking rework 3, finding 2): a
-    /// lost datagram is simply gone — no retransmit, no stream fallback — so
-    /// callers must only route messages here that tolerate loss/reorder
-    /// (superseded state, latest-wins acks). Tagged `TAG_APP` so a receiver's
-    /// datagram lane surfaces it as the same `ServerEvent::Message`/
-    /// `ClientEvent::Message` the stream uses. A failed send (connection
-    /// closing, payload too large) is counted in `NetMetrics::datagram_send_failures`
-    /// and dropped — never falls back to the stream.
+    /// of the reliable ordered stream: a lost datagram is simply gone — no
+    /// retransmit, no stream fallback — so callers must only route messages
+    /// here that tolerate loss/reorder (superseded state, latest-wins acks).
+    /// Tagged `TAG_APP` so a receiver's datagram lane surfaces it as the
+    /// same `ServerEvent::Message`/`ClientEvent::Message` the stream uses. A
+    /// failed send (connection closing, payload too large) is counted in
+    /// `NetMetrics::datagram_send_failures` and dropped — never falls back
+    /// to the stream.
     pub fn send_datagram(&self, conn: ConnId, data: Vec<u8>) {
         let _ = self.out.send(Outgoing::Datagram(conn, encode_datagram(TAG_APP, &data)));
     }
@@ -215,22 +215,21 @@ impl NetServer {
 
     /// Default hard cap on total simultaneous connections this endpoint will
     /// hold open — without it, a connection flood grows `ConnMap` (and every
-    /// per-connection task/channel/queue) without bound (networking audit
-    /// 2026-07-11, finding 4). This is `NetLimits::default().max_connections`;
-    /// override via `bind_with_limits` (finding 20).
+    /// per-connection task/channel/queue) without bound. This is
+    /// `NetLimits::default().max_connections`; override via
+    /// `bind_with_limits`.
     pub const MAX_CONNECTIONS: usize = 4096;
     /// Default hard cap on simultaneous connections from a single source IP —
     /// bounds one hostile or misconfigured client from exhausting
     /// `MAX_CONNECTIONS` alone. This is
     /// `NetLimits::default().max_connections_per_ip`; an embedder modeling
     /// many distinct clients from one IP (a soak harness) overrides it via
-    /// `bind_with_limits` (finding 20).
+    /// `bind_with_limits`.
     pub const MAX_CONNECTIONS_PER_IP: usize = 8;
 
-    /// Reader-side token-bucket rate limit (finding 4): the number of app
-    /// frames a connection may have queued as burst headroom above its
-    /// steady refill rate. Starts full so a legitimate opening burst isn't
-    /// penalized.
+    /// Reader-side token-bucket rate limit: the number of app frames a
+    /// connection may have queued as burst headroom above its steady refill
+    /// rate. Starts full so a legitimate opening burst isn't penalized.
     pub const MSG_BUCKET_CAPACITY: f64 = 128.0;
     /// Steady-state refill rate of the token bucket above, in tokens/sec.
     /// 2x the 60 Hz sim tick rate: generous headroom for a real client's
@@ -255,9 +254,9 @@ impl NetServer {
         self.rtts.lock().unwrap().get(&conn).map(|a| a.load(Ordering::Relaxed))
     }
 
-    /// Source IP of a connection, if still connected (networking rework 1,
-    /// finding 4) — the accessor the per-IP failed-login rate limiter reads
-    /// to attribute a denied login to its source address.
+    /// Source IP of a connection, if still connected — the accessor the
+    /// per-IP failed-login rate limiter reads to attribute a denied login
+    /// to its source address.
     pub fn peer_ip(&self, conn: ConnId) -> Option<IpAddr> {
         self.peers.lock().unwrap().get(&conn).copied()
     }
@@ -349,12 +348,11 @@ async fn server_main(
         }
     });
 
-    // Busy-time instrumentation (networking audit 2026-07-11, finding 14
-    // step 1): a canary task wakes on a fixed cadence. On this current-
-    // thread runtime nothing else can run while this task is asleep, so any
-    // lateness on wakeup is exactly the time the thread spent running other
-    // tasks (handshakes, frame codec, the accept loop) — accumulated into
-    // `NetMetrics::busy_micros` as a busy-time proxy.
+    // Busy-time instrumentation: a canary task wakes on a fixed cadence. On
+    // this current-thread runtime nothing else can run while this task is
+    // asleep, so any lateness on wakeup is exactly the time the thread spent
+    // running other tasks (handshakes, frame codec, the accept loop) —
+    // accumulated into `NetMetrics::busy_micros` as a busy-time proxy.
     {
         let metrics = metrics.clone();
         tokio::spawn(async move {
@@ -379,18 +377,18 @@ async fn server_main(
             _ = &mut shutdown => break,
         };
         let Some(incoming) = incoming else { break };
-        // QUIC address validation (finding 4): force a retry round-trip
-        // before spending any handshake work on a connection whose source
-        // address hasn't been proven yet — closes the UDP amplification
-        // vector where a spoofed source gets a bigger reply than it sent.
+        // QUIC address validation: force a retry round-trip before spending
+        // any handshake work on a connection whose source address hasn't
+        // been proven yet — closes the UDP amplification vector where a
+        // spoofed source gets a bigger reply than it sent.
         if !incoming.remote_address_validated() {
             let _ = incoming.retry();
             continue;
         }
 
-        // Connection caps (finding 4): reserve a slot before the handshake
-        // even starts, so a burst of near-simultaneous attempts can't slip
-        // past the cap while earlier ones are still mid-handshake.
+        // Connection caps: reserve a slot before the handshake even starts,
+        // so a burst of near-simultaneous attempts can't slip past the cap
+        // while earlier ones are still mid-handshake.
         let remote_ip = incoming.remote_address().ip();
         {
             let mut counts = ip_counts.lock().unwrap();
@@ -448,10 +446,9 @@ async fn server_main(
         });
     }
 
-    // Shutdown (finding 1, networking rework plan 2026-07-12): stop accepting,
-    // close every open connection with a reason the client can surface, then
-    // give close frames a brief window to reach the wire before the thread
-    // exits and the socket is released.
+    // Shutdown: stop accepting, close every open connection with a reason
+    // the client can surface, then give close frames a brief window to reach
+    // the wire before the thread exits and the socket is released.
     endpoint.close(0u32.into(), b"server shutdown");
     let _ = tokio::time::timeout(Duration::from_secs(3), endpoint.wait_idle()).await;
 }
@@ -480,10 +477,9 @@ async fn handle_connection(
     match (tag, decode_ctrl(&payload)) {
         (TAG_CTRL, Some(Ctrl::Hello { version: v })) if v == version => {}
         (TAG_CTRL, Some(Ctrl::Hello { version: v })) => {
-            // A version mismatch used to be a silent close: no reason ever
-            // reached the client (networking audit 2026-07-11, finding 16).
-            // Send a Reject frame with the reason before dropping the
-            // connection so the client can surface it instead of guessing.
+            // A version mismatch must not be a silent close: send a Reject
+            // frame with the reason before dropping the connection so the
+            // client can surface it instead of guessing.
             let reason = format!("version mismatch: client {v}, server {version}");
             if write_frame(&mut send, TAG_CTRL, &encode_ctrl(&Ctrl::Reject { reason: reason.clone() })).await.is_ok() {
                 // A bare `return` here would drop `connection`/`send` with no
@@ -510,9 +506,8 @@ async fn handle_connection(
     // writes through this handle directly, with no map lock per frame.
     let rtt = Arc::new(AtomicU64::new(0));
     rtts.lock().unwrap().insert(id, rtt.clone());
-    // Source IP, registered once at connect (networking rework 1, finding 4):
-    // same lifecycle as `rtts` above, removed by the same cleanup in
-    // `server_main`.
+    // Source IP, registered once at connect: same lifecycle as `rtts`
+    // above, removed by the same cleanup in `server_main`.
     peers.lock().unwrap().insert(id, remote_ip);
     let _ = events.send(ServerEvent::Connected(id));
     log::info!("net: conn {id} from {}", connection.remote_address());
@@ -531,15 +526,14 @@ async fn handle_connection(
         }
     });
 
-    // Datagram receive task (networking rework 3, finding 2) — its own
-    // reader loop, independent of the stream reader below, with its OWN
-    // token bucket (the stream reader-loop bucket above is untouched). A
-    // datagram `Ctrl::Ping` is answered DIRECTLY via `send_datagram` here,
-    // bypassing the writer queue entirely — precisely the queueing delay a
-    // ping/pong is meant to avoid measuring. Ends silently when
-    // `read_datagram` errors; the stream reader loop below owns
-    // connection-teardown signaling, so this task is aborted alongside the
-    // writer once that loop exits.
+    // Datagram receive task — its own reader loop, independent of the
+    // stream reader below, with its OWN token bucket (the stream
+    // reader-loop bucket above is untouched). A datagram `Ctrl::Ping` is
+    // answered DIRECTLY via `send_datagram` here, bypassing the writer queue
+    // entirely — precisely the queueing delay a ping/pong is meant to avoid
+    // measuring. Ends silently when `read_datagram` errors; the stream
+    // reader loop below owns connection-teardown signaling, so this task is
+    // aborted alongside the writer once that loop exits.
     let datagram_conn = connection.clone();
     let datagram_events = events.clone();
     let datagram_metrics = metrics.clone();
@@ -582,10 +576,10 @@ async fn handle_connection(
         }
     });
 
-    // Reader-side token bucket (finding 4): refills continuously, drained one
-    // token per app frame. Bounds how fast this connection's frames turn
-    // into `ServerEvent`s — without it, a client sending faster than the
-    // sim's poll cadence grows the event channel without bound.
+    // Reader-side token bucket: refills continuously, drained one token per
+    // app frame. Bounds how fast this connection's frames turn into
+    // `ServerEvent`s — without it, a client sending faster than the sim's
+    // poll cadence grows the event channel without bound.
     let mut msg_tokens = NetServer::MSG_BUCKET_CAPACITY;
     let mut last_refill = Instant::now();
 
@@ -638,15 +632,13 @@ mod tests {
     use crate::common::{client_crypto, decode_ctrl, encode_ctrl, read_frame_out, write_frame, Ctrl, TAG_CTRL};
     use std::time::Duration;
 
-    /// Regression test for the writer-queue-cap facade fix (networking audit
-    /// 2026-07-11, finding 3). Before this fix `WRITER_QUEUE_CAP` was declared
-    /// but never read: the writer queue was a plain unbounded channel, so a
-    /// client that stopped draining its stream made the server buffer frames
-    /// forever. A raw (non-`NetClient`) connection is used here because
-    /// `NetClient`'s own reader task always drains the wire regardless of
-    /// whether the game polls it — this test needs a peer that genuinely
-    /// never reads again, to force real QUIC flow-control backpressure on
-    /// the server's send side.
+    /// Pins that a stalled reader gets kicked instead of the writer queue
+    /// buffering forever: `WRITER_QUEUE_CAP` must actually be enforced, not
+    /// merely declared. A raw (non-`NetClient`) connection is used here
+    /// because `NetClient`'s own reader task always drains the wire
+    /// regardless of whether the game polls it — this test needs a peer
+    /// that genuinely never reads again, to force real QUIC flow-control
+    /// backpressure on the server's send side.
     #[tokio::test]
     async fn stalled_reader_is_kicked_and_backlog_drains() {
         let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
@@ -716,12 +708,10 @@ mod tests {
         drop(connection);
     }
 
-    /// Regression test for `NetServer` having no real close path (networking
-    /// rework plan 2026-07-12, finding 1). Before this fix dropping a
-    /// `NetServer` closed the event/outgoing channels but left the accept
-    /// loop running forever on a detached thread — the client was never told
-    /// the server was gone, and the listening socket stayed bound so an
-    /// immediate rebind on the same address would fail.
+    /// Pins that dropping a `NetServer` closes the accept loop and the QUIC
+    /// endpoint, not merely the event/outgoing channels: the client must be
+    /// told the server is gone, and the listening socket must be released
+    /// immediately so a rebind on the same address succeeds.
     #[tokio::test]
     async fn drop_closes_endpoint_notifies_client_and_releases_port() {
         let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
@@ -761,12 +751,10 @@ mod tests {
             .expect("rebind on the same address should succeed immediately after drop");
     }
 
-    /// Regression test for the per-IP failed-login rate limiter's engine-net
-    /// dependency (networking rework 1, finding 4): before this, `NetServer`
-    /// exposed no per-connection source address at all, so the sim had no way
-    /// to attribute a failed login to an IP. `peer_ip` must mirror `rtts`'s
-    /// exact lifecycle — populated once `Connected` fires, gone once
-    /// `Disconnected` fires.
+    /// Pins `peer_ip`'s lifecycle, the per-IP failed-login rate limiter's
+    /// dependency for attributing a failed login to an IP: it must mirror
+    /// `rtts`'s exact lifecycle — populated once `Connected` fires, gone
+    /// once `Disconnected` fires.
     #[tokio::test]
     async fn peer_ip_tracks_connection_lifecycle() {
         let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
@@ -806,12 +794,9 @@ mod tests {
         assert_eq!(server.peer_ip(conn_id), None, "peer_ip must be gone after the connection ends");
     }
 
-    /// Regression test for the datagram lane's server→client direction
-    /// (networking rework 3, finding 2). Before this fix `NetServer` had no
-    /// `send_datagram` at all — the only way to reach a client was the
-    /// reliable ordered stream. This didn't compile until the lane existed,
-    /// which is the fail-first evidence for this step (the API itself was
-    /// the missing piece, not a runtime behavior).
+    /// Pins the datagram lane's server→client direction:
+    /// `NetServer::send_datagram` must deliver to the client as a
+    /// `ClientEvent::Message`, independent of the reliable ordered stream.
     #[tokio::test]
     async fn datagram_lane_delivers_server_to_client_message() {
         let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
@@ -863,10 +848,10 @@ mod tests {
         );
     }
 
-    /// Regression test for the datagram lane's client→server direction
-    /// (networking rework 3, finding 2): `NetClient::send_datagram` must
-    /// surface at the server as the same `ServerEvent::Message` the stream
-    /// produces, with a real (nonzero) `recv_micros` arrival stamp.
+    /// Pins the datagram lane's client→server direction:
+    /// `NetClient::send_datagram` must surface at the server as the same
+    /// `ServerEvent::Message` the stream produces, with a real (nonzero)
+    /// `recv_micros` arrival stamp.
     #[tokio::test]
     async fn datagram_lane_delivers_client_to_server_message() {
         let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
@@ -907,14 +892,14 @@ mod tests {
         assert!(recv_micros > 0, "recv_micros should be nonzero — the server epoch has elapsed by arrival");
     }
 
-    /// Regression test for the datagram ctrl-ping path answering DIRECTLY via
-    /// `send_datagram` instead of the per-connection writer queue (networking
-    /// rework 3, finding 2) — precisely the queueing delay a ping/pong is
-    /// meant to measure around. A raw (non-`NetClient`) connection sends a
-    /// `Ctrl::Ping` as a bare datagram and must get a `Ctrl::Pong` datagram
-    /// back while `NetMetrics::frames_out` (the STREAM counter, incremented
-    /// only by the writer task) stays at 0 — proof the reply never touched
-    /// the writer queue at all.
+    /// Pins that the datagram ctrl-ping path answers DIRECTLY via
+    /// `send_datagram` instead of the per-connection writer queue —
+    /// precisely the queueing delay a ping/pong is meant to measure around.
+    /// A raw (non-`NetClient`) connection sends a `Ctrl::Ping` as a bare
+    /// datagram and must get a `Ctrl::Pong` datagram back while
+    /// `NetMetrics::frames_out` (the STREAM counter, incremented only by the
+    /// writer task) stays at 0 — proof the reply never touched the writer
+    /// queue at all.
     #[tokio::test]
     async fn datagram_ctrl_ping_gets_direct_pong_bypassing_writer_queue() {
         let mut server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");
@@ -968,16 +953,13 @@ mod tests {
         drop(connection);
     }
 
-    /// Regression test for clock pings riding the datagram lane instead of
-    /// the reliable stream (networking rework 3, finding 3). Before this fix
-    /// the client's pinger task enqueued every `Ctrl::Ping` onto `write_tx`
-    /// — the same delayed pipeline and QUIC stream the app frames use — so
-    /// each ping counted in the client's `frames_out`. This test waits for
-    /// the clock to converge (`server_offset_micros` becomes `Some`, which
-    /// requires at least one ping/pong round trip) and asserts the client's
-    /// stream `frames_out` is still 0 — the test itself never sends anything
-    /// over the stream, so any nonzero count can only be ping traffic that
-    /// leaked onto the ordered stream.
+    /// Pins that clock pings ride the datagram lane instead of the reliable
+    /// stream: this test waits for the clock to converge
+    /// (`server_offset_micros` becomes `Some`, which requires at least one
+    /// ping/pong round trip) and asserts the client's stream `frames_out` is
+    /// still 0 — the test itself never sends anything over the stream, so
+    /// any nonzero count can only be ping traffic that leaked onto the
+    /// ordered stream.
     #[tokio::test]
     async fn clock_pings_never_touch_the_stream() {
         let server = NetServer::bind("127.0.0.1:0".parse().unwrap(), 1).expect("bind");

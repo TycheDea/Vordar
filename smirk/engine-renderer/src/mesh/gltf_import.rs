@@ -20,9 +20,9 @@ pub struct VertexSkin {
     pub weights: [f32; 4],
 }
 
-/// The full glTF metallic-roughness material of one primitive (VQ-A2/C2/C4).
-/// Missing maps stay None and bind 1×1 neutral defaults at upload; factors
-/// multiply per the glTF spec.
+/// The full glTF metallic-roughness material of one primitive. Missing maps
+/// stay None and bind 1×1 neutral defaults at upload; factors multiply per
+/// the glTF spec.
 pub struct MaterialData {
     pub base_color_factor: [f32; 4],
     pub metallic_factor:   f32,
@@ -33,7 +33,7 @@ pub struct MaterialData {
     pub alpha_cutoff:      f32,
     pub emissive_factor:   [f32; 3],
     /// KHR_materials_emissive_strength (1.0 when absent) — HDR emissive for
-    /// bloom (VQ-C3).
+    /// bloom.
     pub emissive_strength: f32,
     pub base_color_image:         Option<ImageData>, // sRGB
     pub normal_image:             Option<ImageData>, // linear
@@ -321,8 +321,8 @@ fn visit_node(
                 .unwrap_or_else(|| (0..positions.len() as u32).collect());
 
             // Tangents: from the asset when present, otherwise generated in
-            // source space (VQ-C4). Generation runs pre-transform; the
-            // normal-matrix rotation below carries them to world space.
+            // source space. Generation runs pre-transform; the normal-matrix
+            // rotation below carries them to world space.
             let tangents: Vec<[f32; 4]> = reader
                 .read_tangents()
                 .map(|t| t.collect())
@@ -378,8 +378,8 @@ fn visit_node(
     }
 }
 
-/// Read the whole glTF metallic-roughness material of a primitive (VQ-A2):
-/// every texture slot plus the scalar/vector factors.
+/// Read the whole glTF metallic-roughness material of a primitive: every
+/// texture slot plus the scalar/vector factors.
 fn read_material(
     mat:    &gltf::Material,
     images: &[gltf::image::Data],

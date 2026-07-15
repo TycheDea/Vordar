@@ -94,8 +94,8 @@ pub(crate) fn upload_mesh(
             usage:    BufferUsages::INDEX,
         });
 
-        // The five material textures (VQ-A2/C2): sRGB for color-like slots,
-        // linear for data-like slots; 1×1 neutral defaults where absent.
+        // The five material textures: sRGB for color-like slots, linear for
+        // data-like slots; 1×1 neutral defaults where absent.
         let m = &p.material;
         let albedo   = slot_texture(device, queue, mipgen, &m.base_color_image, true, [255; 4]);
         let normal   = slot_texture(device, queue, mipgen, &m.normal_image, false, [128, 128, 255, 255]);

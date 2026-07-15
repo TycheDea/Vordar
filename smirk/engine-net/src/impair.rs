@@ -4,8 +4,7 @@
 // QUIC retransmits it, which is exactly the head-of-line phenomenon the loss
 // probes measure. (Dropping frames above QUIC, after reliable delivery,
 // cannot reproduce that.) Client-side receive drop == server→client loss;
-// client-side send drop == client→server loss (networking audit 2026-07-11,
-// finding 17 — the send-drop half was missing entirely).
+// client-side send drop == client→server loss.
 
 use crate::NetError;
 use quinn::udp::{RecvMeta, Transmit};
@@ -115,8 +114,7 @@ mod tests {
     /// Minimal fake socket that just counts how many datagrams actually
     /// reached it — isolates `LossySocket::try_send`'s drop decision from
     /// real QUIC/retransmission timing, which is too noisy for a fast,
-    /// deterministic test (networking audit 2026-07-11, finding 17, path
-    /// step 1: "drop probability on `try_send`").
+    /// deterministic test.
     #[derive(Debug, Default)]
     struct CountingSocket {
         sends: AtomicUsize,
@@ -160,9 +158,7 @@ mod tests {
         }
     }
 
-    /// `upstream_loss = 1.0` must drop every send below the real socket — the
-    /// client→server direction that, before finding 17, had no drop path at
-    /// all (`try_send` only ever forwarded).
+    /// `upstream_loss = 1.0` must drop every send below the real socket.
     #[test]
     fn upstream_loss_of_one_drops_every_send() {
         let inner = Arc::new(CountingSocket::default());
@@ -174,8 +170,7 @@ mod tests {
         assert_eq!(inner.sends.load(Ordering::Relaxed), 0, "loss=1.0 must never reach the real socket");
     }
 
-    /// `upstream_loss = 0.0` must forward every send unchanged — the
-    /// pre-finding-17 behavior for the direction that had no loss knob.
+    /// `upstream_loss = 0.0` must forward every send unchanged.
     #[test]
     fn upstream_loss_of_zero_forwards_every_send() {
         let inner = Arc::new(CountingSocket::default());
@@ -189,8 +184,8 @@ mod tests {
 
     /// A mid-range probability must drop *some* but not *all* sends, and land
     /// close to the configured rate over enough draws — proof `roll` (the
-    /// same LCG technique the pre-existing receive-side drop already used)
-    /// is wired correctly for the send path, not just always-true/always-false.
+    /// same LCG technique the receive-side drop uses) is wired correctly for
+    /// the send path, not just always-true/always-false.
     #[test]
     fn upstream_loss_of_half_drops_roughly_half() {
         let inner = Arc::new(CountingSocket::default());

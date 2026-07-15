@@ -1,9 +1,9 @@
-// GPU mip-chain generation — VQ-C1.
+// GPU mip-chain generation.
 //
 // A render-pass blit chain: for each level i, draw a fullscreen triangle into
 // mip i sampling mip i-1 with a linear filter. Works on any renderable format
 // (one lazily-created pipeline per format). The same blit skeleton is reused
-// by the IBL prefilter (Phase 2) and bloom (Phase 4) chains.
+// by the IBL prefilter and bloom chains.
 
 use std::collections::HashMap;
 use wgpu::{Device, Queue, Texture, TextureFormat};

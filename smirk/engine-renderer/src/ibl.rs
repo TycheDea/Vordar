@@ -1,8 +1,8 @@
-// Image-based lighting (VQ-D2): bake a Radiance .hdr equirect into the
-// cubemaps the PBR shaders consume — base environment (sky), diffuse
-// irradiance, GGX-prefiltered specular chain, and the split-sum BRDF LUT.
-// All baking happens once at environment load through render passes (the
-// mipgen blit skeleton with IBL fragments).
+// Image-based lighting: bake a Radiance .hdr equirect into the cubemaps the
+// PBR shaders consume — base environment (sky), diffuse irradiance,
+// GGX-prefiltered specular chain, and the split-sum BRDF LUT. All baking
+// happens once at environment load through render passes (the mipgen blit
+// skeleton with IBL fragments).
 
 use half::f16;
 use wgpu::util::DeviceExt;

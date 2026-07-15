@@ -1,14 +1,14 @@
-// Dual-filter Kawase bloom (Phase 4). A half-resolution Rgba16Float mip
-// chain: soft-knee prefilter from the HDR resolve into mip 0, downsample
-// through the chain, then additive tent upsamples back to mip 0, which the
-// tonemap pass composites.
+// Dual-filter Kawase bloom. A half-resolution Rgba16Float mip chain:
+// soft-knee prefilter from the HDR resolve into mip 0, downsample through
+// the chain, then additive tent upsamples back to mip 0, which the tonemap
+// pass composites.
 
 use crate::post::HDR_FORMAT;
 use wgpu::util::DeviceExt;
 use wgpu::Device;
 
 pub(crate) const BLOOM_LEVELS: u32 = 6;
-const THRESHOLD: f32 = 1.0; // HDR emissive > 1.0 blooms (VQ-C3)
+const THRESHOLD: f32 = 1.0; // HDR emissive > 1.0 blooms
 const KNEE: f32 = 0.5;
 
 pub(crate) struct BloomPass {

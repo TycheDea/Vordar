@@ -1,4 +1,4 @@
-// Tangent generation for meshes whose glTF ships no TANGENT accessor — VQ-C4.
+// Tangent generation for meshes whose glTF ships no TANGENT accessor.
 //
 // Per-triangle tangent/bitangent from UV derivatives (Lengyel), accumulated
 // per vertex, then Gram-Schmidt orthonormalized against the vertex normal.

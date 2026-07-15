@@ -173,9 +173,9 @@ impl PrefabLibrary {
     pub fn len(&self) -> usize { self.prefabs.len() }
     pub fn is_empty(&self) -> bool { self.prefabs.is_empty() }
 
-    /// Every prefab id in this library, sorted for a deterministic order
-    /// (networking rework 5, finding 4 — the per-zone prefab table's `u16`
-    /// index assignment must be stable across a `PrefabTable` build).
+    /// Every prefab id in this library, sorted for a deterministic order —
+    /// the per-zone prefab table's `u16` index assignment must be stable
+    /// across a `PrefabTable` build.
     pub fn names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.prefabs.keys().cloned().collect();
         names.sort();

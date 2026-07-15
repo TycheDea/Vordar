@@ -16,11 +16,10 @@ pub struct NetMetrics {
     /// `server::server_main`) woke up late by — on the single-threaded
     /// runtime, lateness is time the thread spent running other tasks
     /// (handshakes, frame codec, accept loop) instead of idling, so this is
-    /// a proxy for how saturated the network thread is (networking audit
-    /// 2026-07-11, finding 14 step 1).
+    /// a proxy for how saturated the network thread is.
     pub busy_micros: AtomicU64,
-    /// Datagrams received on the unreliable lane (networking rework 3,
-    /// finding 2) — counted regardless of tag (ctrl ping or app payload).
+    /// Datagrams received on the unreliable lane — counted regardless of
+    /// tag (ctrl ping or app payload).
     pub datagrams_in: AtomicU64,
     /// Datagrams successfully handed to `quinn::Connection::send_datagram`
     /// on the unreliable lane.

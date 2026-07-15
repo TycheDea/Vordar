@@ -1,4 +1,4 @@
-// Billboard particle pass (VQ-E3) — textured, atlas-driven, soft, in two
+// Billboard particle pass — textured, atlas-driven, soft, in two
 // blend variants:
 //   additive (One+One)           — energy: glows, sparks, trails
 //   premultiplied alpha           — media: smoke, dust
@@ -188,10 +188,10 @@ pub(crate) fn create_particle_pipelines(
 
 // ── Procedural atlas ─────────────────────────────────────────────────────────
 
-/// Grayscale particle atlas pixels (VQ-E3), `size`×`size` RGBA8, ATLAS_GRID²
-/// cells: 0 = soft glow, 1 = hard-core glow, 2 = horizontal streak,
-/// 3 = smoke puff; remaining cells repeat soft glow variants. Pure CPU —
-/// unit-tested; runtime-tinted so it is style-agnostic.
+/// Grayscale particle atlas pixels, `size`×`size` RGBA8, ATLAS_GRID² cells:
+/// 0 = soft glow, 1 = hard-core glow, 2 = horizontal streak, 3 = smoke puff;
+/// remaining cells repeat soft glow variants. Pure CPU — unit-tested;
+/// runtime-tinted so it is style-agnostic.
 pub(crate) fn atlas_pixels(size: u32) -> Vec<u8> {
     let cell_px = size / ATLAS_GRID;
     let mut pixels = vec![0u8; (size * size * 4) as usize];

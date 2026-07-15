@@ -20,8 +20,8 @@ pub enum ClientEvent {
     Disconnected,
     Message(Vec<u8>),
     /// The server rejected the handshake with a reason (e.g. version
-    /// mismatch) instead of just closing the connection silently (networking
-    /// audit 2026-07-11, finding 16). `Disconnected` still follows.
+    /// mismatch) instead of just closing the connection silently.
+    /// `Disconnected` still follows.
     Rejected(String),
 }
 
@@ -33,10 +33,10 @@ const SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Sliding window over which the lowest-RTT sample is treated as the sync
-/// anchor, instead of the connection's all-time best (networking audit
-/// 2026-07-11, finding 6). Once an early low-RTT sample ages out of this
-/// window, later samples resume driving the offset instead of one lucky
-/// sample pinning it for the rest of the session.
+/// anchor, instead of the connection's all-time best. Once an early
+/// low-RTT sample ages out of this window, later samples resume driving the
+/// offset instead of one lucky sample pinning it for the rest of the
+/// session.
 const SYNC_WINDOW: Duration = Duration::from_secs(90);
 /// Maximum rate, in parts-per-million of elapsed local time, at which the
 /// published offset may move toward a new target. A correction is always a
@@ -44,11 +44,9 @@ const SYNC_WINDOW: Duration = Duration::from_secs(90);
 /// intent deadlines) never observes a jump.
 const MAX_SLEW_PPM: f64 = 2_000.0;
 
-/// Both-direction network conditioner knobs (networking audit 2026-07-11,
-/// finding 17): before this, the only impairment was a fixed symmetric
-/// latency plus receive-side (server→client) datagram loss — no
-/// client→server loss, no jitter/reorder, no simulated clock skew. Testing
-/// only; every field defaults to "no impairment".
+/// Both-direction network conditioner knobs: latency, independent
+/// upstream/downstream datagram loss, jitter/reorder, and simulated clock
+/// skew. Testing only; every field defaults to "no impairment".
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Impairment {
     /// Simulated round-trip time; each direction is delayed `rtt / 2`.
@@ -57,7 +55,7 @@ pub struct Impairment {
     /// QUIC, exercising real retransmission (see `impair.rs`).
     pub downstream_loss: f32,
     /// Probability (0.0–1.0) that a client→server datagram is dropped below
-    /// QUIC — the direction that used to be untestable entirely.
+    /// QUIC.
     pub upstream_loss: f32,
     /// Extra, per-frame random delay drawn uniformly from `[0, jitter]` and
     /// added on top of the fixed one-way latency, in both directions. Unlike
@@ -67,8 +65,8 @@ pub struct Impairment {
     /// Simulated client clock drift, in parts-per-million of real elapsed
     /// time. Feeds every "local now" this client reports or times against
     /// (`Ping.t_client`, `local_micros()`), so `ClockSync`'s drift-rate
-    /// estimate (finding 6) has something real to track under a live
-    /// connection instead of only in `ClockSync`'s own unit tests.
+    /// estimate has something real to track under a live connection instead
+    /// of only in `ClockSync`'s own unit tests.
     pub clock_skew_ppm: f64,
 }
 
@@ -78,10 +76,10 @@ impl Impairment {
         Self { rtt, ..Default::default() }
     }
 
-    /// Named WAN profiles (finding 17, path step 5): representative combined
-    /// latency/jitter/loss/skew shapes so client-feel and clock-sync claims
-    /// have a headless test at recognizable real-world conditions, not just
-    /// hand-picked individual numbers.
+    /// Named WAN profiles: representative combined latency/jitter/loss/skew
+    /// shapes so client-feel and clock-sync claims have a headless test at
+    /// recognizable real-world conditions, not just hand-picked individual
+    /// numbers.
     pub fn wifi() -> Self {
         Self {
             rtt: Duration::from_millis(20),
@@ -115,9 +113,9 @@ impl Impairment {
 
 /// Local-clock scaling for the `clock_skew_ppm` harness: a real client's
 /// crystal doesn't tick at exactly the server's rate, by tens of ppm over a
-/// long session (finding 6's evidence). Scaling real elapsed time by
-/// `1 + skew_ppm/1e6` gives clock-sync a genuine, growing offset to correct
-/// for instead of a step outside the simulation entirely.
+/// long session. Scaling real elapsed time by `1 + skew_ppm/1e6` gives
+/// clock-sync a genuine, growing offset to correct for instead of a step
+/// outside the simulation entirely.
 fn skewed_micros(elapsed: Duration, skew_ppm: f64) -> u64 {
     if skew_ppm == 0.0 {
         return elapsed.as_micros() as u64;
@@ -178,13 +176,13 @@ impl<T> Ord for Pending<T> {
     }
 }
 
-/// Delay pipeline stage for latency/jitter simulation (finding 17): items
-/// arrive tagged with their intended delivery instant and are released in
-/// *deadline* order, not enqueue order. That distinction is what makes jitter
-/// able to reorder frames — under a plain delayed FIFO channel (the pre-
-/// finding-17 behavior), a later item drawing a smaller delay than an
-/// earlier one still waits behind it; here it legitimately overtakes, the
-/// way real jitter reorders packets on the wire.
+/// Delay pipeline stage for latency/jitter simulation: items arrive tagged
+/// with their intended delivery instant and are released in *deadline*
+/// order, not enqueue order. That distinction is what makes jitter able to
+/// reorder frames — under a plain delayed FIFO channel, a later item
+/// drawing a smaller delay than an earlier one still waits behind it; here
+/// it legitimately overtakes, the way real jitter reorders packets on the
+/// wire.
 async fn delay_reorder<T: Send + 'static>(
     mut rx: UnboundedReceiver<(tokio::time::Instant, T)>,
     tx: UnboundedSender<T>,
@@ -233,7 +231,7 @@ struct ClockSample {
 /// RTT selection (not all-time-best), a linear drift-rate estimate that
 /// projects the chosen sample forward to "now", and a slew limiter on the
 /// published offset. Pure and network-free, so it is unit-testable without a
-/// live connection (networking audit 2026-07-11, finding 6).
+/// live connection.
 struct ClockSync {
     samples: VecDeque<ClockSample>,
     offset: i64,
@@ -318,14 +316,14 @@ impl ClockSync {
 pub struct NetClient {
     events: UnboundedReceiver<ClientEvent>,
     out: UnboundedSender<Vec<u8>>,
-    /// Outbound datagram lane (networking rework 3, finding 2) — a separate
-    /// channel from `out` above: datagrams never touch the reliable stream's
-    /// writer queue, so a stalled stream can never delay them.
+    /// Outbound datagram lane — a separate channel from `out` above:
+    /// datagrams never touch the reliable stream's writer queue, so a
+    /// stalled stream can never delay them.
     out_datagram: UnboundedSender<Vec<u8>>,
     clock: Arc<Mutex<ClockSync>>,
     epoch: Instant,
-    /// Simulated clock drift applied to every reading of `epoch` (finding 17's
-    /// clock-skew harness) — zero for every non-impaired connection.
+    /// Simulated clock drift applied to every reading of `epoch` — zero for
+    /// every non-impaired connection.
     clock_skew_ppm: f64,
     metrics: Arc<NetMetrics>,
 }
@@ -351,8 +349,8 @@ impl NetClient {
         Self::connect_impaired(addr, version, Impairment::latency(simulated_rtt))
     }
 
-    /// Full network conditioner (finding 17): latency, both-direction datagram
-    /// loss, jitter/reorder, and simulated clock skew — see [`Impairment`].
+    /// Full network conditioner: latency, both-direction datagram loss,
+    /// jitter/reorder, and simulated clock skew — see [`Impairment`].
     /// Testing only.
     pub fn connect_impaired(addr: SocketAddr, version: u8, impairment: Impairment) -> Result<Self, NetError> {
         let one_way = impairment.rtt / 2;
@@ -410,17 +408,17 @@ impl NetClient {
     }
 
     /// Send `data` to the server via an unreliable QUIC datagram instead of
-    /// the reliable ordered stream (networking rework 3, finding 2): a lost
-    /// datagram is simply gone — no retransmit, no stream fallback — so
-    /// callers must only route messages here that tolerate loss/reorder.
-    /// Tagged `TAG_APP` so the server's datagram lane surfaces it as the same
-    /// `ServerEvent::Message` the stream uses.
+    /// the reliable ordered stream: a lost datagram is simply gone — no
+    /// retransmit, no stream fallback — so callers must only route messages
+    /// here that tolerate loss/reorder. Tagged `TAG_APP` so the server's
+    /// datagram lane surfaces it as the same `ServerEvent::Message` the
+    /// stream uses.
     pub fn send_datagram(&self, data: Vec<u8>) {
         let _ = self.out_datagram.send(data);
     }
 
     /// Microseconds since this client started — the local monotonic clock
-    /// (skewed by `clock_skew_ppm` under the finding-17 harness).
+    /// (skewed by `clock_skew_ppm` under the impairment harness).
     pub fn local_micros(&self) -> u64 {
         skewed_micros(self.epoch.elapsed(), self.clock_skew_ppm)
     }
@@ -505,13 +503,11 @@ async fn client_main(
     log::info!("net: connected to {addr}");
 
     // Writer task — merges app sends only; sole owner of the stream. Clock
-    // pings ride the datagram lane below (networking rework 3, finding 3) so
-    // they never queue behind app frames here. Frames carry a delivery
-    // deadline (enqueue time + one_way, plus a jitter draw); `delay_reorder`
-    // releases them in deadline order rather than enqueue order, so under
-    // jitter a frame can legitimately overtake one queued ahead of it
-    // (finding 17 — previously a strictly monotonic FIFO delay, which could
-    // never reorder anything).
+    // pings ride the datagram lane below so they never queue behind app
+    // frames here. Frames carry a delivery deadline (enqueue time + one_way,
+    // plus a jitter draw); `delay_reorder` releases them in deadline order
+    // rather than enqueue order, so under jitter a frame can legitimately
+    // overtake one queued ahead of it.
     let (write_tx, write_rx) = unbounded_channel::<(tokio::time::Instant, (u8, Vec<u8>))>();
     let (ordered_tx, mut ordered_rx) = unbounded_channel::<(u8, Vec<u8>)>();
     tokio::spawn(delay_reorder(write_rx, ordered_tx));
@@ -536,11 +532,11 @@ async fn client_main(
         conn_for_forward.close(0u32.into(), b"client closed");
     });
 
-    // Datagram outbound pipeline (networking rework 3, finding 2): outbound
-    // datagrams get their own delay_reorder stage (one_way + jitter, a fresh
-    // seed) but never touch the stream's writer queue at all —
-    // `connection.send_datagram` is fire-and-forget, so a lost datagram is
-    // truly gone instead of retransmitted.
+    // Datagram outbound pipeline: outbound datagrams get their own
+    // delay_reorder stage (one_way + jitter, a fresh seed) but never touch
+    // the stream's writer queue at all — `connection.send_datagram` is
+    // fire-and-forget, so a lost datagram is truly gone instead of
+    // retransmitted.
     let (dgram_write_tx, dgram_write_rx) = unbounded_channel::<(tokio::time::Instant, (u8, Vec<u8>))>();
     let (dgram_ordered_tx, mut dgram_ordered_rx) = unbounded_channel::<(u8, Vec<u8>)>();
     tokio::spawn(delay_reorder(dgram_write_rx, dgram_ordered_tx));
@@ -565,10 +561,10 @@ async fn client_main(
     });
 
     // Clock-sync pinger: a fast burst, then occasional re-checks. Pings ride
-    // the datagram lane (networking rework 3, finding 3) — never `write_tx`
-    // — so a retransmitting stream can never inflate an RTT sample with
-    // queueing delay that has nothing to do with the path. A lost ping/pong
-    // datagram costs one sample; the burst and recheck cadence absorb it.
+    // the datagram lane — never `write_tx` — so a retransmitting stream can
+    // never inflate an RTT sample with queueing delay that has nothing to do
+    // with the path. A lost ping/pong datagram costs one sample; the burst
+    // and recheck cadence absorb it.
     let ping_tx = dgram_write_tx.clone();
     let pinger = tokio::spawn(async move {
         let mut ping_jitter = Jitter::with_seed(jitter, 0xA5A5_5A5A_1234_5678);
@@ -593,12 +589,12 @@ async fn client_main(
     let (ordered_in_tx, mut ordered_in_rx) = unbounded_channel::<Result<(u8, Vec<u8>), NetError>>();
     tokio::spawn(delay_reorder(in_rx, ordered_in_tx));
 
-    // Datagram inbound task (finding 2): stamps arrivals into the SAME in_tx
-    // channel the stream reader (below) uses, so the one delay_reorder /
-    // ordered_in_rx consumer loop handles both lanes identically — a
-    // datagram Ctrl::Pong or app message is indistinguishable from its
-    // stream counterpart by the time it reaches that loop. Never sends
-    // `Err`: only the stream reader owns connection-teardown signaling.
+    // Datagram inbound task: stamps arrivals into the SAME in_tx channel the
+    // stream reader (below) uses, so the one delay_reorder / ordered_in_rx
+    // consumer loop handles both lanes identically — a datagram Ctrl::Pong
+    // or app message is indistinguishable from its stream counterpart by
+    // the time it reaches that loop. Never sends `Err`: only the stream
+    // reader owns connection-teardown signaling.
     let dgram_in_tx = in_tx.clone();
     let dgram_conn_for_recv = connection.clone();
     let dgram_reader_metrics = metrics.clone();
@@ -666,19 +662,18 @@ async fn client_main(
 mod tests {
     use super::*;
 
-    /// Regression test for "clock sync locks onto the all-time-best RTT
-    /// sample" (networking audit 2026-07-11, finding 6). Simulates an
-    /// hour-long session (360 re-check pings at the real `SYNC_INTERVAL`
-    /// cadence) under a steady 50 ppm clock skew — the worst case the finding
-    /// cites, worth 180 ms of drift per hour — plus one early, unusually good
-    /// RTT sample. Under the old "keep the lowest RTT ever seen" rule that
-    /// first sample would pin the offset for the rest of the session; the
-    /// windowed-minimum + drift-rate estimate must instead keep tracking the
-    /// drift once that sample ages out of the window.
+    /// Pins that clock sync tracks drift instead of locking onto the
+    /// all-time-best RTT sample. Simulates an hour-long session (360
+    /// re-check pings at the real `SYNC_INTERVAL` cadence) under a steady 50
+    /// ppm clock skew — worth 180 ms of drift per hour — plus one early,
+    /// unusually good RTT sample. Under a "keep the lowest RTT ever seen"
+    /// rule that first sample would pin the offset for the rest of the
+    /// session; the windowed-minimum + drift-rate estimate must instead
+    /// keep tracking the drift once that sample ages out of the window.
     #[test]
     fn windowed_minimum_tracks_drift_past_an_early_lucky_sample() {
         let mut sync = ClockSync::new();
-        const DRIFT_PPM: f64 = 50.0 / 1_000_000.0; // 50 ppm, the finding's worst case
+        const DRIFT_PPM: f64 = 50.0 / 1_000_000.0; // 50 ppm worst-case skew
         const BASE_OFFSET: i64 = 1_000_000; // 1 s baseline local->server offset
         let true_offset = |t_local: u64| BASE_OFFSET + (DRIFT_PPM * t_local as f64) as i64;
 
@@ -701,8 +696,8 @@ mod tests {
 
         let final_offset = sync.offset().expect("synced");
         let expected = true_offset(t_local);
-        // Old (all-time-best) behavior would leave this at BASE_OFFSET, 180 ms
-        // away from `expected` — proof the fix actually moved off it.
+        // An all-time-best rule would leave this at BASE_OFFSET, 180 ms away
+        // from `expected` — this assertion fails under that rule.
         assert!(
             (final_offset - BASE_OFFSET).abs() > 150_000,
             "offset never moved off the early lucky sample: {final_offset} (started at {BASE_OFFSET})"
@@ -714,7 +709,7 @@ mod tests {
     }
 
     /// A new sync target must be approached gradually, not stepped straight
-    /// to it, so a reader mid-correction never observes a jump (finding 6).
+    /// to it, so a reader mid-correction never observes a jump.
     #[test]
     fn offset_corrections_are_slewed_not_stepped() {
         let mut sync = ClockSync::new();

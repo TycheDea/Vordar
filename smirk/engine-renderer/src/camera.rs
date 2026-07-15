@@ -40,7 +40,7 @@ impl Camera {
             znear: 0.1,
             zfar: 200.0,
             // Pulled back far enough to read the battlefield, not just the
-            // player's feet (Phase 7.5). Mouse wheel adjusts via zoom().
+            // player's feet. Mouse wheel adjusts via zoom().
             radius: 34.0,
             angle:  std::f32::consts::FRAC_PI_4,
             pitch:  0.8,
@@ -173,7 +173,7 @@ pub(crate) struct LightUniform {
     pub(crate) _pad:      f32,
     pub(crate) color:     [f32; 3], // RGB light intensity
     pub(crate) ambient:   f32,      // IBL ambient scale (1.0 = environment as authored)
-    // Distance fog (VQ-A5): linear-space color, exponential density.
+    // Distance fog: linear-space color, exponential density.
     pub(crate) fog_color:   [f32; 3],
     pub(crate) fog_density: f32,
 }
@@ -235,7 +235,7 @@ pub(crate) fn create_gpu_resources(
             // Fragment too: the PBR shaders read camera.eye for the view vector.
             uniform_entry(0, ShaderStages::VERTEX.union(ShaderStages::FRAGMENT)),
             uniform_entry(1, ShaderStages::FRAGMENT),
-            // Shadow receiving (VQ-D3): sun view-proj + depth map + comparison sampler.
+            // Shadow receiving: sun view-proj + depth map + comparison sampler.
             uniform_entry(2, ShaderStages::FRAGMENT),
             BindGroupLayoutEntry {
                 binding:    3,

@@ -49,11 +49,11 @@ impl Plugin for PhysicsPlugin {
             .insert_resource(CandidatePairs::new())
             .insert_resource(ActivePairs::new())
             // Rebuild SpatialGrid right before broadphase reads it. Collision
-            // runs at 60 Hz everywhere — a PostUpdate rebuild was 10 Hz-stale
-            // on the server (PostUpdate = snapshot rate), which projectile
-            // hit detection can't tolerate (Phase 3 review wrinkle, closed in
-            // Phase 7.5). Bonus: same-tick spawns enter the grid immediately
-            // (SpawnFlush precedes Collision).
+            // runs at 60 Hz everywhere — a PostUpdate rebuild would be 10
+            // Hz-stale on the server (PostUpdate = snapshot rate), which
+            // projectile hit detection can't tolerate. Bonus: same-tick
+            // spawns enter the grid immediately (SpawnFlush precedes
+            // Collision).
             .add_system(CellUpdateSystem::new(), Phase::Collision,        SystemOrder::First)
             .add_system(BroadphaseSystem::new(), Phase::Collision,        SystemOrder::after::<CellUpdateSystem>())
             .add_system(NarrowphaseSystem::new(), Phase::Collision,        SystemOrder::after::<BroadphaseSystem>())

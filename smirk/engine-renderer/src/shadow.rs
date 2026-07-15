@@ -1,4 +1,4 @@
-// Shadow mapping (VQ-D3): one fitted orthographic cascade for the sun.
+// Shadow mapping: one fitted orthographic cascade for the sun.
 // The camera is a bounded orbit (radius 16–55) over compact zones, so a
 // single 2048² map fitted around the camera target holds up; CSM stays
 // future work. Receivers PCF-filter in the geometry shaders via the shared
