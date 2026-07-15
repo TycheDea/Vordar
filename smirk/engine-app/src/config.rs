@@ -10,6 +10,7 @@
 //   )
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WindowConfig {
@@ -54,4 +55,29 @@ pub enum WindowMode {
     Borderless,
     /// Exclusive fullscreen — takes full ownership of the display.
     Fullscreen,
+}
+
+/// Serialize a WindowConfig to RON format and write it to disk with a format header.
+/// Returns Ok(()) on success; returns Err with a message on any serialization or write error.
+pub fn save_window_config(path: &Path, config: &WindowConfig) -> Result<(), String> {
+    match ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::default()) {
+        Ok(s) => {
+            let header = "// Engine window configuration.\n\
+                          // Loaded by App::configure(\"content/config/engine.ron\").\n\
+                          // resolution: Auto | Fixed(1280, 720)\n\
+                          // mode:       Windowed | Borderless | Fullscreen\n\
+                          // vsync:      true | false\n\
+                          // max_fps:    None = monitor refresh rate, Some(60) = explicit cap\n";
+            std::fs::write(path, format!("{header}{s}\n"))
+                .map_err(|e| format!("failed to write config: {e}"))
+        }
+        Err(e) => Err(format!("failed to serialize config: {e}")),
+    }
+}
+
+/// Load a WindowConfig from a RON file on disk.
+/// Returns Some(config) on success; returns None if the file cannot be read or parsed.
+pub fn reload_config(path: &Path) -> Option<WindowConfig> {
+    let s = std::fs::read_to_string(path).ok()?;
+    ron::from_str::<WindowConfig>(&s).ok()
 }

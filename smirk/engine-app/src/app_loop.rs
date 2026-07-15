@@ -8,7 +8,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 use crate::app::App;
-use crate::config::{Resolution, WindowConfig, WindowMode};
+use crate::config::{Resolution, WindowConfig, WindowMode, reload_config, save_window_config};
 use crate::input::{KeyboardState, MouseState};
 use crate::winit_processor::WinitEventProcessor;
 
@@ -88,19 +88,8 @@ impl ApplicationHandler for App {
                     &self.config_path,
                     self.resources.get::<WindowConfig>().cloned(),
                 ) {
-                    match ron::ser::to_string_pretty(&cfg, ron::ser::PrettyConfig::default()) {
-                        Ok(s) => {
-                            let header = "// Engine window configuration.\n\
-                                          // Loaded by App::configure(\"content/config/engine.ron\").\n\
-                                          // resolution: Auto | Fixed(1280, 720)\n\
-                                          // mode:       Windowed | Borderless | Fullscreen\n\
-                                          // vsync:      true | false\n\
-                                          // max_fps:    None = monitor refresh rate, Some(60) = explicit cap\n";
-                            if let Err(e) = std::fs::write(path, format!("{header}{s}\n")) {
-                                log::warn!("failed to persist config to {path}: {e}");
-                            }
-                        }
-                        Err(e) => log::warn!("failed to serialize config: {e}"),
+                    if let Err(e) = save_window_config(std::path::Path::new(path), &cfg) {
+                        log::warn!("failed to persist config to {path}: {e}");
                     }
                 }
                 event_loop.exit();
@@ -157,21 +146,18 @@ impl ApplicationHandler for App {
                     .unwrap_or(false);
                 if config_changed {
                     if let Some(path) = &self.config_path.clone() {
-                        if let Ok(s) = std::fs::read_to_string(path) {
-                            match ron::from_str::<WindowConfig>(&s) {
-                                Ok(new_cfg) => {
-                                    if let Some(w) = &self.window {
-                                        w.set_title(&new_cfg.title);
-                                        if let Resolution::Fixed(width, height) = new_cfg.resolution {
-                                            let _ = w.request_inner_size(
-                                                winit::dpi::PhysicalSize::new(width, height),
-                                            );
-                                        }
-                                    }
-                                    self.resources.insert(new_cfg);
+                        if let Some(new_cfg) = reload_config(std::path::Path::new(path)) {
+                            if let Some(w) = &self.window {
+                                w.set_title(&new_cfg.title);
+                                if let Resolution::Fixed(width, height) = new_cfg.resolution {
+                                    let _ = w.request_inner_size(
+                                        winit::dpi::PhysicalSize::new(width, height),
+                                    );
                                 }
-                                Err(e) => log::warn!("hot-reload parse error: {e}"),
                             }
+                            self.resources.insert(new_cfg);
+                        } else {
+                            log::warn!("hot-reload parse error for {path}");
                         }
                     }
                 }
