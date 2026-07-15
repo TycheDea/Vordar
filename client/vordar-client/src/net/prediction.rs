@@ -55,6 +55,19 @@ pub(super) fn reconcile_own(
 ) {
     let speed = world.get::<&Player>(entity).map(|p| p.speed).unwrap_or(0.0);
     let bound = resources.get::<PlayRadius>().copied().unwrap_or_default().0;
+    let own_shape = world.get::<&Hitbox>(entity).map(|h| h.shape.clone()).ok();
+    // Defensive only: the player prefab always carries a Hitbox. Without one
+    // there's no shape to test against statics, so the replay falls back to
+    // free-flight instead of pushing an unknown shape around.
+    let statics: Vec<(Vec3, CollisionShape)> = match &own_shape {
+        Some(_) => world
+            .query::<(&Transform, &Hitbox, hecs::Satisfies<&Solid>, hecs::Satisfies<&Anchored>)>()
+            .iter()
+            .filter_map(|(t, h, solid, anchored)| (solid && anchored).then(|| (t.position, h.shape.clone())))
+            .collect(),
+        None => Vec::new(),
+    };
+    let shape = own_shape.unwrap_or(CollisionShape::Aabb { half_extents: Vec3::ZERO });
     let (replayed, still_reconciling_a_dash) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
         state.pending.retain(|p| p.seq > last_processed_seq);
@@ -65,13 +78,14 @@ pub(super) fn reconcile_own(
         // still. Any unacked intent recorded during the dash means the
         // server hasn't caught up on the dash yet.
         let still_reconciling_a_dash = state.pending.iter().any(|p| p.leap.is_some());
-        (replay_position(server_pos, speed, state.pending.iter(), bound), still_reconciling_a_dash)
+        (replay_position(server_pos, speed, state.pending.iter(), bound, &shape, &statics), still_reconciling_a_dash)
     };
-    // Collision response isn't replayed here: mid-dash the free-flight
-    // `replayed` position and a wall-clamped real one can differ for reasons
-    // that aren't mispredictions, so corrections stay suppressed until the
-    // server has caught up on the whole dash instead of tugging every
-    // snapshot.
+    // Collision is part of the replay (predict_step pushes out of statics
+    // exactly as SeparationSystem does), so wall contact isn't a source of
+    // mismatch here. What forces suppression during a dash is network
+    // timing: the server's dash mirror finishes strictly later than the
+    // local one, so corrections stay off until the server has caught up on
+    // the whole dash.
     if still_reconciling_a_dash {
         return;
     }
@@ -94,19 +108,21 @@ pub(super) fn reconcile_own(
 }
 
 /// Position after replaying pending intents on top of the server's
-/// authoritative position — the same movement rule the simulation runs,
-/// including a leap override where one was active and the world-boundary
-/// clamp — collision response is the one part of the shared rule still
-/// unreplayed.
+/// authoritative position — the same movement + static-collision rule the
+/// simulation runs (`vordar_game::motion::predict_step`), including a leap
+/// override where one was active, the world-boundary clamp, and the push out
+/// of anchored statics the server's SeparationSystem applies.
 fn replay_position<'a>(
     server_pos: Vec3,
     speed: f32,
     pending: impl Iterator<Item = &'a PendingIntent>,
     bound: f32,
+    shape: &CollisionShape,
+    statics: &[(Vec3, CollisionShape)],
 ) -> Vec3 {
     pending.fold(server_pos, |pos, p| {
         let velocity = p.leap.unwrap_or_else(|| movement_velocity(p.dir, speed));
-        step(pos, velocity, p.dt, bound)
+        predict_step(pos, velocity, p.dt, bound, shape, statics)
     })
 }
 
@@ -238,10 +254,18 @@ mod tests {
         PendingIntent { seq, dir, dt: DT, leap: None }
     }
 
+    fn walker_shape() -> CollisionShape {
+        CollisionShape::Aabb { half_extents: Vec3::splat(0.5) }
+    }
+
+    fn wall_shape() -> CollisionShape {
+        CollisionShape::Aabb { half_extents: Vec3::new(1.6, 0.9, 1.3) } // the cottage's shape (content/chapters/chapter02/prefabs/cottage.ron)
+    }
+
     #[test]
     fn replay_applies_unacked_intents() {
         let pending = vec![intent(1, Vec2::new(1.0, 0.0)), intent(2, Vec2::new(1.0, 0.0))];
-        let pos = replay_position(Vec3::ZERO, 6.0, pending.iter(), PlayRadius::default().0);
+        let pos = replay_position(Vec3::ZERO, 6.0, pending.iter(), PlayRadius::default().0, &walker_shape(), &[]);
         assert!((pos.x - 2.0 * 6.0 * DT).abs() < 1e-6);
         assert_eq!(pos.y, 0.0);
         assert_eq!(pos.z, 0.0);
@@ -252,8 +276,8 @@ mod tests {
         // An over-unit dir must move exactly as fast as a unit dir.
         let cheat = vec![intent(1, Vec2::new(30.0, 40.0))];
         let fair = vec![intent(1, Vec2::new(0.6, 0.8))];
-        let a = replay_position(Vec3::ZERO, 6.0, cheat.iter(), PlayRadius::default().0);
-        let b = replay_position(Vec3::ZERO, 6.0, fair.iter(), PlayRadius::default().0);
+        let a = replay_position(Vec3::ZERO, 6.0, cheat.iter(), PlayRadius::default().0, &walker_shape(), &[]);
+        let b = replay_position(Vec3::ZERO, 6.0, fair.iter(), PlayRadius::default().0, &walker_shape(), &[]);
         assert!((a - b).length() < 1e-6);
     }
 
@@ -272,14 +296,14 @@ mod tests {
         let leaping: Vec<PendingIntent> = (1..=ticks)
             .map(|seq| PendingIntent { seq, dir: Vec2::new(0.0, 1.0), dt: DT, leap: Some(dash_velocity) })
             .collect();
-        let dashed = replay_position(Vec3::ZERO, 6.0, leaping.iter(), PlayRadius::default().0);
+        let dashed = replay_position(Vec3::ZERO, 6.0, leaping.iter(), PlayRadius::default().0, &walker_shape(), &[]);
         let expected = dash_velocity * DT * ticks as f32;
         assert!((dashed - expected).length() < 1e-4, "leap-aware replay must follow the dash exactly: {dashed:?}");
 
         let plain: Vec<PendingIntent> = (1..=ticks)
             .map(|seq| PendingIntent { seq, dir: Vec2::new(0.0, 1.0), dt: DT, leap: None })
             .collect();
-        let dead_reckoned = replay_position(Vec3::ZERO, 6.0, plain.iter(), PlayRadius::default().0);
+        let dead_reckoned = replay_position(Vec3::ZERO, 6.0, plain.iter(), PlayRadius::default().0, &walker_shape(), &[]);
         assert!(
             (dashed - dead_reckoned).length() > SNAP_DISTANCE,
             "dead-reckoned WASD must diverge from the real dash past SNAP_DISTANCE, got {:.2}",
@@ -315,12 +339,60 @@ mod tests {
         let live = world.get::<&Transform>(e).unwrap().position;
 
         let pending: Vec<PendingIntent> = (1..=ticks).map(|seq| intent(seq, dir)).collect();
-        let replayed = replay_position(start, speed, pending.iter(), bound);
+        let replayed = replay_position(start, speed, pending.iter(), bound, &walker_shape(), &[]);
 
         assert_eq!(replayed, live, "replay must land exactly where the live system does at the boundary");
         assert!(
             classify_error(replayed - live) == Correction::Trust,
             "boundary replay must not fall into the Smooth-correction band"
+        );
+    }
+
+    /// A player already pressed against a wall (the live-pipeline
+    /// wall-equilibrium position, computed by folding `predict_step` the same
+    /// way `vordar_game::motion`'s equivalence tests do) who keeps sending +X
+    /// intents into it: the replay must fold the same static push the server
+    /// applies and stay put, not free-flight through the wall and snap.
+    #[test]
+    fn reconcile_against_a_wall_stays_in_the_trust_band() {
+        let wall_pos = Vec3::new(3.0, 0.0, 0.0);
+        let bound = PlayRadius::default().0;
+        let speed = 6.0;
+        let velocity = movement_velocity(Vec2::X, speed);
+        let statics = [(wall_pos, wall_shape())];
+
+        let mut server_pos = Vec3::ZERO;
+        for _ in 0..60 {
+            server_pos = predict_step(server_pos, velocity, DT, bound, &walker_shape(), &statics);
+        }
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(PlayRadius(bound));
+        let entity = world.spawn((
+            Transform::new(server_pos),
+            Player { speed },
+            Hitbox { shape: walker_shape() },
+            Solid,
+        ));
+        let wall = world.spawn((Transform::new(wall_pos), Hitbox { shape: wall_shape() }, Solid));
+        world.insert_one(wall, Anchored).unwrap();
+
+        let mut state =
+            NetClientState::new(None, "127.0.0.1:9".parse().unwrap(), "unit-test".into(), [0u8; 32], true, Duration::ZERO);
+        state.own_id = Some(1);
+        state.entities.insert(1, entity);
+        state.pending = (1..=30u32).map(|seq| intent(seq, Vec2::X)).collect();
+        resources.insert(state);
+
+        let before = world.get::<&Transform>(entity).unwrap().position;
+        reconcile_own(&mut world, &mut resources, entity, server_pos, 0);
+        let after = world.get::<&Transform>(entity).unwrap().position;
+
+        assert!(
+            (after - before).length() < TRUST_DISTANCE,
+            "replay against a wall must stay in the Trust band, moved {:.2} units",
+            (after - before).length()
         );
     }
 

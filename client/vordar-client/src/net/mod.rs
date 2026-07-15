@@ -22,7 +22,7 @@ use engine_app::app::App;
 use engine_app::events::EventBus;
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, System, SystemOrder};
-use engine_core::components::{Health, Transform};
+use engine_core::components::{Anchored, CollisionShape, Health, Hitbox, Solid, Transform};
 use engine_core::prefab::spawn_prefab;
 use engine_core::traits::{DespawnQueue, Resources, SpawnContext};
 use engine_core::World;
@@ -38,7 +38,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_game::events::MoveIntent;
-use vordar_game::motion::{step, MovementSystem, PlayRadius};
+use vordar_game::motion::{predict_step, MovementSystem, PlayRadius};
 use vordar_game::player::{movement_velocity, PlayerMovementSystem};
 use vordar_game::Player;
 use vordar_protocol::{

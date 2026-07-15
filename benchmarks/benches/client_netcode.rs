@@ -9,7 +9,7 @@
 // weakest hardware in the system, so these are foundation numbers.
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use engine_core::components::Transform;
+use engine_core::components::{Anchored, CollisionShape, Hitbox, Solid, Transform};
 use engine_core::prefab::{register_core_components, ComponentRegistry, PrefabLibrary};
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
@@ -124,28 +124,47 @@ fn bench_apply_enters(c: &mut Criterion) {
 
 /// Reconciliation replay: rebase onto the server position and re-apply
 /// pending intents. 60 ≈ one second of unacked intents; 240 is the cap
-/// (server stopped acking — the worst case).
+/// (server stopped acking — the worst case). The `_statics32` variant adds
+/// ~32 anchored hitboxes to the world, scattered away from the walker so
+/// none actually overlaps — it measures the per-call static-set collection
+/// (`reconcile_own`'s world query), not a push resolution.
 fn bench_reconcile(c: &mut Criterion) {
     let mut group = c.benchmark_group("client/reconcile");
-    for n in [60usize, 240] {
-        let mut world = World::new();
-        let mut resources = Resources::new();
-        let pos = Vec3::new(3.0, 0.0, 3.0);
-        let entity = world.spawn((Transform::new(pos), Player { speed: 6.0 }));
-        let mut state = seam::state_for_bench(Some(1), true);
-        seam::map_entity(&mut state, 1, entity);
-        for seq in 1..=n as u32 {
-            seam::push_pending(&mut state, seq, Vec2::X, DT);
-        }
-        resources.insert(state);
-        // server_pos puts the replayed position exactly on the current one:
-        // zero error → Trust → nothing moves, iterations stay stationary
-        // (seq 0 acks nothing, so the pending queue never shrinks either).
-        let server_pos = pos - movement_velocity(Vec2::X, 6.0) * (DT * n as f32);
+    for statics in [0usize, 32] {
+        for n in [60usize, 240] {
+            let mut world = World::new();
+            let mut resources = Resources::new();
+            let pos = Vec3::new(3.0, 0.0, 3.0);
+            let entity = world.spawn((
+                Transform::new(pos),
+                Player { speed: 6.0 },
+                Hitbox { shape: CollisionShape::Aabb { half_extents: Vec3::splat(0.5) } },
+                Solid,
+            ));
+            for i in 0..statics {
+                let wall = world.spawn((
+                    Transform::new(Vec3::new(50.0 + i as f32, 0.0, 0.0)),
+                    Hitbox { shape: CollisionShape::Aabb { half_extents: Vec3::new(1.6, 0.9, 1.3) } },
+                    Solid,
+                ));
+                world.insert_one(wall, Anchored).unwrap();
+            }
+            let mut state = seam::state_for_bench(Some(1), true);
+            seam::map_entity(&mut state, 1, entity);
+            for seq in 1..=n as u32 {
+                seam::push_pending(&mut state, seq, Vec2::X, DT);
+            }
+            resources.insert(state);
+            // server_pos puts the replayed position exactly on the current one:
+            // zero error → Trust → nothing moves, iterations stay stationary
+            // (seq 0 acks nothing, so the pending queue never shrinks either).
+            let server_pos = pos - movement_velocity(Vec2::X, 6.0) * (DT * n as f32);
 
-        group.bench_function(format!("pending{n}"), |b| {
-            b.iter(|| seam::reconcile_own(&mut world, &mut resources, entity, server_pos, 0));
-        });
+            let label = if statics == 0 { format!("pending{n}") } else { format!("pending{n}_statics{statics}") };
+            group.bench_function(label, |b| {
+                b.iter(|| seam::reconcile_own(&mut world, &mut resources, entity, server_pos, 0));
+            });
+        }
     }
     group.finish();
 }
