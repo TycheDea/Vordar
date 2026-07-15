@@ -35,6 +35,6 @@ sha2            = { workspace = true }
 [dev-dependencies]
 # e2e asserts persisted state by reading the test database directly.
 rusqlite        = { workspace = true }
-# Shared headless-client test harness (hygiene rework 4, finding 1) — the
-# dev-cycle back to this crate is intentional (Cargo permits it).
+# Shared headless-client test harness — the dev-cycle back to this crate
+# is intentional (Cargo permits it).
 test-support    = { path = "../../testing/test-support" }

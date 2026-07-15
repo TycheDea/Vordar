@@ -41,10 +41,10 @@ getrandom       = { workspace = true }
 # Offscreen render tests (tests/ground_render.rs) pass wgpu types to the
 # engine's headless harness.
 wgpu = "29"
-# engine-renderer's offscreen module is feature-gated (hygiene finding 16) —
-# enable it here so this test build sees it without shipping it in vordar.
+# engine-renderer's offscreen module is feature-gated — enable it here so
+# this test build sees it without shipping it in vordar.
 engine-renderer = { path = "../../smirk/engine-renderer", features = ["offscreen"] }
-# net.rs's reconnect test (networking audit 2026-07-11, finding 7) drives a
-# real headless server the same way vordar-server's own e2e suite does.
+# Headless integration tests drive a real server the same way vordar-server's
+# own e2e suite does.
 vordar-server = { path = "../../server/vordar-server" }
 test-support  = { path = "../../testing/test-support" }

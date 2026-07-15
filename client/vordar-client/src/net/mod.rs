@@ -49,8 +49,8 @@ use vordar_protocol::{
 
 pub struct NetClientPlugin {
     pub server_addr: SocketAddr,
-    /// Predict own movement locally; off reproduces the Phase 1 server-driven
-    /// feel (one round-trip of input latency) for comparison.
+    /// Predict own movement locally; off reproduces the server-driven feel
+    /// (one round-trip of input latency) for comparison.
     pub predict: bool,
     /// Artificial round-trip latency added by engine-net (testing knob).
     pub simulated_rtt: Duration,

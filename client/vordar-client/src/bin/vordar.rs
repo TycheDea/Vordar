@@ -1,6 +1,6 @@
 // Vordar — networked client. The server is authoritative: this process runs
 // only rendering, input→intent sending, snapshot replication, and prediction
-// of its own player via the shared movement systems (Phase 2).
+// of its own player via the shared movement systems.
 //
 //   cargo run -p vordar-client --bin vordar [server_addr]   (default 127.0.0.1:5151)
 //

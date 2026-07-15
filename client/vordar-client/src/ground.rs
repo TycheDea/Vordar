@@ -1,8 +1,7 @@
-// Zone ground mesh (Phase 6): a heightmap-displaced grid with a tiling PBR
-// texture set, replacing the SDF slab. Gameplay stays on the flat y = 0
-// plane (hitbox bottoms at GROUND_TOP_Y), so the surface is pinned flat
-// inside the play radius and only rolls into gentle hills toward the
-// horizon — scenery never clips feet.
+// Zone ground mesh: a heightmap-displaced grid with a tiling PBR texture set.
+// Gameplay stays on the flat y = 0 plane (hitbox bottoms at GROUND_TOP_Y), so
+// the surface is pinned flat inside the play radius and only rolls into gentle
+// hills toward the horizon — scenery never clips feet.
 //
 // Pure mesh math — unit-tested without a GPU.
 

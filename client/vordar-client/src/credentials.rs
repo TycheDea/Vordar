@@ -1,8 +1,8 @@
-// Local account-credential storage (networking rework 1, finding 3): the
-// real client mints a random 32-byte token once per character name and
-// persists it in a small RON file (`name → hex token`) so every subsequent
-// `Login` for that name presents the same credential — trust-on-first-use,
-// the same shape a real password/registration flow lands on later.
+// Local account-credential storage: the real client mints a random 32-byte
+// token once per character name and persists it in a small RON file
+// (`name → hex token`) so every subsequent `Login` for that name presents the
+// same credential — trust-on-first-use, the same shape a real
+// password/registration flow lands on later.
 //
 // Deliberately a flat name → hex-string map, not a binary blob: it needs to
 // be human-inspectable (a dev debugging "why was I denied?") and RON is

@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-# Headless offscreen render harness (hygiene finding 16) — used by this
-# crate's own tests/offscreen.rs and vordar-client's tests/ground_render.rs.
+# Headless offscreen render harness — used by this crate's own
+# tests/offscreen.rs and vordar-client's tests/ground_render.rs.
 # Never enabled by normal builds.
 offscreen = []
 

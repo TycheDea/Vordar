@@ -26,8 +26,7 @@ fn shutdown_flag_saves_all_players_and_returns_from_run_headless() {
         let mut app = vordar_server::build_server_app(addr, &server_db);
         app.insert_resource(ShutdownFlag(server_flag));
         // No tick budget — only the shutdown flag (via AppExit) can end this
-        // loop. Before the fix, nothing ever sets it and the thread never
-        // returns.
+        // loop.
         app.run_headless(60.0, None);
     });
     std::thread::sleep(Duration::from_millis(300));
@@ -51,8 +50,8 @@ fn shutdown_flag_saves_all_players_and_returns_from_run_headless() {
     // connected player and request AppExit.
     flag.store(true, Ordering::Relaxed);
 
-    // Join with a deadline: before the fix, run_headless(_, None) never
-    // returns and this would hang forever.
+    // Join with a deadline to ensure run_headless(_, None) returns after the
+    // shutdown flag is set.
     join_with_deadline(server_thread, Duration::from_secs(10), "server thread");
 
     // The client must observe the connection close (NetServer's Drop fires

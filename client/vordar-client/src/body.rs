@@ -1,11 +1,11 @@
 // Body composition — turns (RaceId, ClassId) into the entity's visual. Two
 // outputs, chosen by whether the race defines a skinned model:
 //   • mesh race  → RenderMesh (glTF) + LocomotionClips + AnimController; the
-//     Phase-B runtime animates it. Class shows through the mesh tint. No
+//     skinned-mesh runtime animates it. Class shows through the mesh tint. No
 //     ShapeGroup/PoseRig — the skinned pipeline draws it.
 //   • SDF race   → ShapeGroup (race base body + class outfit) + a PoseRig from
-//     the class's pose params (the pre-Phase-C path, unchanged). Enemies/NPCs
-//     never reach here (they author ShapeGroup directly and carry no Race).
+//     the class's pose params (the SDF path). Enemies/NPCs never reach here
+//     (they author ShapeGroup directly and carry no Race).
 // Client-only: the server parses the ids but never composes. Composed once per
 // entity (BodyComposed marker); prefabs author no visual of their own.
 

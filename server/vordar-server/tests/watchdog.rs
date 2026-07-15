@@ -83,9 +83,9 @@ fn a_panicked_zone_restarts_on_the_same_address_and_a_fresh_connection_succeeds(
     victim.wait_for("disconnected", Duration::from_secs(5), |b| b.disconnected);
 
     // Poll the SAME address until the watchdog's rebuild accepts connections
-    // again — before the fix there is no supervisor, the zone thread stays
-    // dead, and every retry times out. Pump east throughout: its zone must
-    // stay completely unaffected by start's panic and restart.
+    // again — without a supervisor, the zone thread stays dead and every
+    // retry times out. Pump east throughout: its zone must stay completely
+    // unaffected by start's panic and restart.
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut fresh = loop {
         easterner.pump();
