@@ -4,8 +4,9 @@
 // EnemyAISystem; WHAT an engaged enemy does is a behavior looked up by prefab
 // name in the BehaviorRegistry. The default interprets the data-driven
 // `Enemy.attack` profile from the prefab RON; an archetype that outgrows data
-// registers its own EnemyBehavior (see chapter-01's enemies/ modules) without
-// touching anything shared.
+// gets a chapter crate registering its own `EnemyBehavior` impl into
+// `BehaviorRegistry` (no chapter currently does) without touching anything
+// shared.
 //
 // Determinism contract (DESIGN.md §6): a behavior is a pure function of its
 // ctx — dt-accumulated state lives on the Enemy component; no clocks, no RNG.

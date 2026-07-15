@@ -331,7 +331,7 @@ impl System for MenuSystem {
                 (MenuScreen::Main, 0) => { menu.open = false; }                                // Resume
                 (MenuScreen::Main, 1) => {
                     // Refresh draft from current config before entering settings
-                    // (handled in apply_pending_menu_actions for OpenSettings action)
+                    // (handled in apply_menu_actions for OpenSettings action)
                     menu.screen   = MenuScreen::Settings;
                     menu.selected = 0;
                 }

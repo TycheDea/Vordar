@@ -1,12 +1,12 @@
-/// Connection lifecycle: reconnect backoff, event dispatch, world teardown.
-///
-/// A connection is driven on the Input tick: maybe_reconnect polls the backoff
-/// timer and dials if due, then NetReceiveSystem drains events and dispatches
-/// them (snapshot updates, redirects, disconnects). Unexpected disconnect or
-/// a zone Redirect trigger teardown_replicated_world to reset the AOI and
-/// prediction state, then reschedule a redial on a backoff-doubled cadence.
-/// LoginDenied stops the redial entirely: retrying with the same bad credential
-/// would only be denied again.
+// Connection lifecycle: reconnect backoff, event dispatch, world teardown.
+//
+// A connection is driven on the Input tick: maybe_reconnect polls the backoff
+// timer and dials if due, then NetReceiveSystem drains events and dispatches
+// them (snapshot updates, redirects, disconnects). Unexpected disconnect or
+// a zone Redirect trigger teardown_replicated_world to reset the AOI and
+// prediction state, then reschedule a redial on a backoff-doubled cadence.
+// LoginDenied stops the redial entirely: retrying with the same bad credential
+// would only be denied again.
 
 use super::apply;
 use super::NetClientState;

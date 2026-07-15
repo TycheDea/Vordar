@@ -1,8 +1,7 @@
-// CollisionResolveSystem — reads CollisionStarted events each frame.
-//
-// This is a stub: the actual damage/pushback logic lives in the game crate,
-// which subscribes to CollisionStarted/CollisionEnded via EventBus.
-// The engine registers this system to hold the Phase::CollisionResolve slot.
+// CollisionResolveSystem — a stub that does nothing itself. The actual
+// damage/pushback logic lives in the game crate, which subscribes to
+// CollisionStarted/CollisionEnded via EventBus; the engine registers this
+// system only to hold the Phase::CollisionResolve slot.
 
 use engine_app::scheduler::System;
 use engine_core::traits::Resources;

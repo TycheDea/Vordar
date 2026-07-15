@@ -3,7 +3,7 @@
 // state machine (each transition crossfaded by the engine's AnimationPlayer),
 // an attack/death one-shot layer, and eased turning toward the movement
 // heading. All cosmetic and client-owned — the sim never reads Transform.rotation
-// (see net.rs), so facing here changes nothing about gameplay.
+// (see the net/ module family), so facing here changes nothing about gameplay.
 //
 // A character opts in by carrying `LocomotionClips` (which clip is which, +
 // speed thresholds) and `AnimController` (runtime latch). The engine attaches

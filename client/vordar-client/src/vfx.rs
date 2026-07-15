@@ -25,7 +25,7 @@ use vordar_game::vfx::{BurstDef, ParticleBlend, VfxLibrary, VfxTrail};
 pub const CAST_COUNT: usize = 14;
 pub const CAST_SPEED: f32 = 4.0;
 pub const CAST_SIZE: f32 = 0.12;
-/// Impact burst per point of damage (clamped) — see react.rs.
+/// Impact burst per point of damage (clamped) — see hit_react.rs.
 pub const IMPACT_SIZE: f32 = 0.10;
 pub const IMPACT_SPEED: f32 = 3.2;
 /// Death burst.

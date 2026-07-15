@@ -1,5 +1,6 @@
-//! Keeps the SDF InstancePool in sync with the world — fixed-step position
-//! snapshot, dirty-slot writes, slot attach/free.
+//! Snapshots each entity's previous Transform for render-frame interpolation,
+//! and keeps the SDF InstancePool in sync with the world — dirty-slot writes,
+//! slot attach/free.
 
 use engine_core::traits::Resources;
 use engine_core::World;
@@ -90,8 +91,8 @@ impl System for RenderSyncSystem {
     }
 }
 
-/// Frees render slots for entities queued for despawn — must run before DespawnFlushSystem.
-/// Registered by RenderPlugin in Phase::DespawnFlush, First — must run before
+/// Frees render slots for entities queued for despawn. Registered by
+/// RenderPlugin in Phase::DespawnFlush, First — must run before
 /// DespawnFlushSystem.
 pub(crate) struct RenderSlotDespawnSystem;
 

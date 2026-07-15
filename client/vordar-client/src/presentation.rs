@@ -1,6 +1,8 @@
-// Client-only world dressing + HUD (Phase 7.5): the readable ground plane,
-// portal monuments, and the minimap data feed. Nothing here is replicated or
-// simulated — pure presentation, shared by the sandbox and the networked bin.
+// Client-only world dressing (Phase 7.5): the readable ground plane and
+// portal monuments, plus the HudHidden marker that excludes ground/dressing
+// entities from the minimap (whose feed lives in ui/minimap.rs). Nothing here
+// is replicated or simulated — pure presentation, shared by the sandbox and
+// the networked bin.
 
 use engine_app::scheduler::System;
 use engine_core::components::{RenderMesh, RenderShape, RenderShapeType, Transform};

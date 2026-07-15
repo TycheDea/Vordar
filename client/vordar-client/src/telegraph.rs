@@ -1,8 +1,8 @@
-/// Telegraph visuals: scheduled-ability indicators that count down to the
-/// mechanic's resolve time. Purely client-local — never in the replication map;
-/// despawns at T. Fill is a pure function of synced server time vs resolve_at
-/// (DESIGN.md §3) — zero per-frame network updates, and the visual completes
-/// exactly at T (the hit-test moment) on every client.
+// Telegraph visuals: scheduled-ability indicators that count down to the
+// mechanic's resolve time. Purely client-local — never in the replication map;
+// despawns at T. Fill is a pure function of synced server time vs resolve_at
+// (DESIGN.md §3) — zero per-frame network updates, and the visual completes
+// exactly at T (the hit-test moment) on every client.
 
 use engine_app::scheduler::System;
 use engine_core::components::{RenderShape, Transform};
@@ -14,8 +14,7 @@ use hecs::Entity;
 
 use crate::net::NetClientState;
 
-/// A telegraph visual: counts down to the mechanic's resolve time. Purely
-/// client-local — never in the replication map; despawns itself at T.
+/// A telegraph visual: counts down to the mechanic's resolve time.
 pub(crate) struct TelegraphVisual {
     pub(crate) resolve_at_micros: u64,
     pub(crate) duration_micros: u64,
@@ -46,10 +45,7 @@ pub(crate) fn spawn_telegraph(
     }
 }
 
-/// Animates telegraph fill as a PURE FUNCTION of synced server time vs
-/// resolve_at (DESIGN.md §3) — zero per-frame network updates, and the visual
-/// completes exactly at T (the hit-test moment) on every client. Runs once
-/// per display frame so the fill is smooth at any refresh rate.
+/// Runs once per display frame so the fill is smooth at any refresh rate.
 pub struct TelegraphFillSystem;
 
 impl System for TelegraphFillSystem {
