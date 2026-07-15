@@ -43,7 +43,8 @@ mod impair;
 mod metrics;
 mod server;
 
-pub use client::{ClientEvent, Impairment, NetClient};
+pub use client::{ClientEvent, NetClient};
+pub use impair::Impairment;
 pub use server::{ConnId, NetLimits, NetServer, ServerEvent};
 pub use common::{MAX_FRAME_IN, MAX_FRAME_OUT};
 pub use metrics::NetMetrics;
