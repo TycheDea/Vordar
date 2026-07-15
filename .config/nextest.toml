@@ -13,6 +13,13 @@
 # not stop unrelated tests from loading the CPU next to them —
 # rend_kills_camped_enemy has flaked exactly that way twice).
 # Renaming one of these tests MUST update this filter list.
+#
+# MEASURED COST (2026-07-15): exclusive-test isolation costs 6.45s per full
+# run (3.37s + 2.06s + 1.02s with all cores idle). Despite it,
+# rend_kills_camped_enemy flaked ~2.5% of full runs under load; isolation is
+# retained (rerun cost 40s + attribution confusion outweighs the 6.45s fixed
+# cost), and future flakes get fixed via test-internal budget tuning, not
+# scheduling.
 
 [test-groups]
 realtime = { max-threads = 4 }

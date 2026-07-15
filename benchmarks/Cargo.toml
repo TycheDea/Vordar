@@ -8,6 +8,9 @@ publish = false
 # Criterion flags (--quick, --save-baseline) go to every bench target; the
 # default libtest harness on the lib would choke on them.
 bench = false
+# No unit tests or doctests ship here; skip building the empty test binaries.
+test    = false
+doctest = false
 
 [dependencies]
 engine-core     = { path = "../smirk/engine-core" }

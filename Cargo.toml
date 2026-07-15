@@ -58,6 +58,13 @@ ctrlc = { version = "3", features = ["termination"] }
 # Benchmarks only (vordar-benches). No plotters/HTML — headless, faster builds.
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 
+# Line tables only (debug=1): panics and backtraces stay symbolicated, but the
+# full DWARF/PDB that debug=2 emits — 13.8 GiB across the test binaries, most of
+# it never opened in a debugger — is dropped. Test binaries inherit this via the
+# test profile.
+[profile.dev]
+debug = 1
+
 # Keep symbols in bench builds for future flamegraph work — no runtime cost.
 [profile.bench]
 debug = true

@@ -5,6 +5,9 @@ edition = "2021"
 
 [lib]
 name = "chapter_02"
+# No unit tests or doctests ship here; skip building the empty test binaries.
+test    = false
+doctest = false
 
 [dependencies]
 engine-core = { path = "../../smirk/engine-core" }
