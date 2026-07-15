@@ -1,9 +1,4 @@
 // Chapter-driven spawning.
-//
-// Spawn requests go directly through SpawnQueue (via queue_prefab_spawn), NOT
-// an EventBus hop: events are cleared only in Phase::Input, so a same-phase
-// event reader would re-read step-1 events during fixed-rate catch-up steps
-// and double-spawn.
 
 use super::chapter::ActiveChapter;
 use crate::enemies::Enemy;

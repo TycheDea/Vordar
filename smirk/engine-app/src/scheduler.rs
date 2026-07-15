@@ -2,13 +2,15 @@
 //
 // Systems are registered with a Phase and a SystemOrder.
 // At startup, systems within each phase are topologically sorted (once).
-// At runtime, each phase runs at its configured TickRate:
-//   Fixed(hz) — accumulates wall-clock time; fires N times per frame at a constant delta
-//   Render    — fires exactly once per frame; receives the actual frame delta
+// At runtime the frame runs off one app-wide fixed clock:
+//   Fixed  — all Fixed phases run once per fixed step, in declaration order,
+//            and the whole set repeats N times per frame at a constant delta
+//   Render — fires exactly once per frame; receives the actual frame delta
 //
-// Phases always execute in Phase declaration order.
-// A Fixed phase fires all pending steps before the next phase executes.
-// If a cycle is detected during startup sort, the app panics with a clear message.
+// Fixed phases interleave per step (step 0: every fixed phase, then step 1: …),
+// so a same-step spawn is visible to that step's later phases. Render phases
+// run after all steps. If a cycle is detected during startup sort, the app
+// panics with a clear message.
 
 use crate::tick_rate::TickRate;
 use engine_core::traits::Resources;
@@ -88,10 +90,8 @@ pub trait System: 'static {
 // ── PhaseEntry ────────────────────────────────────────────────────────────────
 
 struct PhaseEntry {
-    systems:     Vec<Box<dyn System>>,
-    fixed_dt:    f32,   // 0.0 when is_render
-    accumulator: f32,
-    is_render:   bool,
+    systems:   Vec<Box<dyn System>>,
+    is_render: bool,
 }
 
 // ── Scheduler ────────────────────────────────────────────────────────────────
@@ -100,6 +100,10 @@ pub struct Scheduler {
     pending:        BTreeMap<Phase, Vec<(Box<dyn System>, TypeId, SystemOrder)>>,
     rate_overrides: BTreeMap<Phase, TickRate>,
     phases:         BTreeMap<Phase, PhaseEntry>,
+    // One fixed clock for the whole app: every Fixed phase steps off this
+    // accumulator so all fixed phases interleave per step on a multi-step frame.
+    fixed_dt:       f32,
+    accumulator:    f32,
 }
 
 impl Scheduler {
@@ -108,6 +112,8 @@ impl Scheduler {
             pending:        BTreeMap::new(),
             rate_overrides: BTreeMap::new(),
             phases:         BTreeMap::new(),
+            fixed_dt:       1.0 / 60.0,
+            accumulator:    0.0,
         }
     }
 
@@ -202,55 +208,46 @@ impl Scheduler {
                 .copied()
                 .unwrap_or_else(|| phase.default_tick_rate());
 
-            let entry = match rate {
-                TickRate::Render => PhaseEntry {
-                    systems,
-                    fixed_dt:    0.0,
-                    accumulator: 0.0,
-                    is_render:   true,
-                },
-                TickRate::Fixed(hz) => PhaseEntry {
-                    systems,
-                    fixed_dt:    1.0 / hz,
-                    accumulator: 0.0,
-                    is_render:   false,
-                },
+            let is_render = match rate {
+                TickRate::Render    => true,
+                // Fixed cadence is app-wide; every fixed phase steps at this rate.
+                TickRate::Fixed(hz) => { self.fixed_dt = 1.0 / hz; false }
             };
 
-            self.phases.insert(phase, entry);
+            self.phases.insert(phase, PhaseEntry { systems, is_render });
         }
     }
 
-    /// Advance all phases by one display frame.
+    /// Advance the sim by one display frame.
     ///
-    /// Fixed phases accumulate `frame_delta` and fire however many steps their
-    /// budget allows (capped at 8 to prevent spiral-of-death on lag spikes).
-    /// Render phases fire exactly once, receiving `frame_delta` directly.
-    ///
-    /// Phases always execute in Phase declaration order.
+    /// The whole frame runs off one fixed clock: `frame_delta` is accumulated
+    /// once (capped at 8 steps to prevent spiral-of-death on lag spikes), then
+    /// for each step every Fixed phase runs in declaration order before the
+    /// next step — so cross-phase invariants (events live one tick, spawns
+    /// visible to the same step's collision, one integration per collision
+    /// pass) hold on every frame shape. Render phases fire once afterward,
+    /// receiving `frame_delta`, with alpha from the single accumulator.
     pub fn run_tick(&mut self, world: &mut World, resources: &mut Resources, frame_delta: f32) {
-        let mut last_alpha = 0.0f32;
-
-        for (_phase, entry) in &mut self.phases {
-            if entry.is_render {
-                // Expose the sub-step fraction to render systems before they run.
-                if let Some(alpha) = resources.get_mut::<InterpolationAlpha>() {
-                    alpha.0 = last_alpha;
-                }
+        let fixed_dt = self.fixed_dt;
+        self.accumulator = (self.accumulator + frame_delta).min(fixed_dt * 8.0);
+        while self.accumulator >= fixed_dt {
+            for entry in self.phases.values_mut() {
+                if entry.is_render { continue; }
                 for system in &mut entry.systems {
-                    system.run(world, resources, frame_delta);
+                    system.run(world, resources, fixed_dt);
                 }
-            } else {
-                // Cap accumulator to 8 steps to avoid runaway catch-up after long pauses.
-                entry.accumulator =
-                    (entry.accumulator + frame_delta).min(entry.fixed_dt * 8.0);
-                while entry.accumulator >= entry.fixed_dt {
-                    for system in &mut entry.systems {
-                        system.run(world, resources, entry.fixed_dt);
-                    }
-                    entry.accumulator -= entry.fixed_dt;
-                }
-                last_alpha = entry.accumulator / entry.fixed_dt;
+            }
+            self.accumulator -= fixed_dt;
+        }
+
+        // Expose the sub-step fraction to render systems before they run.
+        if let Some(alpha) = resources.get_mut::<InterpolationAlpha>() {
+            alpha.0 = self.accumulator / fixed_dt;
+        }
+        for entry in self.phases.values_mut() {
+            if !entry.is_render { continue; }
+            for system in &mut entry.systems {
+                system.run(world, resources, frame_delta);
             }
         }
     }
@@ -405,6 +402,32 @@ mod tests {
 
         assert_eq!(log.lock().unwrap().len(), 1);
         assert!((delta.lock().unwrap()[0] - 0.050).abs() < 1e-6);
+    }
+
+    #[test]
+    fn multi_step_frame_interleaves_phases() {
+        // Two fixed phases, one system each. A 3-step frame must run them
+        // (Update -> Collision) three times interleaved, NOT drain Update
+        // three times and then Collision three times.
+        let log   = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
+
+        let mut sched = Scheduler::new();
+        sched.add(make_system("update",    log.clone(), delta.clone()),
+                  Phase::Update,    SystemOrder::Default);
+        sched.add(make_system("collision", log.clone(), delta.clone()),
+                  Phase::Collision, SystemOrder::Default);
+        sched.build();
+
+        let mut world     = World::new();
+        let mut resources = Resources::new();
+        // 3.5 steps worth of time -> exactly 3 steps (avoids fp boundary).
+        sched.run_tick(&mut world, &mut resources, 3.5 / 60.0);
+
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["update", "collision", "update", "collision", "update", "collision"],
+        );
     }
 
     #[test]

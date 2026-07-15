@@ -7,7 +7,6 @@ use crate::db::{CharacterRecord, DbHandle, DbWorker};
 use engine_app::app::App;
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, SystemOrder};
-use engine_app::tick_rate::TickRate;
 use engine_core::components::{Health, Transform};
 use engine_core::World;
 use engine_net::{ConnId, NetLimits, NetMetrics, NetServer};
@@ -106,7 +105,6 @@ pub fn install(
     app.insert_resource(NetServerState::new(server, db, db_owner, zone, directory, world_origin))
         // World time published every tick for world systems (events, day/night).
         .insert_resource(WorldTime(0))
-        .set_phase_rate(Phase::PostUpdate, TickRate::Fixed(POST_HZ))
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         // Unconditional: no-ops wherever `ShutdownFlag` is absent (every
         // existing test/bench) or the flag hasn't been flipped.

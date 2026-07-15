@@ -73,9 +73,6 @@ impl System for ProjectileTtlSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
         let mut expired: Vec<Entity> = Vec::new();
         for (entity, projectile) in world.query::<(Entity, &mut Projectile)>().iter() {
-            if projectile.ttl <= 0.0 {
-                continue; // already queued; fixed phases can step twice before a flush
-            }
             projectile.ttl -= delta;
             if projectile.ttl <= 0.0 {
                 expired.push(entity);
@@ -201,8 +198,7 @@ mod tests {
         }
         assert_eq!(despawn_count(&resources), 0, "still flying");
         ProjectileTtlSystem.run(&mut world, &mut resources, DT);
-        ProjectileTtlSystem.run(&mut world, &mut resources, DT);
-        assert_eq!(despawn_count(&resources), 1, "expired exactly once");
+        assert_eq!(despawn_count(&resources), 1, "expired -> queued for despawn");
     }
 
     #[test]
