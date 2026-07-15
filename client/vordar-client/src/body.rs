@@ -63,9 +63,6 @@ impl System for BodyComposeSystem {
                     attack_secs: MESH_ATTACK_SECS,
                     forward_offset: model.forward_offset,
                 };
-                // TEMP (anim feel-check): confirm the live player takes the mesh
-                // branch. Remove with the MeshRenderSyncSystem pose log.
-                log::info!("body compose: race '{race_id}' -> skinned mesh {}", model.asset);
                 let _ = world.insert(entity, (
                     RenderMesh { asset: model.asset.clone(), tint },
                     clips,

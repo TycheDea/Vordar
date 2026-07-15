@@ -106,15 +106,13 @@ pub struct MeshRenderSyncSystem {
     // Scratch, reused across frames.
     items:         Vec<(usize, MeshInstance)>,
     skinned_items: Vec<(usize, SkinnedMeshInstance)>,
-    // TEMP (anim feel-check): throttles a ~1 Hz log of each skinned player's clip.
-    log_accum: f32,
     /// Throttles the 80%-of-cap warning to ~once per 5 s.
     warn_accum: f32,
 }
 
 impl MeshRenderSyncSystem {
     pub fn new() -> Self {
-        Self { items: Vec::new(), skinned_items: Vec::new(), log_accum: 0.0, warn_accum: 0.0 }
+        Self { items: Vec::new(), skinned_items: Vec::new(), warn_accum: 0.0 }
     }
 }
 
@@ -125,15 +123,6 @@ impl System for MeshRenderSyncSystem {
             return;
         }
         let alpha = resources.get::<InterpolationAlpha>().map(|a| a.0).unwrap_or(1.0);
-
-        // TEMP (anim feel-check): once ~a second, log each skinned player's clip
-        // so a headless dev can confirm the live pose is advancing. Remove once
-        // the character animates on screen.
-        self.log_accum += delta;
-        let should_log = self.log_accum >= 1.0;
-        if should_log {
-            self.log_accum = 0.0;
-        }
 
         // Take the stores out so they can borrow device/queue from RendererState
         // (Resources allows one borrow at a time; owned meanwhile).
@@ -199,12 +188,6 @@ impl System for MeshRenderSyncSystem {
                         }
                         let joint_base = skinned.joints.len() as u32;
                         let (mats, globals) = pose_player(player, cpu_skin, delta);
-                        if should_log {
-                            log::info!(
-                                "skinned anim: clip={:?} time={:.2} blend={:.2} joints={}",
-                                player.clip, player.time, player.blend_t, mats.len()
-                            );
-                        }
                         skinned.joints.extend(mats.iter().map(|m| m.to_cols_array_2d()));
                         // Publish the configured attachment sockets for this entity.
                         if !socket_bones.is_empty() {
