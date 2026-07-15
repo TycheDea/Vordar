@@ -65,9 +65,7 @@ impl System for NetReceiveSystem {
 
         let events = resources.get_mut::<NetServerState>().unwrap().server.poll();
 
-        // Projectile casts accepted this tick — spawned after the event loop
-        // releases the NetServerState borrow (spawn_projectile needs resources).
-        let mut pending_bolts: Vec<(String, Vec3, Vec3, f32, i32, DamageType, f32, Entity)> = Vec::new();
+        let mut pending_bolts: Vec<PendingBolt> = Vec::new();
 
         for event in events {
             match event {
@@ -93,143 +91,9 @@ impl System for NetReceiveSystem {
                             let Some(pc) = state.conns.get_mut(&conn) else { continue };
                             queue_move_intents(pc, &intents, recv_micros, rtt, &state.server.metrics());
                         }
-                        ClientMsg::CastIntent { seq, t_server_micros: t, skill: skill_id, target } => {
+                        ClientMsg::CastIntent { seq, t_server_micros, skill, target } => {
                             let state = resources.get_mut::<NetServerState>().unwrap();
-                            let rtt = state.server.rtt_micros(conn).unwrap_or(0);
-                            let Some(pc) = state.conns.get_mut(&conn) else { continue };
-                            if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
-                                log::warn!("conn {conn}: cast rejected ({reason})");
-                                state.server.metrics().record_reject();
-                                continue;
-                            }
-                            pc.last_seq = seq;
-                            pc.last_t = t;
-                            let caster = pc.entity;
-                            let class_id = world.get::<&ClassId>(caster)
-                                .map(|c| c.id.clone())
-                                .unwrap_or_else(|_| DEFAULT_CLASS.to_owned());
-                            let Some(def) = class_library.get(&class_id, &skill_id) else {
-                                log::warn!("conn {conn}: unknown ability '{skill_id}' for class '{class_id}'");
-                                continue;
-                            };
-                            let now = state.server.now_micros();
-                            let on_cooldown = pc.cooldown_ready.get(&skill_id)
-                                .is_some_and(|&ready_at| now < ready_at);
-                            if on_cooldown {
-                                log::debug!("conn {conn}: '{skill_id}' on cooldown");
-                                continue;
-                            }
-                            let Ok(caster_pos) = world.get::<&Transform>(caster).map(|tr| tr.position) else {
-                                continue;
-                            };
-                            let target = Vec3::new(target.x, 0.0, target.y);
-                            if !target.is_finite() { continue; }
-                            match &def.effect {
-                                AbilityEffect::Scheduled { telegraph_prefab, radius, damage, damage_type, cast_micros, max_range } => {
-                                    let (telegraph_prefab, radius, damage, damage_type, cast_micros, max_range) =
-                                        (telegraph_prefab.clone(), *radius, *damage, *damage_type, *cast_micros, *max_range);
-                                    if caster_pos.distance_squared(target) > max_range * max_range {
-                                        log::debug!("conn {conn}: cast out of range");
-                                        continue;
-                                    }
-                                    pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
-                                    state.next_mechanic_id += 1;
-                                    let id = state.next_mechanic_id;
-                                    // Schedule in ABSOLUTE server time and tell everyone the
-                                    // same thing (DESIGN.md §3) — T = telegraph completion.
-                                    let resolve_at_micros = now + cast_micros;
-                                    world.spawn((
-                                        Transform::new(target),
-                                        Mechanic {
-                                            id,
-                                            radius,
-                                            damage,
-                                            damage_type,
-                                            resolve_at_micros,
-                                            caster,
-                                        },
-                                    ));
-                                    let frame = encode(&ServerMsg::MechanicScheduled {
-                                        id,
-                                        telegraph_prefab,
-                                        pos: target,
-                                        radius,
-                                        resolve_at_micros,
-                                        duration_micros: cast_micros,
-                                    });
-                                    for c in aoi_conns(&state.conns, world, target) {
-                                        state.server.send(c, frame.clone());
-                                    }
-                                    log::info!("conn {conn}: mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
-                                }
-                                AbilityEffect::Projectile { prefab, speed, damage, damage_type, ttl_secs, spawn_offset } => {
-                                    let (prefab, speed, damage, damage_type, ttl_secs, spawn_offset) =
-                                        (prefab.clone(), *speed, *damage, *damage_type, *ttl_secs, *spawn_offset);
-                                    // No range gate: the target only fixes the
-                                    // flight direction; the projectile itself
-                                    // is the range limit (speed × ttl).
-                                    let mut dir = target - caster_pos;
-                                    dir.y = 0.0;
-                                    if dir.length_squared() < 1e-6 {
-                                        continue; // degenerate aim at own feet
-                                    }
-                                    let dir = dir.normalize();
-                                    pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
-                                    pending_bolts.push((
-                                        prefab,
-                                        caster_pos + dir * spawn_offset,
-                                        dir,
-                                        speed,
-                                        damage,
-                                        damage_type,
-                                        ttl_secs,
-                                        caster,
-                                    ));
-                                }
-                                AbilityEffect::Leap { telegraph_prefab, radius, damage, damage_type, cast_micros, max_range } => {
-                                    let (telegraph_prefab, radius, damage, damage_type, cast_micros, max_range) =
-                                        (telegraph_prefab.clone(), *radius, *damage, *damage_type, *cast_micros, *max_range);
-                                    if caster_pos.distance_squared(target) > max_range * max_range {
-                                        log::debug!("conn {conn}: leap out of range");
-                                        continue;
-                                    }
-                                    pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
-                                    state.next_mechanic_id += 1;
-                                    let id = state.next_mechanic_id;
-                                    // Same scheduling as Scheduled — the arrival hit test IS a
-                                    // Mechanic — plus a dash whose countdown ends at the same
-                                    // instant (both derived from cast_micros).
-                                    let resolve_at_micros = now + cast_micros;
-                                    let cast_secs = cast_micros as f32 / 1e6;
-                                    world.spawn((
-                                        Transform::new(target),
-                                        Mechanic {
-                                            id,
-                                            radius,
-                                            damage,
-                                            damage_type,
-                                            resolve_at_micros,
-                                            caster,
-                                        },
-                                    ));
-                                    let _ = world.insert_one(caster, LeapImpulse {
-                                        velocity: leap_velocity(caster_pos, target, cast_secs),
-                                        remaining: cast_secs,
-                                    });
-                                    let frame = encode(&ServerMsg::MechanicScheduled {
-                                        id,
-                                        telegraph_prefab,
-                                        pos: target,
-                                        radius,
-                                        resolve_at_micros,
-                                        duration_micros: cast_micros,
-                                    });
-                                    for c in aoi_conns(&state.conns, world, target) {
-                                        state.server.send(c, frame.clone());
-                                    }
-                                    log::info!("conn {conn}: leap mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
-                                }
-                            }
+                            dispatch_cast(world, state, &class_library, &mut pending_bolts, conn, seq, t_server_micros, recv_micros, skill, target);
                         }
                     }
                 }
@@ -237,8 +101,8 @@ impl System for NetReceiveSystem {
         }
 
         // Spawn the projectiles accepted above (player-fired: damages enemies).
-        for (prefab, origin, dir, speed, damage, damage_type, ttl, caster) in pending_bolts {
-            spawn_projectile(world, resources, &prefab, origin, dir, speed, damage, damage_type, ttl, caster, false);
+        for b in pending_bolts {
+            spawn_projectile(world, resources, &b.prefab, b.origin, b.dir, b.speed, b.damage, b.damage_type, b.ttl_secs, b.caster, false);
         }
 
         // Finished character loads → spawn + Welcome (or a denial). The
@@ -514,6 +378,173 @@ fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name
         cooldowns: HashMap::new(),
     };
     state.db.login(conn, name, token, defaults);
+}
+
+/// Projectile casts accepted this tick — spawned after the event loop
+/// releases the NetServerState borrow (spawn_projectile needs resources).
+struct PendingBolt {
+    prefab: String,
+    origin: Vec3,
+    dir: Vec3,
+    speed: f32,
+    damage: i32,
+    damage_type: DamageType,
+    ttl_secs: f32,
+    caster: Entity,
+}
+
+/// Validates and resolves a `ClientMsg::CastIntent`: sequence/timestamp
+/// checks, class/ability lookup, cooldown gate, then one of the three
+/// `AbilityEffect` arms. Scheduled and Leap mechanics are spawned and
+/// broadcast immediately; Projectile casts are deferred onto
+/// `pending_bolts` for the caller's post-event-loop spawn pass.
+fn dispatch_cast(
+    world: &mut World,
+    state: &mut NetServerState,
+    class_library: &ClassLibrary,
+    pending_bolts: &mut Vec<PendingBolt>,
+    conn: ConnId,
+    seq: u32,
+    t: u64,
+    recv_micros: u64,
+    skill_id: String,
+    target: Vec2,
+) {
+    let rtt = state.server.rtt_micros(conn).unwrap_or(0);
+    let Some(pc) = state.conns.get_mut(&conn) else { return };
+    if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
+        log::warn!("conn {conn}: cast rejected ({reason})");
+        state.server.metrics().record_reject();
+        return;
+    }
+    pc.last_seq = seq;
+    pc.last_t = t;
+    let caster = pc.entity;
+    let class_id = world.get::<&ClassId>(caster)
+        .map(|c| c.id.clone())
+        .unwrap_or_else(|_| DEFAULT_CLASS.to_owned());
+    let Some(def) = class_library.get(&class_id, &skill_id) else {
+        log::warn!("conn {conn}: unknown ability '{skill_id}' for class '{class_id}'");
+        return;
+    };
+    let now = state.server.now_micros();
+    let on_cooldown = pc.cooldown_ready.get(&skill_id)
+        .is_some_and(|&ready_at| now < ready_at);
+    if on_cooldown {
+        log::debug!("conn {conn}: '{skill_id}' on cooldown");
+        return;
+    }
+    let Ok(caster_pos) = world.get::<&Transform>(caster).map(|tr| tr.position) else {
+        return;
+    };
+    let target = Vec3::new(target.x, 0.0, target.y);
+    if !target.is_finite() { return; }
+    match &def.effect {
+        AbilityEffect::Scheduled { telegraph_prefab, radius, damage, damage_type, cast_micros, max_range } => {
+            let (telegraph_prefab, radius, damage, damage_type, cast_micros, max_range) =
+                (telegraph_prefab.clone(), *radius, *damage, *damage_type, *cast_micros, *max_range);
+            if caster_pos.distance_squared(target) > max_range * max_range {
+                log::debug!("conn {conn}: cast out of range");
+                return;
+            }
+            pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
+            state.next_mechanic_id += 1;
+            let id = state.next_mechanic_id;
+            // Schedule in ABSOLUTE server time and tell everyone the
+            // same thing (DESIGN.md §3) — T = telegraph completion.
+            let resolve_at_micros = now + cast_micros;
+            world.spawn((
+                Transform::new(target),
+                Mechanic {
+                    id,
+                    radius,
+                    damage,
+                    damage_type,
+                    resolve_at_micros,
+                    caster,
+                },
+            ));
+            let frame = encode(&ServerMsg::MechanicScheduled {
+                id,
+                telegraph_prefab,
+                pos: target,
+                radius,
+                resolve_at_micros,
+                duration_micros: cast_micros,
+            });
+            for c in aoi_conns(&state.conns, world, target) {
+                state.server.send(c, frame.clone());
+            }
+            log::info!("conn {conn}: mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
+        }
+        AbilityEffect::Projectile { prefab, speed, damage, damage_type, ttl_secs, spawn_offset } => {
+            let (prefab, speed, damage, damage_type, ttl_secs, spawn_offset) =
+                (prefab.clone(), *speed, *damage, *damage_type, *ttl_secs, *spawn_offset);
+            // No range gate: the target only fixes the
+            // flight direction; the projectile itself
+            // is the range limit (speed × ttl).
+            let mut dir = target - caster_pos;
+            dir.y = 0.0;
+            if dir.length_squared() < 1e-6 {
+                return; // degenerate aim at own feet
+            }
+            let dir = dir.normalize();
+            pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
+            pending_bolts.push(PendingBolt {
+                prefab,
+                origin: caster_pos + dir * spawn_offset,
+                dir,
+                speed,
+                damage,
+                damage_type,
+                ttl_secs,
+                caster,
+            });
+        }
+        AbilityEffect::Leap { telegraph_prefab, radius, damage, damage_type, cast_micros, max_range } => {
+            let (telegraph_prefab, radius, damage, damage_type, cast_micros, max_range) =
+                (telegraph_prefab.clone(), *radius, *damage, *damage_type, *cast_micros, *max_range);
+            if caster_pos.distance_squared(target) > max_range * max_range {
+                log::debug!("conn {conn}: leap out of range");
+                return;
+            }
+            pc.cooldown_ready.insert(skill_id.clone(), now + def.cooldown_micros);
+            state.next_mechanic_id += 1;
+            let id = state.next_mechanic_id;
+            // Same scheduling as Scheduled — the arrival hit test IS a
+            // Mechanic — plus a dash whose countdown ends at the same
+            // instant (both derived from cast_micros).
+            let resolve_at_micros = now + cast_micros;
+            let cast_secs = cast_micros as f32 / 1e6;
+            world.spawn((
+                Transform::new(target),
+                Mechanic {
+                    id,
+                    radius,
+                    damage,
+                    damage_type,
+                    resolve_at_micros,
+                    caster,
+                },
+            ));
+            let _ = world.insert_one(caster, LeapImpulse {
+                velocity: leap_velocity(caster_pos, target, cast_secs),
+                remaining: cast_secs,
+            });
+            let frame = encode(&ServerMsg::MechanicScheduled {
+                id,
+                telegraph_prefab,
+                pos: target,
+                radius,
+                resolve_at_micros,
+                duration_micros: cast_micros,
+            });
+            for c in aoi_conns(&state.conns, world, target) {
+                state.server.send(c, frame.clone());
+            }
+            log::info!("conn {conn}: leap mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
+        }
+    }
 }
 
 /// Anti-cheat caps from DESIGN.md §3, in the protocol from v1.
