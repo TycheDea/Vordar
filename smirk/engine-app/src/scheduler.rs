@@ -125,6 +125,14 @@ impl Scheduler {
             .push((Box::new(system), TypeId::of::<S>(), std::any::type_name::<S>(), order));
     }
 
+    /// Type names of systems registered so far for `phase`, in registration
+    /// order. Reads `pending`, which `build()` consumes — call before it.
+    pub fn pending_names(&self, phase: Phase) -> Vec<&'static str> {
+        self.pending
+            .get(&phase)
+            .map_or(Vec::new(), |v| v.iter().map(|&(_, _, name, _)| name).collect())
+    }
+
     /// Override the tick rate for a phase.
     /// Must be called before build(). Defaults come from Phase::default_tick_rate().
     pub fn set_phase_rate(&mut self, phase: Phase, rate: TickRate) {

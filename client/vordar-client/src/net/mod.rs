@@ -83,32 +83,11 @@ impl Plugin for NetClientPlugin {
         .add_system(NetSendInputSystem, Phase::Input, SystemOrder::after::<NetReceiveSystem>())
         .add_system(crate::cast::AbilityCastSystem::new(), Phase::Input, SystemOrder::after::<NetSendInputSystem>())
         .insert_resource(crate::world_time::WorldTime { offset_micros: 0, synced: false })
-        .insert_resource(crate::CastState::new())
-        .insert_resource(crate::presentation::CurrentZone("start".into()))
-        .insert_resource(vordar_game::zones::load_zones("content/zones/zones.ron"))
-        .insert_resource(crate::vfx::ParticleSim::new())
+        .add_plugin(crate::PresentationPlugin)
         .add_system(NetInterpolateSystem, Phase::Update, SystemOrder::First)
-        .add_system(crate::presentation::ZoneDressingSystem::new(), Phase::Update, SystemOrder::Default)
-        .add_system(crate::body::BodyComposeSystem, Phase::Update, SystemOrder::Default)
-        .add_system(crate::hit_react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
-        .add_system(crate::hit_react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
-        .add_system(crate::pose::PoseAnimationSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::RenderSyncSystem>())
-        // Facing + locomotion drive skinned meshes — same registration as the
-        // sandbox plugin; remote entities animate from NetMotion (snapshot
-        // deltas), the predicted own player from its real sim Velocity.
-        // Hit reacts watch replicated hp (protocol v8) for flinches + sparks.
-        .add_system(crate::hit_react::HitReactSystem, Phase::RenderSync, SystemOrder::before::<crate::locomotion::LocomotionSystem>())
-        .add_system(crate::locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
-        .add_system(crate::locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
-        .add_system(crate::vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
-        // Weapons glue to the freshly rebuilt hand sockets (same slot as VFX).
-        .add_system(crate::weapons::WeaponAttachSystem::default(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
-        // Impact beats fire where despawning projectiles died (before the flush).
-        .add_system(crate::vfx::ImpactBurstSystem, Phase::DespawnFlush, SystemOrder::First)
         .add_system(crate::NetCameraFollowSystem, Phase::RenderSync, SystemOrder::First)
         .add_system(crate::telegraph::TelegraphFillSystem, Phase::RenderSync, SystemOrder::First)
         .add_system(crate::world_time::DayNightSystem, Phase::RenderSync, SystemOrder::First);
-        crate::ui::install(app);
         if self.predict {
             // The shared simulation moves our own player. Remote players stay
             // playback-driven (NetInterpolateSystem): no intents are emitted

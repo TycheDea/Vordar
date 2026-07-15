@@ -141,6 +141,13 @@ impl App {
         self
     }
 
+    /// Type names of systems registered so far for `phase`, in registration
+    /// order. Only meaningful before `run`/`run_ticks`/`run_headless`, which
+    /// call `Scheduler::build` and consume the pending list.
+    pub fn pending_system_names(&self, phase: Phase) -> Vec<&'static str> {
+        self.scheduler.pending_names(phase)
+    }
+
     /// Insert a custom resource accessible to all systems via resources.get_mut::<T>().
     pub fn insert_resource<T: std::any::Any + Send + Sync>(&mut self, resource: T) -> &mut Self {
         self.resources.insert(resource);

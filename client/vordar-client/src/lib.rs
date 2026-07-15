@@ -213,19 +213,19 @@ impl System for NetCameraFollowSystem {
     }
 }
 
-/// Client-side presentation plugin for offline play: input → intents, camera
-/// follow, zone dressing (floor + portals), minimap, left-click bolt.
-pub struct ClientPlugin;
+/// Presentation systems + resources shared by every game mode: zone dressing,
+/// corpses/hit-react, pose/facing/locomotion, VFX, weapons, and UI. Neither
+/// ClientPlugin (offline) nor NetClientPlugin (online) differs in any of
+/// this — they only differ in input source, cast source, camera-follow, and
+/// (online) net systems, which each layers on top.
+pub struct PresentationPlugin;
 
-impl Plugin for ClientPlugin {
+impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
-        // ClearEventsSystem runs SystemOrder::First in Input, so Default lands after it.
         app.insert_resource(CastState::new())
             .insert_resource(presentation::CurrentZone("start".into()))
             .insert_resource(vordar_game::zones::load_zones("content/zones/zones.ron"))
             .insert_resource(vfx::ParticleSim::new())
-            .add_system(PlayerInputSystem, Phase::Input,      SystemOrder::Default)
-            .add_system(sandbox::SandboxCastSystem, Phase::Input, SystemOrder::Default)
             .add_system(presentation::ZoneDressingSystem::new(), Phase::Update, SystemOrder::Default)
             .add_system(body::BodyComposeSystem, Phase::Update, SystemOrder::Default)
             .add_system(hit_react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
@@ -242,8 +242,21 @@ impl Plugin for ClientPlugin {
             .add_system(locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
             .add_system(vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
             // Weapons glue to the freshly rebuilt hand sockets (same slot as VFX).
-            .add_system(weapons::WeaponAttachSystem::default(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())
-            .add_system(CameraFollowSystem, Phase::RenderSync, SystemOrder::First);
+            .add_system(weapons::WeaponAttachSystem::default(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>());
         ui::install(app);
+    }
+}
+
+/// Client-side presentation plugin for offline play: input → intents, camera
+/// follow, left-click bolt.
+pub struct ClientPlugin;
+
+impl Plugin for ClientPlugin {
+    fn build(&self, app: &mut App) {
+        // ClearEventsSystem runs SystemOrder::First in Input, so Default lands after it.
+        app.add_plugin(PresentationPlugin)
+            .add_system(PlayerInputSystem, Phase::Input,      SystemOrder::Default)
+            .add_system(sandbox::SandboxCastSystem, Phase::Input, SystemOrder::Default)
+            .add_system(CameraFollowSystem, Phase::RenderSync, SystemOrder::First);
     }
 }
