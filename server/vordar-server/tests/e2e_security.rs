@@ -1,7 +1,7 @@
 // Security and metrics tests: login validation, rate limiting, reject counting.
 // Isolated from connectivity, combat, and persistence concerns.
 
-use test_support::{name_token, raw_login_probe, workspace_root, Bot, MetricMirror};
+use test_support::{name_token, raw_login_probe, spawn_server, spawn_server_with, workspace_root, Bot, MetricMirror};
 use engine_app::scheduler::{Phase, SystemOrder};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,17 +22,14 @@ fn invalid_intent_increments_reject_counter() {
     let rejects: Arc<AtomicU64> = Arc::default();
     {
         let rejects = rejects.clone();
-        std::thread::spawn(move || {
-            let mut app = vordar_server::build_server_app(addr, ":memory:");
+        spawn_server_with(addr, ":memory:", 1200, move |app| {
             app.add_system(
                 MetricMirror { dest: rejects, select: |m| &m.rejects },
                 Phase::Input,
                 SystemOrder::Default,
             );
-            app.run_headless(60.0, Some(1200));
         });
     }
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -74,10 +71,7 @@ fn invalid_intent_increments_reject_counter() {
 fn wrong_token_cannot_kick_or_impersonate() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25169".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 2400);
 
     let mut guarded = Bot::connect_as(addr, "guarded");
     guarded.wait_for("guarded welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -116,10 +110,7 @@ fn wrong_token_cannot_kick_or_impersonate() {
 fn login_failures_are_rate_limited() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25170".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 2400);
 
     let mut keeper = Bot::connect_as(addr, "keeper");
     keeper.wait_for("keeper welcome", Duration::from_secs(5), |b| b.player_id.is_some());

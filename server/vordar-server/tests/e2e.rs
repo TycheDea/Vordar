@@ -13,7 +13,7 @@
 //   phase5_world_clock_and_blood_moon — world time + scripted events
 //   far_bot_never_sees_out_of_aoi_mechanic — AOI scope for damage telegraphs
 
-use test_support::{settle, workspace_root, Bot, PopulateSystem};
+use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
@@ -27,10 +27,7 @@ fn phase1_end_to_end() {
     let addr: SocketAddr = "127.0.0.1:25151".parse().unwrap();
 
     // Server runs ~20 s of simulation on its own thread, then winds down.
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1200));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 1200);
 
     let mut a = Bot::connect(addr);
     a.wait_for("bot A welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -83,10 +80,7 @@ fn phase1_end_to_end() {
 fn phase2_simulated_latency() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25152".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1200));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 1200);
 
     let mut bot = Bot::connect_with_latency(addr, Duration::from_millis(150));
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -124,10 +118,7 @@ fn phase2_simulated_latency() {
 fn epsilon_over_unit_direction_still_moves_player() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25167".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1200));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 1200);
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -159,12 +150,9 @@ fn epsilon_over_unit_direction_still_moves_player() {
 fn phase3_npc_replication() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25153".parse().unwrap();
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 1200, |app| {
         app.add_plugin(chapter_01::Chapter01Plugin);
-        app.run_headless(60.0, Some(1200));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -184,10 +172,7 @@ fn phase3_npc_replication() {
 fn far_bot_never_sees_out_of_aoi_mechanic() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25164".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 2400);
 
     let mut a = Bot::connect(addr);
     a.wait_for("A welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -227,8 +212,7 @@ fn far_bot_never_sees_out_of_aoi_mechanic() {
 fn phase5_world_clock_and_blood_moon() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25157".parse().unwrap();
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 1200, |app| {
         // The grunt prefab lives in chapter-01's prefab dir (registrations
         // only — no chapter waves in this test).
         app.add_plugin(chapter_01::Chapter01ContentPlugin);
@@ -249,9 +233,7 @@ fn phase5_world_clock_and_blood_moon() {
                 }],
             }],
         });
-        app.run_headless(60.0, Some(1200));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let grunt_count = |b: &Bot| b.prefabs.values().filter(|p| *p == "grunt").count();
 
@@ -307,12 +289,9 @@ impl System for KillPlayersSystem {
 fn phase3_respawn_after_death() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25155".parse().unwrap();
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 1200, |app| {
         app.add_system(KillPlayersSystem { ticks: 0, fired: false }, Phase::Update, SystemOrder::Default);
-        app.run_headless(60.0, Some(1200));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -345,12 +324,9 @@ fn phase3_aoi_border() {
     }
     positions.push(glam::Vec3::new(58.0, 0.0, 0.0));
 
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 1500, |app| {
         app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
-        app.run_headless(60.0, Some(1500));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let far_visible = |b: &Bot| b.last_snapshot.values().any(|p| p.x > 50.0);
 

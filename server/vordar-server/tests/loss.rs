@@ -12,7 +12,7 @@
 //
 //   cargo test -p vordar-server --release --test loss -- --ignored --nocapture
 
-use test_support::{percentile, Bot};
+use test_support::{percentile, spawn_server, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -32,12 +32,8 @@ fn loss_probe_inter_snapshot_gaps() {
         eprintln!("WARNING: loss probe running in debug — results will not be representative");
     }
     let addr: SocketAddr = "127.0.0.1:25181".parse().unwrap();
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
-        // 10 min of sim — comfortably outlives the eight 30 s windows (2 RTTs × 4 loss rates).
-        app.run_headless(60.0, Some(60 * 600));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    // 10 min of sim — comfortably outlives the eight 30 s windows (2 RTTs × 4 loss rates).
+    spawn_server(addr, ":memory:", 60 * 600);
 
     // One mover keeps the world changing so snapshots carry real state.
     let mut mover = Bot::connect(addr);
@@ -141,12 +137,8 @@ fn loss_probe_upstream_intent_lag() {
         eprintln!("WARNING: loss probe running in debug — results will not be representative");
     }
     let addr: SocketAddr = "127.0.0.1:25182".parse().unwrap();
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
-        // 400 s of sim — comfortably outlives 2 RTTs × 5 loss rates × 8 s windows plus settle.
-        app.run_headless(60.0, Some(60 * 400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    // 400 s of sim — comfortably outlives 2 RTTs × 5 loss rates × 8 s windows plus settle.
+    spawn_server(addr, ":memory:", 60 * 400);
 
     println!("upstream loss probe: {} s window per rate", UPSTREAM_WINDOW.as_secs());
     for rtt in WAN_RTTS {

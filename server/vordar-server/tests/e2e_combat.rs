@@ -1,7 +1,7 @@
 // Combat mechanics tests: scheduled AOE, rend, onslaught. Isolated from
 // connectivity, persistence, and wire-format concerns.
 
-use test_support::{settle, workspace_root, Bot};
+use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_protocol::{encode, ClientMsg};
@@ -14,10 +14,7 @@ use vordar_protocol::{encode, ClientMsg};
 fn phase4_scheduled_aoe() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25156".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 2400);
 
     let mut a = Bot::connect(addr);
     a.wait_for("A welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -109,12 +106,9 @@ fn phase4_scheduled_aoe() {
 fn phase7_5_rend_kills_camped_enemy() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25163".parse().unwrap();
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 2400, |app| {
         app.add_plugin(chapter_01::Chapter01Plugin);
-        app.run_headless(60.0, Some(2400));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -187,10 +181,7 @@ fn phase7_5_rend_kills_camped_enemy() {
 fn ravager_onslaught_dashes_and_resolves() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25166".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 2400);
 
     let mut a = Bot::connect(addr);
     a.wait_for("A welcome", Duration::from_secs(5), |b| b.player_id.is_some());

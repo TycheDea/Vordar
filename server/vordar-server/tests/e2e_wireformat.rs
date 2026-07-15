@@ -2,7 +2,7 @@
 // datagram budgets, intent redundancy. Isolated from connectivity, combat, and
 // persistence concerns.
 
-use test_support::{settle, workspace_root, Bot, PopulateSystem};
+use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, SystemOrder};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -23,12 +23,9 @@ fn replication_ids_are_compact() {
     let addr: SocketAddr = "127.0.0.1:25179".parse().unwrap();
 
     let positions: Vec<glam::Vec3> = (0..10).map(|i| glam::Vec3::new(i as f32 * 2.0, 0.0, 0.0)).collect();
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 1200, |app| {
         app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
-        app.run_headless(60.0, Some(1200));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -60,16 +57,13 @@ fn hp_none_distinguishes_health_less_entities() {
     let addr: SocketAddr = "127.0.0.1:25190".parse().unwrap();
 
     let positions = vec![glam::Vec3::new(5.0, 0.0, 0.0)];
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 1200, |app| {
         app.add_system(
             PopulateSystem { done: false, positions, prefab: "bolt".into() },
             Phase::PreUpdate,
             SystemOrder::First,
         );
-        app.run_headless(60.0, Some(1200));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -109,10 +103,7 @@ fn hp_none_distinguishes_health_less_entities() {
 fn prefab_table_binds_u16_refs() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25191".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1200));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 1200);
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -166,12 +157,9 @@ fn crowd_snapshot_fits_datagram_budget() {
         }
     }
 
-    std::thread::spawn(move || {
-        let mut app = vordar_server::build_server_app(addr, ":memory:");
+    spawn_server_with(addr, ":memory:", 2500, |app| {
         app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
-        app.run_headless(60.0, Some(2500));
     });
-    std::thread::sleep(Duration::from_millis(300));
 
     let mut bot = Bot::connect(addr);
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());

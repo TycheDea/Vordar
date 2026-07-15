@@ -1,7 +1,7 @@
 // Persistence tests: character saves, reconnection, restarts, cooldown remainders.
 // Isolated from connectivity, combat, and wire-format concerns.
 
-use test_support::{settle, temp_db, workspace_root, Bot};
+use test_support::{settle, spawn_server, temp_db, workspace_root, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -13,10 +13,7 @@ fn phase6_reconnect_restores_position() {
     let addr: SocketAddr = "127.0.0.1:25158".parse().unwrap();
     let db = temp_db("reconnect");
     let server_db = db.clone();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, &server_db).run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, &server_db, 2400);
 
     let mut alice = Bot::connect_as(addr, "alice");
     alice.wait_for("alice welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -56,10 +53,7 @@ fn phase6_health_persists_in_db() {
     let addr: SocketAddr = "127.0.0.1:25159".parse().unwrap();
     let db = temp_db("health");
     let server_db = db.clone();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, &server_db).run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, &server_db, 2400);
 
     let mut atk = Bot::connect_as(addr, "atk");
     atk.wait_for("atk welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -111,10 +105,7 @@ fn phase6_health_persists_in_db() {
 fn phase6_login_takeover() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25162".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 2400);
 
     let mut first = Bot::connect_as(addr, "dup");
     first.wait_for("first welcome", Duration::from_secs(5), |b| b.player_id.is_some());
@@ -200,10 +191,7 @@ fn relog_restores_exact_cooldown_remainder() {
     let addr: SocketAddr = "127.0.0.1:25165".parse().unwrap();
     let db = temp_db("cooldown-relog");
     let server_db = db.clone();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, &server_db).run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, &server_db, 2400);
 
     let mut alice = Bot::connect_as(addr, "alice");
     alice.wait_for("alice welcome", Duration::from_secs(5), |b| b.player_id.is_some());
