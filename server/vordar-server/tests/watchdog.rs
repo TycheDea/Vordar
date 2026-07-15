@@ -18,11 +18,11 @@ use vordar_server::{build_zone_app, supervise_zone};
 
 /// Panics exactly once across every zone rebuild: `swap` only fires the
 /// first time it observes `true`, and every rebuilt App registers a brand
-/// new `PanicOnce` sharing the same flag — which by then reads `false` — so
+/// new `PanicOnceSystem` sharing the same flag — which by then reads `false` — so
 /// the watchdog's own restart never re-triggers it.
-struct PanicOnce(Arc<AtomicBool>);
+struct PanicOnceSystem(Arc<AtomicBool>);
 
-impl System for PanicOnce {
+impl System for PanicOnceSystem {
     fn run(&mut self, _world: &mut World, _resources: &mut Resources, _delta: f32) {
         if self.0.swap(false, Ordering::SeqCst) {
             panic!("test-induced zone panic");
@@ -55,7 +55,7 @@ fn a_panicked_zone_restarts_on_the_same_address_and_a_fresh_connection_succeeds(
                     build_zone_app(addr, handle.fork(), zone.clone(), directory.clone(), world_origin);
                 app.insert_resource(ShutdownFlag(app_flag.clone()));
                 if is_start {
-                    app.add_system(PanicOnce(zone_trigger.clone()), Phase::Update, SystemOrder::Default);
+                    app.add_system(PanicOnceSystem(zone_trigger.clone()), Phase::Update, SystemOrder::Default);
                 }
                 app.run_headless(60.0, None);
             });

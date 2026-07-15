@@ -28,13 +28,13 @@ const PLAYER_SPEED: f32 = 6.0; // content/prefabs/human.ron
 /// Test-local instrumentation (the determinism discipline binds game systems,
 /// not meters): records the interval between consecutive runs of its phase
 /// while `recording` is set.
-struct PhaseMeter {
+struct TickPhaseMeterSystem {
     last: Option<Instant>,
     recording: Arc<AtomicBool>,
     intervals: Arc<Mutex<Vec<f64>>>,
 }
 
-impl System for PhaseMeter {
+impl System for TickPhaseMeterSystem {
     fn run(&mut self, _world: &mut World, _resources: &mut Resources, _delta: f32) {
         if !self.recording.load(Ordering::Relaxed) {
             self.last = None;
@@ -118,12 +118,12 @@ fn soak_200_bots_hold_tick_budget() {
             let limits = NetLimits { max_connections_per_ip: total_bots, ..NetLimits::default() };
             let mut app = vordar_server::build_server_app_with_limits(addr, ":memory:", limits);
             app.add_system(
-                PhaseMeter { last: None, recording: recording.clone(), intervals: input_intervals },
+                TickPhaseMeterSystem { last: None, recording: recording.clone(), intervals: input_intervals },
                 Phase::Input,
                 SystemOrder::First,
             );
             app.add_system(
-                PhaseMeter { last: None, recording, intervals: post_intervals },
+                TickPhaseMeterSystem { last: None, recording, intervals: post_intervals },
                 Phase::PostUpdate,
                 SystemOrder::Last,
             );

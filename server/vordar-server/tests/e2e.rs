@@ -3,8 +3,8 @@
 // Isolated from combat, persistence, security, and wire-format concerns.
 //
 // Tests kept in this file:
-//   end_to_end        — connect, clock sync, mutual visibility,
-//                              movement replication, disconnect despawn
+//   login_move_sync_roundtrip — connect, clock sync, mutual visibility,
+//                                   movement replication, disconnect despawn
 //   simulated_latency — prediction acks + intent validation at 150 ms
 //   epsilon_over_unit_direction_still_moves_player — normalize noise tolerance
 //   npc_replication   — chapter waves replicate NPCs to clients
@@ -22,7 +22,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 #[test]
-fn end_to_end() {
+fn login_move_sync_roundtrip() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25151".parse().unwrap();
 
