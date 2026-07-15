@@ -24,7 +24,7 @@ use vordar_game::player::class::{ClassId, ClassLibrary, DEFAULT_CLASS};
 use vordar_game::skills::AbilityEffect;
 use vordar_game::world::WorldTime;
 use vordar_game::Mechanic;
-use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg};
+use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg};
 
 use super::{aoi_conns, save_character, NetServerState, PlayerConn, HISTORY_CAP, MAX_REWIND_MICROS};
 
@@ -81,112 +81,22 @@ impl System for NetReceiveSystem {
                     handle_disconnect(world, resources, conn);
                 }
                 ServerEvent::Message { conn, data, recv_micros } => {
-                    let state = resources.get_mut::<NetServerState>().unwrap();
                     let Some(msg) = decode::<ClientMsg>(&data) else {
                         log::warn!("conn {conn}: undecodable message ({} bytes)", data.len());
                         continue;
                     };
-                    // Login comes from a connection that has no PlayerConn
-                    // yet — handle it before the guard below.
-                    if let ClientMsg::Login { name, token } = &msg {
-                        let token = *token;
-                        // Per-IP failed-login rate limit: resolved and
-                        // checked before anything else — an over-budget IP
-                        // is turned away without running credential
-                        // verification again. Successful logins are never
-                        // throttled; only the failures recorded below count
-                        // against the budget.
-                        let peer_ip = state.server.peer_ip(conn);
-                        let now = state.server.now_micros();
-                        if peer_ip.is_some_and(|ip| state.login_failures.is_limited(ip, now)) {
-                            log::warn!("conn {conn}: login denied — rate limited");
-                            state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::RateLimited }));
-                            continue;
-                        }
-                        if name.len() > 32 || !name.chars().all(|c| c.is_ascii_graphic() && c != ' ') {
-                            log::warn!("conn {conn}: invalid login name");
-                            if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
-                            state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
-                            continue;
-                        }
-                        if state.conns.contains_key(&conn) || state.loading.contains_key(&conn) {
-                            log::debug!("conn {conn}: duplicate login ignored");
-                            continue;
-                        }
-                        // Session takeover: the newest connection wins, but
-                        // ONLY when the presented token matches the connected
-                        // session's — a mismatch denies the NEW connection
-                        // without touching the victim, no DB roundtrip. A
-                        // bare name match would let anyone who knew a
-                        // character name hijack or kick its session. The old
-                        // one is usually a stale session — a closed client
-                        // whose QUIC close never arrived (process exit can
-                        // outrace the close frame) lingers until the idle
-                        // timeout, and ignoring the relogin until then would
-                        // leave the new client waiting forever for Welcome.
-                        let old = state.conns.iter()
-                            .find(|(_, pc)| pc.name == *name)
-                            .map(|(&c, pc)| (c, pc.token));
-                        if let Some((old_conn, old_token)) = old {
-                            if old_token != token {
-                                log::warn!("conn {conn}: login as '{name}' denied — active session token mismatch");
-                                if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
-                                state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
-                                continue;
-                            }
-                            let pc = state.conns.remove(&old_conn).unwrap();
-                            // Same save-then-despawn as a real disconnect, so
-                            // the takeover load (FIFO behind it) restores the
-                            // freshest state.
-                            save_character(world, state, &pc);
-                            state.server.disconnect(old_conn);
-                            log::info!("conn {conn}: '{name}' takes over session from conn {old_conn}");
-                            resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
-                        }
-                        let state = resources.get_mut::<NetServerState>().unwrap();
-                        // A same-name load still in flight belongs to another
-                        // stale connection — forget it (its DbLoaded result
-                        // gets discarded) and kick that connection too, but
-                        // again only on a token match; a mismatch denies the
-                        // NEW connection and leaves the in-flight login alone.
-                        let stale = state.loading.iter()
-                            .find(|(_, (n, _))| n == name)
-                            .map(|(&c, &(_, t))| (c, t));
-                        if let Some((stale_conn, stale_token)) = stale {
-                            if stale_token != token {
-                                log::warn!("conn {conn}: login as '{name}' denied — in-flight login token mismatch");
-                                if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
-                                state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
-                                continue;
-                            }
-                            state.loading.remove(&stale_conn);
-                            state.server.disconnect(stale_conn);
-                        }
-                        log::info!("conn {conn}: login as '{name}', loading character");
-                        state.loading.insert(conn, (name.clone(), token));
-                        // Defaults seed a NEW character only: ring spawn +
-                        // the player prefab's full health (human.ron is
-                        // the source of truth; the DB merely overrides
-                        // Health.current after spawn).
-                        // (The zone field is decorative here: the schema
-                        // default puts every NEW character in 'start'.)
-                        let defaults = CharacterRecord {
-                            zone: "start".into(),
-                            pos: spawn_position(conn),
-                            health: 100,
-                            cooldowns: HashMap::new(),
-                        };
-                        state.db.login(conn, name.clone(), token, defaults);
-                        continue;
-                    }
-                    let rtt = state.server.rtt_micros(conn).unwrap_or(0);
-                    let Some(pc) = state.conns.get_mut(&conn) else { continue };
-
                     match msg {
+                        ClientMsg::Login { name, token } => handle_login(world, resources, conn, name, token),
                         ClientMsg::MoveIntents { intents } => {
+                            let state = resources.get_mut::<NetServerState>().unwrap();
+                            let rtt = state.server.rtt_micros(conn).unwrap_or(0);
+                            let Some(pc) = state.conns.get_mut(&conn) else { continue };
                             queue_move_intents(pc, &intents, recv_micros, rtt, &state.server.metrics());
                         }
                         ClientMsg::CastIntent { seq, t_server_micros: t, skill: skill_id, target } => {
+                            let state = resources.get_mut::<NetServerState>().unwrap();
+                            let rtt = state.server.rtt_micros(conn).unwrap_or(0);
+                            let Some(pc) = state.conns.get_mut(&conn) else { continue };
                             if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
                                 log::warn!("conn {conn}: cast rejected ({reason})");
                                 state.server.metrics().record_reject();
@@ -321,8 +231,6 @@ impl System for NetReceiveSystem {
                                 }
                             }
                         }
-                        // Handled before the PlayerConn guard above.
-                        ClientMsg::Login { .. } => {}
                     }
                 }
             }
@@ -513,6 +421,99 @@ fn handle_disconnect(world: &mut World, resources: &mut Resources, conn: ConnId)
         resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
         log::info!("conn {conn}: disconnected, despawning {:?}", pc.entity);
     }
+}
+
+/// Login arrives from a connection that has no `PlayerConn` yet; grant and
+/// spawn happen only later, when the DB load completes.
+fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name: String, token: AccountToken) {
+    let state = resources.get_mut::<NetServerState>().unwrap();
+    // Per-IP failed-login rate limit: resolved and
+    // checked before anything else — an over-budget IP
+    // is turned away without running credential
+    // verification again. Successful logins are never
+    // throttled; only the failures recorded below count
+    // against the budget.
+    let peer_ip = state.server.peer_ip(conn);
+    let now = state.server.now_micros();
+    if peer_ip.is_some_and(|ip| state.login_failures.is_limited(ip, now)) {
+        log::warn!("conn {conn}: login denied — rate limited");
+        state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::RateLimited }));
+        return;
+    }
+    if name.len() > 32 || !name.chars().all(|c| c.is_ascii_graphic() && c != ' ') {
+        log::warn!("conn {conn}: invalid login name");
+        if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
+        state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
+        return;
+    }
+    if state.conns.contains_key(&conn) || state.loading.contains_key(&conn) {
+        log::debug!("conn {conn}: duplicate login ignored");
+        return;
+    }
+    // Session takeover: the newest connection wins, but
+    // ONLY when the presented token matches the connected
+    // session's — a mismatch denies the NEW connection
+    // without touching the victim, no DB roundtrip. A
+    // bare name match would let anyone who knew a
+    // character name hijack or kick its session. The old
+    // one is usually a stale session — a closed client
+    // whose QUIC close never arrived (process exit can
+    // outrace the close frame) lingers until the idle
+    // timeout, and ignoring the relogin until then would
+    // leave the new client waiting forever for Welcome.
+    let old = state.conns.iter()
+        .find(|(_, pc)| pc.name == name)
+        .map(|(&c, pc)| (c, pc.token));
+    if let Some((old_conn, old_token)) = old {
+        if old_token != token {
+            log::warn!("conn {conn}: login as '{name}' denied — active session token mismatch");
+            if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
+            state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
+            return;
+        }
+        let pc = state.conns.remove(&old_conn).unwrap();
+        // Same save-then-despawn as a real disconnect, so
+        // the takeover load (FIFO behind it) restores the
+        // freshest state.
+        save_character(world, state, &pc);
+        state.server.disconnect(old_conn);
+        log::info!("conn {conn}: '{name}' takes over session from conn {old_conn}");
+        resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
+    }
+    let state = resources.get_mut::<NetServerState>().unwrap();
+    // A same-name load still in flight belongs to another
+    // stale connection — forget it (its DbLoaded result
+    // gets discarded) and kick that connection too, but
+    // again only on a token match; a mismatch denies the
+    // NEW connection and leaves the in-flight login alone.
+    let stale = state.loading.iter()
+        .find(|(_, (n, _))| n == &name)
+        .map(|(&c, &(_, t))| (c, t));
+    if let Some((stale_conn, stale_token)) = stale {
+        if stale_token != token {
+            log::warn!("conn {conn}: login as '{name}' denied — in-flight login token mismatch");
+            if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
+            state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
+            return;
+        }
+        state.loading.remove(&stale_conn);
+        state.server.disconnect(stale_conn);
+    }
+    log::info!("conn {conn}: login as '{name}', loading character");
+    state.loading.insert(conn, (name.clone(), token));
+    // Defaults seed a NEW character only: ring spawn +
+    // the player prefab's full health (human.ron is
+    // the source of truth; the DB merely overrides
+    // Health.current after spawn).
+    // (The zone field is decorative here: the schema
+    // default puts every NEW character in 'start'.)
+    let defaults = CharacterRecord {
+        zone: "start".into(),
+        pos: spawn_position(conn),
+        health: 100,
+        cooldowns: HashMap::new(),
+    };
+    state.db.login(conn, name, token, defaults);
 }
 
 /// Anti-cheat caps from DESIGN.md §3, in the protocol from v1.
