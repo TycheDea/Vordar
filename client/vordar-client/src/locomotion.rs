@@ -88,14 +88,8 @@ pub fn aim_at(world: &mut World, entity: Entity, target: glam::Vec3) {
 }
 
 /// Estimated velocity for entities the local sim doesn't move (remote,
-/// snapshot-lerped players) — derived from snapshot position deltas in
-/// net.rs. Locomotion/facing fall back to it when the sim `Velocity` is
-/// absent or zero, so remote characters animate too. Client-only, ≤ one
-/// snapshot interval stale.
-#[derive(Clone, Copy, Default)]
-pub struct NetMotion {
-    pub velocity: glam::Vec3,
-}
+/// snapshot-lerped players), written by `net::interpolate::NetInterpolateSystem`.
+pub use crate::net::NetMotion;
 
 /// The velocity locomotion/facing should animate from: the sim's when it is
 /// actually moving the entity (local/predicted player), else the

@@ -30,6 +30,7 @@ use engine_net::NetClient;
 use glam::{Vec2, Vec3};
 use hecs::Entity;
 use interpolate::{NetBuffer, NetInterpolateSystem};
+pub use interpolate::NetMotion;
 use lifecycle::{reconnect_backoff, NetReceiveSystem, Reconnect};
 use prediction::{reconcile_own, NetCorrectionSystem, NetSendInputSystem, PendingIntent};
 pub(crate) use prediction::start_predicted_leap;
@@ -89,14 +90,14 @@ impl Plugin for NetClientPlugin {
         .add_system(NetInterpolateSystem, Phase::Update, SystemOrder::First)
         .add_system(crate::presentation::ZoneDressingSystem::new(), Phase::Update, SystemOrder::Default)
         .add_system(crate::body::BodyComposeSystem, Phase::Update, SystemOrder::Default)
-        .add_system(crate::react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
-        .add_system(crate::react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
+        .add_system(crate::hit_react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
+        .add_system(crate::hit_react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
         .add_system(crate::pose::PoseAnimationSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::RenderSyncSystem>())
         // Facing + locomotion drive skinned meshes — same registration as the
         // sandbox plugin; remote entities animate from NetMotion (snapshot
         // deltas), the predicted own player from its real sim Velocity.
         // Hit reacts watch replicated hp (protocol v8) for flinches + sparks.
-        .add_system(crate::react::HitReactSystem, Phase::RenderSync, SystemOrder::before::<crate::locomotion::LocomotionSystem>())
+        .add_system(crate::hit_react::HitReactSystem, Phase::RenderSync, SystemOrder::before::<crate::locomotion::LocomotionSystem>())
         .add_system(crate::locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
         .add_system(crate::locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
         .add_system(crate::vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())

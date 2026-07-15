@@ -7,11 +7,12 @@ pub mod body;
 pub mod cast;
 pub mod credentials;
 pub mod ground;
+pub mod hit_react;
 pub mod locomotion;
 pub mod net;
 pub mod pose;
 pub mod presentation;
-pub mod react;
+pub mod sandbox;
 pub mod telegraph;
 pub mod ui;
 pub mod vfx;
@@ -224,19 +225,19 @@ impl Plugin for ClientPlugin {
             .insert_resource(vordar_game::zones::load_zones("content/zones/zones.ron"))
             .insert_resource(vfx::ParticleSim::new())
             .add_system(PlayerInputSystem, Phase::Input,      SystemOrder::Default)
-            .add_system(presentation::SandboxCastSystem, Phase::Input, SystemOrder::Default)
+            .add_system(sandbox::SandboxCastSystem, Phase::Input, SystemOrder::Default)
             .add_system(presentation::ZoneDressingSystem::new(), Phase::Update, SystemOrder::Default)
             .add_system(body::BodyComposeSystem, Phase::Update, SystemOrder::Default)
-            .add_system(react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
+            .add_system(hit_react::CorpseTtlSystem, Phase::Update, SystemOrder::Default)
             // Corpses must be cloned from dying entities BEFORE the flush removes them.
-            .add_system(react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
+            .add_system(hit_react::CorpseOnDeathSystem, Phase::DespawnFlush, SystemOrder::First)
             // Impact beats fire where despawning projectiles died (before the flush).
             .add_system(vfx::ImpactBurstSystem, Phase::DespawnFlush, SystemOrder::First)
             .add_system(pose::PoseAnimationSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::RenderSyncSystem>())
             // Facing + locomotion drive skinned meshes; both must run before the
             // mesh sync so rotation and clip selection are current this frame.
             // Hit reacts run before locomotion so a fresh flinch wins the frame.
-            .add_system(react::HitReactSystem, Phase::RenderSync, SystemOrder::before::<locomotion::LocomotionSystem>())
+            .add_system(hit_react::HitReactSystem, Phase::RenderSync, SystemOrder::before::<locomotion::LocomotionSystem>())
             .add_system(locomotion::FacingSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
             .add_system(locomotion::LocomotionSystem, Phase::RenderSync, SystemOrder::before::<engine_renderer::MeshRenderSyncSystem>())
             .add_system(vfx::VfxSystem::new(), Phase::RenderSync, SystemOrder::after::<engine_renderer::MeshRenderSyncSystem>())

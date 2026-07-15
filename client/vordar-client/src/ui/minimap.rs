@@ -4,6 +4,16 @@
 // engine machinery. HudSyncSystem publishes HudState each display frame; the
 // `draw` callback (registered as a UiLayers layer) renders it.
 
+use crate::presentation::{CurrentZone, HudHidden};
+use engine_app::scheduler::System;
+use engine_core::components::{RenderShape, ShapeGroup, Transform};
+use engine_core::traits::Resources;
+use engine_core::World;
+use glam::Vec2;
+use hecs::Entity;
+use vordar_game::zones::ZonesDef;
+use vordar_game::Player;
+
 /// One blip on the minimap: world XZ + linear RGB.
 #[derive(Clone)]
 pub struct HudDot {
@@ -31,6 +41,62 @@ pub struct HudState {
     /// retried in the background (networking audit 2026-07-11, finding 7).
     /// None when connected, or offline (no NetClientState at all).
     pub reconnecting: Option<u32>,
+}
+
+/// Publishes the minimap: tracked player at the center, every visible entity
+/// as a dot in its own body color, portals as rim markers. Runs once per
+/// display frame. (The bolt cooldown moved to the action bar.)
+pub struct HudSyncSystem;
+
+impl System for HudSyncSystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        let own = crate::net::own_entity(resources)
+            .or_else(|| world.query::<(Entity, &Player)>().iter().next().map(|(e, _)| e));
+        let center = own.and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position));
+
+        let mut dots: Vec<HudDot> = Vec::new();
+        if center.is_some() {
+            for (entity, transform, shape) in world.query::<(Entity, &Transform, &RenderShape)>().iter() {
+                if Some(entity) == own || world.get::<&HudHidden>(entity).is_ok() {
+                    continue;
+                }
+                dots.push(HudDot {
+                    pos: Vec2::new(transform.position.x, transform.position.z),
+                    color: shape.color.to_array(),
+                });
+            }
+            for (entity, transform, group) in world.query::<(Entity, &Transform, &ShapeGroup)>().iter() {
+                if Some(entity) == own || world.get::<&HudHidden>(entity).is_ok() {
+                    continue;
+                }
+                let color = group.shapes.first().map(|s| s.color.to_array()).unwrap_or([1.0; 3]);
+                dots.push(HudDot {
+                    pos: Vec2::new(transform.position.x, transform.position.z),
+                    color,
+                });
+            }
+        }
+
+        let zone = resources.get::<CurrentZone>().map(|z| z.0.clone()).unwrap_or_default();
+        let markers: Vec<Vec2> = resources
+            .get::<ZonesDef>()
+            .and_then(|def| def.zones.iter().find(|z| z.name == zone))
+            .map(|z| z.portals.iter().map(|p| Vec2::new(p.pos.x, p.pos.z)).collect())
+            .unwrap_or_default();
+
+        let heading = engine_renderer::camera_yaw(resources);
+        let reconnecting = crate::net::reconnect_attempt(resources);
+
+        let Some(hud) = resources.get_mut::<HudState>() else { return };
+        hud.open = center.is_some();
+        hud.center = center.map(|p| Vec2::new(p.x, p.z));
+        hud.heading = heading;
+        hud.dots = dots;
+        hud.markers = markers;
+        hud.range = 45.0;
+        hud.label = zone;
+        hud.reconnecting = reconnecting;
+    }
 }
 
 const DISC_RADIUS: f32 = 90.0;

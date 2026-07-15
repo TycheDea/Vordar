@@ -35,6 +35,16 @@ const RESYNC_TICKS: f64 = 30.0;
 /// dead-reckon indefinitely.
 const EXTRAP_CAP_TICKS: f64 = 15.0;
 
+/// Estimated velocity for entities the local sim doesn't move (remote,
+/// snapshot-lerped players) — derived from snapshot position deltas by
+/// `NetInterpolateSystem`. Locomotion/facing fall back to it when the sim
+/// `Velocity` is absent or zero, so remote characters animate too.
+/// Client-only, ≤ one snapshot interval stale.
+#[derive(Clone, Copy, Default)]
+pub struct NetMotion {
+    pub velocity: Vec3,
+}
+
 /// Tick-indexed position history for a replicated (non-predicted) entity —
 /// component on every replicated entity except a predicted own player.
 /// `NetInterpolateSystem` renders `Transform.position` a fixed
@@ -100,7 +110,7 @@ impl System for NetInterpolateSystem {
             net_motions.push((entity, velocity));
         }
         for (entity, velocity) in net_motions {
-            let _ = world.insert_one(entity, crate::locomotion::NetMotion { velocity });
+            let _ = world.insert_one(entity, NetMotion { velocity });
         }
     }
 }
@@ -315,7 +325,7 @@ mod tests {
             render_sys.run(&mut world, &mut resources, DT);
             positions.push(world.get::<&Transform>(remote).unwrap().position);
             motions.push(
-                world.get::<&crate::locomotion::NetMotion>(remote).map(|m| m.velocity).unwrap_or(Vec3::ZERO),
+                world.get::<&NetMotion>(remote).map(|m| m.velocity).unwrap_or(Vec3::ZERO),
             );
         }
 

@@ -48,7 +48,7 @@ pub(super) fn handle_entity_died(world: &mut World, resources: &mut Resources, i
             }
         };
         if let Some((transform, mesh, death)) = corpse {
-            crate::react::spawn_corpse(world, transform, mesh, &death);
+            crate::hit_react::spawn_corpse(world, transform, mesh, &death);
         }
         resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
     }

@@ -19,6 +19,6 @@ pub fn install(app: &mut App) {
         .insert_resource(action_bar::ActionBarState::default())
         // Presentation tuning the game owns (engine defaults would also do).
         .insert_resource(CameraConfig { min_radius: 16.0, max_radius: 55.0 })
-        .add_system(crate::presentation::HudSyncSystem, Phase::RenderSync, SystemOrder::Default)
+        .add_system(minimap::HudSyncSystem, Phase::RenderSync, SystemOrder::Default)
         .add_system(action_bar::ActionBarSyncSystem, Phase::RenderSync, SystemOrder::Default);
 }
