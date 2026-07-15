@@ -17,6 +17,7 @@ use crate::motion::{MovementSystem, PlayRadius, SeparationSystem};
 use crate::player::class::{ClassId, ClassLibrary};
 use crate::player::race::{RaceId, RaceLibrary};
 use crate::player::{Player, PlayerMovementSystem};
+use crate::progression::{XpGrantSystem, XpReward};
 use crate::world::camp::CampSystem;
 use crate::world::wave_spawner::{ChapterSetupSystem, WaveSpawnerSystem};
 use engine_app::app::App;
@@ -34,6 +35,7 @@ impl Plugin for GameComponentsPlugin {
             .register_component::<CombatStats>("CombatStats")
             .register_component::<ClassId>("Class")
             .register_component::<RaceId>("Race")
+            .register_component::<XpReward>("XpReward")
             .register_component::<crate::vfx::VfxTrail>("VfxTrail")
             // Shared prefabs (chapter plugins add their own dirs on top).
             .add_prefab_dir("content/prefabs");
@@ -76,6 +78,7 @@ impl Plugin for CoreGamePlugin {
             .add_system(SeparationSystem,     Phase::CollisionResolve, SystemOrder::First)
             .add_system(ProjectileHitSystem,  Phase::CollisionResolve, SystemOrder::before::<ContactDamageSystem>())
             .add_system(ContactDamageSystem,  Phase::CollisionResolve, SystemOrder::Default)
-            .add_system(DeathSystem::new(),   Phase::CollisionResolve, SystemOrder::after::<ContactDamageSystem>());
+            .add_system(DeathSystem::new(),   Phase::CollisionResolve, SystemOrder::after::<ContactDamageSystem>())
+            .add_system(XpGrantSystem,        Phase::CollisionResolve, SystemOrder::after::<DeathSystem>());
     }
 }

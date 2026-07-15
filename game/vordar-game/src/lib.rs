@@ -6,12 +6,13 @@
 // only. Content (stats, camps, prefabs) belongs to chapter crates and asset
 // files, not here.
 //
-//   player/   — the player: component, movement rule, skill book
-//   enemies/  — Enemy component, engagement model, per-archetype behaviors
-//   combat/   — projectiles, contact damage, death, scheduled mechanics
-//   motion/   — velocity integration, solid separation
-//   world/    — world clock/events, zones, chapters (linked modules), camps
-//   events.rs — intent events (the only way input reaches the simulation)
+//   player/       — the player: component, movement rule, skill book
+//   enemies/      — Enemy component, engagement model, per-archetype behaviors
+//   combat/       — projectiles, contact damage, death, scheduled mechanics
+//   motion/       — velocity integration, solid separation
+//   world/        — world clock/events, zones, chapters (linked modules), camps
+//   progression/  — per-player progression state (XP accumulation and rewards)
+//   events.rs     — intent events (the only way input reaches the simulation)
 
 pub mod combat;
 pub mod enemies;
@@ -19,6 +20,7 @@ pub mod events;
 pub mod motion;
 pub mod player;
 pub mod plugin;
+pub mod progression;
 pub mod vfx;
 pub mod world;
 
