@@ -22,6 +22,17 @@
                     (-8.5, 0.0, -8.5),
                 ]),
             ],
+            // Sustained pressure for the whole window: grunts push in from the
+            // zone edges, outside every chapter-01 camp aggro bubble and clear
+            // of the portal corridor along +X.
+            waves: [
+                (prefab: "grunt", positions: [
+                    (16.0, 0.0, 16.0),
+                    (-16.0, 0.0, 16.0),
+                    (16.0, 0.0, -16.0),
+                    (-16.0, 0.0, -16.0),
+                ], interval_seconds: 5.0, max_alive: 8),
+            ],
         ),
     ],
 )

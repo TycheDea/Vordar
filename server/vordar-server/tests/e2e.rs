@@ -234,7 +234,15 @@ fn world_clock_and_blood_moon() {
                         glam::Vec3::new(-10.0, 0.0, 0.0),
                     ],
                 }],
-                waves: vec![],
+                waves: vec![vordar_game::world::EventWaveDef {
+                    prefab: "grunt".into(),
+                    positions: vec![
+                        glam::Vec3::new(6.0, 0.0, 6.0),
+                        glam::Vec3::new(-6.0, 0.0, 6.0),
+                    ],
+                    interval_seconds: 2.0,
+                    max_alive: 20,
+                }],
             }],
         });
     });
@@ -251,6 +259,11 @@ fn world_clock_and_blood_moon() {
     // The blood moon spawns reach both clients.
     a.wait_for("A sees blood-moon grunts", Duration::from_secs(8), |bot| grunt_count(bot) >= 3);
     b.wait_for("B sees blood-moon grunts", Duration::from_secs(8), |bot| grunt_count(bot) >= 3);
+
+    // Wave pulses (2 grunts every 2 s) ride the same AOI/replication path as
+    // the one-shot spawns: at least one pulse lands on top of the 3 one-shot.
+    a.wait_for("A sees wave pressure spawns", Duration::from_secs(8), |bot| grunt_count(bot) >= 5);
+    b.wait_for("B sees wave pressure spawns", Duration::from_secs(8), |bot| grunt_count(bot) >= 5);
 
     // Mid-event joiner: clock mapping + already-spawned entities arrive at once.
     let mut c = Bot::connect(addr);

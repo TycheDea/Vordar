@@ -388,6 +388,19 @@ mod tests {
         assert_eq!(d.events[0].waves[0].max_alive, 8);
     }
 
+    #[test]
+    fn shipped_events_ron_parses_with_a_wave() {
+        // cwd for a `cargo test` unit-test binary is the crate's own manifest
+        // directory (game/vordar-game), so `../..` reaches the workspace root
+        // the same way the shipped content is loaded in production
+        // (`server/vordar-server/src/main.rs`, `client/vordar-client/src/bin/vordar.rs`).
+        let d = load_world_events("../../content/zones/events.ron");
+        let blood_moon = &d.events[0];
+        assert_eq!(blood_moon.name, "blood_moon");
+        assert_eq!(blood_moon.waves.len(), 1, "shipped blood moon carries one wave");
+        assert_eq!(blood_moon.waves[0].max_alive, 8);
+    }
+
     fn defs() -> WorldEventsDef {
         WorldEventsDef {
             day_seconds: 100.0,
