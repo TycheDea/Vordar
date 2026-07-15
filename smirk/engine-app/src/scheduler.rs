@@ -16,7 +16,7 @@ use crate::tick_rate::TickRate;
 use engine_core::traits::Resources;
 use engine_core::World;
 use std::any::TypeId;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 // ── InterpolationAlpha ────────────────────────────────────────────────────────
 //
@@ -67,17 +67,17 @@ pub enum SystemOrder {
     /// Run after all First and Default systems in this phase.
     Last,
     /// Run immediately after the named system type.
-    After(TypeId),
+    After(TypeId, &'static str),
     /// Run immediately before the named system type.
-    Before(TypeId),
+    Before(TypeId, &'static str),
 }
 
 impl SystemOrder {
     pub fn after<S: System + 'static>() -> Self {
-        Self::After(TypeId::of::<S>())
+        Self::After(TypeId::of::<S>(), std::any::type_name::<S>())
     }
     pub fn before<S: System + 'static>() -> Self {
-        Self::Before(TypeId::of::<S>())
+        Self::Before(TypeId::of::<S>(), std::any::type_name::<S>())
     }
 }
 
@@ -97,7 +97,7 @@ struct PhaseEntry {
 // ── Scheduler ────────────────────────────────────────────────────────────────
 
 pub struct Scheduler {
-    pending:        BTreeMap<Phase, Vec<(Box<dyn System>, TypeId, SystemOrder)>>,
+    pending:        BTreeMap<Phase, Vec<(Box<dyn System>, TypeId, &'static str, SystemOrder)>>,
     rate_overrides: BTreeMap<Phase, TickRate>,
     phases:         BTreeMap<Phase, PhaseEntry>,
     // One fixed clock for the whole app: every Fixed phase steps off this
@@ -122,7 +122,7 @@ impl Scheduler {
         self.pending
             .entry(phase)
             .or_default()
-            .push((Box::new(system), TypeId::of::<S>(), order));
+            .push((Box::new(system), TypeId::of::<S>(), std::any::type_name::<S>(), order));
     }
 
     /// Override the tick rate for a phase.
@@ -132,45 +132,80 @@ impl Scheduler {
     }
 
     /// Topological sort of each phase. Called once after all systems are registered.
-    /// Panics on cycle with a descriptive message showing the involved phase.
+    /// First/Last systems are nodes in the same sort as Default/After/Before
+    /// ones (implicit edges: every First precedes every non-First, every
+    /// non-Last precedes every Last), so an After/Before naming a First/Last
+    /// system resolves instead of silently evaporating. Panics on a cycle or
+    /// on an After/Before target never registered in the phase.
     pub fn build(&mut self) {
         for (phase, items) in std::mem::take(&mut self.pending) {
-            let mut first  = Vec::new();
-            let mut middle = Vec::new();
-            let mut last   = Vec::new();
+            let n = items.len();
 
-            for (system, type_id, order) in items {
-                match order {
-                    SystemOrder::First => first.push(system),
-                    SystemOrder::Last  => last.push(system),
-                    order              => middle.push((system, type_id, order)),
+            let mut systems: Vec<Option<Box<dyn System>>> = Vec::with_capacity(n);
+            let mut names:   Vec<&'static str>             = Vec::with_capacity(n);
+            let mut orders:  Vec<SystemOrder>              = Vec::with_capacity(n);
+            let mut index_of: HashMap<TypeId, usize>       = HashMap::with_capacity(n);
+
+            for (i, (system, type_id, name, order)) in items.into_iter().enumerate() {
+                systems.push(Some(system));
+                names.push(name);
+                orders.push(order);
+                index_of.insert(type_id, i);
+            }
+
+            let first_idx: HashSet<usize> = orders
+                .iter()
+                .enumerate()
+                .filter_map(|(i, o)| matches!(o, SystemOrder::First).then_some(i))
+                .collect();
+            let last_idx: HashSet<usize> = orders
+                .iter()
+                .enumerate()
+                .filter_map(|(i, o)| matches!(o, SystemOrder::Last).then_some(i))
+                .collect();
+
+            let mut adjacency: Vec<Vec<usize>> = vec![vec![]; n];
+
+            for &fi in &first_idx {
+                for j in 0..n {
+                    if !first_idx.contains(&j) { adjacency[fi].push(j); }
+                }
+            }
+            for &li in &last_idx {
+                for j in 0..n {
+                    if j != li && !first_idx.contains(&j) && !last_idx.contains(&j) {
+                        adjacency[j].push(li);
+                    }
                 }
             }
 
-            let index_of: HashMap<TypeId, usize> = middle
-                .iter()
-                .enumerate()
-                .map(|(i, (_, type_id, _))| (*type_id, i))
-                .collect();
-
-            let mut adjacency: Vec<Vec<usize>> = vec![vec![]; middle.len()];
-            for (i, (_, _, order)) in middle.iter().enumerate() {
+            for (i, order) in orders.iter().enumerate() {
                 match order {
-                    SystemOrder::After(target_id) => {
-                        if let Some(&j) = index_of.get(target_id) {
-                            adjacency[j].push(i);
-                        }
+                    SystemOrder::After(target_id, target_name) => {
+                        let j = *index_of.get(target_id).unwrap_or_else(|| {
+                            panic!(
+                                "unresolved ordering constraint in phase {phase:?}: `{}` is \
+                                 After(`{target_name}`), which was never registered in this phase",
+                                names[i],
+                            )
+                        });
+                        adjacency[j].push(i);
                     }
-                    SystemOrder::Before(target_id) => {
-                        if let Some(&j) = index_of.get(target_id) {
-                            adjacency[i].push(j);
-                        }
+                    SystemOrder::Before(target_id, target_name) => {
+                        let j = *index_of.get(target_id).unwrap_or_else(|| {
+                            panic!(
+                                "unresolved ordering constraint in phase {phase:?}: `{}` is \
+                                 Before(`{target_name}`), which was never registered in this phase",
+                                names[i],
+                            )
+                        });
+                        adjacency[i].push(j);
                     }
                     _ => {}
                 }
             }
 
-            let mut in_degree = vec![0usize; middle.len()];
+            let mut in_degree = vec![0usize; n];
             for neighbors in &adjacency {
                 for &j in neighbors { in_degree[j] += 1; }
             }
@@ -181,13 +216,9 @@ impl Scheduler {
                 .filter_map(|(i, &d)| if d == 0 { Some(i) } else { None })
                 .collect();
 
-            let n = middle.len();
-            let mut middle: Vec<Option<Box<dyn System>>> =
-                middle.into_iter().map(|(system, _, _)| Some(system)).collect();
-
             let mut sorted: Vec<Box<dyn System>> = Vec::with_capacity(n);
             while let Some(i) = queue.pop_front() {
-                sorted.push(middle[i].take().unwrap());
+                sorted.push(systems[i].take().unwrap());
                 for &j in &adjacency[i] {
                     in_degree[j] -= 1;
                     if in_degree[j] == 0 { queue.push_back(j); }
@@ -197,11 +228,6 @@ impl Scheduler {
             if sorted.len() != n {
                 panic!("Cycle detected in phase {:?} — check After/Before constraints", phase);
             }
-
-            let mut systems = Vec::with_capacity(first.len() + sorted.len() + last.len());
-            systems.extend(first);
-            systems.extend(sorted);
-            systems.extend(last);
 
             let rate = self.rate_overrides
                 .get(&phase)
@@ -214,7 +240,7 @@ impl Scheduler {
                 TickRate::Fixed(hz) => { self.fixed_dt = 1.0 / hz; false }
             };
 
-            self.phases.insert(phase, PhaseEntry { systems, is_render });
+            self.phases.insert(phase, PhaseEntry { systems: sorted, is_render });
         }
     }
 
@@ -328,6 +354,66 @@ mod tests {
         let before_pos = order.iter().position(|&s| s == "before_a").unwrap();
         let after_pos  = order.iter().position(|&s| s == "after_a").unwrap();
         assert!(before_pos < after_pos, "before_a must run before after_a");
+    }
+
+    #[test]
+    fn after_first_system_is_honored() {
+        let log   = Arc::new(Mutex::new(Vec::new()));
+        let delta = Arc::new(Mutex::new(Vec::new()));
+
+        struct FirstSys;
+        impl System for FirstSys {
+            fn run(&mut self, _: &mut World, _: &mut Resources, _: f32) {}
+        }
+
+        let mut sched = Scheduler::new();
+        // Registered before FirstSys to stress that the target resolves
+        // regardless of declaration order.
+        sched.add(make_system("after_first", log.clone(), delta.clone()),
+                  Phase::Update, SystemOrder::after::<FirstSys>());
+        sched.add(FirstSys, Phase::Update, SystemOrder::First);
+        sched.build();
+
+        let mut world     = World::new();
+        let mut resources = Resources::new();
+        sched.run_tick(&mut world, &mut resources, 1.0 / 60.0);
+
+        assert_eq!(*log.lock().unwrap(), vec!["after_first"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Cycle detected")]
+    fn before_first_system_panics() {
+        struct FirstSys;
+        impl System for FirstSys {
+            fn run(&mut self, _: &mut World, _: &mut Resources, _: f32) {}
+        }
+        struct BeforeFirst;
+        impl System for BeforeFirst {
+            fn run(&mut self, _: &mut World, _: &mut Resources, _: f32) {}
+        }
+
+        let mut sched = Scheduler::new();
+        sched.add(FirstSys, Phase::Update, SystemOrder::First);
+        sched.add(BeforeFirst, Phase::Update, SystemOrder::before::<FirstSys>());
+        sched.build();
+    }
+
+    #[test]
+    #[should_panic(expected = "never registered in this phase")]
+    fn unknown_ordering_target_panics() {
+        struct Ghost;
+        impl System for Ghost {
+            fn run(&mut self, _: &mut World, _: &mut Resources, _: f32) {}
+        }
+        struct Real;
+        impl System for Real {
+            fn run(&mut self, _: &mut World, _: &mut Resources, _: f32) {}
+        }
+
+        let mut sched = Scheduler::new();
+        sched.add(Real, Phase::Update, SystemOrder::after::<Ghost>());
+        sched.build();
     }
 
     #[test]
