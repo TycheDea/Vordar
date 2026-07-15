@@ -40,7 +40,10 @@ impl KeyboardState {
         self.just_released.contains(&key)
     }
 
-    pub(crate) fn press(&mut self, key: KeyCode) {
+    /// Public so headless tests in other crates can drive a real held key
+    /// through the normal `KeyboardState` → movement-system path instead of
+    /// reimplementing input handling.
+    pub fn press(&mut self, key: KeyCode) {
         self.pressed.insert(key);
         self.just_pressed.insert(key);
     }

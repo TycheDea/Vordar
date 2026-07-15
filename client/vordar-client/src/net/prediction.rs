@@ -59,14 +59,8 @@ pub(super) fn reconcile_own(
     // Defensive only: the player prefab always carries a Hitbox. Without one
     // there's no shape to test against statics, so the replay falls back to
     // free-flight instead of pushing an unknown shape around.
-    let statics: Vec<(Vec3, CollisionShape)> = match &own_shape {
-        Some(_) => world
-            .query::<(&Transform, &Hitbox, hecs::Satisfies<&Solid>, hecs::Satisfies<&Anchored>)>()
-            .iter()
-            .filter_map(|(t, h, solid, anchored)| (solid && anchored).then(|| (t.position, h.shape.clone())))
-            .collect(),
-        None => Vec::new(),
-    };
+    let statics: Vec<(Vec3, CollisionShape)> =
+        if own_shape.is_some() { collect_solid_anchored_statics(world) } else { Vec::new() };
     let shape = own_shape.unwrap_or(CollisionShape::Aabb { half_extents: Vec3::ZERO });
     let (replayed, still_reconciling_a_dash) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
@@ -126,6 +120,17 @@ fn replay_position<'a>(
     })
 }
 
+/// Solid + Anchored statics in the world, as `(position, shape)` pairs —
+/// what both `reconcile_own`'s replay and `PredictedStaticCollisionSystem`
+/// push the own player out of.
+fn collect_solid_anchored_statics(world: &World) -> Vec<(Vec3, CollisionShape)> {
+    world
+        .query::<(&Transform, &Hitbox, hecs::Satisfies<&Solid>, hecs::Satisfies<&Anchored>)>()
+        .iter()
+        .filter_map(|(t, h, solid, anchored)| (solid && anchored).then(|| (t.position, h.shape.clone())))
+        .collect()
+}
+
 /// What to do about a reconciliation error.
 #[derive(Debug, PartialEq)]
 enum Correction {
@@ -175,6 +180,26 @@ impl System for NetCorrectionSystem {
         if let Ok(mut transform) = world.get::<&mut Transform>(entity) {
             transform.position += step;
         }
+    }
+}
+
+/// Pushes the own predicted player out of anchored statics every Update tick
+/// — the same `anchored_push` rule the server's SeparationSystem and
+/// `reconcile_own`'s replay both apply — so the locally displayed position
+/// obeys walls tick-by-tick instead of free-flighting until the next
+/// snapshot's replay forces a Snap-class correction. Runs after
+/// NetCorrectionSystem (net/mod.rs registration) so it acts on this tick's
+/// fully corrected position.
+pub(super) struct PredictedStaticCollisionSystem;
+
+impl System for PredictedStaticCollisionSystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        let Some(entity) = resources.get::<NetClientState>().and_then(|s| s.own_entity()) else { return };
+        let Some(shape) = world.get::<&Hitbox>(entity).map(|h| h.shape.clone()).ok() else { return };
+        let statics = collect_solid_anchored_statics(world);
+        let Ok(mut transform) = world.get::<&mut Transform>(entity) else { return };
+        let push = anchored_push(transform.position, &shape, &statics);
+        transform.position += push;
     }
 }
 

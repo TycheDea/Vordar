@@ -1,25 +1,32 @@
 use crate::net::{
     interpolate::NetInterpolateSystem,
     lifecycle::NetReceiveSystem,
-    prediction::{start_predicted_leap, NetCorrectionSystem, NetSendInputSystem, SNAP_DISTANCE},
+    prediction::{
+        start_predicted_leap, NetCorrectionSystem, NetSendInputSystem, PredictedStaticCollisionSystem,
+        SNAP_DISTANCE,
+    },
     own_entity, reconnect_attempt, NetClientState,
 };
 use crate::world_time::WorldTime;
+use engine_app::app::App;
 use engine_app::events::EventBus;
-use engine_app::scheduler::System;
+use engine_app::input::KeyboardState;
+use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_app::time::Time;
 use engine_core::components::Transform;
-use engine_core::traits::{DespawnQueue, Resources};
+use engine_core::prefab::{spawn_prefab, PrefabLibrary};
+use engine_core::traits::{DespawnQueue, Resources, SpawnContext};
 use engine_core::World;
 use engine_net::NetClient;
 use glam::{Vec2, Vec3};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use test_support::{name_token, percentile, spawn_server, workspace_root, Bot};
+use test_support::{name_token, percentile, spawn_server, spawn_server_with, workspace_root, Bot};
 use vordar_game::motion::MovementSystem;
 use vordar_game::player::PlayerMovementSystem;
 use vordar_game::Player;
 use vordar_protocol::{PROTOCOL_VERSION, TICK_HZ};
+use winit::keyboard::KeyCode;
 
 const DT: f32 = 1.0 / 60.0;
 
@@ -282,6 +289,175 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
         max_recv_jump < SNAP_DISTANCE,
         "reconciliation snapped {max_recv_jump:.2} units mid-dash — leap-aware replay must keep \
          corrections under SNAP_DISTANCE ({SNAP_DISTANCE})"
+    );
+}
+
+/// Server-side, test-local: waits for the first `Player` entity (the
+/// wall-hug walker's login spawn) to appear, then spawns a real `cottage`
+/// (`content/chapters/chapter02/prefabs/cottage.ron`: Anchored, Solid,
+/// 1.6x0.9x1.3-half hitbox) 6 units +X of it via the real `spawn_prefab`
+/// path, so it replicates and collides exactly like any other static prop.
+struct SpawnCottageOnceSystem {
+    done: bool,
+}
+
+impl System for SpawnCottageOnceSystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        if self.done {
+            return;
+        }
+        let Some(player_pos) = world.query::<(&Transform, &Player)>().iter().next().map(|(t, _)| t.position)
+        else {
+            return;
+        };
+        self.done = true;
+        let cottage_pos = player_pos + Vec3::new(6.0, 0.0, 0.0);
+        spawn_prefab("cottage", cottage_pos, &mut SpawnContext { world, resources }).expect("cottage prefab must spawn");
+    }
+}
+
+/// Without a collision system in the predict branch (`NetClientPlugin`,
+/// net/mod.rs), the locally displayed player would free-fly through a wall
+/// while the reconciliation replay (which folds `anchored_push` the same way
+/// the server's SeparationSystem does) stays wall-clamped — the two diverge
+/// past SNAP_DISTANCE within ~0.17 s at 6 u/s and every snapshot snaps.
+/// `PredictedStaticCollisionSystem` closes that gap by applying the identical
+/// push to the displayed Transform every Update tick. This walks a real
+/// predicting client straight into a real cottage at 150 ms RTT and watches
+/// every `NetReceiveSystem::run` for a snap, exactly like
+/// `onslaught_dash_replay_never_snaps_at_150ms_rtt` above.
+#[test]
+fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
+    workspace_root();
+
+    let addr: SocketAddr = "127.0.0.1:25403".parse().unwrap();
+    spawn_server_with(addr, ":memory:", 2400, |app: &mut App| {
+        app.add_prefab_dir("content/chapters/chapter02/prefabs").add_system(
+            SpawnCottageOnceSystem { done: false },
+            Phase::PostUpdate,
+            SystemOrder::Default,
+        );
+    });
+
+    let mut world = World::new();
+    let mut resources = Resources::new();
+    insert_game_prefabs(&mut resources);
+    resources.get_mut::<PrefabLibrary>().unwrap().load_dir("content/chapters/chapter02/prefabs");
+    resources.insert(DespawnQueue::new());
+    resources.insert(Time::new());
+    resources.insert(WorldTime { offset_micros: 0, synced: false });
+    resources.insert(EventBus::new());
+    resources.insert(KeyboardState::new());
+    resources.insert(NetClientState::new(
+        Some(
+            NetClient::connect_with_latency(addr, PROTOCOL_VERSION, Duration::from_millis(150))
+                .expect("wall-hug walker connect"),
+        ),
+        addr,
+        "wallhug-walker".into(),
+        name_token("wallhug-walker"),
+        true,
+        Duration::from_millis(150),
+    ));
+
+    let mut recv = NetReceiveSystem;
+    let mut send = NetSendInputSystem;
+    let mut player_move = PlayerMovementSystem;
+    let mut leap_sys = vordar_game::combat::leap::LeapSystem;
+    let mut move_sys = MovementSystem;
+    let mut correction_sys = NetCorrectionSystem;
+    let mut static_collision_sys = PredictedStaticCollisionSystem;
+    let mut max_recv_jump = 0.0f32;
+
+    let mut run_input = |world: &mut World, resources: &mut Resources| {
+        resources.get_mut::<EventBus>().unwrap().clear();
+        let before = own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position));
+        recv.run(world, resources, DT);
+        if let Some(before) = before {
+            if let Some(after) =
+                own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
+            {
+                max_recv_jump = max_recv_jump.max((after - before).length());
+            }
+        }
+        send.run(world, resources, DT);
+    };
+    let mut run_update = |world: &mut World, resources: &mut Resources| {
+        player_move.run(world, resources, DT);
+        leap_sys.run(world, resources, DT);
+        move_sys.run(world, resources, DT);
+        correction_sys.run(world, resources, DT);
+        static_collision_sys.run(world, resources, DT);
+    };
+
+    // Welcome + clock sync.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        run_input(&mut world, &mut resources);
+        run_update(&mut world, &mut resources);
+        let ready = {
+            let state = resources.get::<NetClientState>().unwrap();
+            state.own_id.is_some() && state.client.as_ref().unwrap().server_now_micros().is_some()
+        };
+        if ready {
+            break;
+        }
+        assert!(Instant::now() < deadline, "never got Welcome + clock sync");
+        std::thread::sleep(Duration::from_millis(16));
+    }
+
+    let entity_deadline = Instant::now() + Duration::from_secs(2);
+    while own_entity(&resources).is_none() {
+        run_input(&mut world, &mut resources);
+        run_update(&mut world, &mut resources);
+        assert!(Instant::now() < entity_deadline, "predicted entity never appeared after Welcome");
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    let entity = own_entity(&resources).expect("predicted entity must exist by now");
+    let origin = world.get::<&Transform>(entity).unwrap().position;
+
+    // No RendererState resource is inserted, so camera_movement_axes defaults
+    // to forward=-Z, right=+X — holding KeyD alone drives a pure +X
+    // MoveIntent through the real WASD path (read_move_dir → NetSendInputSystem),
+    // not a synthesized one.
+    resources.get_mut::<KeyboardState>().unwrap().press(KeyCode::KeyD);
+
+    // Walk straight at the cottage and settle against it, watching every
+    // tick's NetReceiveSystem call for a snap.
+    let hold_deadline = Instant::now() + Duration::from_secs(6);
+    let mut elapsed = 0.0f32;
+    while elapsed < 2.0 {
+        assert!(Instant::now() < hold_deadline, "test loop stalled mid wall-hug");
+        std::thread::sleep(Duration::from_millis(16));
+        run_input(&mut world, &mut resources);
+        run_update(&mut world, &mut resources);
+        elapsed += DT;
+    }
+
+    assert!(
+        max_recv_jump < SNAP_DISTANCE,
+        "reconciliation snapped {max_recv_jump:.2} units walking into the wall — \
+         PredictedStaticCollisionSystem must keep local prediction wall-clamped like the replay"
+    );
+
+    // Equilibrium penetration is SLOP + v*dt/CORRECTION_PERCENT ≈ 0.135
+    // (motion::separation) past the wall's near face minus the walker's own
+    // half-extent — proving the hug is real contact, not merely "didn't snap".
+    let final_pos = world.get::<&Transform>(entity).unwrap().position;
+    let wall_face_x = origin.x + 6.0 - 1.6; // cottage 6 units +X of spawn; half-extent 1.6 (cottage.ron)
+    let walker_half_x = 0.5; // ravager.ron's Hitbox half-extent
+    let equilibrium_x = wall_face_x - walker_half_x;
+    assert!(
+        final_pos.x <= equilibrium_x + 0.15,
+        "walker penetrated past the wall-hug equilibrium: x={:.3}, expected <= {:.3}",
+        final_pos.x,
+        equilibrium_x + 0.15
+    );
+    assert!(
+        final_pos.x > equilibrium_x - 1.0,
+        "walker never actually reached the wall: x={:.3}, expected near {:.3}",
+        final_pos.x,
+        equilibrium_x
     );
 }
 

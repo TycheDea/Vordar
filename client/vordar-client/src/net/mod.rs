@@ -32,13 +32,15 @@ use hecs::Entity;
 use interpolate::{NetBuffer, NetInterpolateSystem};
 pub use interpolate::NetMotion;
 use lifecycle::{reconnect_backoff, NetReceiveSystem, Reconnect};
-use prediction::{reconcile_own, NetCorrectionSystem, NetSendInputSystem, PendingIntent};
+use prediction::{
+    reconcile_own, NetCorrectionSystem, NetSendInputSystem, PendingIntent, PredictedStaticCollisionSystem,
+};
 pub(crate) use prediction::start_predicted_leap;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_game::events::MoveIntent;
-use vordar_game::motion::{predict_step, MovementSystem, PlayRadius};
+use vordar_game::motion::{anchored_push, predict_step, MovementSystem, PlayRadius};
 use vordar_game::player::{movement_velocity, PlayerMovementSystem};
 use vordar_game::Player;
 use vordar_protocol::{
@@ -97,7 +99,13 @@ impl Plugin for NetClientPlugin {
             app.add_system(PlayerMovementSystem, Phase::Update, SystemOrder::First)
                 .add_system(vordar_game::combat::leap::LeapSystem, Phase::Update, SystemOrder::Default)
                 .add_system(MovementSystem, Phase::Update, SystemOrder::Last)
-                .add_system(NetCorrectionSystem, Phase::Update, SystemOrder::Last);
+                .add_system(NetCorrectionSystem, Phase::Update, SystemOrder::Last)
+                // Must be SystemOrder::Last, not after::<NetCorrectionSystem>(): Last
+                // carries an implicit "after every non-Last system" edge, so a
+                // Default-tier After pointed at a Last system is a contradiction the
+                // scheduler rejects as a cycle. Two Last peers resolve by registration
+                // order instead, which this call chain already places correctly.
+                .add_system(PredictedStaticCollisionSystem, Phase::Update, SystemOrder::Last);
         }
     }
 }
