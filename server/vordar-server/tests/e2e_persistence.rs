@@ -63,9 +63,9 @@ fn phase6_health_persists_in_db() {
     let victim_id = victim.player_id.unwrap();
     atk.wait_for("atk sees victim", Duration::from_secs(5), |b| b.last_snapshot.contains_key(&victim_id));
 
-    // Finding 8 of docs/reviews/networking/audit-networking-2026-07-11.md: every fresh
-    // spawn now pessimistically starts its abilities on full cooldown, so
-    // "cleave" isn't castable in the instant after login — clear it first.
+    // Every fresh spawn pessimistically starts its abilities on full
+    // cooldown, so "cleave" isn't castable in the instant after login —
+    // clear it first.
     std::thread::sleep(Duration::from_millis(3200));
 
     // Cleave the stationary victim (30 base + the Ravager's power, possibly a
@@ -178,13 +178,9 @@ fn phase6_restart_durability() {
     );
 }
 
-// Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: cooldowns
-// used to live only in the connection's in-memory `PlayerConn.last_cast`
-// (audit finding 8's pessimistic fix seeded every ability on full cooldown
-// at spawn instead of persisting the true remainder). Cooldowns now persist
-// as `ready_at` remainders, so a relog restores the EXACT remaining
-// cooldown — neither a free reset (the original finding 8 bug) nor a full
-// pessimistic reset (finding 8's fix).
+// Cooldowns persist as `ready_at` remainders, so a relog restores the EXACT
+// remaining cooldown — neither a free reset (no persisted state at all) nor
+// a full pessimistic reset (every ability back to full cooldown).
 #[test]
 fn relog_restores_exact_cooldown_remainder() {
     workspace_root();

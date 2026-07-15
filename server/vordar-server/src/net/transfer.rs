@@ -9,12 +9,12 @@ use vordar_protocol::{encode, ServerMsg};
 use crate::db::CharacterRecord;
 use super::{cooldown_remainders, NetServerState, STAGGER};
 
-/// Portal handoff (Phase 7): persist → despawn → redirect. The character is
-/// saved into the TARGET zone at the portal's arrival point, the body leaves
-/// this zone, and the client is told where to log in next. The CLIENT closes
-/// the connection — kicking here could outrace the Redirect frame (the
-/// Phase 6 takeover lesson). The eventual Disconnected finds no PlayerConn,
-/// so no stale save can clobber the transfer save.
+/// Portal handoff: persist → despawn → redirect. The character is saved into
+/// the TARGET zone at the portal's arrival point, the body leaves this zone,
+/// and the client is told where to log in next. The CLIENT closes the
+/// connection — kicking here could outrace the Redirect frame. The eventual
+/// Disconnected finds no PlayerConn, so no stale save can clobber the
+/// transfer save.
 pub(super) struct ZoneTransferSystem {
     ticks: u64,
 }

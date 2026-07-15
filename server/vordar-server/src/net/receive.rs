@@ -102,12 +102,12 @@ impl System for NetReceiveSystem {
                     // yet — handle it before the guard below.
                     if let ClientMsg::Login { name, token } = &msg {
                         let token = *token;
-                        // Per-IP failed-login rate limit (networking rework 1,
-                        // finding 4): resolved and checked before anything
-                        // else — an over-budget IP is turned away without
-                        // running credential verification again. Successful
-                        // logins are never throttled; only the failures
-                        // recorded below count against the budget.
+                        // Per-IP failed-login rate limit: resolved and
+                        // checked before anything else — an over-budget IP
+                        // is turned away without running credential
+                        // verification again. Successful logins are never
+                        // throttled; only the failures recorded below count
+                        // against the budget.
                         let peer_ip = state.server.peer_ip(conn);
                         let now = state.server.now_micros();
                         if peer_ip.is_some_and(|ip| state.login_failures.is_limited(ip, now)) {
@@ -128,10 +128,9 @@ impl System for NetReceiveSystem {
                         // Session takeover: the newest connection wins, but
                         // ONLY when the presented token matches the connected
                         // session's — a mismatch denies the NEW connection
-                        // without touching the victim, no DB roundtrip
-                        // (networking rework 1, finding 3: this used to kick
-                        // on bare name match, letting anyone who knew a
-                        // character name hijack or kick its session). The old
+                        // without touching the victim, no DB roundtrip. A
+                        // bare name match would let anyone who knew a
+                        // character name hijack or kick its session. The old
                         // one is usually a stale session — a closed client
                         // whose QUIC close never arrived (process exit can
                         // outrace the close frame) lingers until the idle
@@ -206,7 +205,6 @@ impl System for NetReceiveSystem {
                         ClientMsg::CastIntent { seq, t_server_micros: t, skill: skill_id, target } => {
                             if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
                                 log::warn!("conn {conn}: cast rejected ({reason})");
-                                // See queue_move_intents below (finding 18).
                                 state.server.metrics().record_reject();
                                 continue;
                             }
@@ -369,8 +367,7 @@ impl System for NetReceiveSystem {
                     let state = resources.get_mut::<NetServerState>().unwrap();
                     // The conn may already have dropped while the DB
                     // roundtrip was in flight — peer_ip is then None, and
-                    // there is nothing to record against (networking rework
-                    // 1, finding 4).
+                    // there is nothing to record against.
                     if let Some(ip) = state.server.peer_ip(conn) {
                         let now = state.server.now_micros();
                         state.login_failures.record(ip, now);
@@ -398,11 +395,10 @@ impl System for NetReceiveSystem {
                     continue;
                 }
             }
-            // This zone's prefab table (protocol v13, networking rework 5
-            // finding 4) is built lazily, once, on the first grant reaching
-            // this point — by App-build time every chapter's prefab dir has
-            // loaded, so PrefabLibrary is fully populated. Read here, before
-            // spawn_prefab needs `resources` mutably below.
+            // This zone's prefab table is built lazily, once, on the first
+            // grant reaching this point — by App-build time every chapter's
+            // prefab dir has loaded, so PrefabLibrary is fully populated.
+            // Read here, before spawn_prefab needs `resources` mutably below.
             let new_prefab_table: Option<Vec<String>> = {
                 let has_table = resources.get::<NetServerState>().unwrap().prefab_table.is_some();
                 if has_table {
@@ -433,11 +429,9 @@ impl System for NetReceiveSystem {
                     if let Ok(mut hp) = world.get::<&mut Health>(entity) {
                         hp.current = record.health;
                     }
-                    // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
-                    // cooldowns are persisted as remainders (`record.cooldowns`),
+                    // Cooldowns are persisted as remainders (`record.cooldowns`),
                     // so a relog or zone transfer restores the exact remaining
-                    // cooldown instead of the pessimistic full-cooldown reset
-                    // this used to seed (finding 8 of the networking audit).
+                    // cooldown instead of resetting every ability to full.
                     let spawn_now = state.server.now_micros();
                     let cooldown_ready: HashMap<String, u64> = record.cooldowns
                         .into_iter()
@@ -460,9 +454,8 @@ impl System for NetReceiveSystem {
                     state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
                     // Prefab table right after Welcome, on the same ordered
                     // stream, so it always precedes the first Snapshot's
-                    // enters (protocol v13, networking rework 5 finding 4).
-                    // NOT resent on the respawn re-Welcome below — the
-                    // connection keeps its table.
+                    // enters. NOT resent on the respawn re-Welcome below —
+                    // the connection keeps its table.
                     let names = (*state.prefab_table.as_ref().expect("prefab table built above").0).clone();
                     state.server.send(conn, encode(&ServerMsg::PrefabTable { names }));
                     let at_server_micros = state.server.now_micros();
@@ -548,7 +541,7 @@ fn validate_intent(pc: &PlayerConn, seq: u32, t: u64, recv_micros: u64, rtt: u64
     }
     // Arrival deadline: an input claiming time T must arrive within ~one RTT
     // of T. MAX_REWIND acts as a floor while RTT estimates settle; the actual
-    // lag-compensation rewind (Phase 4 snapshot tests) is capped separately.
+    // lag-compensation rewind is capped separately.
     let max_age = rtt.max(MAX_REWIND_MICROS) + ARRIVAL_MARGIN_MICROS;
     if recv_micros.saturating_sub(t) > max_age {
         return Err("arrived past deadline");
@@ -556,11 +549,10 @@ fn validate_intent(pc: &PlayerConn, seq: u32, t: u64, recv_micros: u64, rtt: u64
     Ok(())
 }
 
-/// Applies a `ClientMsg::MoveIntents` batch in order (protocol v15,
-/// networking rework 3 finding 5): the client resends up to the last 3
-/// intents each tick, so a lost datagram is fully recovered by the next
-/// tick's batch. An entry whose `seq` this connection has already seen
-/// (`seq <= pc.last_seq`) is expected redundancy — skipped silently, no
+/// Applies a `ClientMsg::MoveIntents` batch in order: the client resends up
+/// to the last 3 intents each tick, so a lost datagram is fully recovered by
+/// the next tick's batch. An entry whose `seq` this connection has already
+/// seen (`seq <= pc.last_seq`) is expected redundancy — skipped silently, no
 /// reject, no log — not a violation; only entries advancing `last_seq` run
 /// the full `validate_intent` + dir-cap checks and enqueue exactly as the
 /// old single-intent path did.
@@ -602,14 +594,12 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
 
-    /// Regression test for the seq=0 replay wedge (networking audit
-    /// 2026-07-11, finding 16). `last_seq: 0` is the connection's "nothing
-    /// received yet" sentinel; before this fix, `pc.last_seq != 0 && seq <=
-    /// pc.last_seq` skipped the monotonicity check entirely whenever seq was
-    /// 0, so a spoofed/replayed seq=0 intent passed validation every single
-    /// time instead of ever advancing past the sentinel. A genuine client's
-    /// own seq counter starts at 1, so seq=0 should never be a legitimate
-    /// value on the wire.
+    /// `last_seq: 0` is the connection's "nothing received yet" sentinel, so
+    /// a naive `seq <= pc.last_seq` monotonicity check must not special-case
+    /// seq==0 as "not yet checked" — a spoofed/replayed seq=0 intent must be
+    /// rejected outright rather than passing validation every time. A
+    /// genuine client's own seq counter starts at 1, so seq=0 should never be
+    /// a legitimate value on the wire.
     #[test]
     fn zero_seq_is_always_rejected() {
         let mut world = World::new();
@@ -649,14 +639,12 @@ mod tests {
         }
     }
 
-    /// Fail-first regression for the last-3 redundancy batch (networking
-    /// rework 3 finding 5): a client resends up to the last 3 move intents
-    /// every Input tick, so the server must treat an already-seen `seq` as
-    /// expected redundancy — skipped silently, no reject, no re-queue — not
-    /// a violation. Before the fix, `queue_move_intents` ran every entry
-    /// through `validate_intent` unconditionally, so the 6/7 duplicates in
-    /// the second batch tripped `validate_intent`'s own `seq <= last_seq`
-    /// rejection and were counted in `NetMetrics::rejects`.
+    /// A client resends up to the last 3 move intents every Input tick, so
+    /// the server must treat an already-seen `seq` as expected redundancy —
+    /// skipped silently, no reject, no re-queue — not a violation: running
+    /// every entry through `validate_intent` unconditionally would trip its
+    /// own `seq <= last_seq` rejection on ordinary resends and count them in
+    /// `NetMetrics::rejects`.
     #[test]
     fn move_intents_dedupe_silently_without_rejecting() {
         let mut world = World::new();

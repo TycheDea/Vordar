@@ -108,12 +108,12 @@ fn phase2_simulated_latency() {
     });
 }
 
-// Regression test for Finding 2 of docs/reviews/networking/audit-networking-2026-07-11.md:
-// an honest client's direction that lands a few ULP over unit length (exactly
+// An honest client's direction that lands a few ULP over unit length (exactly
 // what glam's f32 `normalize()` produces for ordinary camera-yaw inputs) must
-// still move the player. A strict `> 1.0` reject silently drops every one of
-// these intents (misprediction-causing rubber-banding); the fix tolerates
-// epsilon-scale excess and clamps it, like the shared `movement_velocity` rule.
+// still move the player. A strict `> 1.0` reject would silently drop every
+// one of these intents (misprediction-causing rubber-banding); tolerating
+// epsilon-scale excess and clamping it, like the shared `movement_velocity`
+// rule, is what this test pins.
 #[test]
 fn epsilon_over_unit_direction_still_moves_player() {
     workspace_root();
@@ -161,13 +161,12 @@ fn phase3_npc_replication() {
     });
 }
 
-// Regression test for Finding 5 of docs/reviews/networking/audit-networking-2026-07-11.md:
-// MechanicScheduled/HitResult used to `broadcast` to EVERY connection
-// regardless of distance — a cheating client got a zone-wide radar off
-// telegraph positions, and aggregate mechanic traffic scaled O(players ×
-// casts). The fix scopes both sends to the same AOI_RADIUS the snapshot
-// system already uses, so a bot far outside the caster's AOI must never
-// receive either message for that mechanic.
+// MechanicScheduled/HitResult are scoped to the same AOI_RADIUS the snapshot
+// system uses — broadcasting either to every connection regardless of
+// distance would give a cheating client a zone-wide radar off telegraph
+// positions and scale aggregate mechanic traffic O(players × casts). A bot
+// far outside the caster's AOI must never receive either message for that
+// mechanic.
 #[test]
 fn far_bot_never_sees_out_of_aoi_mechanic() {
     workspace_root();

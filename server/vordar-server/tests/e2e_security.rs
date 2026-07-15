@@ -9,12 +9,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vordar_protocol::{encode, ClientMsg, LoginDenyReason, MoveIntentEntry};
 
-// Finding 18 of docs/reviews/networking/audit-networking-2026-07-11.md: validate_intent's
-// callers only `log::debug!`/`log::warn!` a rejected intent — nothing fed the
-// `NetMetrics` the operational-blindness fix (finding 3) claims to expose, so
-// a client sending invalid intents was as invisible to metrics as one behaving
-// normally. The fix records every validate_intent rejection into
-// `NetMetrics::rejects`.
+// Every validate_intent rejection must be recorded into `NetMetrics::rejects`
+// — logging alone (`log::debug!`/`log::warn!`) would leave a client sending
+// invalid intents as invisible to metrics as one behaving normally.
 #[test]
 fn invalid_intent_increments_reject_counter() {
     workspace_root();
@@ -39,13 +36,12 @@ fn invalid_intent_increments_reject_counter() {
 
     // A far-future timestamp is a guaranteed, deterministic reject with no
     // need for any prior legitimate traffic to go stale first — unlike
-    // seq=0 (PlayerConn::last_seq's sentinel), which since protocol v15
-    // (networking rework 3 finding 5) is silently skipped as expected
-    // last-3-redundancy overlap rather than rejected when it arrives inside
-    // a `ClientMsg::MoveIntents` batch (`seq <= pc.last_seq`, and last_seq
-    // starts at 0). seq=1 is newer than the sentinel, so only its timestamp
-    // — stamped ~10 s in the future, far past FUTURE_SLACK_MICROS — trips
-    // validate_intent.
+    // seq=0 (PlayerConn::last_seq's sentinel), which is silently skipped as
+    // expected last-3-redundancy overlap rather than rejected when it
+    // arrives inside a `ClientMsg::MoveIntents` batch (`seq <= pc.last_seq`,
+    // and last_seq starts at 0). seq=1 is newer than the sentinel, so only
+    // its timestamp — stamped ~10 s in the future, far past
+    // FUTURE_SLACK_MICROS — trips validate_intent.
     let t_server_micros = bot.client.server_now_micros().expect("clock synced");
     bot.client.send_datagram(encode(&ClientMsg::MoveIntents {
         intents: vec![MoveIntentEntry { seq: 1, t_server_micros: t_server_micros + 10_000_000, dir: glam::Vec2::ZERO }],
@@ -59,12 +55,11 @@ fn invalid_intent_increments_reject_counter() {
     assert!(rejects.load(Ordering::Relaxed) >= 1, "an invalid intent must be counted in NetMetrics::rejects");
 }
 
-// Finding 3 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: `Login`
-// used to carry only a bare name, so anyone who knew a character's name could
-// take over — or kick — its session (`phase6_login_takeover` in persistence tests
-// exercises the LEGITIMATE version of this same mechanism). A same-name login must now
-// also present the token the session claimed the name with; a mismatch is
-// denied (`LoginDenied(BadCredentials)`, connection left open — the CLIENT
+// A bare name match would let anyone who knew a character's name take over —
+// or kick — its session (`phase6_login_takeover` in persistence tests
+// exercises the LEGITIMATE version of this same mechanism). A same-name login
+// must also present the token the session claimed the name with; a mismatch
+// is denied (`LoginDenied(BadCredentials)`, connection left open — the CLIENT
 // closes) and the connected victim is never touched: no kick, no DB
 // roundtrip, no interruption to its snapshots.
 #[test]
@@ -99,13 +94,11 @@ fn wrong_token_cannot_kick_or_impersonate() {
     assert!(guarded.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
 }
 
-// Finding 4 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: nothing
-// throttled repeated bad-credential login attempts — a client could probe
-// names/tokens as fast as the message token bucket allowed. Failed logins
-// (here: token mismatches) now count against a per-IP budget; once
+// Failed logins (here: token mismatches) count against a per-IP budget; once
 // exhausted, further attempts from that IP are denied `RateLimited` instead
 // of running credential verification again, while the CONNECTED victim whose
-// name is being probed is never touched.
+// name is being probed is never touched — without this, a client could probe
+// names/tokens as fast as the message token bucket allowed.
 #[test]
 fn login_failures_are_rate_limited() {
     workspace_root();

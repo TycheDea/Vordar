@@ -43,10 +43,9 @@ pub fn build_server_app(addr: SocketAddr, db_path: &str) -> App {
 }
 
 /// Like [`build_server_app`], but with explicit connection-cap configuration
-/// (networking audit 2026-07-11, finding 20) — e.g. a soak harness modeling
-/// many distinct bot clients from one source IP raises
-/// `max_connections_per_ip` to its bot count here instead of the transport
-/// weakening its own default.
+/// — e.g. a soak harness modeling many distinct bot clients from one source
+/// IP raises `max_connections_per_ip` to its bot count here instead of the
+/// transport weakening its own default.
 pub fn build_server_app_with_limits(addr: SocketAddr, db_path: &str, limits: NetLimits) -> App {
     let mut app = App::new();
     app.add_plugin(PhysicsPlugin)
@@ -78,15 +77,14 @@ pub fn build_zone_app(
 }
 
 /// Join every zone thread, logging loudly if one panicked instead of exiting
-/// cleanly (networking audit 2026-07-11, finding 18). `main` used to discard
-/// `handle.join()`'s `Result` outright (`let _ = handle.join();`), so a
-/// panicked zone died with no trace at all. Since rework 10 wired every zone
-/// thread through `supervise_zone`, a panic is caught and the zone rebuilds
-/// on the same address automatically — this log now fires only once the
-/// restart budget (`MAX_ZONE_RESTARTS`) is spent, or the shutdown flag was
-/// already set when the panic was caught: the zone is then genuinely,
-/// permanently down, its listener stays bound but dead, and every other zone
-/// keeps redirecting players into that now-dead address until the process is
+/// cleanly — silently discarding `handle.join()`'s `Result` would leave a
+/// panicked zone dead with no trace at all. Every zone thread runs under
+/// `supervise_zone`, so a panic is normally caught and the zone rebuilds on
+/// the same address automatically — this log fires only once the restart
+/// budget (`MAX_ZONE_RESTARTS`) is spent, or the shutdown flag was already
+/// set when the panic was caught: the zone is then genuinely, permanently
+/// down, its listener stays bound but dead, and every other zone keeps
+/// redirecting players into that now-dead address until the process is
 /// restarted.
 pub fn join_zone_threads(handles: Vec<(String, std::thread::JoinHandle<()>)>) {
     for (name, handle) in handles {
@@ -113,8 +111,8 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 /// Max consecutive *fast* zone-panic restarts before the supervisor gives up
-/// and re-raises the panic (rework 10, finding 2). A run that survives
-/// `HEALTHY_UPTIME` resets the strike count, so this bounds hot crash loops
+/// and re-raises the panic. A run that survives `HEALTHY_UPTIME` resets the
+/// strike count, so this bounds hot crash loops
 /// (bad content, corrupt state that panics on the first tick), not a
 /// long-lived server's lifetime recovery budget.
 pub const MAX_ZONE_RESTARTS: u32 = 3;
@@ -136,8 +134,8 @@ fn next_strikes(prev: u32, ran_for: Duration) -> u32 {
     }
 }
 
-/// Run `run_zone` under a restart-on-panic supervisor (rework 10, finding 2).
-/// A panic unwinding out of `run_zone` drops everything it built — in
+/// Run `run_zone` under a restart-on-panic supervisor. A panic unwinding out
+/// of `run_zone` drops everything it built — in
 /// particular the App's `NetServer`, whose `Drop`
 /// (`engine-net/src/server.rs:240-253`) closes the QUIC endpoint and joins
 /// the network thread — so by the time `catch_unwind` returns it is safe to
@@ -146,8 +144,8 @@ fn next_strikes(prev: u32, ran_for: Duration) -> u32 {
 /// bounded by `MAX_ZONE_RESTARTS`; once that budget is spent, or `shutdown`
 /// is already set when a panic is caught, the original panic payload is
 /// re-raised via `resume_unwind` so `join_zone_threads` reports it exactly as
-/// an unsupervised panic would (finding 18) — a clean return from `run_zone`
-/// (e.g. a shutdown drain finishing) ends supervision with no restart.
+/// an unsupervised panic would — a clean return from `run_zone` (e.g. a
+/// shutdown drain finishing) ends supervision with no restart.
 pub fn supervise_zone(name: &str, shutdown: &AtomicBool, mut run_zone: impl FnMut()) {
     let mut strikes = 0u32;
     loop {
@@ -189,10 +187,10 @@ mod tests {
         assert_eq!(panic_message(&payload), "startup failed: bad zones.ron");
     }
 
-    /// Regression test for finding 18: a panicked zone thread must not
-    /// prevent `join_zone_threads` from joining (and thus not silently
-    /// dropping) the other zone threads behind it, and must not itself
-    /// propagate the panic and take the whole process down with it.
+    /// A panicked zone thread must not prevent `join_zone_threads` from
+    /// joining (and thus not silently dropping) the other zone threads
+    /// behind it, and must not itself propagate the panic and take the whole
+    /// process down with it.
     #[test]
     fn a_panicked_zone_does_not_stop_the_others_from_being_joined() {
         let joined = Arc::new(AtomicUsize::new(0));
@@ -213,10 +211,9 @@ mod tests {
         assert_eq!(joined.load(Ordering::SeqCst), 2, "both healthy zone threads must still be joined despite the panic in between");
     }
 
-    /// Regression test for rework 10, finding 2 (restart path): one panic
-    /// followed by a clean return must be fully absorbed by the supervisor —
-    /// it retries after the panic and returns normally once `run_zone`
-    /// succeeds, having called the closure exactly twice.
+    /// One panic followed by a clean return must be fully absorbed by the
+    /// supervisor — it retries after the panic and returns normally once
+    /// `run_zone` succeeds, having called the closure exactly twice.
     #[test]
     fn supervise_zone_restarts_after_one_panic_then_returns() {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -231,11 +228,11 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
-    /// Regression test for rework 10, finding 2 (budget path): a closure that
-    /// always panics must be retried exactly `MAX_ZONE_RESTARTS` times past
-    /// the first failure (`MAX_ZONE_RESTARTS + 1` total calls), then the
-    /// supervisor must re-raise the original payload so the thread dies
-    /// panicked with the same message a caller would see today.
+    /// A closure that always panics must be retried exactly
+    /// `MAX_ZONE_RESTARTS` times past the first failure (`MAX_ZONE_RESTARTS +
+    /// 1` total calls), then the supervisor must re-raise the original
+    /// payload so the thread dies panicked with the same message an
+    /// unsupervised caller would see.
     #[test]
     fn supervise_zone_gives_up_after_max_restarts_and_repanics_with_original_payload() {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -252,9 +249,8 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), (MAX_ZONE_RESTARTS + 1) as usize);
     }
 
-    /// Regression test for rework 10, finding 2 (shutdown-wins path): if the
-    /// shutdown flag is already set when the first panic is caught, the
-    /// supervisor must not restart at all — one call, immediate re-raise.
+    /// If the shutdown flag is already set when the first panic is caught,
+    /// the supervisor must not restart at all — one call, immediate re-raise.
     #[test]
     fn supervise_zone_does_not_restart_when_shutdown_flag_already_set() {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -271,9 +267,8 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
-    /// Regression test for rework 10, finding 2 (forgiveness path): a run
-    /// that survived `HEALTHY_UPTIME` resets the strike count to 1 for the
-    /// new panic; a fast failure just accumulates.
+    /// A run that survived `HEALTHY_UPTIME` resets the strike count to 1 for
+    /// the new panic; a fast failure just accumulates.
     #[test]
     fn next_strikes_resets_after_healthy_uptime_but_accumulates_otherwise() {
         assert_eq!(next_strikes(3, Duration::from_secs(61)), 1);

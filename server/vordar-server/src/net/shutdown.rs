@@ -9,19 +9,18 @@ use std::sync::Arc;
 use crate::db::CharacterRecord;
 use super::{cooldown_remainders, NetServerState};
 
-/// Process-wide shutdown signal (networking rework 8, finding 3): `main`
-/// shares one `Arc<AtomicBool>` with its OS signal handler and inserts a
-/// clone into every zone App. Absent from every existing test/bench, which is
-/// exactly how `ShutdownSystem` tells "no shutdown wired" apart from "not
-/// shutting down yet".
+/// Process-wide shutdown signal: `main` shares one `Arc<AtomicBool>` with its
+/// OS signal handler and inserts a clone into every zone App. Absent from
+/// every existing test/bench, which is exactly how `ShutdownSystem` tells
+/// "no shutdown wired" apart from "not shutting down yet".
 pub struct ShutdownFlag(pub Arc<AtomicBool>);
 
 /// On the shared flag: save every connected player's live state — the same
 /// save the disconnect path performs (`ServerEvent::Disconnected` above), just
 /// for everyone at once — and request the App's exit. Registered
 /// unconditionally by `install()`; a no-op wherever `ShutdownFlag` is absent
-/// or still false. No client notification here: `NetServer`'s Drop (finding
-/// 1) closes every connection with a reason when the App drops moments later.
+/// or still false. No client notification here: `NetServer`'s Drop closes
+/// every connection with a reason when the App drops moments later.
 pub(super) struct ShutdownSystem;
 
 impl System for ShutdownSystem {

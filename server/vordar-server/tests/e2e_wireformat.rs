@@ -8,15 +8,12 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use engine_net::Impairment;
 
-// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: every
-// wire entity id used to be raw hecs `Entity` bits (`entity.to_bits().get()`
-// at the server net module's Welcome/HitResult/EntityDied/snapshot-gather sites) —
-// always >= 2^32 because of the generation bits packed into the upper half,
-// hence a 5+ byte postcard varint on every single reference. A zone-local
-// `ReplIds` allocator now hands out small, monotonic `u32` ids instead. This
-// documents the compactness contract directly: against the pre-fix wire
-// format every one of these ids is in the billions and this test fails;
-// after the fix every id is small by construction.
+// Every wire entity id is a small, monotonic `u32` handed out by the
+// zone-local `ReplIds` allocator — never raw hecs `Entity` bits, which are
+// always >= 2^32 (the generation bits packed into the upper half) and would
+// cost a 5+ byte postcard varint on every single reference. This documents
+// the compactness contract directly: an id in the billions would fail this
+// test.
 #[test]
 fn replication_ids_are_compact() {
     workspace_root();
@@ -41,16 +38,11 @@ fn replication_ids_are_compact() {
     }
 }
 
-// Finding 3 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: hp used
-// to flatten to a plain `i32` with 0 doing double duty for "no Health
-// component" and "dead at 0 HP" (the server's old
-// `hp.map(|h| h.current).unwrap_or(0)`). A Health-less replicated entity (the
-// "bolt" prefab: Transform+Hitbox+PrefabId, no Health) must be indistinguishable
-// on the wire from *absent hp*, not from "hp is 0" — which the old i32 format
-// could not express. Against the pre-fix format this test fails: the bolt's
-// flattened hp of 0 lands in `last_hp` just like any other reading, so it is
-// NOT absent. After the fix, hp rides as `Option<i32>` and only `Some` readings
-// reach `last_hp`.
+// Hp rides as `Option<i32>`, so a Health-less replicated entity (the "bolt"
+// prefab: Transform+Hitbox+PrefabId, no Health) is indistinguishable on the
+// wire from *absent hp*, never from "hp is 0" — a plain `i32` with 0 doing
+// double duty for "no Health component" and "dead at 0 HP" could not express
+// that distinction, and only `Some` readings reach `last_hp`.
 #[test]
 fn hp_none_distinguishes_health_less_entities() {
     workspace_root();
@@ -89,15 +81,11 @@ fn hp_none_distinguishes_health_less_entities() {
     );
 }
 
-// Finding 4 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
-// `EntityState.prefab` used to repeat the full prefab name string on every
-// single AOI enter. A per-zone `ServerMsg::PrefabTable` is now sent once per
-// connection immediately after `Welcome`, and `EntityState.prefab` rides as a
-// `u16` index into it. This test references `Bot::prefab_names` directly — a
-// field that does not exist before this finding lands — so it fails to
-// compile against the pre-fix code rather than failing at runtime; once it
-// compiles, `Bot::pump`'s index resolution (which panics on an unresolvable
-// index) is the thing that would actually catch a broken wire-ordering
+// A per-zone `ServerMsg::PrefabTable` is sent once per connection immediately
+// after `Welcome`, and `EntityState.prefab` rides as a `u16` index into it
+// rather than repeating the full prefab name string on every single AOI
+// enter. `Bot::pump`'s index resolution panics on an unresolvable index, so
+// it is the thing that would actually catch a broken wire-ordering
 // regression.
 #[test]
 fn prefab_table_binds_u16_refs() {
@@ -130,17 +118,14 @@ fn prefab_table_binds_u16_refs() {
     );
 }
 
-// Finding 5 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md: a
-// permanent size gate on steady-state snapshot frames. Findings 1-4 compacted
-// wire entity ids (u32, not raw hecs bits), quantized positions (WirePos),
-// made hp an explicit Option (no more 0-as-"no Health"), and replaced a
-// repeated prefab name string with a u16 table index — together meant to
-// bring a full 64-entry `states` frame (the server's MAX_SNAPSHOT_STATES)
-// comfortably under the ~1.2 KB QUIC datagram budget that rework 3
-// (snapshots on datagrams) is physically blocked on today. Against the
-// pre-rework wire format this exact scenario (a 100-entity crowd, steady
-// state, the full 64-entry states budget) measures ~1.25 KB+ per frame and
-// this test fails; it passes only because findings 1-4 landed first.
+// A permanent size gate on steady-state snapshot frames. Compact wire entity
+// ids (u32, not raw hecs bits), quantized positions (WirePos), an explicit hp
+// `Option` (no 0-as-"no Health"), and a u16 prefab table index (no repeated
+// name string) together bring a full 64-entry `states` frame (the server's
+// MAX_SNAPSHOT_STATES) comfortably under the ~1.2 KB QUIC datagram budget
+// snapshots-on-datagrams needs — a bulkier wire format would blow this
+// budget on exactly this scenario (a 100-entity crowd, steady state, the
+// full 64-entry states budget).
 #[test]
 fn crowd_snapshot_fits_datagram_budget() {
     workspace_root();
@@ -172,9 +157,9 @@ fn crowd_snapshot_fits_datagram_budget() {
 
     // Let the initial `enters` wave (all 101 identities) finish landing
     // before measuring — a first-join identity wave rides `AoiDelta` on the
-    // reliable stream (protocol v14, networking rework 3 finding 4), entirely
-    // separate from the `Snapshot` datagram this gate measures, but settling
-    // first still avoids racing the AOI-entry seeding against steady state.
+    // reliable stream, entirely separate from the `Snapshot` datagram this
+    // gate measures, but settling first still avoids racing the AOI-entry
+    // seeding against steady state.
     settle(&mut bot, Duration::from_secs(1));
     bot.snapshot_bytes.clear();
     settle(&mut bot, Duration::from_secs(1)); // ~10 snapshots at SNAPSHOT_HZ
@@ -185,11 +170,11 @@ fn crowd_snapshot_fits_datagram_budget() {
         64,
         "the worst case (full states budget) must still be in effect when measured"
     );
-    // Since rework 3 finding 4, `snapshot_bytes` measures only the datagram
+    // `snapshot_bytes` measures only the datagram
     // `Snapshot { tick, last_processed_seq, states }` payload — identity
-    // (enters/leaves) moved to the separate stream-only `AoiDelta` message, so
-    // this 1100-byte gate is now literally the datagram-budget measurement
-    // rework 3 needed, not an approximation of it.
+    // (enters/leaves) rides the separate stream-only `AoiDelta` message, so
+    // this 1100-byte gate is literally the datagram-budget measurement, not
+    // an approximation of it.
     let max = *bot.snapshot_bytes.iter().max().unwrap();
     assert!(
         max <= 1100,
@@ -197,11 +182,10 @@ fn crowd_snapshot_fits_datagram_budget() {
     );
 }
 
-// Finding 5 of docs/reviews/networking/plan-networking-rework-3-2026-07-13.md:
-// `ClientMsg::MoveIntent` was replaced by `ClientMsg::MoveIntents`, a batch
-// of up to 3 entries (this tick's plus the two previous) sent via datagram
-// every Input tick — a lost datagram is fully recovered by the next tick's
-// overlapping batch. This proves the recovery end-to-end under upstream
+// `ClientMsg::MoveIntents` sends a batch of up to 3 entries (this tick's
+// plus the two previous) via datagram every Input tick — a lost datagram is
+// fully recovered by the next tick's overlapping batch. This proves the
+// recovery end-to-end under upstream
 // loss: a bot walking +X at realistic WAN RTT (40 ms) with heavy upstream
 // loss (30%) must still replicate most of the displacement an unimpaired
 // control bot covers over the identical send cadence and window. Without

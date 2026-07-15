@@ -1,10 +1,9 @@
-// Finding 3 of docs/reviews/networking/plan-networking-rework-8-2026-07-12.md: killing
-// the process today loses up to a full autosave window (~30 s) of every
-// online player's state — there is no code path that saves *all* connected
-// players and stops the sim loop. The fix: a shared `ShutdownFlag` resource,
-// observed each tick by `ShutdownSystem`, saves every connected player and
-// sets `AppExit` within the same tick `run_headless` checks it, so the loop
-// returns with the final saves already queued in the `DbWorker`.
+// Killing the process without a graceful shutdown path would lose up to a
+// full autosave window (~30 s) of every online player's state. A shared
+// `ShutdownFlag` resource, observed each tick by `ShutdownSystem`, saves
+// every connected player and sets `AppExit` within the same tick
+// `run_headless` checks it, so the loop returns with the final saves already
+// queued in the `DbWorker`.
 
 use test_support::{join_with_deadline, settle, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
 use std::net::SocketAddr;
@@ -56,9 +55,8 @@ fn shutdown_flag_saves_all_players_and_returns_from_run_headless() {
     // returns and this would hang forever.
     join_with_deadline(server_thread, Duration::from_secs(10), "server thread");
 
-    // The client must observe the connection close (NetServer's Drop, wired
-    // by finding 1, fires when the App drops moments after run_headless
-    // returns).
+    // The client must observe the connection close (NetServer's Drop fires
+    // when the App drops moments after run_headless returns).
     bot.wait_for("disconnected", Duration::from_secs(5), |b| b.disconnected);
 
     // The final save must have landed — proving ShutdownSystem's save, not a
@@ -76,14 +74,10 @@ fn shutdown_flag_saves_all_players_and_returns_from_run_headless() {
     );
 }
 
-// Finding 4: nothing wires main's OS signal to the per-zone ShutdownFlag
-// across a REAL multi-zone topology, and tests/zones.rs's own harness leaks
-// its DbWorker (`std::mem::forget`) precisely because zone threads have had
-// no way to be told to stop. This test builds the exact topology `main` runs
-// (two zones, one shared DbWorker, one shared world-time origin) but keeps
-// the zone JoinHandles and wires one shared ShutdownFlag into both apps —
-// the harness this test builds IS the wiring `main` needs, minus the OS
-// signal itself.
+// This test builds the exact topology `main` runs (two zones, one shared
+// DbWorker, one shared world-time origin) but keeps the zone JoinHandles and
+// wires one shared ShutdownFlag into both apps, so a REAL multi-zone
+// shutdown can be proven end to end without relying on OS signals.
 #[test]
 fn shared_flag_drains_both_zones_and_worker_drop_returns() {
     workspace_root();
@@ -148,10 +142,10 @@ fn shared_flag_drains_both_zones_and_worker_drop_returns() {
     }
 
     // No mem::forget (unlike tests/zones.rs's harness, which leaks the
-    // worker precisely because zone threads previously had no way to stop):
-    // every zone App has now dropped, taking its DbHandle down with it, so
-    // the request channel is genuinely closed and this Drop must return
-    // instead of hanging.
+    // worker since its zone threads have no way to be told to stop): every
+    // zone App has now dropped, taking its DbHandle down with it, so the
+    // request channel is genuinely closed and this Drop must return instead
+    // of hanging.
     drop(worker);
 
     let conn = rusqlite::Connection::open(&db).unwrap();

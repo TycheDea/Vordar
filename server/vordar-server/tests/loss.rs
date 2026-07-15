@@ -85,11 +85,9 @@ fn loss_probe_inter_snapshot_gaps() {
                 p99,
                 gaps.last().unwrap(),
             );
-            // Decision gate for the datagram snapshot path (rework 3): a lost
-            // datagram is skipped, not retransmitted, so gaps should bound to
-            // cadence multiples regardless of RTT — unlike the pre-datagram
-            // stream baseline (BASELINE.md), which stayed under the gate only
-            // by margin at 200 ms RTT.
+            // Decision gate for the datagram snapshot path: a lost datagram
+            // is skipped, not retransmitted, so gaps should bound to cadence
+            // multiples regardless of RTT.
             assert!(
                 p99 <= 250.0,
                 "rtt={}ms loss={loss} p99 gap {p99:.0}ms exceeds the 250ms datagram-era gate",
@@ -99,29 +97,22 @@ fn loss_probe_inter_snapshot_gaps() {
     }
 }
 
-/// Upstream (client→server) counterpart of the probe above. MoveIntents now
-/// ride an unreliable QUIC datagram with last-3 redundancy (protocol v15,
-/// networking rework 3 finding 5) — CastIntent and Login stay on the
-/// reliable stream. This probe sends a steady stream of MoveIntents and
-/// measures how far the server's applied-intent ack
+/// Upstream (client→server) counterpart of the probe above. MoveIntents ride
+/// an unreliable QUIC datagram with last-3 redundancy — CastIntent and Login
+/// stay on the reliable stream. This probe sends a steady stream of
+/// MoveIntents and measures how far the server's applied-intent ack
 /// (`Snapshot::last_processed_seq`, mirrored client-side as `Bot::last_ack`)
 /// falls behind the bot's own send counter (`Bot::seq`) — redundancy's
 /// resilience under upstream loss made observable purely through the real
 /// protocol, no server-internal hook required.
 ///
-/// Pre-redundancy calibration run (see git history of this comment, captured
-/// by this plan's finding 1 before finding 5 landed, when MoveIntent was a
-/// single per-tick message on the one reliable stream) measured p50/p99/max
-/// lag of roughly 6/9/10 ticks at realistic WAN loss (0-5%) versus 8/13/15 at
-/// 30% and 17/27/29 at 60%: the stream stalled visibly under sustained heavy
-/// loss. Post-redundancy, the same `EXTREME_LOSS` rate measures only ~15
-/// ticks max (vs a ~9-tick 0%-loss baseline) at 50 ms RTT — last-3 redundancy
-/// absorbs all but the rarest 3-in-a-row datagram loss, so lag stays close to
-/// baseline instead of compounding into a growing backlog. `EXTREME_LOSS`
-/// still proves the impairment mechanism reaches the transport (lag must
-/// move at all) while also proving redundancy bounds the damage (lag must
-/// not blow up the way the pre-redundancy stream did); 0/1/3/5% are printed
-/// for realistic-WAN reference, same as the downstream probe above.
+/// At `EXTREME_LOSS`, last-3 redundancy must absorb all but the rarest
+/// 3-in-a-row datagram loss: lag should stay a bounded multiple of the
+/// 0%-loss baseline instead of compounding into a growing backlog, proving
+/// both that the impairment mechanism reaches the transport (lag must move
+/// at all) and that redundancy bounds the damage (lag must not blow up
+/// unboundedly). 0/1/3/5% are printed for realistic-WAN reference, same as
+/// the downstream probe above.
 const UPSTREAM_WINDOW: Duration = Duration::from_secs(8);
 /// Below the server's 60 Hz per-tick intent-apply rate, so at 0% loss the
 /// applied ack tracks the send counter almost exactly — any lag beyond that

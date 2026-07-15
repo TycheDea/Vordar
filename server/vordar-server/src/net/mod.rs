@@ -56,9 +56,9 @@ const AOI_RADIUS: f32 = 40.0;
 /// (~530 ms at 60 Hz — covers MAX_REWIND plus resolve-tick slack).
 const HISTORY_CAP: usize = 32;
 /// PostUpdate runs at the sim rate; the 10 Hz systems below self-gate on it.
-/// Defined from `vordar_protocol::TICK_HZ` (networking rework 4, finding 1):
-/// the client's playback cursor treats that constant as the rate ticks
-/// advance at, so the two must never drift apart.
+/// Defined from `vordar_protocol::TICK_HZ`: the client's playback cursor
+/// treats that constant as the rate ticks advance at, so the two must never
+/// drift apart.
 const POST_HZ: f32 = TICK_HZ;
 /// Snapshot stagger: each connection is served every STAGGER-th PostUpdate
 /// run (still SNAPSHOT_HZ per client) — the fan-out cost splits into STAGGER
@@ -69,10 +69,9 @@ pub struct NetServerPlugin {
     pub addr: SocketAddr,
     /// SQLite path for character persistence (`:memory:` for throwaway).
     pub db_path: String,
-    /// Bind-time connection-cap configuration (networking audit 2026-07-11,
-    /// finding 20). `NetLimits::default()` for production; a soak harness
-    /// modeling many distinct clients from one source IP raises
-    /// `max_connections_per_ip` here instead.
+    /// Bind-time connection-cap configuration: `NetLimits::default()` for
+    /// production; a soak harness modeling many distinct clients from one
+    /// source IP raises `max_connections_per_ip` here instead.
     pub limits: NetLimits,
 }
 
@@ -111,8 +110,7 @@ pub fn install(
         .set_phase_rate(Phase::PostUpdate, TickRate::Fixed(POST_HZ))
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         // Unconditional: no-ops wherever `ShutdownFlag` is absent (every
-        // existing test/bench) or the flag hasn't been flipped (networking
-        // rework 8, finding 3).
+        // existing test/bench) or the flag hasn't been flipped.
         .add_system(ShutdownSystem, Phase::Input, SystemOrder::Default)
         // Deaths broadcast before the flush removes the dying entity.
         .add_system(DeathBroadcastSystem, Phase::DespawnFlush, SystemOrder::First)
@@ -132,10 +130,10 @@ struct PlayerConn {
     entity: Entity,
     /// Character name — the persistence key.
     name: String,
-    /// The account token this session logged in with (networking rework 1
-    /// finding 3): compared synchronously against a same-name login's
-    /// presented token to gate session takeover — a mismatch denies the new
-    /// connection without touching this one, no DB roundtrip needed.
+    /// The account token this session logged in with: compared synchronously
+    /// against a same-name login's presented token to gate session takeover —
+    /// a mismatch denies the new connection without touching this one, no DB
+    /// roundtrip needed.
     token: AccountToken,
     /// Validated intents as (seq, client stamp, dir) in arrival order, applied
     /// ONE PER TICK. The client emits exactly one intent per fixed Input tick,
@@ -187,25 +185,24 @@ pub struct NetServerState {
     /// token). The token rides along so a later same-name login (takeover or
     /// stale-loading eviction) can be gated on a match before the in-flight
     /// load is disturbed, and so a granted load can seed the new
-    /// `PlayerConn.token` without re-reading the wire (networking rework 1
-    /// finding 3). Spawn + Welcome happen when the DbLoaded result arrives.
+    /// `PlayerConn.token` without re-reading the wire. Spawn + Welcome happen
+    /// when the DbLoaded result arrives.
     loading: HashMap<ConnId, (String, AccountToken)>,
-    /// Failed-login attempts per source IP (networking rework 1, finding 4) —
-    /// gates further Login attempts from an over-budget IP with `RateLimited`
-    /// before any credential check runs.
+    /// Failed-login attempts per source IP — gates further Login attempts
+    /// from an over-budget IP with `RateLimited` before any credential check
+    /// runs.
     login_failures: LoginFailures,
     tick: u64,
     next_mechanic_id: u64,
-    /// Zone-local wire id allocator (protocol v10, networking rework 5
-    /// finding 1) — see `ReplIds`.
+    /// Zone-local wire id allocator — see `ReplIds`.
     repl_ids: ReplIds,
-    /// This zone's prefab name table (protocol v13, networking rework 5
-    /// finding 4): `None` until the first login grant builds it from the
-    /// zone's fully-populated `PrefabLibrary` (sorted names, deterministic —
-    /// every chapter's prefab dir has loaded by App-build time). `Arc` makes
-    /// resending it to every new connection a cheap clone instead of a fresh
-    /// sort/alloc; the `HashMap` is the reverse index used to encode
-    /// `EntityState::prefab` at snapshot-gather time.
+    /// This zone's prefab name table: `None` until the first login grant
+    /// builds it from the zone's fully-populated `PrefabLibrary` (sorted
+    /// names, deterministic — every chapter's prefab dir has loaded by
+    /// App-build time). `Arc` makes resending it to every new connection a
+    /// cheap clone instead of a fresh sort/alloc; the `HashMap` is the
+    /// reverse index used to encode `EntityState::prefab` at snapshot-gather
+    /// time.
     prefab_table: Option<(Arc<Vec<String>>, HashMap<String, u16>)>,
 }
 
@@ -240,9 +237,8 @@ impl NetServerState {
         self.server.local_addr()
     }
 
-    /// Network-layer counters, including the busy-time proxy (networking
-    /// audit 2026-07-11, finding 14 step 1) — exposed so the soak harness can
-    /// sample the network thread's saturation directly.
+    /// Network-layer counters, including the busy-time proxy — exposed so
+    /// the soak harness can sample the network thread's saturation directly.
     pub fn metrics(&self) -> Arc<NetMetrics> {
         self.server.metrics()
     }
@@ -276,17 +272,16 @@ fn cooldown_remainders(ready: &HashMap<String, u64>, now: u64) -> HashMap<String
 }
 
 /// Connections whose player is within AOI range of `center` — the interest-
-/// management filter for the mechanic sends below (Finding 5 of
-/// docs/reviews/networking/audit-networking-2026-07-11.md: `state.server.broadcast` used
-/// to fan MechanicScheduled/HitResult out to EVERY connection, including
-/// pre-login ones, which both wasted O(players × casts) bandwidth and gave a
-/// cheating client a zone-wide radar off telegraph positions). Uses the same
-/// `AOI_RADIUS` as snapshot replication so a telegraph/hit result reaches
-/// exactly the clients who could plausibly see it. A client that walks into
-/// range only after the message already went out simply misses that one
-/// telegraph/hit notification: telegraphs last seconds and `HitResult` still
-/// resolves hits correctly regardless of who was told about the schedule, so
-/// the miss is cosmetic — accepted rather than adding re-send bookkeeping.
+/// management filter for the mechanic sends below, so a cheating client
+/// cannot get a zone-wide radar off telegraph positions and aggregate
+/// mechanic traffic never scales past every connection regardless of
+/// distance. Uses the same `AOI_RADIUS` as snapshot replication so a
+/// telegraph/hit result reaches exactly the clients who could plausibly see
+/// it. A client that walks into range only after the message already went
+/// out simply misses that one telegraph/hit notification: telegraphs last
+/// seconds and `HitResult` still resolves hits correctly regardless of who
+/// was told about the schedule, so the miss is cosmetic — accepted rather
+/// than adding re-send bookkeeping.
 fn aoi_conns(conns: &HashMap<ConnId, PlayerConn>, world: &World, center: Vec3) -> Vec<ConnId> {
     conns
         .iter()
@@ -303,7 +298,6 @@ fn aoi_conns(conns: &HashMap<ConnId, PlayerConn>, world: &World, center: Vec3) -
 mod tests {
     use super::*;
 
-    /// Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
     /// `cooldown_remainders` is the pure conversion from absolute `ready_at`
     /// stamps to save-time remainders — it must subtract correctly for a
     /// skill still cooling down, and drop (not zero-fill) any entry whose

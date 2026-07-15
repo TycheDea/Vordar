@@ -1,20 +1,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 
-/// Failure window for the per-IP login rate limiter (networking rework 1,
-/// finding 4): failure timestamps older than this are pruned before every
-/// check.
+/// Failure window for the per-IP login rate limiter: failure timestamps
+/// older than this are pruned before every check.
 const LOGIN_FAIL_WINDOW_MICROS: u64 = 10_000_000;
 /// Failures within the window before further logins from that IP are denied
 /// `RateLimited`.
 const MAX_LOGIN_FAILURES: usize = 5;
 
-/// Failed-login ledger, per source IP (networking rework 1, finding 4):
-/// bounds credential brute-force / name-probing without touching successful
-/// logins — every multi-bot test, the 200-bot soak, and the dev single-player
-/// pack log in from 127.0.0.1, so a limit on SUCCESSFUL logins would need
-/// config plumbing through every server constructor just to keep the
-/// workspace green. Only failures count.
+/// Failed-login ledger, per source IP: bounds credential brute-force /
+/// name-probing without touching successful logins — every multi-bot test,
+/// the 200-bot soak, and the dev single-player pack log in from 127.0.0.1, so
+/// a limit on SUCCESSFUL logins would need config plumbing through every
+/// server constructor just to keep the workspace green. Only failures count.
 pub(super) struct LoginFailures {
     pub(super) by_ip: HashMap<IpAddr, VecDeque<u64>>,
 }

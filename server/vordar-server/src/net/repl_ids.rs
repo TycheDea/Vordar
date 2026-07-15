@@ -2,8 +2,7 @@ use engine_core::World;
 use hecs::Entity;
 use std::collections::HashMap;
 
-/// Stable wire-id allocator for entities replicated to clients (Finding 1 of
-/// docs/reviews/networking/plan-networking-rework-5-2026-07-13.md): players,
+/// Stable wire-id allocator for entities replicated to clients: players,
 /// enemies, bolts, and hazards each get a unique, monotonically increasing u32
 /// on their first snapshot. Ids are NOT reused when an entity despawns — the
 /// wire-side assumption is that an id uniquely identifies a GENERATION of an
@@ -48,10 +47,9 @@ impl ReplIds {
 mod tests {
     use super::*;
 
-    /// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
     /// `ReplIds` must hand back the SAME id on every subsequent lookup of an
     /// entity, and assign distinct, monotonically increasing ids to distinct
-    /// entities — the wire-compactness contract the whole finding rests on.
+    /// entities — the wire-compactness contract replication depends on.
     #[test]
     fn repl_ids_assign_stable_monotonic_ids() {
         let mut world = World::new();
@@ -68,7 +66,6 @@ mod tests {
         assert!(id2 > id1_first, "ids are assigned monotonically as entities are first referenced");
     }
 
-    /// Finding 1 of docs/reviews/networking/plan-networking-rework-5-2026-07-13.md:
     /// `sweep` must drop a despawned entity's mapping, and a fresh entity
     /// (even one that reuses the despawned entity's hecs slot at a new
     /// generation) must get a BRAND NEW id — never the stale one — so a

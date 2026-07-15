@@ -27,20 +27,18 @@ pub const SNAPSHOT_HZ: f32 = 10.0;
 /// Rate at which `AoiDelta.tick` / `Snapshot.tick` advance — both are stamped
 /// from the server's `NetServerState.tick`, a PostUpdate counter incremented
 /// once per fixed sim tick. The client needs this to convert a tick delta
-/// into wall-clock time for its playback cursor (networking rework 4,
-/// finding 1).
+/// into wall-clock time for its playback cursor.
 pub const TICK_HZ: f32 = 60.0;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMsg {
     /// This tick's movement intent plus up to the two previous (ascending
-    /// `seq`), sent via an unreliable QUIC datagram every Input tick
-    /// (protocol v15, networking rework 3 finding 5) — last-3 redundancy
-    /// means a single lost datagram costs nothing, since the next tick's
-    /// batch re-carries it. The server applies entries in order, skipping
-    /// any whose `seq` it has already seen (expected redundancy, not a
-    /// violation) and running full validation only on entries that advance
-    /// `PlayerConn::last_seq`.
+    /// `seq`), sent via an unreliable QUIC datagram every Input tick —
+    /// last-3 redundancy means a single lost datagram costs nothing, since
+    /// the next tick's batch re-carries it. The server applies entries in
+    /// order, skipping any whose `seq` it has already seen (expected
+    /// redundancy, not a violation) and running full validation only on
+    /// entries that advance `PlayerConn::last_seq`.
     MoveIntents { intents: Vec<MoveIntentEntry> },
     /// Cast skill `skill` at world-XZ `target`. Shares the seq/timestamp
     /// validation with `MoveIntents`' entries; bypasses the movement
@@ -49,18 +47,17 @@ pub enum ClientMsg {
     /// unlike movement it cannot tolerate loss/replay.
     CastIntent { seq: u32, t_server_micros: u64, skill: String, target: Vec2 },
     /// First message after connect: which character this connection plays,
-    /// and the account credential proving it (networking rework 1 finding
-    /// 3). `token` is verified server-side against `sha256(token)` stored in
-    /// the `accounts` table — trust-on-first-use, so a fresh name claims
-    /// itself on first login. The server gates spawn + Welcome on this.
+    /// and the account credential proving it. `token` is verified
+    /// server-side against `sha256(token)` stored in the `accounts` table —
+    /// trust-on-first-use, so a fresh name claims itself on first login. The
+    /// server gates spawn + Welcome on this.
     Login { name: String, token: AccountToken }, // name validated ≤ 32 printable ASCII
 }
 
-/// One movement intent inside a `ClientMsg::MoveIntents` batch (protocol v15,
-/// networking rework 3 finding 5). Desired movement direction (≤ unit
-/// length, world XZ plane); `seq` increases monotonically and
-/// `t_server_micros` is the synced-clock stamp — both are validated
-/// server-side (anti-cheat caps, DESIGN.md §3) on whichever entry in the
+/// One movement intent inside a `ClientMsg::MoveIntents` batch. Desired
+/// movement direction (≤ unit length, world XZ plane); `seq` increases
+/// monotonically and `t_server_micros` is the synced-clock stamp — both are
+/// validated server-side (anti-cheat caps, DESIGN.md §3) on whichever entry in the
 /// batch first advances the connection's `last_seq`.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MoveIntentEntry {
@@ -72,14 +69,12 @@ pub struct MoveIntentEntry {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerMsg {
     /// Sent once after connect: which replicated entity is yours. `player_id`
-    /// is a zone-local wire id (protocol v10, networking rework 5 finding 1) —
-    /// small and monotonic, not raw hecs `Entity` bits.
+    /// is a zone-local wire id — small and monotonic, not raw hecs `Entity` bits.
     Welcome { player_id: u32 },
     /// This zone's prefab name table, sent once per connection immediately
     /// after the initial `Welcome` on the same ordered stream — NOT resent on
-    /// the respawn re-Welcome, the connection keeps its table (protocol v13,
-    /// networking rework 5 finding 4). Index into `names` is the `u16`
-    /// `EntityState::prefab` rides on the wire; stream ordering guarantees
+    /// the respawn re-Welcome, the connection keeps its table. Index into
+    /// `names` is the `u16` `EntityState::prefab` rides on the wire; stream ordering guarantees
     /// this arrives before the first `Snapshot`'s `enters`. Built once per
     /// zone from the fully-populated `PrefabLibrary` (sorted names,
     /// deterministic) — the client installs every chapter's content while a
@@ -89,10 +84,10 @@ pub enum ServerMsg {
     /// Per-client area-of-interest identity delta: entities entering or
     /// leaving your AOI this tick. Entity identity (prefab) is sent once on
     /// AOI entry; afterward only positions flow via `Snapshot`. Rides the
-    /// reliable stream (protocol v14, networking rework 3 finding 4) —
-    /// ordering with `PrefabTable`/`Welcome` is what makes the enter/leave
-    /// diff protocol sound — and is sent only when `enters`/`leaves` is
-    /// non-empty, so steady state sends no stream traffic at all.
+    /// reliable stream — ordering with `PrefabTable`/`Welcome` is what makes
+    /// the enter/leave diff protocol sound — and is sent only when
+    /// `enters`/`leaves` is non-empty, so steady state sends no stream
+    /// traffic at all.
     AoiDelta {
         tick: u64,
         /// Entities that entered your AOI (or spawned inside it) — spawn these.
@@ -102,9 +97,8 @@ pub enum ServerMsg {
     },
     /// Per-client state update: current position (+hp) of every entity in
     /// your AOI, plus the intent ack. Rides an unreliable QUIC datagram every
-    /// snapshot interval (protocol v14, networking rework 3 finding 4) — a
-    /// lost datagram is simply skipped, because the next cadence supersedes
-    /// it. `last_processed_seq` is the highest intent seq the server had
+    /// snapshot interval — a lost datagram is simply skipped, because the
+    /// next cadence supersedes it. `last_processed_seq` is the highest intent seq the server had
     /// applied when the snapshot was taken: the client drops acknowledged
     /// pending intents and replays the rest on top of its own position
     /// (prediction reconciliation). Datagrams can arrive out of order, so a
@@ -122,8 +116,8 @@ pub enum ServerMsg {
     /// resolving at absolute server time `resolve_at_micros`. Sent IDENTICALLY
     /// to every AOI-scoped recipient — countdowns anchor to the synced clock,
     /// so receive time never matters. T = telegraph visual completion. Sent
-    /// only to connections within AOI range of `pos` (Finding 5: this used to
-    /// broadcast zone-wide, leaking telegraph positions to distant clients).
+    /// only to connections within AOI range of `pos`, so a distant client
+    /// never gets a radar off telegraph positions it cannot see.
     MechanicScheduled {
         id: u64,
         telegraph_prefab: String,
@@ -134,8 +128,8 @@ pub enum ServerMsg {
     },
     /// Outcome of a resolved mechanic: which entities were inside at T. Sent
     /// only to connections within AOI range of the mechanic's position.
-    /// `hits` are zone-local wire ids (protocol v10); `mechanic` is a
-    /// separate id space (server's `next_mechanic_id`), unaffected.
+    /// `hits` are zone-local wire ids; `mechanic` is a separate id space
+    /// (server's `next_mechanic_id`), unaffected.
     HitResult { mechanic: u64, hits: Vec<u32> },
     /// World-clock sample: world time `world_micros` corresponded to server
     /// time `at_server_micros`. Combined with clock sync, clients evaluate
@@ -149,17 +143,16 @@ pub enum ServerMsg {
     /// logging into a zone that doesn't own the character. The CLIENT closes
     /// the old connection — a server-side kick could outrace this frame.
     Redirect { zone: String, addr: std::net::SocketAddr },
-    /// An entity in your AOI died at `pos` (v8). Snapshots stop mentioning it
+    /// An entity in your AOI died at `pos`. Snapshots stop mentioning it
     /// the same tick, so this is the client's only death signal — it drives
     /// the cosmetic corpse + death burst. Sent only to clients whose known
-    /// set contains the entity. `id` is a zone-local wire id (protocol v10).
+    /// set contains the entity. `id` is a zone-local wire id.
     EntityDied { id: u32, pos: Vec3 },
-    /// The presented `Login` was rejected (v9, networking rework 1 finding
-    /// 3): invalid/mismatched token (`BadCredentials`), or — once finding 4
-    /// wires it — too many recent failures from this IP (`RateLimited`,
-    /// declared now so the wire never bumps twice). The server leaves the
-    /// connection open; the CLIENT closes it, same as `Redirect` and the
-    /// Phase-6 takeover — a server-side kick could outrace this frame.
+    /// The presented `Login` was rejected: invalid/mismatched token
+    /// (`BadCredentials`), or too many recent failures from this IP
+    /// (`RateLimited`). The server leaves the connection open; the CLIENT
+    /// closes it, same as `Redirect` and a session takeover — a server-side
+    /// kick could outrace this frame.
     LoginDenied { reason: LoginDenyReason },
 }
 
@@ -169,39 +162,36 @@ pub enum LoginDenyReason {
     /// the one presented (trust-on-first-use: a fresh name always claims and
     /// grants — this is only a mismatch against an existing claim).
     BadCredentials,
-    /// This source IP has too many recent failed logins (finding 4).
+    /// This source IP has too many recent failed logins.
     RateLimited,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntityState {
-    /// Zone-local wire id (protocol v10, networking rework 5 finding 1):
-    /// small and monotonic, assigned by the server's `ReplIds` allocator on
-    /// first reference — never raw hecs `Entity` bits. Stable for the
-    /// entity's lifetime, never reused.
+    /// Zone-local wire id: small and monotonic, assigned by the server's
+    /// `ReplIds` allocator on first reference — never raw hecs `Entity`
+    /// bits. Stable for the entity's lifetime, never reused.
     pub id: u32,
-    /// Index into the zone's prefab name table (`ServerMsg::PrefabTable`,
-    /// protocol v13, networking rework 5 finding 4) — resolve client-side to
-    /// the prefab name to spawn. Replaces a repeated full prefab name string
-    /// on every AOI enter.
+    /// Index into the zone's prefab name table (`ServerMsg::PrefabTable`) —
+    /// resolve client-side to the prefab name to spawn. Replaces a repeated
+    /// full prefab name string on every AOI enter.
     pub prefab: u16,
-    /// Quantized position (protocol v11) — see `WirePos`.
+    /// Quantized position — see `WirePos`.
     pub pos: WirePos,
-    /// Current health (v8) — cosmetic on the client (hit reacts, health bars).
-    /// `None` means the entity has no `Health` component (protocol v12); a
-    /// present reading may still be `Some(v)` with `v <= 0` momentarily
-    /// (dying this tick) — `None` never conflates with "dead".
+    /// Current health — cosmetic on the client (hit reacts, health bars).
+    /// `None` means the entity has no `Health` component; a present reading
+    /// may still be `Some(v)` with `v <= 0` momentarily (dying this tick) —
+    /// `None` never conflates with "dead".
     pub hp: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntityPos {
-    /// Zone-local wire id (protocol v10) — see `EntityState::id`.
+    /// Zone-local wire id — see `EntityState::id`.
     pub id: u32,
-    /// Quantized position (protocol v11) — see `WirePos`.
+    /// Quantized position — see `WirePos`.
     pub pos: WirePos,
-    /// Current health (v8); `None` = no `Health` component (protocol v12) —
-    /// see `EntityState::hp`.
+    /// Current health; `None` = no `Health` component — see `EntityState::hp`.
     pub hp: Option<i32>,
 }
 
@@ -215,7 +205,7 @@ pub const POS_UNITS_PER_METER: f32 = 256.0;
 
 /// A snapshot position, quantized to `1 / POS_UNITS_PER_METER` on the wire.
 /// Rust-side code stays entirely in `Vec3` — the precision loss happens once,
-/// at encode (protocol v11, networking rework 5 finding 2).
+/// at encode.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WirePos(pub Vec3);
 
@@ -261,8 +251,7 @@ mod tests {
 
     #[test]
     fn client_msg_roundtrip() {
-        // Protocol v15, networking rework 3 finding 5: MoveIntent was
-        // replaced by a batch of up to 3 entries (last-3 redundancy).
+        // A batch of up to 3 entries (last-3 redundancy).
         let msg = ClientMsg::MoveIntents {
             intents: vec![
                 MoveIntentEntry { seq: 5, t_server_micros: 100_000, dir: Vec2::new(1.0, 0.0) },
@@ -351,8 +340,7 @@ mod tests {
 
     #[test]
     fn aoi_delta_roundtrip() {
-        // Protocol v14, networking rework 3 finding 4: the identity delta
-        // split off Snapshot onto its own stream-only message.
+        // The identity delta is a separate stream-only message from Snapshot.
         let msg = ServerMsg::AoiDelta {
             tick: 42,
             enters: vec![
@@ -424,8 +412,7 @@ mod tests {
         // Awkward coordinates (negative, fractional) through the real
         // encode/decode path: quantization error must stay within half a
         // 1/256 m quantum (plus float slop) per axis. Covers both messages
-        // WirePos rides on (protocol v14 split): AoiDelta's enters and
-        // Snapshot's states.
+        // WirePos rides on: AoiDelta's enters and Snapshot's states.
         let awkward = Vec3::new(-37.123, 0.0, 81.987);
         let tol = 1.0 / 512.0 + 1e-4;
 

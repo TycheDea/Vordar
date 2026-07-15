@@ -76,8 +76,7 @@ impl System for SnapshotBroadcastSystem {
                 let world_micros = state.world_at(at_server_micros);
                 state.server.broadcast(encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
 
-                // Periodic net metrics dump — the operational visibility the
-                // dead NetMetrics facade claimed but never provided.
+                // Periodic net metrics dump for operational visibility.
                 let m = state.server.metrics();
                 log::info!(
                     "net metrics: frames_in={} frames_out={} bytes_in={} bytes_out={} rejects={} writer_queue_depth={} busy_micros={}",
@@ -128,9 +127,8 @@ impl System for SnapshotBroadcastSystem {
                     if dist_sq > AOI_RADIUS * AOI_RADIUS {
                         continue;
                     }
-                    // None = no Health component (protocol v12) — never
-                    // flattened to 0, which used to conflate "no Health" with
-                    // "dead".
+                    // None = no Health component — never flattened to 0,
+                    // which would conflate "no Health" with "dead".
                     let hp = hp.map(|h| h.current);
                     current.push((entity, t.position, hp, dist_sq));
                 }
@@ -164,8 +162,7 @@ impl System for SnapshotBroadcastSystem {
                     let prefab_name = world.get::<&PrefabId>(entity).ok()?.0.clone();
                     // A miss is unreachable in practice — spawn_prefab always
                     // attaches PrefabId from the same PrefabLibrary the table
-                    // was built from (protocol v13, networking rework 5
-                    // finding 4) — but skip rather than crash the whole
+                    // was built from — but skip rather than crash the whole
                     // snapshot over a content-bug edge case.
                     let prefab = match by_name.and_then(|m| m.get(&prefab_name)) {
                         Some(&idx) => idx,
@@ -195,14 +192,14 @@ impl System for SnapshotBroadcastSystem {
             // Identity delta rides the reliable stream (ordering with
             // PrefabTable/Welcome is what makes the diff protocol sound) and
             // only when non-empty — steady state then sends no stream
-            // traffic at all (protocol v14, networking rework 3 finding 4).
+            // traffic at all.
             if !enters.is_empty() || !leaves.is_empty() {
                 state.server.send(conn, encode(&ServerMsg::AoiDelta { tick, enters, leaves }));
             }
             // State update rides an unreliable datagram every snapshot
             // interval: a lost one is simply skipped, since the next cadence
-            // supersedes it — this is the head-of-line blocking this rework
-            // exists to remove.
+            // supersedes it — this avoids head-of-line blocking a reliable
+            // stream would otherwise impose.
             let last_processed_seq = pc.applied_seq;
             state.server.send_datagram(conn, encode(&ServerMsg::Snapshot {
                 tick,

@@ -1,11 +1,9 @@
-// Rework 10 (zone-thread watchdog recovery), finding 3: `supervise_zone`
-// (finding 2) and `DbHandle::fork` (finding 1) exist but nothing in `main.rs`
-// wires a zone thread through the supervisor yet, so a panicked zone today
-// still dies forever. This e2e test proves the whole loop: a zone panics
+// Proves the zone-thread watchdog's whole recovery loop: a zone panics
 // mid-session, its connected player is disconnected, the watchdog rebuilds
-// the zone on the SAME address, a fresh connection to that address is
-// Welcomed, a second zone is completely unaffected, and the shared shutdown
-// flag still drains everything cleanly afterward.
+// the zone on the SAME address (via `supervise_zone` and `DbHandle::fork`),
+// a fresh connection to that address is Welcomed, a second zone is
+// completely unaffected, and the shared shutdown flag still drains
+// everything cleanly afterward.
 
 use test_support::{join_with_deadline, spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot};
 use engine_app::scheduler::{Phase, System, SystemOrder};

@@ -26,9 +26,9 @@ fn phase4_scheduled_aoe() {
     let b_id = b.player_id.unwrap();
     a.wait_for("A sees B", Duration::from_secs(5), |bot| bot.last_snapshot.contains_key(&b_id));
 
-    // Finding 8 of docs/reviews/networking/audit-networking-2026-07-11.md: every fresh
-    // spawn now pessimistically starts its abilities on full cooldown, so
-    // "cleave" isn't castable in the instant after login — clear it first.
+    // Every fresh spawn pessimistically starts its abilities on full
+    // cooldown, so "cleave" isn't castable in the instant after login —
+    // clear it first.
     std::thread::sleep(Duration::from_millis(3200));
 
     // ── Cast 1: B stands still inside the area → hit (caster A excluded). ──
@@ -164,8 +164,8 @@ fn phase7_5_rend_kills_camped_enemy() {
 
     assert!(!bot.mechanics.is_empty(), "rend's strike schedule must replicate");
     assert_eq!(bot.player_id, Some(original_body), "the bot must survive the fight");
-    // Protocol v8: hp rides in snapshots — the grunt's 30 HP visibly drops
-    // before it dies, and its death is announced with a position.
+    // Hp rides in snapshots — the grunt's 30 HP visibly drops before it
+    // dies, and its death is announced with a position.
     assert_eq!(hp_seen.first(), Some(&30), "grunt enters at full health, saw {hp_seen:?}");
     assert!(
         hp_seen.windows(2).all(|w| w[1] < w[0]),
@@ -196,8 +196,7 @@ fn ravager_onslaught_dashes_and_resolves() {
     let target = *a.last_snapshot.get(&b_id).unwrap();
     let start_dist = (glam::Vec2::new(start.x, start.z) - glam::Vec2::new(target.x, target.z)).length();
 
-    // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
-    // cooldowns now persist as remainders instead of pessimistically seeding
+    // Cooldowns persist as remainders instead of pessimistically seeding
     // full cooldown at spawn, so a fresh character's "onslaught" is castable
     // immediately — no clearing wait needed.
     a.send_cast("onslaught", glam::Vec2::new(target.x, target.z));

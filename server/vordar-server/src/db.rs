@@ -495,12 +495,10 @@ mod tests {
         assert_eq!(loaded.record.health, 80);
     }
 
-    /// Regression test for finding 13 of the networking audit: `db.rs` had
-    /// no `journal_mode` PRAGMA at all, so SQLite defaulted to a rollback
-    /// journal (fsync per commit, writers block readers). `journal_mode` is
-    /// recorded in the database file header, not per-connection, so a fresh,
-    /// independent connection opened after the worker started must also see
-    /// "wal".
+    /// `journal_mode` must be WAL, not SQLite's rollback-journal default
+    /// (fsync per commit, writers block readers). It is recorded in the
+    /// database file header, not per-connection, so a fresh, independent
+    /// connection opened after the worker started must also see "wal".
     #[test]
     fn spawn_enables_wal_journal_mode() {
         let path = temp_db("wal");
@@ -511,8 +509,7 @@ mod tests {
         drop(worker);
     }
 
-    /// Regression test for finding 5 of the networking rework-8 plan: a
-    /// fresh database has no schema history at all — `spawn` must stamp
+    /// A fresh database has no schema history at all — `spawn` must stamp
     /// `user_version` to the latest migration it applied, not leave it at
     /// SQLite's default of 0. Read through an independent connection since
     /// `user_version` is header state, not per-connection.
@@ -526,11 +523,11 @@ mod tests {
         drop(worker);
     }
 
-    /// Regression test for finding 5: every database that exists today looks
-    /// like this — the characters table present, data in it, no
-    /// `user_version` stamp (defaults to 0). Opening it through `DbWorker`
-    /// must adopt the ladder losslessly (the row's data survives) and stamp
-    /// the version, not leave the file's history ambiguous forever.
+    /// A legacy database predating the migration ladder looks like this —
+    /// the characters table present, data in it, no `user_version` stamp
+    /// (defaults to 0). Opening it through `DbWorker` must adopt the ladder
+    /// losslessly (the row's data survives) and stamp the version, not leave
+    /// the file's history ambiguous forever.
     #[test]
     fn legacy_db_without_version_stamp_adopts_the_ladder() {
         let path = temp_db("migrate-legacy");
@@ -571,10 +568,9 @@ mod tests {
         // ordering `save_then_reload_roundtrips_across_reopen` relies on.
     }
 
-    /// Regression test for finding 5: a database stamped with a `user_version`
-    /// beyond this build's known migration ladder was written by a newer
-    /// build. Running against it blind (today's behavior) risks corrupting an
-    /// unknown schema; `spawn` must refuse it instead.
+    /// A database stamped with a `user_version` beyond this build's known
+    /// migration ladder was written by a newer build. Running against it
+    /// blind risks corrupting an unknown schema; `spawn` must refuse it.
     #[test]
     fn newer_schema_version_is_refused_not_silently_run() {
         let path = temp_db("migrate-future");
@@ -586,8 +582,7 @@ mod tests {
         assert!(result.is_err(), "a database from a newer build must be refused, not silently run");
     }
 
-    /// Regression test for finding 1 of the zone-watchdog rework: a
-    /// supervisor rebuilding a panicked zone's App needs a fresh `DbHandle`
+    /// A supervisor rebuilding a panicked zone's App needs a fresh `DbHandle`
     /// without reaching back to the main-thread `DbWorker`. `fork()` must
     /// share the worker's request channel (same end-to-end persistence) but
     /// keep its own reply channel private — a load issued through the fork
@@ -637,12 +632,10 @@ mod tests {
         assert_eq!(health, 77);
     }
 
-    /// Regression test for finding 13's batched-transaction worker loop: a
-    /// wave of heterogeneous requests (three saves for existing characters
+    /// A wave of heterogeneous requests (three saves for existing characters
     /// plus a load-or-create for a new one) enqueued back-to-back, before
-    /// the worker thread can drain them one at a time, must all land — not
-    /// just the first request the old per-request-autocommit loop happened
-    /// to see first.
+    /// the worker thread can drain them one at a time, must all land in a
+    /// single batched transaction — not just the first request seen.
     #[test]
     fn a_burst_of_saves_and_loads_all_land_from_one_wave() {
         let path = temp_db("batch");
@@ -683,12 +676,11 @@ mod tests {
         }
     }
 
-    /// Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
-    /// cooldowns are now persisted as remainders in the new `cooldowns`
-    /// column (RON-encoded `HashMap<String, u64>`). A save carrying a
-    /// non-empty cooldowns map must survive a full close/reopen of the
-    /// database file, the same round-trip `save_then_reload_roundtrips_
-    /// across_reopen` proves for position/health.
+    /// Cooldowns are persisted as remainders in the `cooldowns` column
+    /// (RON-encoded `HashMap<String, u64>`). A save carrying a non-empty
+    /// cooldowns map must survive a full close/reopen of the database file,
+    /// the same round-trip `save_then_reload_roundtrips_across_reopen`
+    /// proves for position/health.
     #[test]
     fn cooldowns_persist_across_reopen() {
         let path = temp_db("cooldowns");
@@ -718,8 +710,7 @@ mod tests {
         assert_eq!(loaded.record.cooldowns, cooldowns, "cooldown remainders must survive a reopen");
     }
 
-    /// Finding 2 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md: a
-    /// fresh name's first `login` has nothing to compare against, so it
+    /// A fresh name's first `login` has nothing to compare against, so it
     /// claims the account (stores `sha256(token)`) and grants — same as
     /// `load_or_create` would, just through the verified path.
     #[test]
@@ -785,10 +776,11 @@ mod tests {
         assert_eq!(health, 42, "a denied login must not touch the character row");
     }
 
-    /// A pre-rework database (characters table only, no accounts) migrated
-    /// on `spawn` must land exactly one unclaimed account per character,
-    /// linked via `account_id`, at `user_version == 3` — and that legacy
-    /// character's first `login` claims the account for the presented token.
+    /// A database predating the accounts feature (characters table only, no
+    /// accounts) migrated on `spawn` must land exactly one unclaimed account
+    /// per character, linked via `account_id`, at `user_version == 3` — and
+    /// that legacy character's first `login` claims the account for the
+    /// presented token.
     #[test]
     fn legacy_characters_get_unclaimed_linked_accounts_and_first_login_claims() {
         let path = temp_db("login-legacy");
