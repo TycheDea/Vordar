@@ -9,7 +9,7 @@ retroactively from the deferred remainders of implemented findings 7 and 8.
 
 > **Cross-type queue** (all 20 fix-sized findings of
 > `audit-networking-2026-07-11.md` are done, so this file is the whole
-> remaining queue): **~~8~~ → ~~10~~ → ~~1~~ → ~~5~~ → ~~3~~ → ~~4~~ → 7 → 2 → 6.**
+> remaining queue): **~~8~~ → ~~10~~ → ~~1~~ → ~~5~~ → ~~3~~ → ~~4~~ → ~~7~~ → 2 → 6.**
 > 8 done 2026-07-12 (plan-networking-rework-8-2026-07-12.md, 5 steps),
 > 10 done 2026-07-13 (plan-networking-rework-10-2026-07-12.md, 3 steps),
 > 1 done 2026-07-13 (plan-networking-rework-1-2026-07-13.md, 5 steps),
@@ -23,6 +23,9 @@ retroactively from the deferred remainders of implemented findings 7 and 8.
 > entities render from a tick-indexed sample buffer at a fixed 200 ms playback
 > delay with capped extrapolation, smoothness probe gates in BASELINE.md;
 > spawned finding 11, the RESYNC_TICKS vs extrapolation-cap interaction).
+> 7 done 2026-07-16 (plan-networking-rework-7-2026-07-14.md, 4 steps; online-play
+> diagram updated with shared-rule collision contract; with-statics reconcile
+> benchmarks recorded in BASELINE.md).
 > 8 first because two entries depend on it: 10 is blocked on its `NetServer`
 > shutdown path, and 1's schema changes (accounts table, cooldown columns) need
 > its `user_version` migration runner. 10 right after 8 while the shutdown work

@@ -17,7 +17,7 @@ flowchart TB
       direction TB
       R1["spawn / despawn replicated entities<br/>(entered / left the area of interest)"]
       R2["buffer snapshot positions by tick;<br/>render remotes at a fixed ~200 ms delay,<br/>brief capped extrapolation on loss"]
-      R3["reconcile own player:<br/>rebase onto authoritative position,<br/>replay not-yet-processed intents"]
+      R3["reconcile own player:<br/>rebase onto authoritative position,<br/>replay not-yet-processed intents<br/>(full rule: movement + static collision)"]
       R4{"prediction error?"}
       R5["within trust band → keep prediction"]
       R6["moderate drift → blend out over time"]
@@ -83,7 +83,7 @@ flowchart TB
     SM -.-> SPORTAL
   end
 
-  SHARED(["shared movement rule<br/>same math on client and server"])
+  SHARED(["shared movement rule:<br/>movement and static-geometry collision<br/>same math on client and server"])
   CP -.-> SHARED
   SM -.-> SHARED
 

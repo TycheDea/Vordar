@@ -151,6 +151,8 @@ many enemies are actively provoked, which is small in practice.
 | apply_snapshot/enters_64 | 50.9 µs | was 264 µs (mostly compiled prefab spawns) |
 | reconcile/pending60 | 189 ns | |
 | reconcile/pending240 | 575 ns | |
+| reconcile/pending60_statics32 | 20.7 µs | 32-static collision: ~110× pend60, replay per intent |
+| reconcile/pending240_statics32 | 81.7 µs | 32-static collision: ~142× pend240, replay per intent |
 
 ### Snapshot path — `snapshot` (server; broadcast = full 6-tick round covering every
 conn once, comparable to the old un-staggered number; broadcast_slice = one 60 Hz
