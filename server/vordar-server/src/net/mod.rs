@@ -145,10 +145,12 @@ struct PlayerConn {
     /// Entity ids currently inside this client's AOI — diffed each snapshot
     /// to produce enter/leave messages.
     known: HashSet<u32>,
-    /// Recently APPLIED intents as (client stamp, dir) — each entry is exactly
-    /// one tick of integration. Mechanic resolution rewinds through these to
+    /// Recently APPLIED intents as (client stamp, integrated velocity) — each
+    /// entry is exactly one tick of integration, recording the velocity that
+    /// actually moved the player that tick (a LeapImpulse override, not the
+    /// WASD dir, during a dash). Mechanic resolution rewinds through these to
     /// evaluate "position at T" by stamp time (favor-the-defender).
-    history: VecDeque<(u64, Vec2)>,
+    history: VecDeque<(u64, Vec3)>,
     /// Server time each skill is next castable (cooldown enforcement) — a
     /// fast skill must not eat a slow skill's cooldown. Persisted as a
     /// remainder (`ready_at − now`) on every save and restored as

@@ -54,7 +54,7 @@ pub fn fill_histories(state: &mut NetServerState, stamp: u64) {
     for pc in state.conns.values_mut() {
         pc.history.clear();
         for k in 0..HISTORY_CAP {
-            pc.history.push_back((stamp + k as u64, Vec2::X));
+            pc.history.push_back((stamp + k as u64, Vec3::X));
         }
     }
 }

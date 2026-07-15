@@ -8,15 +8,14 @@ use engine_app::scheduler::System;
 use engine_core::components::{Health, Transform};
 use engine_core::traits::Resources;
 use engine_core::World;
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 use hecs::Entity;
 use std::collections::VecDeque;
 use vordar_game::combat::buff::ravager_mods;
 use vordar_game::combat::stats::compute_damage;
 use vordar_game::events::DamageDealt;
 use vordar_game::motion::{step, PlayRadius};
-use vordar_game::player::movement_velocity;
-use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
+use vordar_game::{CombatStats, Enemy, Mechanic, Provoked};
 use vordar_protocol::{encode, ServerMsg};
 use super::{aoi_conns, NetServerState, MAX_REWIND_MICROS, STAGGER};
 
@@ -77,10 +76,7 @@ impl System for MechanicResolveSystem {
                 let state = resources.get::<NetServerState>().unwrap();
                 for (entity, pos) in targets {
                     let pos_at_t = match state.conns.values().find(|pc| pc.entity == entity) {
-                        Some(pc) => {
-                            let speed = world.get::<&Player>(entity).map(|p| p.speed).unwrap_or(0.0);
-                            rewound_position(pos, speed, &pc.history, t_eff, bound)
-                        }
+                        Some(pc) => rewound_position(pos, &pc.history, t_eff, bound),
                         None => pos,
                     };
                     if pos_at_t.distance_squared(center) <= mech.radius * mech.radius {
@@ -124,17 +120,64 @@ impl System for MechanicResolveSystem {
 }
 
 /// Walk the applied-intent history backwards, undoing every tick whose intent
-/// was STAMPED after `t_eff` via `step`'s inverse (same clamp, negated
-/// velocity). Each entry is exactly one tick of integration (the
-/// 1-intent-per-tick queue model), so this reconstructs the position the
-/// player had committed to by time T on their own synced clock.
-fn rewound_position(current: Vec3, speed: f32, history: &VecDeque<(u64, Vec2)>, t_eff: u64, bound: f32) -> Vec3 {
+/// was STAMPED after `t_eff` via `step`'s exact inverse (same clamp, negated
+/// velocity). Each entry stores the velocity that actually integrated that
+/// tick — a dash's LeapImpulse override, not the WASD dir — so a leap is
+/// rewound by the vector that really moved the player, reconstructing the
+/// position the player had committed to by time T on their own synced clock.
+fn rewound_position(current: Vec3, history: &VecDeque<(u64, Vec3)>, t_eff: u64, bound: f32) -> Vec3 {
     let mut pos = current;
-    for &(stamp, dir) in history.iter().rev() {
+    for &(stamp, velocity) in history.iter().rev() {
         if stamp <= t_eff {
             break;
         }
-        pos = step(pos, -movement_velocity(dir, speed), TICK_DT, bound);
+        pos = step(pos, -velocity, TICK_DT, bound);
     }
     pos
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::Vec2;
+    use vordar_game::player::movement_velocity;
+
+    /// A player who dashed out of a mechanic's blast between T and now: the
+    /// leap carried them 12 units away (30 u/s over a 0.4 s cast). Rewinding
+    /// through the recorded leap velocities reconstructs the dash-truth
+    /// position at T (inside the blast → HIT). Rewinding as if the player had
+    /// walked (the pre-fix WASD dead-reckoning) undoes only ~2.4 units and
+    /// leaves them outside the radius (a wrong MISS) — so recording the applied
+    /// velocity flips favor-the-defender from a fabricated past to the real one.
+    #[test]
+    fn rewind_through_a_dash_reconstructs_the_leap_truth_not_wasd() {
+        let bound = 1000.0; // far outside any boundary clamp
+        let center = Vec3::ZERO;
+        let radius = 2.0;
+        let ticks: u64 = 24; // 0.4 s cast at 60 Hz
+        let dash = Vec3::new(30.0, 0.0, 0.0); // 12 units over the cast
+        let tick_micros: u64 = 16_667;
+        let t_eff: u64 = 1_000_000;
+
+        // Player sat on the blast center at T, then dashed +x for the cast.
+        let pos_at_t = center;
+        let now_pos = pos_at_t + dash * TICK_DT * ticks as f32;
+
+        let leap_history: VecDeque<(u64, Vec3)> =
+            (1..=ticks).map(|k| (t_eff + k * tick_micros, dash)).collect();
+        let rewound = rewound_position(now_pos, &leap_history, t_eff, bound);
+        assert!((rewound - pos_at_t).length() < 1e-3, "dash rewind must land on the truth position: {rewound:?}");
+        assert!(rewound.distance_squared(center) <= radius * radius, "player was inside the blast at T → HIT");
+
+        // Same ticks, but history storing the WASD walk velocity (the bug):
+        // the rewind subtracts only walk speed and misses.
+        let walk_v = movement_velocity(Vec2::new(1.0, 0.0), 6.0);
+        let wasd_history: VecDeque<(u64, Vec3)> =
+            (1..=ticks).map(|k| (t_eff + k * tick_micros, walk_v)).collect();
+        let wasd_rewound = rewound_position(now_pos, &wasd_history, t_eff, bound);
+        assert!(
+            wasd_rewound.distance_squared(center) > radius * radius,
+            "WASD dead-reckoning would place the player outside the blast → wrong MISS: {wasd_rewound:?}"
+        );
+    }
 }

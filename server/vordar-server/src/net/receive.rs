@@ -21,9 +21,10 @@ use vordar_game::combat::projectile::spawn_projectile;
 use vordar_game::combat::stats::DamageType;
 use vordar_game::events::MoveIntent;
 use vordar_game::player::class::{ClassId, ClassLibrary, DEFAULT_CLASS};
+use vordar_game::player::movement_velocity;
 use vordar_game::skills::AbilityEffect;
 use vordar_game::world::WorldTime;
-use vordar_game::Mechanic;
+use vordar_game::{Mechanic, Player};
 use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg};
 
 use super::{aoi_conns, save_character, NetServerState, PlayerConn, HISTORY_CAP, MAX_REWIND_MICROS};
@@ -111,7 +112,7 @@ impl System for NetReceiveSystem {
         }
 
         respawn_dead(world, resources);
-        drain_intents(resources);
+        drain_intents(world, resources);
     }
 }
 
@@ -540,25 +541,49 @@ fn respawn_dead(world: &mut World, resources: &mut Resources) {
 /// movement system. An empty queue (arrival jitter) means one tick standing
 /// still — the position deficit stays accounted for in the client's pending
 /// replay, so prediction error remains zero.
-fn drain_intents(resources: &mut Resources) {
-    let intents: Vec<(Entity, Vec2)> = {
+fn drain_intents(world: &World, resources: &mut Resources) {
+    let popped: Vec<(ConnId, Entity, u64, Vec2)> = {
         let state = resources.get_mut::<NetServerState>().unwrap();
-        state.conns.values_mut()
-            .filter_map(|pc| {
+        state.conns.iter_mut()
+            .filter_map(|(&conn, pc)| {
                 let (seq, stamp, dir) = pc.queue.pop_front()?;
                 pc.applied_seq = seq;
-                pc.history.push_back((stamp, dir));
-                if pc.history.len() > HISTORY_CAP {
-                    pc.history.pop_front();
-                }
-                Some((pc.entity, dir))
+                Some((conn, pc.entity, stamp, dir))
             })
             .collect()
     };
+    // Record the velocity that ACTUALLY integrates this tick, not the WASD
+    // dir: a LeapImpulse override wins for its duration, and mechanic-resolve
+    // rewind must subtract exactly what moved the player. Read from the world
+    // before the state re-borrow because `history` lives inside NetServerState.
+    let applied: Vec<Vec3> = popped.iter().map(|&(_, entity, _, dir)| applied_velocity(world, entity, dir)).collect();
+    {
+        let state = resources.get_mut::<NetServerState>().unwrap();
+        for (&(conn, _, stamp, _), &velocity) in popped.iter().zip(&applied) {
+            if let Some(pc) = state.conns.get_mut(&conn) {
+                pc.history.push_back((stamp, velocity));
+                if pc.history.len() > HISTORY_CAP {
+                    pc.history.pop_front();
+                }
+            }
+        }
+    }
     let bus = resources.get_mut::<EventBus>().unwrap();
-    for (entity, dir) in intents {
+    for (_, entity, _, dir) in popped {
         bus.emit(MoveIntent { entity, dir });
     }
+}
+
+/// The velocity that actually integrates for `entity` this tick. A LeapImpulse
+/// overrides the movement intent for its whole duration (LeapSystem runs later
+/// this same tick and wins), exactly as the client mirrors it into its
+/// prediction record — so history stores the dash, not the WASD dir.
+fn applied_velocity(world: &World, entity: Entity, dir: Vec2) -> Vec3 {
+    if let Ok(leap) = world.get::<&LeapImpulse>(entity) {
+        return leap.velocity;
+    }
+    let speed = world.get::<&Player>(entity).map(|p| p.speed).unwrap_or(0.0);
+    movement_velocity(dir, speed)
 }
 
 /// Anti-cheat caps from DESIGN.md §3, in the protocol from v1.
@@ -663,6 +688,31 @@ mod tests {
         // the only thing wrong with it is seq == 0.
         let result = validate_intent(&pc, 0, 1_000, 1_000, 0);
         assert_eq!(result, Err("stale seq"), "seq=0 must never pass validation");
+    }
+
+    /// The velocity recorded in history must be what actually integrates: a
+    /// LeapImpulse override during a dash, not the WASD dir. This is the
+    /// receive-side half of the mechanic-rewind fix (mirrors the client's
+    /// NetSendInputSystem, which mirrors an active LeapImpulse into its
+    /// prediction record).
+    #[test]
+    fn applied_velocity_records_the_dash_override_not_the_wasd_dir() {
+        let mut world = World::new();
+        let walking = world.spawn((Player { speed: 6.0 },));
+        let dir = Vec2::new(1.0, 0.0);
+        assert_eq!(
+            applied_velocity(&world, walking, dir),
+            movement_velocity(dir, 6.0),
+            "without a leap, the WASD velocity integrates"
+        );
+
+        let dash = Vec3::new(30.0, 0.0, 0.0);
+        let dashing = world.spawn((Player { speed: 6.0 }, LeapImpulse { velocity: dash, remaining: 0.4 }));
+        assert_eq!(
+            applied_velocity(&world, dashing, dir),
+            dash,
+            "a LeapImpulse overrides the intent — history must store the dash"
+        );
     }
 
     fn fresh_pc(entity: Entity) -> PlayerConn {
