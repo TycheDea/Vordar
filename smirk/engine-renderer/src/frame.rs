@@ -44,14 +44,10 @@ impl RenderSystem {
             last_gpu_ms: None,
         }
     }
-}
 
-impl System for RenderSystem {
-    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
-        // ── Apply deferred menu actions from the last frame ───────────────────
-        crate::menu_actions::apply_menu_actions(std::mem::take(&mut self.pending_menu), resources);
-
-        // ── Collect dirty ranges ──────────────────────────────────────────────
+    /// Gather dirty instance-pool ranges into `gpu_buf`/`dirty_ranges` and
+    /// clear the pool's dirty flags; returns the pool's total slot count.
+    fn collect_dirty_ranges(&mut self, resources: &mut Resources) -> usize {
         self.gpu_buf.clear();
         self.dirty_ranges.clear();
         let slot_count = {
@@ -73,6 +69,82 @@ impl System for RenderSystem {
             let pool = resources.get_mut::<InstancePool>().expect("InstancePool not in resources");
             pool.dirty.iter_mut().for_each(|d| *d = false);
         }
+        slot_count
+    }
+
+    /// Build this frame's egui output (engine UI + game `UiLayers`) against
+    /// Arc-clone handles, before the `RendererState` mut borrow — so game
+    /// layers get read access to `Resources`. `None` if there is no window.
+    fn build_egui_frame(
+        &mut self,
+        resources: &mut Resources,
+    ) -> Option<(egui::FullOutput, Vec<egui::ClippedPrimitive>, f32)> {
+        let window = resources.get::<Arc<Window>>().cloned()?;
+        let menu_snap = resources.get::<MenuState>().cloned();
+        let dev_lines = resources.get::<engine_app::dev_stats::DevStats>()
+            .filter(|s| s.open)
+            .map(|s| s.display_lines());
+        let monitor_fps = window.current_monitor()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .map(|mhz| (mhz / 1000).max(30));
+
+        let (egui_ctx, egui_winit) = {
+            let s = resources.get::<RendererState>()
+                .expect("RendererState not in resources");
+            (s.egui_ctx.clone(), s.egui_winit.clone())
+        };
+        let raw_input = egui_winit.lock().unwrap().take_egui_input(&window);
+        let mut menu_actions: Vec<MenuAction> = Vec::new();
+        if menu_snap.as_ref().is_some_and(|m| m.quit_requested) {
+            menu_actions.push(MenuAction::Quit);
+            if let Some(m) = resources.get_mut::<MenuState>() { m.quit_requested = false; }
+        }
+
+        // begin_pass/end_pass, NOT run_ui: run_ui wraps the frame in a
+        // full-screen background Ui and allocates it as a central panel,
+        // which makes egui claim the whole viewport — egui-winit then
+        // consumes every unrelated click and wheel event (game input
+        // died unless another button was already held).
+        egui_ctx.begin_pass(raw_input);
+        if let Some(ref lines) = dev_lines {
+            dev_overlay::draw_dev_overlay(&egui_ctx, lines);
+        }
+        if let Some(m) = menu_snap.as_ref() {
+            if m.open {
+                draw_menu(&egui_ctx, m, monitor_fps, &mut menu_actions);
+            }
+        }
+        // Game UI layers (minimap, action bar, ...). Taken out so the
+        // callbacks can read Resources while the registry is borrowed.
+        let mut layers = resources.get_mut::<UiLayers>()
+            .map(std::mem::take)
+            .unwrap_or_default();
+        for layer in layers.layers.iter_mut() {
+            layer(&egui_ctx, resources);
+        }
+        if let Some(slot) = resources.get_mut::<UiLayers>() {
+            *slot = layers;
+        }
+        let full_output = egui_ctx.end_pass();
+
+        // Handle platform output (clipboard, cursor, etc.)
+        egui_winit.lock().unwrap()
+            .handle_platform_output(&window, full_output.platform_output.clone());
+
+        let ppp = full_output.pixels_per_point;
+        let prims = egui_ctx.tessellate(full_output.shapes.clone(), ppp);
+        self.pending_menu = menu_actions;
+        Some((full_output, prims, ppp))
+    }
+}
+
+impl System for RenderSystem {
+    fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
+        // ── Apply deferred menu actions from the last frame ───────────────────
+        crate::menu_actions::apply_menu_actions(std::mem::take(&mut self.pending_menu), resources);
+
+        // ── Collect dirty ranges ──────────────────────────────────────────────
+        let slot_count = self.collect_dirty_ranges(resources);
 
         // ── Snapshot lightweight state for egui draw (before mut borrow) ─────
         self.frame_index += 1;
@@ -90,70 +162,8 @@ impl System for RenderSystem {
         }
         let sample_gpu = overlay_open && self.frame_index % GPU_TIMING_INTERVAL == 0;
 
-        let window       = resources.get::<Arc<Window>>().cloned();
-        let menu_snap    = resources.get::<MenuState>().cloned();
-        let dev_lines    = resources.get::<engine_app::dev_stats::DevStats>()
-            .filter(|s| s.open)
-            .map(|s| s.display_lines());
-        let monitor_fps  = window.as_ref()
-            .and_then(|w| w.current_monitor())
-            .and_then(|m| m.refresh_rate_millihertz())
-            .map(|mhz| (mhz / 1000).max(30));
-
         // ── Egui frame: engine UI + game-registered UiLayers ─────────────────
-        // Runs against Arc-clone handles BEFORE the RendererState mut borrow,
-        // so game layers get read access to Resources.
-        let egui_frame = if let Some(ref w) = window {
-            let (egui_ctx, egui_winit) = {
-                let s = resources.get::<RendererState>()
-                    .expect("RendererState not in resources");
-                (s.egui_ctx.clone(), s.egui_winit.clone())
-            };
-            let raw_input = egui_winit.lock().unwrap().take_egui_input(w);
-            let mut menu_actions: Vec<MenuAction> = Vec::new();
-            if menu_snap.as_ref().is_some_and(|m| m.quit_requested) {
-                menu_actions.push(MenuAction::Quit);
-                if let Some(m) = resources.get_mut::<MenuState>() { m.quit_requested = false; }
-            }
-
-            // begin_pass/end_pass, NOT run_ui: run_ui wraps the frame in a
-            // full-screen background Ui and allocates it as a central panel,
-            // which makes egui claim the whole viewport — egui-winit then
-            // consumes every unrelated click and wheel event (game input
-            // died unless another button was already held).
-            egui_ctx.begin_pass(raw_input);
-            if let Some(ref lines) = dev_lines {
-                dev_overlay::draw_dev_overlay(&egui_ctx, lines);
-            }
-            if let Some(m) = menu_snap.as_ref() {
-                if m.open {
-                    draw_menu(&egui_ctx, m, monitor_fps, &mut menu_actions);
-                }
-            }
-            // Game UI layers (minimap, action bar, ...). Taken out so the
-            // callbacks can read Resources while the registry is borrowed.
-            let mut layers = resources.get_mut::<UiLayers>()
-                .map(std::mem::take)
-                .unwrap_or_default();
-            for layer in layers.layers.iter_mut() {
-                layer(&egui_ctx, resources);
-            }
-            if let Some(slot) = resources.get_mut::<UiLayers>() {
-                *slot = layers;
-            }
-            let full_output = egui_ctx.end_pass();
-
-            // Handle platform output (clipboard, cursor, etc.)
-            egui_winit.lock().unwrap()
-                .handle_platform_output(w, full_output.platform_output.clone());
-
-            let ppp = full_output.pixels_per_point;
-            let prims = egui_ctx.tessellate(full_output.shapes.clone(), ppp);
-            self.pending_menu = menu_actions;
-            Some((full_output, prims, ppp))
-        } else {
-            None
-        };
+        let egui_frame = self.build_egui_frame(resources);
 
         // Mesh draw lists + store, taken out so they outlive the RendererState
         // borrow below (returned at the end of the frame).
@@ -185,47 +195,10 @@ impl System for RenderSystem {
         let state = resources.get_mut::<RendererState>()
             .expect("RendererState not in resources");
 
-        let mut buf_pos = 0usize;
-        for &(offset, count) in &self.dirty_ranges {
-            let data = bytemuck::cast_slice(&self.gpu_buf[buf_pos..buf_pos + count]);
-            state.queue.write_buffer(&state.instance_buffer, offset, data);
-            buf_pos += count;
-        }
-
-        if let Some(list) = mesh_list.as_ref().filter(|l| !l.instances.is_empty()) {
-            let n = list.instances.len().min(MAX_MESH_INSTANCES);
-            state.queue.write_buffer(
-                &state.mesh_instance_buffer, 0,
-                bytemuck::cast_slice(&list.instances[..n]),
-            );
-        }
-
-        // Skinned instances + joint palette.
-        if let Some(list) = skinned_list.as_ref().filter(|l| !l.instances.is_empty()) {
-            state.queue.write_buffer(
-                &state.skinned_instance_buffer, 0,
-                bytemuck::cast_slice(&list.instances),
-            );
-            if !list.joints.is_empty() {
-                state.queue.write_buffer(
-                    &state.joint_buffer, 0,
-                    bytemuck::cast_slice(&list.joints),
-                );
-            }
-        }
-
-        // Particles.
-        let particle_count = particle_list
-            .as_ref()
-            .map(|l| l.instances.len().min(particle_pipeline::MAX_PARTICLES))
-            .unwrap_or(0);
-        if particle_count > 0 {
-            let list = particle_list.as_ref().expect("count > 0");
-            state.queue.write_buffer(
-                &state.particle_instance_buffer, 0,
-                bytemuck::cast_slice(&list.instances[..particle_count]),
-            );
-        }
+        let particle_count = upload_gpu_buffers(
+            state, &self.dirty_ranges, &self.gpu_buf,
+            mesh_list.as_ref(), skinned_list.as_ref(), particle_list.as_ref(),
+        );
 
         // wgpu 29: get_current_texture() returns CurrentSurfaceTexture enum
         let surface_texture = match state.surface.get_current_texture() {
@@ -267,205 +240,17 @@ impl System for RenderSystem {
             &wgpu::CommandEncoderDescriptor { label: Some("Render Encoder") }
         );
 
-        // Shadow pre-pass: fit the sun's ortho volume around the
-        // camera target (texel-snapped) and render depth-only variants of
-        // every opaque draw. Particles don't cast.
-        {
-            let light_vp = shadow::fit_light_vp(state.camera.target, state.light_dir);
-            state.queue.write_buffer(
-                &state.light_vp_buffer, 0,
-                bytemuck::cast_slice(&light_vp.to_cols_array()),
-            );
+        record_shadow_pass(
+            state, &mut encoder, slot_count, sample_gpu,
+            mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
+        );
 
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Shadow Pass"),
-                color_attachments: &[],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &state.shadow_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load:  wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: if sample_gpu {
-                    state.gpu_timer.as_ref().map(|t| t.begin_writes())
-                } else {
-                    None
-                },
-                ..Default::default()
-            });
+        record_main_pass(
+            state, &mut encoder, slot_count,
+            mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
+        );
 
-            // SDF primitives.
-            pass.set_pipeline(&state.shadow_pipelines.sdf);
-            pass.set_bind_group(0, &state.shadow_bind_group, &[]);
-            pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
-            pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
-            pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
-
-            // Static meshes.
-            if let (Some(list), Some(store)) = (mesh_list.as_ref(), mesh_store.as_ref()) {
-                if !list.instances.is_empty() {
-                    pass.set_pipeline(&state.shadow_pipelines.mesh);
-                    pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
-                    for &(mesh_idx, first, count) in &list.ranges {
-                        if first as usize >= MAX_MESH_INSTANCES { break; }
-                        let count = count.min(MAX_MESH_INSTANCES as u32 - first);
-                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
-                        for prim in &gpu_mesh.primitives {
-                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
-                        }
-                    }
-                }
-            }
-
-            // Skinned meshes (re-binds the shared joint palette).
-            if let (Some(list), Some(store)) = (skinned_list.as_ref(), mesh_store.as_ref()) {
-                if !list.instances.is_empty() {
-                    pass.set_pipeline(&state.shadow_pipelines.skinned);
-                    pass.set_bind_group(1, &state.joint_bind_group, &[]);
-                    pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
-                    for &(mesh_idx, first, count) in &list.ranges {
-                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
-                        for prim in &gpu_mesh.primitives {
-                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the
-        // particle pass, which resolves at its end.
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Main Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view:           &state.hdr.msaa_view,
-                    resolve_target: None,
-                    depth_slice:    None,
-                    ops: wgpu::Operations {
-                        load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &state.hdr.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load:  wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            let tex_bg = &state.texture_store[state.active_texture_idx].1;
-            pass.set_pipeline(&state.pipeline);
-            pass.set_bind_group(0, &state.camera_bind_group, &[]);
-            pass.set_bind_group(1, tex_bg, &[]);
-            pass.set_bind_group(2, &state.environment.bind_group, &[]);
-            pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
-            pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
-            pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
-
-            // Mesh pass — same render pass and camera bind group, real geometry.
-            // Ranges are sorted by first-instance, so overflow past the buffer
-            // cap ends the loop rather than wrapping.
-            if let (Some(list), Some(store)) = (mesh_list.as_ref(), mesh_store.as_ref()) {
-                if !list.instances.is_empty() {
-                    pass.set_pipeline(&state.mesh_pipeline);
-                    pass.set_bind_group(2, &state.environment.bind_group, &[]);
-                    pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
-                    for &(mesh_idx, first, count) in &list.ranges {
-                        if first as usize >= MAX_MESH_INSTANCES { break; }
-                        let count = count.min(MAX_MESH_INSTANCES as u32 - first);
-                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
-                        for prim in &gpu_mesh.primitives {
-                            pass.set_bind_group(1, &prim.material_bind_group, &[]);
-                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
-                        }
-                    }
-                }
-            }
-
-            // Skinned mesh pass — same camera bind group, plus the joint
-            // palette (group 2). Instances index their own joint block via the
-            // joint_base instance attribute, so one draw per mesh still works.
-            if let (Some(list), Some(store)) = (skinned_list.as_ref(), mesh_store.as_ref()) {
-                if !list.instances.is_empty() {
-                    pass.set_pipeline(&state.skinned_pipeline);
-                    pass.set_bind_group(0, &state.camera_bind_group, &[]);
-                    pass.set_bind_group(2, &state.joint_bind_group, &[]);
-                    pass.set_bind_group(3, &state.environment.bind_group, &[]);
-                    pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
-                    for &(mesh_idx, first, count) in &list.ranges {
-                        let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
-                        for prim in &gpu_mesh.primitives {
-                            pass.set_bind_group(1, &prim.material_bind_group, &[]);
-                            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                            pass.draw_indexed(0..prim.index_count, 0, first..first + count);
-                        }
-                    }
-                }
-            }
-
-            // Sky pass — the IBL cubemap as background, pinned to the far
-            // plane behind everything opaque.
-            pass.set_pipeline(&state.sky_pipeline);
-            pass.set_bind_group(0, &state.camera_bind_group, &[]);
-            pass.set_bind_group(1, &state.environment.sky_bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
-
-        // Particle pass: depth read-only so the shader can sample the
-        // scene depth for the soft fade; additive first, then premultiplied
-        // alpha; the MSAA resolve happens at the end of this pass.
-        {
-            let additive_count = particle_list
-                .as_ref()
-                .map(|l| l.additive_count.min(particle_count))
-                .unwrap_or(0);
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Particle Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view:           &state.hdr.msaa_view,
-                    resolve_target: Some(&state.hdr.resolve_view),
-                    depth_slice:    None,
-                    ops: wgpu::Operations {
-                        load:  wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Discard, // resolve keeps the frame
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view:        &state.hdr.depth_view,
-                    depth_ops:   None, // read-only: tested by particles, sampled for softness
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            if particle_count > 0 {
-                pass.set_bind_group(0, &state.camera_bind_group, &[]);
-                pass.set_bind_group(1, &state.particle_fx_bind_group, &[]);
-                pass.set_vertex_buffer(0, state.particle_instance_buffer.slice(..));
-                if additive_count > 0 {
-                    pass.set_pipeline(&state.particle_additive);
-                    pass.draw(0..4, 0..additive_count as u32);
-                }
-                if particle_count > additive_count {
-                    pass.set_pipeline(&state.particle_alpha);
-                    pass.draw(0..4, additive_count as u32..particle_count as u32);
-                }
-            }
-        }
+        record_particle_pass(state, &mut encoder, particle_list.as_ref(), particle_count);
 
         // Bloom chain from the HDR resolve, then tonemap (ACES + exposure +
         // bloom composite) onto the swapchain.
@@ -480,28 +265,7 @@ impl System for RenderSystem {
             },
         );
 
-        // Egui overlay pass (Load existing pixels — don't clear the 3D scene)
-        if let (Some(prims), Some(sd)) = (egui_primitives.as_ref(), egui_screen.as_ref()) {
-            state.egui_renderer.update_buffers(
-                &state.device, &state.queue, &mut encoder, prims, sd,
-            );
-            let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("egui Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view:           &view,
-                    resolve_target: None,
-                    depth_slice:    None,
-                    ops: wgpu::Operations {
-                        load:  wgpu::LoadOp::Load, // preserve 3D scene below
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            let mut rpass_static = rpass.forget_lifetime();
-            state.egui_renderer.render(&mut rpass_static, prims, sd);
-        }
+        record_egui_overlay_pass(state, &mut encoder, &view, egui_primitives.as_ref(), egui_screen.as_ref());
 
         // Free textures, submit, present
         if let Some(ref fo) = egui_output {
@@ -523,6 +287,309 @@ impl System for RenderSystem {
         surface_texture.present();
 
         restore_mesh_resources(resources, mesh_list, skinned_list, mesh_store, particle_list);
+    }
+}
+
+/// Upload this frame's dirty ranges plus mesh/skinned/particle instance data
+/// to their GPU buffers; returns the clamped particle instance count.
+fn upload_gpu_buffers(
+    state:         &RendererState,
+    dirty_ranges:  &[(u64, usize)],
+    gpu_buf:       &[SdfInstance],
+    mesh_list:     Option<&MeshDrawList>,
+    skinned_list:  Option<&SkinnedDrawList>,
+    particle_list: Option<&ParticleDrawList>,
+) -> usize {
+    let mut buf_pos = 0usize;
+    for &(offset, count) in dirty_ranges {
+        let data = bytemuck::cast_slice(&gpu_buf[buf_pos..buf_pos + count]);
+        state.queue.write_buffer(&state.instance_buffer, offset, data);
+        buf_pos += count;
+    }
+
+    if let Some(list) = mesh_list.filter(|l| !l.instances.is_empty()) {
+        let n = list.instances.len().min(MAX_MESH_INSTANCES);
+        state.queue.write_buffer(
+            &state.mesh_instance_buffer, 0,
+            bytemuck::cast_slice(&list.instances[..n]),
+        );
+    }
+
+    // Skinned instances + joint palette.
+    if let Some(list) = skinned_list.filter(|l| !l.instances.is_empty()) {
+        state.queue.write_buffer(
+            &state.skinned_instance_buffer, 0,
+            bytemuck::cast_slice(&list.instances),
+        );
+        if !list.joints.is_empty() {
+            state.queue.write_buffer(
+                &state.joint_buffer, 0,
+                bytemuck::cast_slice(&list.joints),
+            );
+        }
+    }
+
+    // Particles.
+    let particle_count = particle_list
+        .map(|l| l.instances.len().min(particle_pipeline::MAX_PARTICLES))
+        .unwrap_or(0);
+    if particle_count > 0 {
+        let list = particle_list.expect("count > 0");
+        state.queue.write_buffer(
+            &state.particle_instance_buffer, 0,
+            bytemuck::cast_slice(&list.instances[..particle_count]),
+        );
+    }
+    particle_count
+}
+
+/// Shadow pre-pass: fit the sun's ortho volume around the camera target
+/// (texel-snapped) and render depth-only variants of every opaque draw.
+/// Particles don't cast.
+fn record_shadow_pass(
+    state:        &RendererState,
+    encoder:      &mut wgpu::CommandEncoder,
+    slot_count:   usize,
+    sample_gpu:   bool,
+    mesh_list:    Option<&MeshDrawList>,
+    skinned_list: Option<&SkinnedDrawList>,
+    mesh_store:   Option<&MeshStore>,
+) {
+    let light_vp = shadow::fit_light_vp(state.camera.target, state.light_dir);
+    state.queue.write_buffer(
+        &state.light_vp_buffer, 0,
+        bytemuck::cast_slice(&light_vp.to_cols_array()),
+    );
+
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("Shadow Pass"),
+        color_attachments: &[],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &state.shadow_view,
+            depth_ops: Some(wgpu::Operations {
+                load:  wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes: if sample_gpu {
+            state.gpu_timer.as_ref().map(|t| t.begin_writes())
+        } else {
+            None
+        },
+        ..Default::default()
+    });
+
+    // SDF primitives.
+    pass.set_pipeline(&state.shadow_pipelines.sdf);
+    pass.set_bind_group(0, &state.shadow_bind_group, &[]);
+    pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
+    pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
+    pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
+
+    // Static meshes.
+    if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
+        if !list.instances.is_empty() {
+            pass.set_pipeline(&state.shadow_pipelines.mesh);
+            pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
+            for &(mesh_idx, first, count) in &list.ranges {
+                if first as usize >= MAX_MESH_INSTANCES { break; }
+                let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+        }
+    }
+
+    // Skinned meshes (re-binds the shared joint palette).
+    if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
+        if !list.instances.is_empty() {
+            pass.set_pipeline(&state.shadow_pipelines.skinned);
+            pass.set_bind_group(1, &state.joint_bind_group, &[]);
+            pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
+            for &(mesh_idx, first, count) in &list.ranges {
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+        }
+    }
+}
+
+/// Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the
+/// particle pass, which resolves at its end.
+fn record_main_pass(
+    state:        &RendererState,
+    encoder:      &mut wgpu::CommandEncoder,
+    slot_count:   usize,
+    mesh_list:    Option<&MeshDrawList>,
+    skinned_list: Option<&SkinnedDrawList>,
+    mesh_store:   Option<&MeshStore>,
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("Main Pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view:           &state.hdr.msaa_view,
+            resolve_target: None,
+            depth_slice:    None,
+            ops: wgpu::Operations {
+                load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &state.hdr.depth_view,
+            depth_ops: Some(wgpu::Operations {
+                load:  wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        ..Default::default()
+    });
+    let tex_bg = &state.texture_store[state.active_texture_idx].1;
+    pass.set_pipeline(&state.pipeline);
+    pass.set_bind_group(0, &state.camera_bind_group, &[]);
+    pass.set_bind_group(1, tex_bg, &[]);
+    pass.set_bind_group(2, &state.environment.bind_group, &[]);
+    pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
+    pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
+    pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
+
+    // Mesh pass — same render pass and camera bind group, real geometry.
+    // Ranges are sorted by first-instance, so overflow past the buffer
+    // cap ends the loop rather than wrapping.
+    if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
+        if !list.instances.is_empty() {
+            pass.set_pipeline(&state.mesh_pipeline);
+            pass.set_bind_group(2, &state.environment.bind_group, &[]);
+            pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
+            for &(mesh_idx, first, count) in &list.ranges {
+                if first as usize >= MAX_MESH_INSTANCES { break; }
+                let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    pass.set_bind_group(1, &prim.material_bind_group, &[]);
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+        }
+    }
+
+    // Skinned mesh pass — same camera bind group, plus the joint
+    // palette (group 2). Instances index their own joint block via the
+    // joint_base instance attribute, so one draw per mesh still works.
+    if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
+        if !list.instances.is_empty() {
+            pass.set_pipeline(&state.skinned_pipeline);
+            pass.set_bind_group(0, &state.camera_bind_group, &[]);
+            pass.set_bind_group(2, &state.joint_bind_group, &[]);
+            pass.set_bind_group(3, &state.environment.bind_group, &[]);
+            pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
+            for &(mesh_idx, first, count) in &list.ranges {
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    pass.set_bind_group(1, &prim.material_bind_group, &[]);
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+        }
+    }
+
+    // Sky pass — the IBL cubemap as background, pinned to the far
+    // plane behind everything opaque.
+    pass.set_pipeline(&state.sky_pipeline);
+    pass.set_bind_group(0, &state.camera_bind_group, &[]);
+    pass.set_bind_group(1, &state.environment.sky_bind_group, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+/// Particle pass: depth read-only so the shader can sample the scene depth
+/// for the soft fade; additive first, then premultiplied alpha; the MSAA
+/// resolve happens at the end of this pass.
+fn record_particle_pass(
+    state:          &RendererState,
+    encoder:        &mut wgpu::CommandEncoder,
+    particle_list:  Option<&ParticleDrawList>,
+    particle_count: usize,
+) {
+    let additive_count = particle_list
+        .map(|l| l.additive_count.min(particle_count))
+        .unwrap_or(0);
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("Particle Pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view:           &state.hdr.msaa_view,
+            resolve_target: Some(&state.hdr.resolve_view),
+            depth_slice:    None,
+            ops: wgpu::Operations {
+                load:  wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Discard, // resolve keeps the frame
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view:        &state.hdr.depth_view,
+            depth_ops:   None, // read-only: tested by particles, sampled for softness
+            stencil_ops: None,
+        }),
+        ..Default::default()
+    });
+    if particle_count > 0 {
+        pass.set_bind_group(0, &state.camera_bind_group, &[]);
+        pass.set_bind_group(1, &state.particle_fx_bind_group, &[]);
+        pass.set_vertex_buffer(0, state.particle_instance_buffer.slice(..));
+        if additive_count > 0 {
+            pass.set_pipeline(&state.particle_additive);
+            pass.draw(0..4, 0..additive_count as u32);
+        }
+        if particle_count > additive_count {
+            pass.set_pipeline(&state.particle_alpha);
+            pass.draw(0..4, additive_count as u32..particle_count as u32);
+        }
+    }
+}
+
+/// Egui overlay pass (Load existing pixels — don't clear the 3D scene).
+fn record_egui_overlay_pass(
+    state:           &mut RendererState,
+    encoder:         &mut wgpu::CommandEncoder,
+    view:            &wgpu::TextureView,
+    egui_primitives: Option<&Vec<egui::ClippedPrimitive>>,
+    egui_screen:     Option<&egui_wgpu::ScreenDescriptor>,
+) {
+    if let (Some(prims), Some(sd)) = (egui_primitives, egui_screen) {
+        state.egui_renderer.update_buffers(
+            &state.device, &state.queue, encoder, prims, sd,
+        );
+        let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("egui Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                depth_slice:    None,
+                ops: wgpu::Operations {
+                    load:  wgpu::LoadOp::Load, // preserve 3D scene below
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        let mut rpass_static = rpass.forget_lifetime();
+        state.egui_renderer.render(&mut rpass_static, prims, sd);
     }
 }
 
