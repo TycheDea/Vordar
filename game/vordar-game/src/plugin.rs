@@ -13,7 +13,7 @@ use crate::combat::leap::LeapSystem;
 use crate::combat::projectile::{ProjectileHitSystem, ProjectileTtlSystem};
 use crate::combat::stats::CombatStats;
 use crate::enemies::{BehaviorRegistry, Enemy, EnemyAISystem};
-use crate::motion::{MovementSystem, SeparationSystem};
+use crate::motion::{MovementSystem, PlayRadius, SeparationSystem};
 use crate::player::class::{ClassId, ClassLibrary};
 use crate::player::race::{RaceId, RaceLibrary};
 use crate::player::{Player, PlayerMovementSystem};
@@ -51,6 +51,7 @@ impl Plugin for CoreGamePlugin {
         // Ensure the per-archetype behavior registry exists; chapter plugins
         // contribute overrides via the same resource_or_default.
         app.resource_or_default::<BehaviorRegistry>();
+        app.resource_or_default::<PlayRadius>();
         app.add_plugin(GameComponentsPlugin)
             // Chapter start (once)
             .add_system(ChapterSetupSystem::new(), Phase::PreUpdate,   SystemOrder::First)

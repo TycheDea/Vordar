@@ -54,6 +54,7 @@ pub(super) fn reconcile_own(
     last_processed_seq: u32,
 ) {
     let speed = world.get::<&Player>(entity).map(|p| p.speed).unwrap_or(0.0);
+    let bound = resources.get::<PlayRadius>().copied().unwrap_or_default().0;
     let (replayed, still_reconciling_a_dash) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
         state.pending.retain(|p| p.seq > last_processed_seq);
@@ -64,7 +65,7 @@ pub(super) fn reconcile_own(
         // still. Any unacked intent recorded during the dash means the
         // server hasn't caught up on the dash yet.
         let still_reconciling_a_dash = state.pending.iter().any(|p| p.leap.is_some());
-        (replay_position(server_pos, speed, state.pending.iter()), still_reconciling_a_dash)
+        (replay_position(server_pos, speed, state.pending.iter(), bound), still_reconciling_a_dash)
     };
     // Collision response isn't replayed here: mid-dash the free-flight
     // `replayed` position and a wall-clamped real one can differ for reasons
@@ -94,16 +95,18 @@ pub(super) fn reconcile_own(
 
 /// Position after replaying pending intents on top of the server's
 /// authoritative position — the same movement rule the simulation runs,
-/// including a leap override where one was active — collision response is
-/// the one part of the shared rule still unreplayed.
+/// including a leap override where one was active and the world-boundary
+/// clamp — collision response is the one part of the shared rule still
+/// unreplayed.
 fn replay_position<'a>(
     server_pos: Vec3,
     speed: f32,
     pending: impl Iterator<Item = &'a PendingIntent>,
+    bound: f32,
 ) -> Vec3 {
     pending.fold(server_pos, |pos, p| {
         let velocity = p.leap.unwrap_or_else(|| movement_velocity(p.dir, speed));
-        pos + velocity * p.dt
+        step(pos, velocity, p.dt, bound)
     })
 }
 
@@ -227,6 +230,7 @@ impl System for NetSendInputSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine_core::components::Velocity;
 
     const DT: f32 = 1.0 / 60.0;
 
@@ -237,7 +241,7 @@ mod tests {
     #[test]
     fn replay_applies_unacked_intents() {
         let pending = vec![intent(1, Vec2::new(1.0, 0.0)), intent(2, Vec2::new(1.0, 0.0))];
-        let pos = replay_position(Vec3::ZERO, 6.0, pending.iter());
+        let pos = replay_position(Vec3::ZERO, 6.0, pending.iter(), PlayRadius::default().0);
         assert!((pos.x - 2.0 * 6.0 * DT).abs() < 1e-6);
         assert_eq!(pos.y, 0.0);
         assert_eq!(pos.z, 0.0);
@@ -248,8 +252,8 @@ mod tests {
         // An over-unit dir must move exactly as fast as a unit dir.
         let cheat = vec![intent(1, Vec2::new(30.0, 40.0))];
         let fair = vec![intent(1, Vec2::new(0.6, 0.8))];
-        let a = replay_position(Vec3::ZERO, 6.0, cheat.iter());
-        let b = replay_position(Vec3::ZERO, 6.0, fair.iter());
+        let a = replay_position(Vec3::ZERO, 6.0, cheat.iter(), PlayRadius::default().0);
+        let b = replay_position(Vec3::ZERO, 6.0, fair.iter(), PlayRadius::default().0);
         assert!((a - b).length() < 1e-6);
     }
 
@@ -268,18 +272,55 @@ mod tests {
         let leaping: Vec<PendingIntent> = (1..=ticks)
             .map(|seq| PendingIntent { seq, dir: Vec2::new(0.0, 1.0), dt: DT, leap: Some(dash_velocity) })
             .collect();
-        let dashed = replay_position(Vec3::ZERO, 6.0, leaping.iter());
+        let dashed = replay_position(Vec3::ZERO, 6.0, leaping.iter(), PlayRadius::default().0);
         let expected = dash_velocity * DT * ticks as f32;
         assert!((dashed - expected).length() < 1e-4, "leap-aware replay must follow the dash exactly: {dashed:?}");
 
         let plain: Vec<PendingIntent> = (1..=ticks)
             .map(|seq| PendingIntent { seq, dir: Vec2::new(0.0, 1.0), dt: DT, leap: None })
             .collect();
-        let dead_reckoned = replay_position(Vec3::ZERO, 6.0, plain.iter());
+        let dead_reckoned = replay_position(Vec3::ZERO, 6.0, plain.iter(), PlayRadius::default().0);
         assert!(
             (dashed - dead_reckoned).length() > SNAP_DISTANCE,
             "dead-reckoned WASD must diverge from the real dash past SNAP_DISTANCE, got {:.2}",
             (dashed - dead_reckoned).length()
+        );
+    }
+
+    /// A player run straight into the world edge for long enough to hit the
+    /// boundary: replaying pending intents must land exactly where the live
+    /// `MovementSystem` does over the same ticks, not merely inside the
+    /// Smooth-correction band (the pre-fix free-flight fold overran the
+    /// clamp every tick past the boundary and drifted, tugging the player at
+    /// the edge for no misprediction).
+    #[test]
+    fn replay_into_the_boundary_matches_the_live_system_exactly() {
+        let bound = PlayRadius::default().0;
+        let speed = 6.0;
+        let dir = Vec2::new(1.0, 0.0);
+        let velocity = movement_velocity(dir, speed);
+        let start = Vec3::new(bound - 0.5, 0.0, 0.0);
+        let ticks: u32 = 30;
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(PlayRadius(bound));
+        let e = world.spawn((
+            Transform { position: start, ..Default::default() },
+            Velocity { linear: velocity },
+        ));
+        for _ in 0..ticks {
+            MovementSystem.run(&mut world, &mut resources, DT);
+        }
+        let live = world.get::<&Transform>(e).unwrap().position;
+
+        let pending: Vec<PendingIntent> = (1..=ticks).map(|seq| intent(seq, dir)).collect();
+        let replayed = replay_position(start, speed, pending.iter(), bound);
+
+        assert_eq!(replayed, live, "replay must land exactly where the live system does at the boundary");
+        assert!(
+            classify_error(replayed - live) == Correction::Trust,
+            "boundary replay must not fall into the Smooth-correction band"
         );
     }
 

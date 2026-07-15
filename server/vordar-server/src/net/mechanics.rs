@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use vordar_game::combat::buff::ravager_mods;
 use vordar_game::combat::stats::compute_damage;
 use vordar_game::events::DamageDealt;
+use vordar_game::motion::{step, PlayRadius};
 use vordar_game::player::movement_velocity;
 use vordar_game::{CombatStats, Enemy, Mechanic, Player, Provoked};
 use vordar_protocol::{encode, ServerMsg};
@@ -47,6 +48,7 @@ impl System for MechanicResolveSystem {
             return;
         }
         let now = resources.get::<NetServerState>().unwrap().server.now_micros();
+        let bound = resources.get::<PlayRadius>().copied().unwrap_or_default().0;
 
         let due: Vec<(Entity, Mechanic, Vec3)> = world
             .query::<(Entity, &Transform, &Mechanic)>()
@@ -77,7 +79,7 @@ impl System for MechanicResolveSystem {
                     let pos_at_t = match state.conns.values().find(|pc| pc.entity == entity) {
                         Some(pc) => {
                             let speed = world.get::<&Player>(entity).map(|p| p.speed).unwrap_or(0.0);
-                            rewound_position(pos, speed, &pc.history, t_eff)
+                            rewound_position(pos, speed, &pc.history, t_eff, bound)
                         }
                         None => pos,
                     };
@@ -122,16 +124,17 @@ impl System for MechanicResolveSystem {
 }
 
 /// Walk the applied-intent history backwards, undoing every tick whose intent
-/// was STAMPED after `t_eff`. Each entry is exactly one tick of integration
-/// (the 1-intent-per-tick queue model), so this reconstructs the position the
+/// was STAMPED after `t_eff` via `step`'s inverse (same clamp, negated
+/// velocity). Each entry is exactly one tick of integration (the
+/// 1-intent-per-tick queue model), so this reconstructs the position the
 /// player had committed to by time T on their own synced clock.
-fn rewound_position(current: Vec3, speed: f32, history: &VecDeque<(u64, Vec2)>, t_eff: u64) -> Vec3 {
+fn rewound_position(current: Vec3, speed: f32, history: &VecDeque<(u64, Vec2)>, t_eff: u64, bound: f32) -> Vec3 {
     let mut pos = current;
     for &(stamp, dir) in history.iter().rev() {
         if stamp <= t_eff {
             break;
         }
-        pos -= movement_velocity(dir, speed) * TICK_DT;
+        pos = step(pos, -movement_velocity(dir, speed), TICK_DT, bound);
     }
     pos
 }

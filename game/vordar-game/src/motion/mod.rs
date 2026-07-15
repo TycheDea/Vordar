@@ -4,5 +4,5 @@
 pub mod movement;
 pub mod separation;
 
-pub use movement::MovementSystem;
+pub use movement::{step, MovementSystem, PlayRadius};
 pub use separation::SeparationSystem;

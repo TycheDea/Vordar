@@ -38,7 +38,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_game::events::MoveIntent;
-use vordar_game::motion::MovementSystem;
+use vordar_game::motion::{step, MovementSystem, PlayRadius};
 use vordar_game::player::{movement_velocity, PlayerMovementSystem};
 use vordar_game::Player;
 use vordar_protocol::{
