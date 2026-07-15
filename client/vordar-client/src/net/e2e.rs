@@ -1,7 +1,7 @@
 use crate::net::{
     interpolate::NetInterpolateSystem,
     lifecycle::NetReceiveSystem,
-    prediction::{start_predicted_leap, NetCorrectionSystem, NetSendInputSystem, MOVE_RING_LEN, SNAP_DISTANCE},
+    prediction::{start_predicted_leap, NetCorrectionSystem, NetSendInputSystem, SNAP_DISTANCE},
     own_entity, reconnect_attempt, NetClientState,
 };
 use crate::world_time::WorldTime;
@@ -11,32 +11,17 @@ use engine_app::time::Time;
 use engine_core::components::Transform;
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
-use engine_net::{ClientEvent, NetClient};
+use engine_net::NetClient;
 use glam::{Vec2, Vec3};
-use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
+use test_support::{name_token, percentile, workspace_root, Bot};
 use vordar_game::motion::MovementSystem;
 use vordar_game::player::PlayerMovementSystem;
 use vordar_game::Player;
-use vordar_protocol::{
-    decode, encode, AccountToken, ClientMsg, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION, TICK_HZ,
-};
+use vordar_protocol::{PROTOCOL_VERSION, TICK_HZ};
 
 const DT: f32 = 1.0 / 60.0;
-
-/// Deterministic token for `name` (mirrors `tests/common/mod.rs`'s
-/// `name_token` in vordar-server): name bytes zero-padded/truncated into
-/// the 32-byte account token, so a victim and a same-name kicker in the
-/// same test always agree on a token without either hardcoding the
-/// other's literal.
-fn name_token(name: &str) -> AccountToken {
-    let mut token = [0u8; 32];
-    let bytes = name.as_bytes();
-    let n = bytes.len().min(32);
-    token[..n].copy_from_slice(&bytes[..n]);
-    token
-}
 
 /// Registers the game's core components and content prefabs into
 /// `resources` — the identical registration list both the onslaught replay
@@ -73,8 +58,7 @@ fn insert_game_prefabs(resources: &mut Resources) {
 /// must notice, tear down, and relogin entirely on its own.
 #[test]
 fn kicked_connection_reconnects_and_relogs_in() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    std::env::set_current_dir(root).unwrap();
+    workspace_root();
 
     let addr: SocketAddr = "127.0.0.1:25400".parse().unwrap();
     std::thread::spawn(move || {
@@ -110,39 +94,12 @@ fn kicked_connection_reconnects_and_relogs_in() {
     // under it. Wait for the kicker's own Welcome before dropping it —
     // `Connection::close` tears the connection down immediately,
     // without flushing pending stream writes, so dropping right after
-    // `send` can race the Login frame right off the wire.
-    let mut kicker = NetClient::connect(addr, PROTOCOL_VERSION).expect("kicker connect");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let mut got_welcome = false;
-        for ev in kicker.poll() {
-            match ev {
-                ClientEvent::Connected => {
-                    // Same derived token as the victim's login above — a
-                    // takeover requires a token match (networking rework
-                    // 1, finding 3); this test is about the reconnect
-                    // state machine, not credential mismatches, so the
-                    // kicker must present the victim's own token.
-                    kicker.send(encode(&ClientMsg::Login {
-                        name: "reconnect-victim".into(),
-                        token: name_token("reconnect-victim"),
-                    }));
-                }
-                ClientEvent::Message(data) => {
-                    if let Some(ServerMsg::Welcome { .. }) = decode::<ServerMsg>(&data) {
-                        got_welcome = true;
-                    }
-                }
-                ClientEvent::Disconnected => {}
-                ClientEvent::Rejected(_) => {}
-            }
-        }
-        if got_welcome {
-            break;
-        }
-        assert!(Instant::now() < deadline, "kicker never got its own Welcome");
-        std::thread::sleep(Duration::from_millis(16));
-    }
+    // `send` can race the Login frame right off the wire. `Bot` derives
+    // the same token from the name, so this takeover satisfies the
+    // token-match requirement (networking rework 1, finding 3)
+    // automatically.
+    let mut kicker = Bot::connect_as(addr, "reconnect-victim");
+    kicker.wait_for("kicker Welcome", Duration::from_secs(5), |b| b.player_id.is_some());
     drop(kicker);
 
     // The victim must notice on its own — no test code touches its
@@ -197,8 +154,7 @@ fn kicked_connection_reconnects_and_relogs_in() {
 /// the dash or right after it.
 #[test]
 fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    std::env::set_current_dir(&root).unwrap();
+    workspace_root();
 
     let addr: SocketAddr = "127.0.0.1:25402".parse().unwrap();
     std::thread::spawn(move || {
@@ -341,19 +297,13 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     );
 }
 
-/// Nearest-rank percentile helper for the smoothness probe below — mirrors
-/// `server/vordar-server/tests/loss.rs`'s `pct`.
-fn pct(sorted: &[f32], p: f64) -> f32 {
-    sorted[((sorted.len() as f64 * p) as usize).min(sorted.len() - 1)]
-}
-
 /// Sleeps until the next precise 60 Hz tick boundary, then advances
 /// `next` by exactly one tick. The connection-wait loops elsewhere in
 /// this file pace themselves with a flat 16 ms sleep, which drifts ~4 %
 /// fast against the true 16.667 ms tick — harmless for a coarse "did the
 /// Welcome arrive yet" wait, but enough drift for an extra render call to
 /// occasionally land inside the smoothness probe's degenerate
-/// reversal-cancellation window (see `mover_tick`'s doc comment),
+/// reversal-cancellation window (see `drive_mover`'s doc comment),
 /// spuriously inflating its measured zero-motion run by one tick.
 fn pace_tick(next: &mut Instant) {
     *next += Duration::from_secs_f64(1.0 / TICK_HZ as f64);
@@ -381,26 +331,14 @@ fn pace_tick(next: &mut Instant) {
 /// near-zero velocity for longer than this probe's zero-motion gate
 /// allows. The steady Z drift guarantees no two samples are ever exactly
 /// equal, so the interpolated segment is always genuinely moving.
-fn mover_tick(
-    client: &NetClient,
-    seq: &mut u32,
-    ring: &mut VecDeque<MoveIntentEntry>,
-    dir: &mut Vec2,
-    last_reverse: &mut Instant,
-) {
+fn drive_mover(mover: &mut Bot, dir: &mut Vec2, last_reverse: &mut Instant) {
     const REVERSE_INTERVAL: Duration = Duration::from_millis(2170);
     if last_reverse.elapsed() >= REVERSE_INTERVAL {
         dir.x = -dir.x;
         *last_reverse = Instant::now();
     }
-    let Some(t_server_micros) = client.server_now_micros() else { return };
-    *seq += 1;
-    ring.push_back(MoveIntentEntry { seq: *seq, t_server_micros, dir: *dir });
-    if ring.len() > MOVE_RING_LEN {
-        ring.pop_front();
-    }
-    let intents: Vec<MoveIntentEntry> = ring.iter().cloned().collect();
-    client.send_datagram(encode(&ClientMsg::MoveIntents { intents }));
+    mover.send_move(*dir);
+    mover.pump();
 }
 
 /// Networking rework 4, finding 3
@@ -408,8 +346,8 @@ fn mover_tick(
 /// probes (`server/vordar-server/tests/loss.rs`) measure arrival gaps and
 /// intent-ack lag only — nothing measures what a player actually SEES: the
 /// per-tick rendered motion of a remote entity under loss and jitter. A
-/// real headless server, a real "mover" (a second raw `NetClient`, the
-/// kicker pattern above) streaming `MoveIntents` datagrams ±X at 6 u/s,
+/// real headless server, a real "mover" (a second `Bot`, the kicker
+/// pattern above) streaming `MoveIntents` datagrams ±X at 6 u/s,
 /// and a real WAN-impaired "observer" running the actual client systems
 /// (`NetReceiveSystem` + `NetInterpolateSystem`, `predict: false` — a
 /// non-predicting own player is buffered like any remote) prove the
@@ -420,8 +358,7 @@ fn mover_tick(
 #[test]
 #[ignore = "loss probe — run with --release --ignored --nocapture"]
 fn remote_render_smoothness_under_loss_probe() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    std::env::set_current_dir(&root).unwrap();
+    workspace_root();
     if cfg!(debug_assertions) {
         eprintln!("WARNING: loss probe running in debug — results will not be representative");
     }
@@ -436,44 +373,16 @@ fn remote_render_smoothness_under_loss_probe() {
     });
     std::thread::sleep(Duration::from_millis(300));
 
-    // The mover: a second raw NetClient (the kicker pattern above) that
-    // logs in and streams MoveIntents — unimpaired; only the observer's
-    // connection below carries the WAN impairment.
-    let mut mover = NetClient::connect(addr, PROTOCOL_VERSION).expect("mover connect");
-    let mut mover_seq = 0u32;
-    let mut mover_ring: VecDeque<MoveIntentEntry> = VecDeque::new();
+    // The mover: a second Bot (the kicker pattern above) that logs in and
+    // streams MoveIntents — unimpaired; only the observer's connection
+    // below carries the WAN impairment.
+    let mut mover = Bot::connect_as(addr, "smoothness-mover");
+    mover.wait_for("mover Welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    let mover_id = mover.player_id.unwrap();
     // Small constant Z drift alongside the ±X reversal — see
-    // `mover_tick`'s doc comment for why this is needed.
+    // `drive_mover`'s doc comment for why this is needed.
     let mut mover_dir = Vec2::new(1.0, 0.1).normalize();
     let mut last_reverse = Instant::now();
-    let mover_id = {
-        let mut id = None;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            for ev in mover.poll() {
-                match ev {
-                    ClientEvent::Connected => {
-                        mover.send(encode(&ClientMsg::Login {
-                            name: "smoothness-mover".into(),
-                            token: name_token("smoothness-mover"),
-                        }));
-                    }
-                    ClientEvent::Message(data) => {
-                        if let Some(ServerMsg::Welcome { player_id }) = decode::<ServerMsg>(&data) {
-                            id = Some(player_id);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if id.is_some() {
-                break;
-            }
-            assert!(Instant::now() < deadline, "mover never got its Welcome");
-            std::thread::sleep(Duration::from_millis(16));
-        }
-        id.unwrap()
-    };
 
     // The observer: the onslaught test's world verbatim (prefab registry
     // + real NetReceiveSystem/NetInterpolateSystem), connected WAN-
@@ -526,8 +435,7 @@ fn remote_render_smoothness_under_loss_probe() {
     // Wait for the mover's own entity to enter the observer's AOI.
     let deadline = Instant::now() + Duration::from_secs(10);
     let mover_entity = loop {
-        mover_tick(&mover, &mut mover_seq, &mut mover_ring, &mut mover_dir, &mut last_reverse);
-        let _ = mover.poll();
+        drive_mover(&mut mover, &mut mover_dir, &mut last_reverse);
         recv.run(&mut world, &mut resources, DT);
         render_sys.run(&mut world, &mut resources, DT);
         if let Some(&e) = resources.get::<NetClientState>().unwrap().entities.get(&mover_id) {
@@ -541,8 +449,7 @@ fn remote_render_smoothness_under_loss_probe() {
     // before recording (mirrors loss.rs's `common::settle`).
     let settle_deadline = Instant::now() + SETTLE;
     while Instant::now() < settle_deadline {
-        mover_tick(&mover, &mut mover_seq, &mut mover_ring, &mut mover_dir, &mut last_reverse);
-        let _ = mover.poll();
+        drive_mover(&mut mover, &mut mover_dir, &mut last_reverse);
         recv.run(&mut world, &mut resources, DT);
         render_sys.run(&mut world, &mut resources, DT);
         pace_tick(&mut next_tick);
@@ -556,8 +463,7 @@ fn remote_render_smoothness_under_loss_probe() {
     let mut max_zero_run = 0u32;
     let window_deadline = Instant::now() + WINDOW;
     while Instant::now() < window_deadline {
-        mover_tick(&mover, &mut mover_seq, &mut mover_ring, &mut mover_dir, &mut last_reverse);
-        let _ = mover.poll();
+        drive_mover(&mut mover, &mut mover_dir, &mut last_reverse);
         recv.run(&mut world, &mut resources, DT);
         render_sys.run(&mut world, &mut resources, DT);
 
@@ -577,10 +483,10 @@ fn remote_render_smoothness_under_loss_probe() {
 
     assert!(steps.len() > 500, "smoothness probe only recorded {} ticks — window too short", steps.len());
     let nominal = SPEED / 60.0;
-    steps.sort_by(|a, b| a.total_cmp(b));
-    let p50 = pct(&steps, 0.50);
-    let p99 = pct(&steps, 0.99);
-    let max = *steps.last().unwrap();
+    let mut steps64: Vec<f64> = steps.iter().map(|&s| s as f64).collect();
+    let p50 = percentile(&mut steps64, 0.50);
+    let p99 = percentile(&mut steps64, 0.99);
+    let max = *steps64.last().unwrap();
     println!(
         "remote render smoothness: ticks={} step_u p50={:.4} p99={:.4} max={:.4} longest_zero_run={}",
         steps.len(),
@@ -597,8 +503,8 @@ fn remote_render_smoothness_under_loss_probe() {
         "longest zero-motion run {max_zero_run} ticks exceeds the 5-tick (~83 ms) freeze gate"
     );
     assert!(
-        p99 <= 1.5 * nominal,
+        p99 <= 1.5 * nominal as f64,
         "p99 per-tick step {p99:.4} exceeds 1.5x nominal ({:.4}) — catch-up warble regression",
-        1.5 * nominal
+        1.5 * nominal as f64
     );
 }

@@ -4342,6 +4342,7 @@ dependencies = [
  "hecs",
  "log",
  "ron",
+ "test-support",
  "vordar-game",
  "vordar-protocol",
  "vordar-server",
