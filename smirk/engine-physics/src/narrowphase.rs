@@ -99,7 +99,13 @@ impl System for NarrowphaseSystem {
     }
 }
 
-fn shapes_overlap(
+/// The `ActivePairs` membership test: any code outside this module that
+/// needs to know whether a pair would be considered in contact (e.g.
+/// vordar-game's `anchored_push`, predicting a static collision without
+/// running the full physics pipeline) must gate through this function so
+/// prediction and the live narrowphase never disagree on what counts as a
+/// contact.
+pub fn shapes_overlap(
     pos_a: Vec3, shape_a: &CollisionShape,
     pos_b: Vec3, shape_b: &CollisionShape,
 ) -> bool {

@@ -18,7 +18,7 @@ use engine_app::scheduler::System;
 use engine_core::components::{Anchored, CollisionShape, Hitbox, Solid, Transform};
 use engine_core::traits::Resources;
 use engine_core::World;
-use engine_physics::narrowphase::ActivePairs;
+use engine_physics::narrowphase::{shapes_overlap, ActivePairs};
 use glam::Vec3;
 use hecs::Entity;
 use std::collections::HashMap;
@@ -132,6 +132,25 @@ fn sphere_aabb_mtv(sphere_pos: &Vec3, radius: f32, aabb_pos: &Vec3, half_extents
     if overlap <= 0.0 { return None; }
     let normal = if dist > 1e-4 { diff / dist } else { Vec3::X };
     Some(normal * overlap * 0.5)
+}
+
+/// Prediction's pure twin of the anchored branch in `SeparationSystem::run`
+/// above: for a walker's position/shape against a set of anchored statics,
+/// gates each candidate through `shapes_overlap` (the same test that decides
+/// live `ActivePairs` membership) before accumulating its `mtv`, so
+/// prediction and the live pipeline compute the identical correction
+/// (DESIGN.md §6 determinism, same contract as `movement::step`).
+pub fn anchored_push(pos: Vec3, shape: &CollisionShape, statics: &[(Vec3, CollisionShape)]) -> Vec3 {
+    let mut sum = Vec3::ZERO;
+    for (s_pos, s_shape) in statics {
+        if !shapes_overlap(pos, shape, *s_pos, s_shape) {
+            continue;
+        }
+        if let Some(correction) = mtv(&pos, shape, s_pos, s_shape) {
+            sum += correction * 2.0;
+        }
+    }
+    sum * CORRECTION_PERCENT
 }
 
 #[cfg(test)]
