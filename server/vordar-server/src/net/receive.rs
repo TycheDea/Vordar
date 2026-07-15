@@ -110,55 +110,8 @@ impl System for NetReceiveSystem {
             complete_db_load(world, resources, l);
         }
 
-        // A connection must always own a live player: combat can kill the
-        // entity, and there is no death/respawn design yet — so respawn at
-        // the connection's spawn point and re-Welcome the client so
-        // prediction and snapshots rebind to the new body.
-        let dead: Vec<ConnId> = {
-            let state = resources.get::<NetServerState>().unwrap();
-            state.conns.iter()
-                .filter(|&(_, pc)| !world.contains(pc.entity))
-                .map(|(&conn, _)| conn)
-                .collect()
-        };
-        for conn in dead {
-            let result = spawn_prefab(PLAYER_PREFAB, spawn_position(conn), &mut SpawnContext { world, resources });
-            let state = resources.get_mut::<NetServerState>().unwrap();
-            let Some(pc) = state.conns.get_mut(&conn) else { continue };
-            match result {
-                Ok(entity) => {
-                    pc.entity = entity;
-                    pc.queue.clear();
-                    let player_id = state.repl_ids.id_for(entity);
-                    state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
-                    log::info!("conn {conn}: player died — respawned as {entity:?}");
-                }
-                Err(e) => log::error!("conn {conn}: respawn failed: {e}"),
-            }
-        }
-
-        // Apply exactly one queued intent per connection per tick for the
-        // shared movement system. An empty queue (arrival jitter) means one
-        // tick standing still — the position deficit stays accounted for in
-        // the client's pending replay, so prediction error remains zero.
-        let intents: Vec<(Entity, Vec2)> = {
-            let state = resources.get_mut::<NetServerState>().unwrap();
-            state.conns.values_mut()
-                .filter_map(|pc| {
-                    let (seq, stamp, dir) = pc.queue.pop_front()?;
-                    pc.applied_seq = seq;
-                    pc.history.push_back((stamp, dir));
-                    if pc.history.len() > HISTORY_CAP {
-                        pc.history.pop_front();
-                    }
-                    Some((pc.entity, dir))
-                })
-                .collect()
-        };
-        let bus = resources.get_mut::<EventBus>().unwrap();
-        for (entity, dir) in intents {
-            bus.emit(MoveIntent { entity, dir });
-        }
+        respawn_dead(world, resources);
+        drain_intents(resources);
     }
 }
 
@@ -551,6 +504,60 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
             log::info!("conn {conn}: '{name}' joined as {entity:?} ({} online)", state.conns.len());
         }
         Err(e) => log::error!("conn {conn}: player spawn failed: {e}"),
+    }
+}
+
+/// A connection must always own a live player: combat can kill the entity,
+/// and there is no death/respawn design yet — so respawn at the
+/// connection's spawn point and re-Welcome the client so prediction and
+/// snapshots rebind to the new body.
+fn respawn_dead(world: &mut World, resources: &mut Resources) {
+    let dead: Vec<ConnId> = {
+        let state = resources.get::<NetServerState>().unwrap();
+        state.conns.iter()
+            .filter(|&(_, pc)| !world.contains(pc.entity))
+            .map(|(&conn, _)| conn)
+            .collect()
+    };
+    for conn in dead {
+        let result = spawn_prefab(PLAYER_PREFAB, spawn_position(conn), &mut SpawnContext { world, resources });
+        let state = resources.get_mut::<NetServerState>().unwrap();
+        let Some(pc) = state.conns.get_mut(&conn) else { continue };
+        match result {
+            Ok(entity) => {
+                pc.entity = entity;
+                pc.queue.clear();
+                let player_id = state.repl_ids.id_for(entity);
+                state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
+                log::info!("conn {conn}: player died — respawned as {entity:?}");
+            }
+            Err(e) => log::error!("conn {conn}: respawn failed: {e}"),
+        }
+    }
+}
+
+/// Apply exactly one queued intent per connection per tick for the shared
+/// movement system. An empty queue (arrival jitter) means one tick standing
+/// still — the position deficit stays accounted for in the client's pending
+/// replay, so prediction error remains zero.
+fn drain_intents(resources: &mut Resources) {
+    let intents: Vec<(Entity, Vec2)> = {
+        let state = resources.get_mut::<NetServerState>().unwrap();
+        state.conns.values_mut()
+            .filter_map(|pc| {
+                let (seq, stamp, dir) = pc.queue.pop_front()?;
+                pc.applied_seq = seq;
+                pc.history.push_back((stamp, dir));
+                if pc.history.len() > HISTORY_CAP {
+                    pc.history.pop_front();
+                }
+                Some((pc.entity, dir))
+            })
+            .collect()
+    };
+    let bus = resources.get_mut::<EventBus>().unwrap();
+    for (entity, dir) in intents {
+        bus.emit(MoveIntent { entity, dir });
     }
 }
 
