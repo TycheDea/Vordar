@@ -10,6 +10,7 @@
 //   npc_replication   — chapter waves replicate NPCs to clients
 //   respawn_after_death — player respawn after entity death
 //   respawn_carries_xp — respawned body inherits the dying body's Xp
+//   xp_survives_relogin — XP persists through disconnect + relogin
 //   aoi_border        — AOI enter/leave at the radius border + bandwidth
 //   world_clock_and_blood_moon — world time + scripted events
 //   far_bot_never_sees_out_of_aoi_mechanic — AOI scope for damage telegraphs
@@ -309,9 +310,11 @@ fn respawn_after_death() {
     });
 }
 
-/// Grants a deterministic Xp(25) at tick 60, on every `Player` entity that
-/// doesn't have one yet — a stand-in for XP earned from kills before the
-/// `KillPlayersSystem` death at tick 120.
+/// Grants a deterministic Xp(25) at tick 60, on every `Player` entity —
+/// a stand-in for XP earned from kills before the `KillPlayersSystem` death
+/// at tick 120. Every logged-in player already carries an `Xp` component
+/// seeded from its saved record (login grant hydration), so this overwrites
+/// rather than filtering for absence.
 struct GrantXpSystem {
     ticks: u64,
     fired: bool,
@@ -326,7 +329,6 @@ impl System for GrantXpSystem {
         self.fired = true;
         let players: Vec<Entity> = world
             .query::<(Entity, &vordar_game::Player)>()
-            .without::<&vordar_game::progression::Xp>()
             .iter()
             .map(|(e, _)| e)
             .collect();
@@ -383,6 +385,72 @@ fn respawn_carries_xp() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert_eq!(probe.load(Ordering::Relaxed), 25, "the respawned body must inherit the dying body's Xp");
+}
+
+/// Mirrors the current `Player` entity's `Xp` into a shared atomic every
+/// tick, defaulting to 0 when the entity carries no `Xp` component at all —
+/// unlike `ProbeXpSystem`, this must observably fall back to 0 across a
+/// relogin's despawn/respawn churn so a missing hydration seam shows up as
+/// 0, not a stale reading left over from the previous body.
+struct ProbeCurrentXpSystem {
+    dest: Arc<AtomicU32>,
+}
+
+impl System for ProbeCurrentXpSystem {
+    fn run(&mut self, world: &mut World, _resources: &mut Resources, _delta: f32) {
+        if let Some((entity, _)) = world.query::<(Entity, &vordar_game::Player)>().iter().next() {
+            let xp = world.get::<&vordar_game::progression::Xp>(entity).map(|x| x.0).unwrap_or(0);
+            self.dest.store(xp, Ordering::Relaxed);
+        }
+    }
+}
+
+// A player's XP is tied to the character (name), not the connection or the
+// body: XP earned before a disconnect must still be there after relogin,
+// carried through the db's `xp` column rather than reset to 0 on the fresh
+// spawn.
+#[test]
+fn xp_survives_relogin() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25184".parse().unwrap();
+    let probe = Arc::new(AtomicU32::new(0));
+    let probe_dest = probe.clone();
+    spawn_server_with(addr, ":memory:", 2400, move |app| {
+        app.add_system(GrantXpSystem { ticks: 0, fired: false }, Phase::Update, SystemOrder::Default);
+        app.add_system(ProbeCurrentXpSystem { dest: probe_dest }, Phase::Update, SystemOrder::Default);
+    });
+
+    let mut first = Bot::connect_as(addr, "xpkeeper");
+    first.wait_for("first welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+
+    // Wait for GrantXpSystem's tick-60 grant to land on the first body.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && probe.load(Ordering::Relaxed) != 25 {
+        first.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(probe.load(Ordering::Relaxed), 25, "XP grant never landed before disconnect");
+
+    drop(first);
+    // Give the server a moment to process the disconnect — save_character
+    // reads the dying body's Xp before the despawn flush removes it.
+    std::thread::sleep(Duration::from_millis(500));
+
+    let mut second = Bot::connect_as(addr, "xpkeeper");
+    second.wait_for("relogin welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+
+    // Fail-first: without hydration at the login grant, the fresh body
+    // carries no Xp component at all and the probe falls back to 0.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        second.pump();
+        let xp = probe.load(Ordering::Relaxed);
+        if xp == 25 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "relogged body never carried Xp 25: probe reads {xp}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 // AOI border behavior + bandwidth. 100 NPCs sit within radius ~19 of

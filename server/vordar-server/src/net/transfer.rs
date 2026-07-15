@@ -63,9 +63,10 @@ impl System for ZoneTransferSystem {
             // Save FIRST: the FIFO db queue puts this ahead of the relogin
             // load the redirected client is about to trigger in the target.
             let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+            let xp = world.get::<&vordar_game::progression::Xp>(pc.entity).map(|x| x.0).unwrap_or(pc.carried_xp);
             state.db.save(
                 pc.name.clone(),
-                CharacterRecord { zone: portal.target_zone.clone(), pos: portal.target_pos, health, cooldowns },
+                CharacterRecord { zone: portal.target_zone.clone(), pos: portal.target_pos, health, cooldowns, xp },
             );
             state.server.send(conn, encode(&ServerMsg::Redirect { zone: portal.target_zone.clone(), addr }));
             resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);

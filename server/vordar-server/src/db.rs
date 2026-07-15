@@ -47,6 +47,8 @@ CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, token_
 ALTER TABLE characters ADD COLUMN account_id INTEGER REFERENCES accounts(id);
 INSERT INTO accounts (name) SELECT name FROM characters;
 UPDATE characters SET account_id = (SELECT id FROM accounts WHERE accounts.name = characters.name);
+", "
+ALTER TABLE characters ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;
 "];
 
 /// Bring `db` up to the latest schema version. Each pending migration runs in
@@ -85,6 +87,8 @@ pub struct CharacterRecord {
     /// which only mean something against the server clock that produced
     /// them. Only skills still cooling down are present.
     pub cooldowns: HashMap<String, u64>,
+    /// Per-player XP total as of the moment this record was saved.
+    pub xp: u32,
 }
 
 enum DbRequest {
@@ -263,7 +267,7 @@ fn worker(mut db: Connection, rx: mpsc::Receiver<DbRequest>) {
                         "{}".into()
                     });
                     let result = tx.execute(
-                        "UPDATE characters SET zone = ?1, pos_x = ?2, pos_y = ?3, pos_z = ?4, health = ?5, cooldowns = ?6 WHERE name = ?7",
+                        "UPDATE characters SET zone = ?1, pos_x = ?2, pos_y = ?3, pos_z = ?4, health = ?5, cooldowns = ?6, xp = ?7 WHERE name = ?8",
                         rusqlite::params![
                             record.zone,
                             record.pos.x as f64,
@@ -271,6 +275,7 @@ fn worker(mut db: Connection, rx: mpsc::Receiver<DbRequest>) {
                             record.pos.z as f64,
                             record.health,
                             cooldowns_text,
+                            record.xp,
                             name
                         ],
                     );
@@ -306,7 +311,7 @@ fn load_or_create(
         rusqlite::params![name, defaults.pos.x as f64, defaults.pos.y as f64, defaults.pos.z as f64, defaults.health, account_id],
     )?;
     db.query_row(
-        "SELECT zone, pos_x, pos_y, pos_z, health, cooldowns FROM characters WHERE name = ?1",
+        "SELECT zone, pos_x, pos_y, pos_z, health, cooldowns, xp FROM characters WHERE name = ?1",
         [name],
         |row| {
             let cooldowns_text: String = row.get(5)?;
@@ -319,6 +324,7 @@ fn load_or_create(
                 pos: Vec3::new(row.get::<_, f64>(1)? as f32, row.get::<_, f64>(2)? as f32, row.get::<_, f64>(3)? as f32),
                 health: row.get(4)?,
                 cooldowns,
+                xp: row.get(6)?,
             })
         },
     )
@@ -383,7 +389,7 @@ mod tests {
     }
 
     fn defaults() -> CharacterRecord {
-        CharacterRecord { zone: "start".into(), pos: Vec3::ZERO, health: 100, cooldowns: HashMap::new() }
+        CharacterRecord { zone: "start".into(), pos: Vec3::ZERO, health: 100, cooldowns: HashMap::new(), xp: 0 }
     }
 
     /// The old always-a-record shape, for the many pre-existing tests that
@@ -423,7 +429,7 @@ mod tests {
         let path = temp_db("fresh");
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        let defaults = CharacterRecord { zone: "start".into(), pos: Vec3::new(3.0, 0.0, -2.0), health: 100, cooldowns: HashMap::new() };
+        let defaults = CharacterRecord { zone: "start".into(), pos: Vec3::new(3.0, 0.0, -2.0), health: 100, cooldowns: HashMap::new(), xp: 0 };
         handle.login(1, "alice".into(), [0u8; 32], defaults.clone());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.conn, 1);
@@ -440,7 +446,7 @@ mod tests {
             let handle = worker.handle();
             handle.login(1, "bob".into(), [0u8; 32], defaults());
             wait_loaded(&handle);
-            handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: saved_pos, health: 40, cooldowns: HashMap::new() });
+            handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: saved_pos, health: 40, cooldowns: HashMap::new(), xp: 40 });
             // Drop (handle first, then worker) flushes the queued save.
         }
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
@@ -450,6 +456,7 @@ mod tests {
         assert_eq!(loaded.record.zone, "east");
         assert_eq!(loaded.record.pos, saved_pos);
         assert_eq!(loaded.record.health, 40);
+        assert_eq!(loaded.record.xp, 40, "xp must survive a reopen");
     }
 
     #[test]
@@ -457,7 +464,7 @@ mod tests {
         let path = temp_db("unknown");
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        handle.save("ghost".into(), CharacterRecord { zone: "east".into(), pos: Vec3::ONE, health: 1, cooldowns: HashMap::new() });
+        handle.save("ghost".into(), CharacterRecord { zone: "east".into(), pos: Vec3::ONE, health: 1, cooldowns: HashMap::new(), xp: 0 });
         handle.login(1, "ghost".into(), [0u8; 32], defaults());
         // The save hit no row; the later create uses defaults.
         assert_eq!(wait_loaded(&handle).record, defaults());
@@ -487,7 +494,7 @@ mod tests {
         a.login(1, "carl".into(), [0u8; 32], defaults());
         wait_loaded(&a);
         let moved = Vec3::new(-16.0, 0.0, 0.0);
-        a.save("carl".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 80, cooldowns: HashMap::new() });
+        a.save("carl".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 80, cooldowns: HashMap::new(), xp: 0 });
         b.login(7, "carl".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&b);
         assert_eq!(loaded.record.zone, "east");
@@ -612,7 +619,7 @@ mod tests {
         assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle after completion");
 
         let moved = Vec3::new(5.0, 0.0, -1.0);
-        h2.save("forked".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 77, cooldowns: HashMap::new() });
+        h2.save("forked".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 77, cooldowns: HashMap::new(), xp: 0 });
         drop(h1);
         drop(h2);
         drop(worker);
@@ -651,9 +658,9 @@ mod tests {
         }
 
         // Fire the burst without waiting between sends.
-        handle.save("ann".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(1.0, 0.0, 0.0), health: 10, cooldowns: HashMap::new() });
-        handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(2.0, 0.0, 0.0), health: 20, cooldowns: HashMap::new() });
-        handle.save("cleo".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(3.0, 0.0, 0.0), health: 30, cooldowns: HashMap::new() });
+        handle.save("ann".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(1.0, 0.0, 0.0), health: 10, cooldowns: HashMap::new(), xp: 0 });
+        handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(2.0, 0.0, 0.0), health: 20, cooldowns: HashMap::new(), xp: 0 });
+        handle.save("cleo".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(3.0, 0.0, 0.0), health: 30, cooldowns: HashMap::new(), xp: 0 });
         handle.login(9, "dana".into(), [0u8; 32], defaults());
         let dana = wait_loaded(&handle);
         assert_eq!(dana.name, "dana");
@@ -699,6 +706,7 @@ mod tests {
                     pos: Vec3::new(2.0, 0.0, 3.0),
                     health: 80,
                     cooldowns: cooldowns.clone(),
+                    xp: 0,
                 },
             );
             // Drop (handle first, then worker) flushes the queued save.
@@ -759,7 +767,7 @@ mod tests {
         wait_login(&handle);
         handle.save(
             "gwen".into(),
-            CharacterRecord { zone: "east".into(), pos: Vec3::new(5.0, 0.0, 0.0), health: 42, cooldowns: HashMap::new() },
+            CharacterRecord { zone: "east".into(), pos: Vec3::new(5.0, 0.0, 0.0), health: 42, cooldowns: HashMap::new(), xp: 0 },
         );
         handle.login(2, "gwen".into(), [2u8; 32], defaults());
         let loaded = wait_login(&handle);

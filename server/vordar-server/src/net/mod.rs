@@ -283,9 +283,10 @@ fn cooldown_remainders(ready: &HashMap<String, u64>, now: u64) -> HashMap<String
 fn save_character(world: &World, state: &NetServerState, pc: &PlayerConn) {
     if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
         let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+        let xp = world.get::<&vordar_game::progression::Xp>(pc.entity).map(|x| x.0).unwrap_or(pc.carried_xp);
         state.db.save(
             pc.name.clone(),
-            CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
+            CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns, xp },
         );
     }
 }

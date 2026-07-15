@@ -218,6 +218,7 @@ fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name
         pos: spawn_position(conn),
         health: 100,
         cooldowns: HashMap::new(),
+        xp: 0,
     };
     state.db.login(conn, name, token, defaults);
 }
@@ -471,6 +472,7 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
             if let Ok(mut hp) = world.get::<&mut Health>(entity) {
                 hp.current = record.health;
             }
+            let _ = world.insert_one(entity, Xp(record.xp));
             // Cooldowns are persisted as remainders (`record.cooldowns`),
             // so a relog or zone transfer restores the exact remaining
             // cooldown instead of resetting every ability to full.
@@ -491,7 +493,7 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
                 history: VecDeque::new(),
                 cooldown_ready,
                 rr_cursor: 0,
-                carried_xp: 0,
+                carried_xp: record.xp,
             });
             let player_id = state.repl_ids.id_for(entity);
             state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
