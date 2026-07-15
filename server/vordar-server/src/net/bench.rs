@@ -41,6 +41,7 @@ pub fn state_with_fake_conns(server: NetServer, db: DbHandle, players: &[Entity]
                 history: VecDeque::new(),
                 cooldown_ready: HashMap::new(),
                 rr_cursor: 0,
+                carried_xp: 0,
             },
         );
     }

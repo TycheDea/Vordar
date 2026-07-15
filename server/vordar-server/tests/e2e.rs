@@ -9,6 +9,7 @@
 //   epsilon_over_unit_direction_still_moves_player — normalize noise tolerance
 //   npc_replication   — chapter waves replicate NPCs to clients
 //   respawn_after_death — player respawn after entity death
+//   respawn_carries_xp — respawned body inherits the dying body's Xp
 //   aoi_border        — AOI enter/leave at the radius border + bandwidth
 //   world_clock_and_blood_moon — world time + scripted events
 //   far_bot_never_sees_out_of_aoi_mechanic — AOI scope for damage telegraphs
@@ -19,6 +20,8 @@ use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
 use hecs::Entity;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -304,6 +307,82 @@ fn respawn_after_death() {
     bot.wait_for("old body leaves the AOI", Duration::from_secs(5), |b| {
         !b.last_snapshot.contains_key(&first_body)
     });
+}
+
+/// Grants a deterministic Xp(25) at tick 60, on every `Player` entity that
+/// doesn't have one yet — a stand-in for XP earned from kills before the
+/// `KillPlayersSystem` death at tick 120.
+struct GrantXpSystem {
+    ticks: u64,
+    fired: bool,
+}
+
+impl System for GrantXpSystem {
+    fn run(&mut self, world: &mut World, _resources: &mut Resources, _delta: f32) {
+        self.ticks += 1;
+        if self.fired || self.ticks < 60 {
+            return;
+        }
+        self.fired = true;
+        let players: Vec<Entity> = world
+            .query::<(Entity, &vordar_game::Player)>()
+            .without::<&vordar_game::progression::Xp>()
+            .iter()
+            .map(|(e, _)| e)
+            .collect();
+        for entity in players {
+            let _ = world.insert_one(entity, vordar_game::progression::Xp(25));
+        }
+    }
+}
+
+/// From tick 180 on, mirrors any `Player` entity's `Xp` into a shared atomic —
+/// systems can't return values, so the harness thread reads this directly.
+struct ProbeXpSystem {
+    ticks: u64,
+    dest: Arc<AtomicU32>,
+}
+
+impl System for ProbeXpSystem {
+    fn run(&mut self, world: &mut World, _resources: &mut Resources, _delta: f32) {
+        self.ticks += 1;
+        if self.ticks < 180 {
+            return;
+        }
+        if let Some((_, xp)) = world.query::<(&vordar_game::Player, &vordar_game::progression::Xp)>().iter().next() {
+            self.dest.store(xp.0, Ordering::Relaxed);
+        }
+    }
+}
+
+// A player's XP is a property of the connection, not the body: the death at
+// tick 120 despawns the entity carrying Xp(25) (granted at tick 60), and the
+// respawned body must inherit that value rather than starting back at 0.
+#[test]
+fn respawn_carries_xp() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25183".parse().unwrap();
+    let probe = Arc::new(AtomicU32::new(0));
+    let probe_dest = probe.clone();
+    spawn_server_with(addr, ":memory:", 1200, move |app| {
+        app.add_system(GrantXpSystem { ticks: 0, fired: false }, Phase::Update, SystemOrder::Default);
+        app.add_system(KillPlayersSystem { ticks: 0, fired: false }, Phase::Update, SystemOrder::Default);
+        app.add_system(ProbeXpSystem { ticks: 0, dest: probe_dest }, Phase::Update, SystemOrder::Default);
+    });
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    let first_body = bot.player_id.unwrap();
+    bot.wait_for("re-welcome after death", Duration::from_secs(10), |b| {
+        b.player_id != Some(first_body)
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline && probe.load(Ordering::Relaxed) == 0 {
+        bot.pump();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(probe.load(Ordering::Relaxed), 25, "the respawned body must inherit the dying body's Xp");
 }
 
 // AOI border behavior + bandwidth. 100 NPCs sit within radius ~19 of

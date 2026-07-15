@@ -22,6 +22,7 @@ use vordar_game::combat::stats::DamageType;
 use vordar_game::events::MoveIntent;
 use vordar_game::player::class::{ClassId, ClassLibrary, DEFAULT_CLASS};
 use vordar_game::player::movement_velocity;
+use vordar_game::progression::Xp;
 use vordar_game::skills::AbilityEffect;
 use vordar_game::world::WorldTime;
 use vordar_game::{Mechanic, Player};
@@ -490,6 +491,7 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
                 history: VecDeque::new(),
                 cooldown_ready,
                 rr_cursor: 0,
+                carried_xp: 0,
             });
             let player_id = state.repl_ids.id_for(entity);
             state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
@@ -528,11 +530,35 @@ fn respawn_dead(world: &mut World, resources: &mut Resources) {
             Ok(entity) => {
                 pc.entity = entity;
                 pc.queue.clear();
+                // Seed the new body's Xp from the dying one's, captured by
+                // XpCarrySystem in the same tick's pre-flush window.
+                let _ = world.insert_one(entity, Xp(pc.carried_xp));
                 let player_id = state.repl_ids.id_for(entity);
                 state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
                 log::info!("conn {conn}: player died — respawned as {entity:?}");
             }
             Err(e) => log::error!("conn {conn}: respawn failed: {e}"),
+        }
+    }
+}
+
+/// Phase::DespawnFlush, First — same pre-flush window as `DeathBroadcastSystem`
+/// (after DeathSystem queues the despawn, before the flush removes the
+/// entity). A dying player's body is about to vanish; its Xp component would
+/// go with it, so this stashes the value in the connection before the body
+/// is gone, for `respawn_dead` to seed onto the next one.
+pub(super) struct XpCarrySystem;
+
+impl System for XpCarrySystem {
+    fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        let dying: Vec<Entity> = resources.get::<DespawnQueue>().unwrap().0.iter().map(|(e, _)| *e).collect();
+        let state = resources.get_mut::<NetServerState>().unwrap();
+        for entity in dying {
+            if let Some(pc) = state.conns.values_mut().find(|pc| pc.entity == entity) {
+                if let Ok(xp) = world.get::<&Xp>(entity) {
+                    pc.carried_xp = xp.0;
+                }
+            }
         }
     }
 }
@@ -683,6 +709,7 @@ mod tests {
             history: VecDeque::new(),
             cooldown_ready: HashMap::new(),
             rr_cursor: 0,
+            carried_xp: 0,
         };
         // Otherwise-well-formed intent (monotonic t, arrives on time) —
         // the only thing wrong with it is seq == 0.
@@ -728,6 +755,7 @@ mod tests {
             history: VecDeque::new(),
             cooldown_ready: HashMap::new(),
             rr_cursor: 0,
+            carried_xp: 0,
         }
     }
 

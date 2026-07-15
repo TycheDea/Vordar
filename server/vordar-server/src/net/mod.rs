@@ -39,7 +39,7 @@ use autosave::AutosaveSystem;
 use broadcast::{DeathBroadcastSystem, SnapshotBroadcastSystem};
 use login::LoginFailures;
 use mechanics::MechanicResolveSystem;
-use receive::NetReceiveSystem;
+use receive::{NetReceiveSystem, XpCarrySystem};
 use repl_ids::ReplIds;
 use shutdown::ShutdownSystem;
 use transfer::ZoneTransferSystem;
@@ -111,6 +111,9 @@ pub fn install(
         .add_system(ShutdownSystem, Phase::Input, SystemOrder::Default)
         // Deaths broadcast before the flush removes the dying entity.
         .add_system(DeathBroadcastSystem, Phase::DespawnFlush, SystemOrder::First)
+        // Same pre-flush window: capture a dying player's Xp before the body
+        // is removed, so the respawn below can carry it to the new one.
+        .add_system(XpCarrySystem, Phase::DespawnFlush, SystemOrder::First)
         // Resolve before broadcasting so deaths reach the same snapshot wave.
         .add_system(MechanicResolveSystem::new(), Phase::PostUpdate, SystemOrder::before::<SnapshotBroadcastSystem>())
         // Rage stacks read the tick's DamageDealt events: CollisionResolve's
@@ -160,6 +163,10 @@ struct PlayerConn {
     /// Round-robin cursor for snapshot `states` throttling — where the
     /// non-nearest rotation resumes next snapshot.
     rr_cursor: usize,
+    /// The XP value to seed onto the next body this connection spawns —
+    /// updated in the pre-flush death window (`XpCarrySystem`) so a body
+    /// death never launders away the player's progression.
+    carried_xp: u32,
 }
 
 pub struct NetServerState {
