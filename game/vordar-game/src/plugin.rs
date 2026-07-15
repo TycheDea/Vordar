@@ -65,7 +65,7 @@ impl Plugin for CoreGamePlugin {
             // World-resident enemy populations; no-op without ActiveChapter.
             .add_system(CampSystem::new(),    Phase::Update,           SystemOrder::Default)
             .add_system(ProjectileTtlSystem,  Phase::Update,           SystemOrder::Default)
-            // No-op unless WorldTimeRes + WorldEventsDef resources exist.
+            // No-op unless WorldTime + WorldEventsDef resources exist.
             .add_system(crate::world::WorldEventSystem::new(), Phase::Update, SystemOrder::Default)
             .add_system(MovementSystem,       Phase::Update,           SystemOrder::Last)
             // Collision response — separation first, then projectile hits

@@ -33,7 +33,7 @@ static NEXT_BOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::ne
 /// Deterministic account token for `name` (networking rework 1, finding 3):
 /// name bytes zero-padded/truncated into the 32-byte token. Every bot derives
 /// its token this way, so two bots sharing a name (same-name tests:
-/// `phase6_login_takeover`, reconnect kicks) automatically share credentials
+/// `login_takeover`, reconnect kicks) automatically share credentials
 /// too — token-gated takeover keeps working for them unchanged.
 pub fn name_token(name: &str) -> AccountToken {
     let mut token = [0u8; 32];

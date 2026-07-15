@@ -22,7 +22,7 @@ use vordar_game::combat::stats::DamageType;
 use vordar_game::events::MoveIntent;
 use vordar_game::player::class::{ClassId, ClassLibrary, DEFAULT_CLASS};
 use vordar_game::skills::AbilityEffect;
-use vordar_game::world::WorldTimeRes;
+use vordar_game::world::WorldTime;
 use vordar_game::Mechanic;
 use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg};
 
@@ -61,7 +61,7 @@ impl System for NetReceiveSystem {
 
         // Publish the world clock for world systems (events, future schedules).
         let world_now = resources.get::<NetServerState>().unwrap().world_micros();
-        resources.get_mut::<WorldTimeRes>().unwrap().0 = world_now;
+        resources.get_mut::<WorldTime>().unwrap().0 = world_now;
 
         let events = resources.get_mut::<NetServerState>().unwrap().server.poll();
 

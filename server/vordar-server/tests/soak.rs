@@ -94,7 +94,7 @@ fn drive(mut bots: Vec<(Bot, Wander)>, stop: Arc<AtomicBool>) -> std::thread::Jo
 
 #[test]
 #[ignore = "soak — run with --release --ignored"]
-fn phase7_soak_200_bots_hold_tick_budget() {
+fn soak_200_bots_hold_tick_budget() {
     test_support::workspace_root();
     if cfg!(debug_assertions) {
         eprintln!("WARNING: soak running in debug — results will not be representative");

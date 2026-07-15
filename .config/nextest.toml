@@ -11,7 +11,7 @@
 # deadline are EXCLUSIVE: `threads-required = "num-cpus"` makes each occupy
 # every worker slot, so nothing else runs beside it (the group cap alone does
 # not stop unrelated tests from loading the CPU next to them —
-# phase7_5_rend_kills_camped_enemy has flaked exactly that way twice).
+# rend_kills_camped_enemy has flaked exactly that way twice).
 # Renaming one of these tests MUST update this filter list.
 
 [test-groups]
@@ -20,7 +20,7 @@ realtime = { max-threads = 4 }
 # Exclusive closed-loop deadline tests (first matching override wins, so this
 # block must precede the group assignments below).
 [[profile.default.overrides]]
-filter = 'test(=phase7_5_rend_kills_camped_enemy) | test(=kicked_connection_reconnects_and_relogs_in) | test(=onslaught_dash_replay_never_snaps_at_150ms_rtt)'
+filter = 'test(=rend_kills_camped_enemy) | test(=kicked_connection_reconnects_and_relogs_in) | test(=onslaught_dash_replay_never_snaps_at_150ms_rtt)'
 test-group = '@global'
 threads-required = 'num-cpus'
 

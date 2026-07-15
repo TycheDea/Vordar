@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use vordar_game::combat::buff::RavagerRageSystem;
-use vordar_game::world::WorldTimeRes;
+use vordar_game::world::WorldTime;
 use vordar_game::zones::ZoneDef;
 use vordar_protocol::{AccountToken, PROTOCOL_VERSION, SNAPSHOT_HZ, TICK_HZ};
 
@@ -106,7 +106,7 @@ pub fn install(
 ) {
     app.insert_resource(NetServerState::new(server, db, db_owner, zone, directory, world_origin))
         // World time published every tick for world systems (events, day/night).
-        .insert_resource(WorldTimeRes(0))
+        .insert_resource(WorldTime(0))
         .set_phase_rate(Phase::PostUpdate, TickRate::Fixed(POST_HZ))
         .add_system(NetReceiveSystem, Phase::Input, SystemOrder::Default)
         // Unconditional: no-ops wherever `ShutdownFlag` is absent (every

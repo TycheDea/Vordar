@@ -56,7 +56,7 @@ fn invalid_intent_increments_reject_counter() {
 }
 
 // A bare name match would let anyone who knew a character's name take over —
-// or kick — its session (`phase6_login_takeover` in persistence tests
+// or kick — its session (`login_takeover` in persistence tests
 // exercises the LEGITIMATE version of this same mechanism). A same-name login
 // must also present the token the session claimed the name with; a mismatch
 // is denied (`LoginDenied(BadCredentials)`, connection left open — the CLIENT

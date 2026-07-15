@@ -11,7 +11,7 @@ use vordar_protocol::{encode, ClientMsg};
 // stepping out before T (by the defender's own synced clock) is a miss even
 // though those packets arrive after T; backdated casts are rejected.
 #[test]
-fn phase4_scheduled_aoe() {
+fn scheduled_aoe() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25156".parse().unwrap();
     spawn_server(addr, ":memory:", 2400);
@@ -103,7 +103,7 @@ fn phase4_scheduled_aoe() {
 // until the grunt's 30 HP run out — observed as an AOI leave while the bot
 // stays alive (player_id never changes → no death re-Welcome).
 #[test]
-fn phase7_5_rend_kills_camped_enemy() {
+fn rend_kills_camped_enemy() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25163".parse().unwrap();
     spawn_server_with(addr, ":memory:", 2400, |app| {

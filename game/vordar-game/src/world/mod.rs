@@ -21,7 +21,7 @@ use glam::Vec3;
 /// Current world time in microseconds — published every tick by whoever owns
 /// the authoritative clock (online: the server's net plugin). World systems
 /// no-op when absent (offline sandbox).
-pub struct WorldTimeRes(pub u64);
+pub struct WorldTime(pub u64);
 
 #[derive(serde::Deserialize)]
 pub struct WorldEventsDef {
@@ -107,7 +107,7 @@ impl WorldEventSystem {
 impl System for WorldEventSystem {
     fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
         let to_spawn: Vec<(String, Vec3)> = {
-            let Some(now) = resources.get::<WorldTimeRes>().map(|t| t.0) else { return };
+            let Some(now) = resources.get::<WorldTime>().map(|t| t.0) else { return };
             let Some(def) = resources.get::<WorldEventsDef>() else { return };
             if self.fired.len() != def.events.len() {
                 self.fired = vec![i64::MIN; def.events.len()];

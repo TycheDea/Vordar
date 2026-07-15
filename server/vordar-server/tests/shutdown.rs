@@ -113,7 +113,7 @@ fn shared_flag_drains_both_zones_and_worker_drop_returns() {
     let stay_pos = stay.own_pos().unwrap();
 
     // Transfers to east through the real portal (the honest way, like
-    // zones.rs's phase7_portal_round_trip), then walks away from east's own
+    // zones.rs's portal_round_trip), then walks away from east's own
     // portal back to start (x=-10) so it doesn't bounce back mid-test.
     let mut rover = Bot::connect_as(start_addr, "rover");
     rover.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());

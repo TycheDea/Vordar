@@ -47,7 +47,7 @@ fn insert_game_prefabs(resources: &mut Resources) {
 /// real `NetClient` connection, and the real `NetReceiveSystem` (no
 /// reimplemented logic). A second login under the same character name
 /// makes the server's existing session-takeover kick the first
-/// connection (mirrors `phase6_login_takeover` in vordar-server's e2e
+/// connection (mirrors `login_takeover` in vordar-server's e2e
 /// suite) — a genuine, unannounced disconnect. engine-net's listening
 /// socket is never released once bound (no shutdown story), so an
 /// in-process bind/drop/rebind on the same port isn't possible; kicking

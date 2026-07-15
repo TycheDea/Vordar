@@ -39,7 +39,7 @@ fn shipped_zone_content_is_valid() {
 // reconnect to east at the arrival point → walk into east's portal → back in
 // start at ITS arrival point.
 #[test]
-fn phase7_portal_round_trip() {
+fn portal_round_trip() {
     workspace_root();
     let start_addr: SocketAddr = "127.0.0.1:25170".parse().unwrap();
     let east_addr: SocketAddr = "127.0.0.1:25171".parse().unwrap();
@@ -83,7 +83,7 @@ fn phase7_portal_round_trip() {
 // (zone + arrival pos in the DB), the late Disconnected must not clobber it,
 // and a relogin to the WRONG zone routes to the right one without a Welcome.
 #[test]
-fn phase7_login_routes_to_saved_zone() {
+fn login_routes_to_saved_zone() {
     workspace_root();
     let start_addr: SocketAddr = "127.0.0.1:25172".parse().unwrap();
     let east_addr: SocketAddr = "127.0.0.1:25173".parse().unwrap();
@@ -208,7 +208,7 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
 // zones must compute the same absolute world time (their per-zone server
 // clocks differ; the WorldClock mapping absorbs that).
 #[test]
-fn phase7_world_clock_shared_across_zones() {
+fn world_clock_shared_across_zones() {
     workspace_root();
     let start_addr: SocketAddr = "127.0.0.1:25174".parse().unwrap();
     let east_addr: SocketAddr = "127.0.0.1:25175".parse().unwrap();
@@ -243,7 +243,7 @@ fn phase7_world_clock_shared_across_zones() {
 // capped — bandwidth stays bounded — while the round-robin still refreshes
 // every entity within a short window.
 #[test]
-fn phase7_snapshot_throttle() {
+fn snapshot_throttle() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25176".parse().unwrap();
 

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 // Phase 6: disconnect saves the character; reconnecting with the same name
 // restores the saved position; a fresh name gets a ring spawn instead.
 #[test]
-fn phase6_reconnect_restores_position() {
+fn reconnect_restores_position() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25158".parse().unwrap();
     let db = temp_db("reconnect");
@@ -48,7 +48,7 @@ fn phase6_reconnect_restores_position() {
 // Phase 6: health persists. Health never rides the wire, so the assertion
 // reads the test database directly after the victim disconnects.
 #[test]
-fn phase6_health_persists_in_db() {
+fn health_persists_in_db() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25159".parse().unwrap();
     let db = temp_db("health");
@@ -102,7 +102,7 @@ fn phase6_health_persists_in_db() {
 // connection gets Welcome + the freshest saved state, the old body despawns,
 // the old connection is kicked.
 #[test]
-fn phase6_login_takeover() {
+fn login_takeover() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25162".parse().unwrap();
     spawn_server(addr, ":memory:", 2400);
@@ -138,7 +138,7 @@ fn phase6_login_takeover() {
 // (DbWorker drop flushes queued saves); server 2 opens the same database and
 // must restore the character.
 #[test]
-fn phase6_restart_durability() {
+fn restart_durability() {
     workspace_root();
     let addr1: SocketAddr = "127.0.0.1:25160".parse().unwrap();
     let addr2: SocketAddr = "127.0.0.1:25161".parse().unwrap();

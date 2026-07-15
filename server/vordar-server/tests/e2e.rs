@@ -3,14 +3,14 @@
 // Isolated from combat, persistence, security, and wire-format concerns.
 //
 // Tests kept in this file:
-//   phase1_end_to_end        — connect, clock sync, mutual visibility,
+//   end_to_end        — connect, clock sync, mutual visibility,
 //                              movement replication, disconnect despawn
-//   phase2_simulated_latency — prediction acks + intent validation at 150 ms
+//   simulated_latency — prediction acks + intent validation at 150 ms
 //   epsilon_over_unit_direction_still_moves_player — normalize noise tolerance
-//   phase3_npc_replication   — chapter waves replicate NPCs to clients
-//   phase3_respawn_after_death — player respawn after entity death
-//   phase3_aoi_border        — AOI enter/leave at the radius border + bandwidth
-//   phase5_world_clock_and_blood_moon — world time + scripted events
+//   npc_replication   — chapter waves replicate NPCs to clients
+//   respawn_after_death — player respawn after entity death
+//   aoi_border        — AOI enter/leave at the radius border + bandwidth
+//   world_clock_and_blood_moon — world time + scripted events
 //   far_bot_never_sees_out_of_aoi_mechanic — AOI scope for damage telegraphs
 
 use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot, PopulateSystem};
@@ -22,7 +22,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 #[test]
-fn phase1_end_to_end() {
+fn end_to_end() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25151".parse().unwrap();
 
@@ -77,7 +77,7 @@ fn phase1_end_to_end() {
 // validation and move the player, and snapshots acknowledge the full intent
 // stream (`last_processed_seq` catches up to the last sent seq).
 #[test]
-fn phase2_simulated_latency() {
+fn simulated_latency() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25152".parse().unwrap();
     spawn_server(addr, ":memory:", 1200);
@@ -147,7 +147,7 @@ fn epsilon_over_unit_direction_still_moves_player() {
 // Phase 3: the server-side chapter (waves) spawns NPCs and they replicate to
 // clients through AOI enters with their prefab identity.
 #[test]
-fn phase3_npc_replication() {
+fn npc_replication() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25153".parse().unwrap();
     spawn_server_with(addr, ":memory:", 1200, |app| {
@@ -208,7 +208,7 @@ fn far_bot_never_sees_out_of_aoi_mechanic() {
 // event's spawns replicate to everyone, including a client that joins
 // mid-event (state reconstruction = clock + AOI, by construction).
 #[test]
-fn phase5_world_clock_and_blood_moon() {
+fn world_clock_and_blood_moon() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25157".parse().unwrap();
     spawn_server_with(addr, ":memory:", 1200, |app| {
@@ -285,7 +285,7 @@ impl System for KillPlayersSystem {
 // entity, the server respawns it and re-Welcomes the client; the old body
 // leaves the AOI stream.
 #[test]
-fn phase3_respawn_after_death() {
+fn respawn_after_death() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25155".parse().unwrap();
     spawn_server_with(addr, ":memory:", 1200, |app| {
@@ -311,7 +311,7 @@ fn phase3_respawn_after_death() {
 // sits at x=58 — outside AOI from spawn, inside after walking east, outside
 // again after walking back.
 #[test]
-fn phase3_aoi_border() {
+fn aoi_border() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25154".parse().unwrap();
 
