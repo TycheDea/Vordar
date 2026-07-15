@@ -12,6 +12,7 @@
 // rebuilt from live entities every frame by MeshRenderSyncSystem, so despawn
 // needs no hook and instancing falls out of grouping by mesh index.
 
+mod anim_import;
 mod gltf_import;
 #[cfg(test)]
 mod test_glb;
