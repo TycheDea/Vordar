@@ -21,5 +21,6 @@ mod sync;
 
 pub use gltf_import::{load_gltf_data, load_image_rgba, ImageData, MaterialData, MeshData, PrimitiveData, VertexSkin};
 pub use store::MeshStore;
+#[cfg(feature = "offscreen")]
 pub(crate) use store::upload_mesh;
 pub use sync::{MeshDrawList, MeshRenderSyncSystem, SkinnedDrawList, SocketConfig, SocketTransforms};

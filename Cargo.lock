@@ -1057,6 +1057,7 @@ dependencies = [
  "egui-winit",
  "engine-app",
  "engine-core",
+ "engine-renderer",
  "gilrs",
  "glam 0.32.1",
  "gltf",

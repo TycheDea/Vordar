@@ -3,6 +3,12 @@ name    = "engine-renderer"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Headless offscreen render harness (hygiene finding 16) — used by this
+# crate's own tests/offscreen.rs and vordar-client's tests/ground_render.rs.
+# Never enabled by normal builds.
+offscreen = []
+
 [dependencies]
 engine-core = { path = "../engine-core" }
 engine-app  = { path = "../engine-app" }
@@ -27,3 +33,8 @@ gltf = { version = "1.4.1", features = ["import", "KHR_materials_emissive_streng
 image = { version = "0.25", default-features = false, features = ["hdr", "png", "jpeg"] }
 half  = { version = "2", features = ["bytemuck"] }
 
+[dev-dependencies]
+# Self dev-dependency so tests/offscreen.rs sees the module without turning
+# it on for normal (non-test) builds — same pattern as vordar-server's
+# bench-internals.
+engine-renderer = { path = ".", features = ["offscreen"] }

@@ -200,6 +200,7 @@ impl TonemapPass {
         self.upload_params(queue);
     }
 
+    #[cfg(feature = "offscreen")]
     pub(crate) fn set_bloom_intensity(&mut self, queue: &Queue, intensity: f32) {
         self.bloom_intensity = intensity;
         self.upload_params(queue);

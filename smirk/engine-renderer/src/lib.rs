@@ -13,6 +13,7 @@ pub(crate) mod menu_actions;
 pub mod mesh;
 pub(crate) mod mesh_pipeline;
 pub(crate) mod mipgen;
+#[cfg(feature = "offscreen")]
 pub mod offscreen;
 pub mod particle_pipeline;
 pub(crate) mod post;
