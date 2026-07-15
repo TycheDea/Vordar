@@ -38,7 +38,7 @@ fn spawn_player_entity(world: &mut World, pos: Vec3) -> Entity {
         Hitbox { shape: CollisionShape::Sphere { radius: 0.5 } },
         CellOccupant { cells: Default::default() },
         Solid,
-        PrefabId("player".into()),
+        PrefabId("human".into()),
         Player { speed: 6.0 },
         Health::new(100),
     ))

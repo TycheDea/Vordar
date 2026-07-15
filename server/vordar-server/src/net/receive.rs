@@ -38,8 +38,8 @@ const FUTURE_SLACK_MICROS: u64 = 50_000;
 const INTENT_QUEUE_CAP: usize = 16;
 
 /// What a character spawns as. The Ravager is the playable class while there
-/// is no character-creation/class-picker; the "player" (Human) prefab and its
-/// kit stay shipped and tested.
+/// is no character-creation/class-picker; the "human" prefab and its kit
+/// stay shipped and tested.
 const PLAYER_PREFAB: &str = "ravager";
 
 /// Spread spawn points so simultaneous joins don't stack on the origin.
@@ -181,7 +181,7 @@ impl System for NetReceiveSystem {
                         log::info!("conn {conn}: login as '{name}', loading character");
                         state.loading.insert(conn, (name.clone(), token));
                         // Defaults seed a NEW character only: ring spawn +
-                        // the player prefab's full health (player.ron is
+                        // the player prefab's full health (human.ron is
                         // the source of truth; the DB merely overrides
                         // Health.current after spawn).
                         // (The zone field is decorative here: the schema

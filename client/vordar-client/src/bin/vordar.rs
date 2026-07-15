@@ -47,7 +47,7 @@ fn main() {
         .add_plugin(GameComponentsPlugin)
         // Same defs the server spawns from — tint/active-state agreement is
         // pure clock math (DESIGN.md §4).
-        .insert_resource(vordar_game::world::load_world_events("content/world/events.ron"));
+        .insert_resource(vordar_game::world::load_world_events("content/zones/events.ron"));
     // Replicated NPCs spawn from chapter prefabs — content registrations of
     // EVERY linked chapter (a Redirect can land us in any zone), no chapter
     // systems (the server is authoritative).

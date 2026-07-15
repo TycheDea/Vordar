@@ -324,7 +324,7 @@ fn aoi_border() {
     positions.push(glam::Vec3::new(58.0, 0.0, 0.0));
 
     spawn_server_with(addr, ":memory:", 1500, |app| {
-        app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
+        app.add_system(PopulateSystem { done: false, positions, prefab: "human".into() }, Phase::PreUpdate, SystemOrder::First);
     });
 
     let far_visible = |b: &Bot| b.last_snapshot.values().any(|p| p.x > 50.0);

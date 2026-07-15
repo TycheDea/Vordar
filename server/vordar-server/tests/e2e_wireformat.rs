@@ -21,7 +21,7 @@ fn replication_ids_are_compact() {
 
     let positions: Vec<glam::Vec3> = (0..10).map(|i| glam::Vec3::new(i as f32 * 2.0, 0.0, 0.0)).collect();
     spawn_server_with(addr, ":memory:", 1200, |app| {
-        app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
+        app.add_system(PopulateSystem { done: false, positions, prefab: "human".into() }, Phase::PreUpdate, SystemOrder::First);
     });
 
     let mut bot = Bot::connect(addr);
@@ -131,7 +131,7 @@ fn crowd_snapshot_fits_datagram_budget() {
     workspace_root();
     let addr: SocketAddr = "127.0.0.1:25192".parse().unwrap();
 
-    // 100 "player" NPCs on rings of radius 5-25 around the origin — all
+    // 100 "human" NPCs on rings of radius 5-25 around the origin — all
     // comfortably inside the bot's AOI_RADIUS (40, the server's AOI_RADIUS).
     let mut positions: Vec<glam::Vec3> = Vec::new();
     for ring in 0..10 {
@@ -143,7 +143,7 @@ fn crowd_snapshot_fits_datagram_budget() {
     }
 
     spawn_server_with(addr, ":memory:", 2500, |app| {
-        app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
+        app.add_system(PopulateSystem { done: false, positions, prefab: "human".into() }, Phase::PreUpdate, SystemOrder::First);
     });
 
     let mut bot = Bot::connect(addr);

@@ -23,7 +23,7 @@ fn soak_bots() -> usize {
 
 const SAMPLED: usize = 5;
 const WINDOW: Duration = Duration::from_secs(30);
-const PLAYER_SPEED: f32 = 6.0; // content/prefabs/player.ron
+const PLAYER_SPEED: f32 = 6.0; // content/prefabs/human.ron
 
 /// Test-local instrumentation (the determinism discipline binds game systems,
 /// not meters): records the interval between consecutive runs of its phase

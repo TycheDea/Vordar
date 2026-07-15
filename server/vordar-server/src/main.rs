@@ -101,7 +101,7 @@ fn main() {
                                 .install(name, &mut app)
                                 .unwrap_or_else(|e| panic!("zones.ron: {e}"));
                         }
-                        app.insert_resource(vordar_game::world::load_world_events("content/world/events.ron"));
+                        app.insert_resource(vordar_game::world::load_world_events("content/zones/events.ron"));
                         app.insert_resource(ShutdownFlag(app_shutdown.clone()));
                         log::info!("zone listening on {addr}");
                         app.run_headless(TICK_HZ, None);

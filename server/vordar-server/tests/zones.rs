@@ -257,7 +257,7 @@ fn snapshot_throttle() {
 
     std::thread::spawn(move || {
         let mut app = vordar_server::build_server_app(addr, ":memory:");
-        app.add_system(PopulateSystem { done: false, positions, prefab: "player".into() }, Phase::PreUpdate, SystemOrder::First);
+        app.add_system(PopulateSystem { done: false, positions, prefab: "human".into() }, Phase::PreUpdate, SystemOrder::First);
         app.run_headless(60.0, Some(1500));
     });
     std::thread::sleep(Duration::from_millis(300));

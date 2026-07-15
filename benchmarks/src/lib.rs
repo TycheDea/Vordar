@@ -53,7 +53,7 @@ pub fn positions(n: usize, layout: Layout, seed: u64) -> Vec<Vec3> {
         .collect()
 }
 
-/// The collidable-entity archetype the game spawns (player.ron / enemy prefabs):
+/// The collidable-entity archetype the game spawns (human.ron / enemy prefabs):
 /// Transform + Velocity + Hitbox(Sphere 0.5) + CellOccupant + Solid.
 pub fn spawn_crowd(world: &mut World, n: usize, layout: Layout, seed: u64) -> Vec<Entity> {
     positions(n, layout, seed)

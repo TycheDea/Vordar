@@ -58,7 +58,7 @@ pub fn test_zones() -> Vec<ZoneDef> {
 pub struct PopulateSystem {
     pub done: bool,
     pub positions: Vec<glam::Vec3>,
-    /// Prefab to spawn at each position — "player" as a stationary, harmless
+    /// Prefab to spawn at each position — "human" as a stationary, harmless
     /// NPC stand-in (Transform/Hitbox so it's in the SpatialGrid, no AI) is
     /// the common case; other replicated prefabs (e.g. "bolt", Health-less)
     /// are spawned the same way for tests that need a specific shape.

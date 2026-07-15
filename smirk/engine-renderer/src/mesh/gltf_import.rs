@@ -534,7 +534,7 @@ mod tests {
     /// absent (it lives in the game repo, not the engine).
     #[test]
     fn loads_real_textured_asset_if_present() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/avocado.glb");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/source/test/avocado.glb");
         if !std::path::Path::new(path).exists() {
             return;
         }
@@ -550,7 +550,7 @@ mod tests {
     /// extraction on production data. Skips if absent.
     #[test]
     fn loads_skinned_fox_asset_if_present() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/fox.glb");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/source/test/fox.glb");
         if !std::path::Path::new(path).exists() {
             return;
         }
