@@ -1,4 +1,4 @@
-// Phase 7 soak: 200 bot clients in one zone must not break the tick budget —
+// Soak: 200 bot clients in one zone must not break the tick budget —
 // movement holds 60 Hz, snapshots hold 10 Hz, throttled bandwidth stays
 // bounded, and a walking bot still covers the distance its intents demand.
 //
@@ -114,8 +114,7 @@ fn soak_200_bots_hold_tick_budget() {
         std::thread::spawn(move || {
             // All bots dial in from localhost — one source IP standing in for
             // a real crowd of distinct clients. State that explicitly instead
-            // of raising the transport's hostile-client default (networking
-            // audit 2026-07-11, finding 20).
+            // of raising the transport's hostile-client default.
             let limits = NetLimits { max_connections_per_ip: total_bots, ..NetLimits::default() };
             let mut app = vordar_server::build_server_app_with_limits(addr, ":memory:", limits);
             app.add_system(
@@ -219,11 +218,10 @@ fn soak_200_bots_hold_tick_budget() {
     let post_hz = post.len() as f64 / WINDOW.as_secs_f64();
     eprintln!("postupdate: {} runs ({post_hz:.1} Hz), p99 interval {:.1} ms", post.len(), percentile(&mut post, 0.99) * 1e3);
 
-    // Network-thread busy time (networking audit 2026-07-11, finding 14 step
-    // 1): the crowd's connection handling, frame codec, and broadcast fan-out
-    // all run on engine-net's single network thread — this is the first real
-    // measurement of how much of that thread's capacity the soak's crowd
-    // consumes.
+    // Network-thread busy time: the crowd's connection handling, frame codec,
+    // and broadcast fan-out all run on engine-net's single network thread —
+    // this is the first real measurement of how much of that thread's
+    // capacity the soak's crowd consumes.
     let busy_pct = (busy_after - busy_before) as f64 / 1e6 / WINDOW.as_secs_f64() * 100.0;
     eprintln!("network thread: {busy_pct:.1}% busy over the {:.0}s window", WINDOW.as_secs_f64());
 
@@ -262,10 +260,11 @@ fn soak_200_bots_hold_tick_budget() {
 
     // ── Movement integrity: a bot walks straight east for 5 s while the
     // crowd churns. "No intents dropped under load" is pinned by the ack
-    // stream catching up to the last sent seq (the Phase 2 property, now at
-    // 200× the load); displacement only sanity-checks that movement happens
-    // at all — SeparationSystem drag through a 200-bot crowd legitimately
-    // costs about half the free-path distance. ──
+    // stream catching up to the last sent seq (`simulated_latency`'s
+    // ack-catchup property, now at 200× the load); displacement only
+    // sanity-checks that movement happens at all — SeparationSystem drag
+    // through a 200-bot crowd legitimately costs about half the free-path
+    // distance. ──
     let walker = &mut sampled[0];
     walker.pump();
     let start = walker.own_pos().expect("walker has a position");

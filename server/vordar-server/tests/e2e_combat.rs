@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_protocol::{encode, ClientMsg};
 
-// Phase 4: scheduled-snapshot combat under 150 ms latency. One identical
+// Scheduled-snapshot combat under 150 ms latency. One identical
 // MechanicScheduled reaches every client; standing in the area at T is a hit;
 // stepping out before T (by the defender's own synced clock) is a miss even
 // though those packets arrive after T; backdated casts are rejected.
@@ -97,11 +97,11 @@ fn scheduled_aoe() {
     assert_eq!(b.mechanics.len(), count_before, "backdated cast must be rejected");
 }
 
-// Phase 7.5 (Ravager rework): the player's default attack, end to end. A
-// camp-resident grunt replicates into the bot's AOI; the bot closes to melee
-// and casts "rend" (fast Scheduled strike, 20 dmg with the Ravager's power)
-// until the grunt's 30 HP run out — observed as an AOI leave while the bot
-// stays alive (player_id never changes → no death re-Welcome).
+// The player's default attack, end to end. A camp-resident grunt replicates
+// into the bot's AOI; the bot closes to melee and casts "rend" (fast
+// Scheduled strike, 20 dmg with the Ravager's power) until the grunt's 30 HP
+// run out — observed as an AOI leave while the bot stays alive (player_id
+// never changes → no death re-Welcome).
 #[test]
 fn rend_kills_camped_enemy() {
     workspace_root();

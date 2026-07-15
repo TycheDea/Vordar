@@ -72,7 +72,7 @@ fn end_to_end() {
     });
 }
 
-// Phase 2: under 150 ms simulated round-trip latency, the clock sync measures
+// Under 150 ms simulated round-trip latency, the clock sync measures
 // the inflated RTT, delayed intents still pass the server's arrival-deadline
 // validation and move the player, and snapshots acknowledge the full intent
 // stream (`last_processed_seq` catches up to the last sent seq).
@@ -144,7 +144,7 @@ fn epsilon_over_unit_direction_still_moves_player() {
     });
 }
 
-// Phase 3: the server-side chapter (waves) spawns NPCs and they replicate to
+// The server-side chapter (waves) spawns NPCs and they replicate to
 // clients through AOI enters with their prefab identity.
 #[test]
 fn npc_replication() {
@@ -203,7 +203,7 @@ fn far_bot_never_sees_out_of_aoi_mechanic() {
     assert!(far.hit_results.is_empty(), "far bot must not see an out-of-AOI HitResult");
 }
 
-// Phase 5: world clock + scripted world event. The blood moon fires at world
+// World clock + scripted world event. The blood moon fires at world
 // time 2 s; every connected client carries the same world-clock mapping; the
 // event's spawns replicate to everyone, including a client that joins
 // mid-event (state reconstruction = clock + AOI, by construction).
@@ -281,7 +281,7 @@ impl System for KillPlayersSystem {
     }
 }
 
-// Phase 3: a connection always owns a live player. When combat kills the
+// A connection always owns a live player. When combat kills the
 // entity, the server respawns it and re-Welcomes the client; the old body
 // leaves the AOI stream.
 #[test]
@@ -306,7 +306,7 @@ fn respawn_after_death() {
     });
 }
 
-// Phase 3: AOI border behavior + bandwidth. 100 NPCs sit within radius ~19 of
+// AOI border behavior + bandwidth. 100 NPCs sit within radius ~19 of
 // the origin (always inside the bot's 40-unit AOI for this walk), one far NPC
 // sits at x=58 — outside AOI from spawn, inside after walking east, outside
 // again after walking back.

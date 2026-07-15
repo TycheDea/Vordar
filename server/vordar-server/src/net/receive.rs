@@ -468,9 +468,9 @@ impl System for NetReceiveSystem {
         }
 
         // A connection must always own a live player: combat can kill the
-        // entity (real death/respawn design lands with later phases) — until
-        // then, respawn at the connection's spawn point and re-Welcome the
-        // client so prediction and snapshots rebind to the new body.
+        // entity, and there is no death/respawn design yet — so respawn at
+        // the connection's spawn point and re-Welcome the client so
+        // prediction and snapshots rebind to the new body.
         let dead: Vec<ConnId> = {
             let state = resources.get::<NetServerState>().unwrap();
             state.conns.iter()

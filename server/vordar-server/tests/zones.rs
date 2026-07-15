@@ -1,5 +1,5 @@
-// Phase 7 e2e: multi-zone server, portal transfer handoff, login routing,
-// shared world clock, and snapshot throttling under crowd load.
+// Multi-zone server: portal transfer handoff, login routing, shared world
+// clock, and snapshot throttling under crowd load.
 
 use test_support::{spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, SystemOrder};
@@ -21,7 +21,7 @@ fn spawn_zone_server(start_addr: SocketAddr, east_addr: SocketAddr, db_path: &st
     // The worker must outlive the zone threads; its Drop would block this
     // test until every zone burns through its tick budget. Saves are
     // processed promptly while running — only shutdown flushing is lost,
-    // and no Phase 7 test depends on it.
+    // and no test here depends on it.
     std::mem::forget(worker);
 }
 
@@ -35,9 +35,9 @@ fn shipped_zone_content_is_valid() {
     assert_eq!(zones.zones[0].name, "start", "clients connect to the first zone");
 }
 
-// The roadmap's Verify line, headless: walk into start's portal → Redirect →
-// reconnect to east at the arrival point → walk into east's portal → back in
-// start at ITS arrival point.
+// Headless: walk into start's portal → Redirect → reconnect to east at the
+// arrival point → walk into east's portal → back in start at ITS arrival
+// point.
 #[test]
 fn portal_round_trip() {
     workspace_root();
@@ -78,7 +78,7 @@ fn portal_round_trip() {
     );
 }
 
-// The impolite path (lessons.md): client killed right after the Redirect,
+// The impolite path: client killed right after the Redirect,
 // never reaching the target zone. The transfer save must already be durable
 // (zone + arrival pos in the DB), the late Disconnected must not clobber it,
 // and a relogin to the WRONG zone routes to the right one without a Welcome.
@@ -188,8 +188,7 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
         bot.pump();
         std::thread::sleep(Duration::from_millis(16));
     }
-    // Finding 1 of docs/reviews/networking/plan-networking-rework-1-2026-07-13.md:
-    // cooldowns now persist as remainders restored across a zone transfer
+    // Cooldowns persist as remainders restored across a zone transfer
     // instead of pessimistically seeding full cooldown at spawn, so a
     // never-cast "cleave" is castable immediately after the transfer — no
     // clearing wait needed.

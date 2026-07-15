@@ -1,4 +1,4 @@
-// Loss probe (gap C — the WEAKPOINTS #4 evidence): snapshots ride one
+// Loss probe: snapshots ride one
 // reliable QUIC stream, so a single lost datagram stalls every later frame
 // on that stream until the retransmit lands (head-of-line blocking). An
 // observer with simulated 50 ms and 200 ms RTT (LAN and WAN paths) and
@@ -7,7 +7,7 @@
 // for each RTT.
 //
 // This is a probe, not a budget test: it prints gap p50/p99/max per rate.
-// Decision gate for the datagram snapshot path (WEAKPOINTS #4): p99 gap
+// Decision gate for the datagram snapshot path: p99 gap
 // > 250 ms or max > 500 ms at 1–5 % loss confirms the stream freezes.
 //
 //   cargo test -p vordar-server --release --test loss -- --ignored --nocapture

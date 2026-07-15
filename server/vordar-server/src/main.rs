@@ -51,9 +51,8 @@ fn main() {
     let world_origin = Instant::now();
 
     // SIGINT/SIGTERM (Unix) or Ctrl+C/console-close (Windows): every zone
-    // observes the same flag via its ShutdownFlag resource (finding 3) and
-    // drains itself in-simulation. A second signal force-exits for the
-    // stuck-shutdown case.
+    // observes the same flag via its ShutdownFlag resource and drains itself
+    // in-simulation. A second signal force-exits for the stuck-shutdown case.
     let shutdown = Arc::new(AtomicBool::new(false));
     let signal_shutdown = shutdown.clone();
     let already_signaled = AtomicBool::new(false);
@@ -80,9 +79,9 @@ fn main() {
                 .name(format!("zone-{}", zone.name))
                 .spawn(move || {
                     // Built on this thread: a built App cannot move (systems
-                    // aren't Send). `supervise_zone` (rework 10) reruns this
-                    // closure from scratch on the same address after a panic,
-                    // so every capture below must be safe to rebuild from —
+                    // aren't Send). `supervise_zone` reruns this closure from
+                    // scratch on the same address after a panic, so every
+                    // capture below must be safe to rebuild from —
                     // `zone`/`directory` are cloned per rebuild and `handle`
                     // mints a fresh `DbHandle` via `fork()` so a rebuilt App
                     // never inherits a dead App's in-flight reply channel.
@@ -112,7 +111,7 @@ fn main() {
         })
         .collect();
 
-    // A panicked zone thread used to be silently swallowed here (networking
-    // audit 2026-07-11, finding 18) — see `join_zone_threads`'s doc comment.
+    // A panicked zone thread must still be joined — see `join_zone_threads`'s
+    // doc comment for why.
     join_zone_threads(handles);
 }

@@ -5,7 +5,7 @@ use test_support::{settle, spawn_server, temp_db, workspace_root, Bot};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-// Phase 6: disconnect saves the character; reconnecting with the same name
+// Disconnect saves the character; reconnecting with the same name
 // restores the saved position; a fresh name gets a ring spawn instead.
 #[test]
 fn reconnect_restores_position() {
@@ -45,7 +45,7 @@ fn reconnect_restores_position() {
     assert!(bob_pos.distance(saved) > 2.0, "fresh character must not inherit alice's spot");
 }
 
-// Phase 6: health persists. Health never rides the wire, so the assertion
+// Health persists. Health never rides the wire, so the assertion
 // reads the test database directly after the victim disconnects.
 #[test]
 fn health_persists_in_db() {
@@ -97,7 +97,7 @@ fn health_persists_in_db() {
     }
 }
 
-// Phase 6: relogin while the old session still looks alive (crashed client,
+// Relogin while the old session still looks alive (crashed client,
 // close frame lost, quick relaunch) must TAKE OVER, not hang: the new
 // connection gets Welcome + the freshest saved state, the old body despawns,
 // the old connection is kicked.
@@ -134,7 +134,7 @@ fn login_takeover() {
     drop(first);
 }
 
-// Phase 6: durability across a server restart. Server 1 shuts down cleanly
+// Durability across a server restart. Server 1 shuts down cleanly
 // (DbWorker drop flushes queued saves); server 2 opens the same database and
 // must restore the character.
 #[test]
