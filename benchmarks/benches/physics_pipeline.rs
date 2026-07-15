@@ -9,12 +9,13 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use engine_app::scheduler::System;
+use engine_core::components::Transform;
 use engine_core::traits::Resources;
 use engine_core::World;
 use engine_physics::broadphase::{BroadphaseSystem, CandidatePairs};
 use engine_physics::cell_update::CellUpdateSystem;
 use engine_physics::narrowphase::NarrowphaseSystem;
-use vordar_benches::{physics_resources, prime_grid, spawn_crowd, uniform_half, Layout, DT};
+use vordar_benches::{physics_resources, prime_grid, spawn_crowd, uniform_half, Layout, CELL_SIZE, DT};
 
 fn scenario(n: usize, layout: Layout) -> (World, Resources) {
     let mut world = World::new();
@@ -31,6 +32,30 @@ fn bench_cell_update(c: &mut Criterion) {
         let mut sys = CellUpdateSystem::new();
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
             b.iter(|| sys.run(&mut world, &mut resources, DT));
+        });
+    }
+    group.finish();
+}
+
+// Steady-state: bench_cell_update reruns on a static world, so after the first
+// tick the incremental diff finds no change — that group measures the idle
+// majority. This one moves every entity across a cell boundary each tick, the
+// incremental worst case (full remove+insert), to prove the churn path holds.
+fn bench_cell_update_moving(c: &mut Criterion) {
+    let mut group = c.benchmark_group("physics/cell_update_moving");
+    for n in [200usize, 1000, 5000] {
+        let (mut world, mut resources) = scenario(n, Layout::Uniform { half_extent: uniform_half(n) });
+        let mut sys = CellUpdateSystem::new();
+        let mut forward = true;
+        group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
+            b.iter(|| {
+                let delta = if forward { CELL_SIZE } else { -CELL_SIZE };
+                forward = !forward;
+                for t in world.query_mut::<&mut Transform>() {
+                    t.position.x += delta;
+                }
+                sys.run(&mut world, &mut resources, DT);
+            });
         });
     }
     group.finish();
@@ -97,5 +122,5 @@ fn bench_chain(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_cell_update, bench_broadphase, bench_narrowphase, bench_chain);
+criterion_group!(benches, bench_cell_update, bench_cell_update_moving, bench_broadphase, bench_narrowphase, bench_chain);
 criterion_main!(benches);

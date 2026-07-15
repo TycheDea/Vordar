@@ -5,10 +5,17 @@
 // stale, and PostUpdate's snapshot-rate cadence would leave it up to 100 ms
 // stale.
 //
-// Per frame:
-//   1. Clear the grid.
-//   2. For each entity with Transform + Hitbox + CellOccupant: compute occupied cells,
-//      insert entity into those cells in SpatialGrid, record in CellOccupant.
+// The grid persists across ticks; each entity's footprint is updated by diffing
+// its new cells against CellOccupant.cells (its footprint last tick) and only
+// removing/inserting on difference. An entity that did not change cells costs
+// nothing but the recompute — no allocator traffic, no grid mutation. Despawns
+// are removed from the grid by DespawnFlush (engine-app/src/flush.rs) using the
+// same CellOccupant.cells record.
+//
+// Per frame, for each entity with Transform + Hitbox + CellOccupant:
+//   1. Compute the cells it now occupies.
+//   2. Remove it from cells it left; insert it into cells it entered.
+//   3. Record the new footprint in CellOccupant.
 
 use engine_app::scheduler::System;
 use engine_core::components::{CellOccupant, CollisionShape, GridCell, Hitbox, Transform};
@@ -31,7 +38,6 @@ impl System for CellUpdateSystem {
             .get_mut::<SpatialGrid>()
             .expect("SpatialGrid not in resources");
 
-        grid.clear();
         let cell_size = grid.cell_size();
 
         // Single pass: query only borrows Transform + Hitbox, so world.get::<&mut CellOccupant>
@@ -46,8 +52,17 @@ impl System for CellUpdateSystem {
             self.scratch.clear();
             cells_for_hitbox_into(transform, hitbox, cell_size, &mut self.scratch);
 
+            // Footprints are 1–4 cells, so linear membership checks are cheaper
+            // than building sets; only differences touch the grid.
+            for &cell in &occupant.cells {
+                if !self.scratch.contains(&cell) {
+                    grid.remove(cell, entity);
+                }
+            }
             for &cell in &self.scratch {
-                grid.insert_in_cell(entity, cell);
+                if !occupant.cells.contains(&cell) {
+                    grid.insert_in_cell(entity, cell);
+                }
             }
 
             occupant.cells.clear();
@@ -72,5 +87,66 @@ fn cells_for_hitbox_into(transform: &Transform, hitbox: &Hitbox, cell_size: f32,
         for row in min_row..=max_row {
             out.push(GridCell { col, row });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::Vec3;
+
+    const CELL: f32 = 10.0;
+
+    fn setup() -> (World, Resources) {
+        let mut resources = Resources::new();
+        resources.insert(SpatialGrid::new(CELL));
+        (World::new(), resources)
+    }
+
+    fn spawn_point(world: &mut World, pos: Vec3) -> Entity {
+        world.spawn((
+            Transform::new(pos),
+            Hitbox { shape: CollisionShape::Sphere { radius: 0.5 } },
+            CellOccupant { cells: Default::default() },
+        ))
+    }
+
+    fn cell_of(pos: Vec3) -> GridCell {
+        GridCell { col: (pos.x / CELL).floor() as i32, row: (pos.z / CELL).floor() as i32 }
+    }
+
+    #[test]
+    fn entity_crossing_cell_boundary_moves_in_grid() {
+        let (mut world, mut resources) = setup();
+        let e = spawn_point(&mut world, Vec3::new(5.0, 0.0, 5.0));
+        let mut sys = CellUpdateSystem::new();
+        sys.run(&mut world, &mut resources, 0.0);
+
+        let old = cell_of(Vec3::new(5.0, 0.0, 5.0));
+        assert_eq!(resources.get::<SpatialGrid>().unwrap().query_cell(old), &[e]);
+
+        world.get::<&mut Transform>(e).unwrap().position = Vec3::new(15.0, 0.0, 5.0);
+        sys.run(&mut world, &mut resources, 0.0);
+
+        let new = cell_of(Vec3::new(15.0, 0.0, 5.0));
+        let grid = resources.get::<SpatialGrid>().unwrap();
+        assert!(grid.query_cell(old).is_empty(), "left cell must be vacated");
+        assert_eq!(grid.query_cell(new), &[e], "entity present in the new cell exactly once");
+    }
+
+    #[test]
+    fn stationary_entity_is_present_exactly_once_across_ticks() {
+        let (mut world, mut resources) = setup();
+        let e = spawn_point(&mut world, Vec3::new(3.0, 0.0, 3.0));
+        let cell = cell_of(Vec3::new(3.0, 0.0, 3.0));
+        let mut sys = CellUpdateSystem::new();
+
+        // Five rebuilds of a still entity must leave one grid entry, not five —
+        // the incremental diff never re-inserts an unchanged footprint.
+        for _ in 0..5 {
+            sys.run(&mut world, &mut resources, 0.0);
+        }
+
+        assert_eq!(resources.get::<SpatialGrid>().unwrap().query_cell(cell), &[e]);
     }
 }
