@@ -69,8 +69,8 @@ impl System for NarrowphaseSystem {
             .0 = candidates;
 
         // Diff against previous frame — compute started/ended while active is borrowed.
-        let started: Vec<(Entity, Entity)>;
-        let ended:   Vec<(Entity, Entity)>;
+        let mut started: Vec<(Entity, Entity)>;
+        let mut ended:   Vec<(Entity, Entity)>;
         {
             let active = resources
                 .get_mut::<ActivePairs>()
@@ -82,6 +82,12 @@ impl System for NarrowphaseSystem {
             for pair in &ended   { active.0.remove(pair);  }
             for pair in &started { active.0.insert(*pair); }
         } // active borrow ends
+
+        // HashSet iteration order is run-varying; sort by canonical pair id so
+        // event order (and anything resolving "first contact wins" from it) is
+        // deterministic run to run.
+        started.sort_unstable();
+        ended.sort_unstable();
 
         // Emit events.
         let bus = resources
@@ -111,6 +117,61 @@ fn shapes_overlap(
         }
         (CollisionShape::Aabb { half_extents }, CollisionShape::Sphere { radius }) => {
             Aabb::new(pos_a, *half_extents).overlaps(&Aabb::new(pos_b, Vec3::splat(*radius)))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Three mutually overlapping entities spawned in ascending Entity-id order:
+    // center < victim_a < victim_b. Candidate pairs are fed in reverse order to
+    // rule out "it happened to come out sorted" as an explanation for a pass.
+    fn overlapping_world() -> (World, Entity, Entity, Entity) {
+        let mut world = World::new();
+        let center = world.spawn((
+            Transform { position: Vec3::ZERO, ..Default::default() },
+            Hitbox { shape: CollisionShape::Sphere { radius: 1.0 } },
+        ));
+        let victim_a = world.spawn((
+            Transform { position: Vec3::new(0.2, 0.0, 0.0), ..Default::default() },
+            Hitbox { shape: CollisionShape::Sphere { radius: 1.0 } },
+        ));
+        let victim_b = world.spawn((
+            Transform { position: Vec3::new(-0.2, 0.0, 0.0), ..Default::default() },
+            Hitbox { shape: CollisionShape::Sphere { radius: 1.0 } },
+        ));
+        (world, center, victim_a, victim_b)
+    }
+
+    // Two victims start overlapping the same entity on the same tick. The
+    // emitted CollisionStarted order must be the canonical (sorted) pair
+    // order on every run — not whatever order a fresh HashSet's hasher seed
+    // happens to iterate in. Repeated with fresh System/ActivePairs instances
+    // (each gets a different SipHash seed) so a flaky pre-fix ordering can't
+    // hide behind one lucky seed.
+    #[test]
+    fn collision_started_order_is_canonical_every_run() {
+        for _ in 0..20 {
+            let (mut world, center, victim_a, victim_b) = overlapping_world();
+            let pair_a = (center, victim_a);
+            let pair_b = (center, victim_b);
+            let mut expected = [pair_a, pair_b];
+            expected.sort();
+
+            let mut resources = Resources::new();
+            resources.insert(CandidatePairs(vec![pair_b, pair_a]));
+            resources.insert(ActivePairs::new());
+            resources.insert(EventBus::new());
+
+            let mut system = NarrowphaseSystem::new();
+            system.run(&mut world, &mut resources, 1.0 / 60.0);
+
+            let bus = resources.get::<EventBus>().expect("EventBus not in resources");
+            let started: Vec<(Entity, Entity)> =
+                bus.read::<CollisionStarted>().map(|e| (e.a, e.b)).collect();
+            assert_eq!(started, expected.to_vec());
         }
     }
 }
