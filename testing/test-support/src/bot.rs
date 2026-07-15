@@ -104,6 +104,35 @@ pub struct Bot {
 }
 
 impl Bot {
+    fn new(client: NetClient, name: String, token: AccountToken) -> Self {
+        Self {
+            client,
+            name,
+            token,
+            player_id: None,
+            last_snapshot: HashMap::new(),
+            prefabs: HashMap::new(),
+            prefab_names: Vec::new(),
+            seq: 0,
+            move_ring: VecDeque::new(),
+            last_ack: 0,
+            bytes: 0,
+            snapshot_bytes: Vec::new(),
+            mechanics: Vec::new(),
+            hit_results: HashMap::new(),
+            world_offset: None,
+            redirect: None,
+            snapshot_ticks: Vec::new(),
+            snapshot_at: Vec::new(),
+            last_states: Vec::new(),
+            last_hp: HashMap::new(),
+            deaths: Vec::new(),
+            disconnected: false,
+            denied: None,
+            latest_state_tick: 0,
+        }
+    }
+
     pub fn connect(addr: SocketAddr) -> Self {
         Self::connect_with_latency(addr, Duration::ZERO)
     }
@@ -158,32 +187,7 @@ impl Bot {
         // consumed above, so it will never reach `pump` for this bot.
         let token = name_token(name);
         client.send(encode(&ClientMsg::Login { name: name.to_owned(), token }));
-        Some(Self {
-            client,
-            name: name.to_owned(),
-            token,
-            player_id: None,
-            last_snapshot: HashMap::new(),
-            prefabs: HashMap::new(),
-            prefab_names: Vec::new(),
-            seq: 0,
-            move_ring: VecDeque::new(),
-            last_ack: 0,
-            bytes: 0,
-            snapshot_bytes: Vec::new(),
-            mechanics: Vec::new(),
-            hit_results: HashMap::new(),
-            world_offset: None,
-            redirect: None,
-            snapshot_ticks: Vec::new(),
-            snapshot_at: Vec::new(),
-            last_states: Vec::new(),
-            last_hp: HashMap::new(),
-            deaths: Vec::new(),
-            disconnected: false,
-            denied: None,
-            latest_state_tick: 0,
-        })
+        Some(Self::new(client, name.to_owned(), token))
     }
 
     pub fn connect_with_latency_as(addr: SocketAddr, name: &str, simulated_rtt: Duration) -> Self {
@@ -215,32 +219,7 @@ impl Bot {
     /// direction loss, jitter/reorder, clock skew — see `Impairment`).
     pub fn connect_full_as(addr: SocketAddr, name: &str, impairment: Impairment) -> Self {
         let client = NetClient::connect_impaired(addr, PROTOCOL_VERSION, impairment).expect("connect failed");
-        Self {
-            client,
-            name: name.to_owned(),
-            token: name_token(name),
-            player_id: None,
-            last_snapshot: HashMap::new(),
-            prefabs: HashMap::new(),
-            prefab_names: Vec::new(),
-            seq: 0,
-            move_ring: VecDeque::new(),
-            last_ack: 0,
-            bytes: 0,
-            snapshot_bytes: Vec::new(),
-            mechanics: Vec::new(),
-            hit_results: HashMap::new(),
-            world_offset: None,
-            redirect: None,
-            snapshot_ticks: Vec::new(),
-            snapshot_at: Vec::new(),
-            last_states: Vec::new(),
-            last_hp: HashMap::new(),
-            deaths: Vec::new(),
-            disconnected: false,
-            denied: None,
-            latest_state_tick: 0,
-        }
+        Self::new(client, name.to_owned(), name_token(name))
     }
 
     /// Drop the current connection (the client closes — the server's
