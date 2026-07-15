@@ -16,4 +16,3 @@ pub mod components;   // Transform, Velocity, Health, Hitbox, RenderShape, CellO
 pub mod prefab;       // ComponentRegistry + PrefabLibrary — data-driven entity definitions
 pub mod spatial;      // SpatialGrid — "give me all entities within radius R"
 pub mod traits;       // Spawnable, EntityLifecycle, Collidable, Renderable
-// pub mod assets;    // AssetCache — load/cache RON configs, sounds, meshes

@@ -15,7 +15,6 @@ use engine_core::traits::Resources;
 use engine_core::World;
 use vordar_game::chapter::ChapterModule;
 use vordar_game::combat::death::DeathSystem;
-use vordar_game::enemies::BehaviorRegistry;
 
 /// This chapter as a linked module — registered with the binaries'
 /// ChapterRegistry. First chapter: requires nothing.
@@ -80,7 +79,6 @@ pub struct Chapter01Plugin;
 
 impl Plugin for Chapter01Plugin {
     fn build(&self, app: &mut App) {
-        enemies::register_behaviors(app.resource_or_default::<BehaviorRegistry>());
         app.add_plugin(Chapter01ContentPlugin)
             .insert_resource(PlayerXp(0))
             .insert_resource(vordar_game::chapter::load_chapter("content/chapters/chapter01/chapter.ron"))

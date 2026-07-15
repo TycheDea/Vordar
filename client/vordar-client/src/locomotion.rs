@@ -143,12 +143,6 @@ pub fn turn_toward_yaw(current: f32, target: f32, max_step: f32) -> f32 {
     current + delta.clamp(-max_step, max_step)
 }
 
-/// Begin the attack one-shot on `entity` (analogue of `pose::trigger_swing`).
-/// No-op if the entity isn't an animated character or is already dead.
-pub fn trigger_attack(world: &World, entity: Entity) {
-    trigger_attack_clip(world, entity, None, None);
-}
-
 /// Begin an attack one-shot with a specific clip (per-ability animations).
 /// `clip` = None falls back to the race's default attack clip; `secs` = None
 /// uses the default latch. Unknown clip names degrade to the asset's first
@@ -171,14 +165,6 @@ pub fn trigger_attack_clip(world: &World, entity: Entity, clip: Option<&str>, se
     }
     if let Ok(mut player) = world.get::<&mut AnimationPlayer>(entity) {
         player.transition_to(&attack, false, ATTACK_BLEND);
-    }
-}
-
-/// Latch the death pose on `entity` — plays the death clip once and holds the
-/// last frame; locomotion never resumes.
-pub fn trigger_death(world: &World, entity: Entity) {
-    if let Ok(mut ctrl) = world.get::<&mut AnimController>(entity) {
-        ctrl.dead = true;
     }
 }
 
