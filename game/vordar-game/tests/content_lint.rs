@@ -11,7 +11,7 @@
 use engine_renderer::mesh::{load_gltf_data, MeshData};
 use engine_renderer::SocketConfig;
 use std::path::{Path, PathBuf};
-use vordar_game::player::class::{RaceLibrary, RaceModel};
+use vordar_game::player::race::{RaceLibrary, RaceModel};
 
 const MAX_JOINTS: usize = 64; // engine palette cap per rig (VQ-B2)
 const MAX_MODEL_BYTES: u64 = 16 * 1024 * 1024; // VQ-B2

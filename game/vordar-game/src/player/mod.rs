@@ -3,6 +3,7 @@
 // (motion integration, projectiles, health/death) stay generic systems.
 
 pub mod class;
+pub mod race;
 pub mod skills;
 
 use crate::events::MoveIntent;

@@ -30,5 +30,5 @@ pub use enemies::{AttackKind, Enemy, Provoked};
 pub use player::Player;
 
 // Short content-facing module paths (`vordar_game::skills::AbilityDef`, ...).
-pub use player::{class, skills};
+pub use player::{class, race, skills};
 pub use world::{chapter, zones};

@@ -1,6 +1,6 @@
-// Class & race system — a class is a named, RON-authored bundle of castable
-// abilities plus its outfit (the gear shapes layered onto a race's base
-// body); a race is a base body. Both libraries mirror PrefabLibrary's
+// Class system — a class is a named, RON-authored bundle of castable
+// abilities plus its outfit (the gear shapes layered onto a race's base body).
+// Loaded from content/classes/ by filename stem, mirroring PrefabLibrary's
 // load-dir-by-filename-stem convention (engine-core/src/prefab.rs).
 //
 // Character visual = race base + class outfit, assembled client-side by
@@ -12,6 +12,9 @@ use engine_core::components::SubShape;
 use glam::Vec3;
 use std::collections::HashMap;
 
+// Re-export from race module for backward compatibility.
+pub use super::race::{RaceId, RaceLibrary, RaceModel};
+
 /// Fallback class for entities with no `ClassId` (ad-hoc test entities that
 /// never spawned from a real prefab).
 pub const DEFAULT_CLASS: &str = "human";
@@ -20,13 +23,6 @@ pub const DEFAULT_CLASS: &str = "human";
 /// (`"Class": (id: "human")`).
 #[derive(Clone, serde::Deserialize)]
 pub struct ClassId {
-    pub id: String,
-}
-
-/// Which race's base body an entity wears — authored on the entity's prefab
-/// (`"Race": (id: "human")`).
-#[derive(Clone, serde::Deserialize)]
-pub struct RaceId {
     pub id: String,
 }
 
@@ -141,114 +137,6 @@ impl ClassLibrary {
     }
 }
 
-/// A skinned glTF character for a race — the Phase-C alternative to the SDF
-/// base body. Clip names are read from whatever the asset ships; the client
-/// maps them into its `LocomotionClips`. `attack`/`death` may be empty when the
-/// rig lacks them. Scale + ground offset are baked into the asset's armature
-/// (honoured by the renderer's skeleton root transform), so no scale knob here.
-#[derive(Clone, serde::Deserialize)]
-pub struct RaceModel {
-    /// glTF path, content convention "content/models/<race>.glb".
-    pub asset: String,
-    pub idle: String,
-    pub walk: String,
-    pub run:  String,
-    #[serde(default)]
-    pub attack: String,
-    #[serde(default)]
-    pub death: String,
-    /// Hit-react clip (flinch on damage); empty when the rig lacks one.
-    #[serde(default)]
-    pub hit: String,
-    /// Move faster than this → at least walk; faster than `run_speed` → run.
-    pub walk_speed: f32,
-    pub run_speed:  f32,
-    /// Radians added to the facing yaw — glTF rigs disagree on forward axis.
-    #[serde(default)]
-    pub forward_offset: f32,
-}
-
-/// One race's presentation: an SDF base body (index 0 = torso, 1 = head, extra
-/// silhouette after — stable pose anchors), and/or a skinned glTF model. A race
-/// with a `model` renders as a rigged mesh; otherwise it composes from `body`.
-#[derive(Clone, Default)]
-pub struct RaceDef {
-    pub body:  Vec<SubShape>,
-    pub model: Option<RaceModel>,
-}
-
-/// On-disk shape of one `content/races/<id>.ron` file.
-#[derive(serde::Deserialize)]
-struct RaceDefFile {
-    #[serde(default)]
-    body:  Vec<SubShape>,
-    #[serde(default)]
-    model: Option<RaceModel>,
-}
-
-/// Loaded race definitions, keyed by race id (= RON filename stem).
-#[derive(Clone, Default)]
-pub struct RaceLibrary {
-    races: HashMap<String, RaceDef>,
-}
-
-impl RaceLibrary {
-    pub fn new() -> Self {
-        Self { races: HashMap::new() }
-    }
-
-    /// Insert an SDF-only race (the common case + tests): a base body, no model.
-    pub fn insert(&mut self, id: impl Into<String>, body: Vec<SubShape>) {
-        self.insert_def(id, RaceDef { body, model: None });
-    }
-
-    pub fn insert_def(&mut self, id: impl Into<String>, def: RaceDef) {
-        let id = id.into();
-        if self.races.insert(id.clone(), def).is_some() {
-            log::warn!("race '{id}' was overwritten");
-        }
-    }
-
-    pub fn load_dir(&mut self, dir: &str) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(e) => {
-                log::error!("race dir '{dir}' unreadable: {e}");
-                return;
-            }
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("ron") {
-                continue;
-            }
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-            match std::fs::read_to_string(&path) {
-                Ok(text) => match ron::from_str::<RaceDefFile>(&text) {
-                    Ok(file) => {
-                        log::info!(
-                            "race loaded: '{stem}' ({} base shapes, model: {})",
-                            file.body.len(),
-                            file.model.as_ref().map(|m| m.asset.as_str()).unwrap_or("none"),
-                        );
-                        self.insert_def(stem, RaceDef { body: file.body, model: file.model });
-                    }
-                    Err(e) => log::error!("race '{}' parse error: {e}", path.display()),
-                },
-                Err(e) => log::error!("race '{}' read error: {e}", path.display()),
-            }
-        }
-    }
-
-    pub fn base(&self, race_id: &str) -> Option<&[SubShape]> {
-        self.races.get(race_id).map(|d| d.body.as_slice())
-    }
-
-    /// The race's skinned model, if it renders as a rigged mesh (Phase C).
-    pub fn model(&self, race_id: &str) -> Option<&RaceModel> {
-        self.races.get(race_id).and_then(|d| d.model.as_ref())
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -327,39 +215,15 @@ mod tests {
         assert_eq!(ids, vec!["blast", "bolt"]);
     }
 
+    /// The real Phase-C content: class tints parse off disk.
     #[test]
-    fn race_model_round_trips_from_ron() {
-        let ron = r#"(
-            model: Some((
-                asset: "content/models/human.glb",
-                idle: "Idle", walk: "Walking_A", run: "Running_A",
-                attack: "1H_Melee_Attack_Chop", death: "Death_A",
-                walk_speed: 0.1, run_speed: 3.0,
-            )),
-        )"#;
-        let file: super::RaceDefFile = ron::from_str(ron).unwrap();
-        let m = file.model.expect("model present");
-        assert_eq!(m.asset, "content/models/human.glb");
-        assert_eq!(m.run, "Running_A");
-        assert_eq!(m.forward_offset, 0.0, "defaults to 0");
-        assert!(file.body.is_empty(), "a mesh race needs no SDF body");
-    }
-
-    /// The real Phase-C content: race models + class tints parse off disk.
-    #[test]
-    fn real_race_and_class_content_parses_if_present() {
-        let races_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/races");
-        if !std::path::Path::new(races_dir).exists() {
+    fn real_class_content_parses_if_present() {
+        let classes_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/classes");
+        if !std::path::Path::new(classes_dir).exists() {
             return;
         }
-        let mut races = RaceLibrary::new();
-        races.load_dir(races_dir);
-        let human = races.model("human").expect("human race has a skinned model");
-        assert!(human.asset.contains("human.glb"));
-        assert_eq!(human.idle, "idle");
-
         let mut classes = ClassLibrary::new();
-        classes.load_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/classes"));
+        classes.load_dir(classes_dir);
         assert!(
             classes.class("ravager").expect("ravager class").tint.is_some(),
             "ravager tints its mesh"
@@ -379,6 +243,5 @@ mod tests {
             classes.get("human", "bolt").unwrap().anim.as_deref(),
             Some("attack_cast")
         );
-        assert_eq!(human.hit, "hit", "races map a hit-react clip");
     }
 }

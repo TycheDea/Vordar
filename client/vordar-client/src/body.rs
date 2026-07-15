@@ -17,7 +17,8 @@ use engine_core::traits::Resources;
 use engine_core::World;
 use glam::Vec3;
 use hecs::Entity;
-use vordar_game::class::{ClassId, ClassLibrary, RaceId, RaceLibrary};
+use vordar_game::class::{ClassId, ClassLibrary};
+use vordar_game::race::{RaceId, RaceLibrary};
 
 /// How long the attack one-shot latches for a mesh character (the KayKit chop
 /// is well under this); locomotion resumes after.
@@ -107,7 +108,8 @@ impl System for BodyComposeSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vordar_game::class::{ClassDef, PoseParams, RaceDef, RaceModel};
+    use vordar_game::class::{ClassDef, PoseParams};
+    use vordar_game::race::{RaceDef, RaceModel};
 
     fn libraries() -> Resources {
         let mut resources = Resources::new();
