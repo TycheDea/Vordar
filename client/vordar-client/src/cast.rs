@@ -21,14 +21,11 @@ const SLOT_KEYS: [winit::keyboard::KeyCode; 2] =
 /// edge-triggered keys (Q, E). Targets for ranged-capped effects are clamped
 /// so an honest cast is never rejected. The client gate is display/traffic
 /// hygiene — the server re-validates class, cooldown, and range.
-pub struct AbilityCastSystem {
-    /// Edge state per keyed slot.
-    was_down: [bool; SLOT_KEYS.len()],
-}
+pub struct AbilityCastSystem;
 
 impl AbilityCastSystem {
     pub fn new() -> Self {
-        Self { was_down: [false; SLOT_KEYS.len()] }
+        Self
     }
 }
 
@@ -87,14 +84,13 @@ impl System for AbilityCastSystem {
             triggered.push(0);
         }
         for (i, key) in SLOT_KEYS.iter().enumerate() {
-            let down = resources
+            let just_pressed = resources
                 .get::<engine_app::input::KeyboardState>()
-                .map(|kb| kb.is_pressed(*key))
+                .map(|kb| kb.just_pressed(*key))
                 .unwrap_or(false);
-            if down && !self.was_down[i] {
+            if just_pressed {
                 triggered.push(i + 1);
             }
-            self.was_down[i] = down;
         }
         triggered.retain(|&s| {
             s < slots.len() && resources.get::<crate::CastState>().map(|c| c.ready(s)).unwrap_or(false)

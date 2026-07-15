@@ -77,6 +77,8 @@ impl App {
 
         let mut scheduler = Scheduler::new();
         scheduler.add(ClearEventsSystem,  Phase::Input,        SystemOrder::First);
+        #[cfg(feature = "winit")]
+        scheduler.add(crate::input::InputEdgeFlushSystem, Phase::Input, SystemOrder::Last);
         scheduler.add(SpawnFlushSystem,   Phase::SpawnFlush,   SystemOrder::Default);
         scheduler.add(DespawnFlushSystem, Phase::DespawnFlush, SystemOrder::Default);
 
