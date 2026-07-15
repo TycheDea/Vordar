@@ -26,7 +26,7 @@ Cross-type queue (mirrored in `reworks-hygiene-2026-07-15.md`):
 > **finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
 > finding 7 → finding 8 → finding 9 → finding 10 → finding 11 → finding 12 →
 > finding 13 → finding 14 → finding 15 → finding 16 → finding 17 → finding 18 →
-> ~~rework 1~~ → rework 2.**
+> ~~rework 1~~ → ~~rework 2~~.**
 >
 > Findings 1–5 (comment work) go first: they edit only comments, and doing them before
 > the placement findings and reworks means moved code carries clean comments (clean
