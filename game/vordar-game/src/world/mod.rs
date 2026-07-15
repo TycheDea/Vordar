@@ -9,6 +9,7 @@
 
 pub mod camp;
 pub mod chapter;
+mod chapter_registry;
 pub mod wave_spawner;
 pub mod zones;
 

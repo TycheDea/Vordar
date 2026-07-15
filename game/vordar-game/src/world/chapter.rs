@@ -1,91 +1,12 @@
-// Chapter definitions — what to spawn, when, and how fast. Pure data, loaded
-// from RON. A chapter plugin inserts an ActiveChapter resource; the wave
-// spawner systems drive everything from it.
+// Chapter content model — what to spawn, when, and how fast. Pure data,
+// loaded from RON. A chapter plugin inserts an ActiveChapter resource; the
+// wave spawner systems drive everything from it.
 //
-// Chapters are LINKED MODULES (one crate each): ChapterModule describes a
-// chapter's name, its dependency chain, and how to install it; the binaries
-// build a ChapterRegistry from the chapter crates they link and install by
-// name — no hardcoded name → plugin matches anywhere.
+// Chapter registration and installation (how chapters link into the binary)
+// lives in chapter_registry.rs; this module re-exports it for compatibility.
 
-use engine_app::app::App;
+pub use super::chapter_registry::{ChapterModule, ChapterRegistry};
 use glam::Vec3;
-
-/// One chapter crate's self-description. `requires` is the dependency chain
-/// ("chapter02 requires chapter01"): installing a chapter first installs the
-/// CONTENT of everything it requires (prefabs/components must exist for
-/// carried-over entities), then its own full plugin.
-pub struct ChapterModule {
-    pub name: &'static str,
-    pub requires: &'static [&'static str],
-    /// Full simulation plugin (server zones, sandbox).
-    pub install: fn(&mut App),
-    /// Registration-only content subset (networked display clients, deps).
-    pub install_content: fn(&mut App),
-}
-
-pub struct ChapterRegistry {
-    modules: Vec<ChapterModule>,
-}
-
-impl ChapterRegistry {
-    pub fn new(modules: Vec<ChapterModule>) -> Self {
-        Self { modules }
-    }
-
-    fn find(&self, name: &str) -> Result<&ChapterModule, String> {
-        self.modules
-            .iter()
-            .find(|m| m.name == name)
-            .ok_or_else(|| format!("unknown chapter '{name}' (not linked into this binary)"))
-    }
-
-    /// Names of `name`'s transitive dependencies, dependencies first.
-    /// Depth-first, cycle-checked; chapter chains are tiny.
-    fn deps_of(&self, name: &str) -> Result<Vec<&'static str>, String> {
-        fn visit<'a>(
-            reg: &'a ChapterRegistry,
-            name: &str,
-            ordered: &mut Vec<&'static str>,
-            visiting: &mut Vec<&'a str>,
-        ) -> Result<(), String> {
-            if visiting.iter().any(|v| *v == name) {
-                return Err(format!("chapter dependency cycle through '{name}'"));
-            }
-            let module = reg.find(name)?;
-            visiting.push(module.name);
-            for dep in module.requires {
-                if !ordered.contains(dep) {
-                    visit(reg, dep, ordered, visiting)?;
-                    ordered.push(dep);
-                }
-            }
-            visiting.pop();
-            Ok(())
-        }
-        let mut ordered = Vec::new();
-        let mut visiting = Vec::new();
-        visit(self, name, &mut ordered, &mut visiting)?;
-        Ok(ordered)
-    }
-
-    /// Install chapter `name` into a simulation App: content of its
-    /// transitive dependencies first, then its own full plugin.
-    pub fn install(&self, name: &str, app: &mut App) -> Result<(), String> {
-        for dep in self.deps_of(name)? {
-            (self.find(dep)?.install_content)(app);
-        }
-        (self.find(name)?.install)(app);
-        Ok(())
-    }
-
-    /// Install every linked chapter's CONTENT (a display client must be able
-    /// to show replicated entities from any zone it can be redirected to).
-    pub fn install_all_content(&self, app: &mut App) {
-        for module in &self.modules {
-            (module.install_content)(app);
-        }
-    }
-}
 
 #[derive(serde::Deserialize)]
 pub struct ChapterDef {
