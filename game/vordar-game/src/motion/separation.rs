@@ -108,16 +108,30 @@ fn mtv(pa: &Vec3, sa: &CollisionShape, pb: &Vec3, sb: &CollisionShape) -> Option
             let normal = if dist > 1e-4 { diff / dist } else { Vec3::X };
             Some(normal * overlap * 0.5)
         }
-        // Mixed: treat sphere as bounding AABB for separation.
+        // Mixed: radial push — direction from the AABB's closest point to the
+        // sphere center, so a sphere sliding past a corner deflects instead of
+        // popping along a box axis.
         (CollisionShape::Sphere { radius }, CollisionShape::Aabb { half_extents }) => {
-            let ha = Vec3::splat(*radius);
-            mtv(pa, &CollisionShape::Aabb { half_extents: ha }, pb, &CollisionShape::Aabb { half_extents: *half_extents })
+            sphere_aabb_mtv(pa, *radius, pb, half_extents)
         }
         (CollisionShape::Aabb { half_extents }, CollisionShape::Sphere { radius }) => {
-            let hb = Vec3::splat(*radius);
-            mtv(pa, &CollisionShape::Aabb { half_extents: *half_extents }, pb, &CollisionShape::Aabb { half_extents: hb })
+            sphere_aabb_mtv(pb, *radius, pa, half_extents).map(|v| -v)
         }
     }
+}
+
+/// Radial MTV between a sphere and an AABB, resolved in the horizontal (X/Z)
+/// plane like the AABB-AABB case above. Returns the vector to push the sphere
+/// away from the AABB; None if not overlapping.
+fn sphere_aabb_mtv(sphere_pos: &Vec3, radius: f32, aabb_pos: &Vec3, half_extents: &Vec3) -> Option<Vec3> {
+    let closest_x = (sphere_pos.x - aabb_pos.x).clamp(-half_extents.x, half_extents.x) + aabb_pos.x;
+    let closest_z = (sphere_pos.z - aabb_pos.z).clamp(-half_extents.z, half_extents.z) + aabb_pos.z;
+    let diff = Vec3::new(sphere_pos.x - closest_x, 0.0, sphere_pos.z - closest_z);
+    let dist = diff.length();
+    let overlap = radius - dist - SLOP;
+    if overlap <= 0.0 { return None; }
+    let normal = if dist > 1e-4 { diff / dist } else { Vec3::X };
+    Some(normal * overlap * 0.5)
 }
 
 #[cfg(test)]
@@ -139,6 +153,36 @@ mod tests {
         pairs.0.insert((a, b));
         resources.insert(pairs);
         SeparationSystem.run(world, &mut resources, 1.0 / 60.0);
+    }
+
+    // A sphere overlapping an anchored AABB post on a diagonal (equal x/z
+    // offset) must be pushed radially — both axes receive comparable
+    // correction. The box-axis approximation this replaces resolves a tie
+    // between overlap_x/overlap_z by picking one axis only, so it would push
+    // along Z alone and leave the X displacement at zero.
+    #[test]
+    fn sphere_pushed_from_anchored_post_deflects_radially() {
+        let mut world = World::new();
+        let post = world.spawn((
+            Transform::new(Vec3::ZERO),
+            Hitbox { shape: CollisionShape::Aabb { half_extents: Vec3::splat(0.5) } },
+            Solid,
+        ));
+        world.insert_one(post, Anchored).unwrap();
+        let walker = world.spawn((
+            Transform::new(Vec3::new(0.6, 0.0, 0.6)),
+            Hitbox { shape: CollisionShape::Sphere { radius: 0.5 } },
+            Solid,
+        ));
+
+        run_pair(&mut world, post, walker);
+
+        let pos = world.get::<&Transform>(walker).unwrap().position;
+        let dx = pos.x - 0.6;
+        let dz = pos.z - 0.6;
+        assert!(dx > 0.05, "x should receive a real radial push, got dx={dx}");
+        assert!(dz > 0.05, "z should receive a real radial push, got dz={dz}");
+        assert!((dx - dz).abs() < 1e-4, "symmetric diagonal setup should push equally on both axes, got dx={dx} dz={dz}");
     }
 
     #[test]

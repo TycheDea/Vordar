@@ -8,7 +8,7 @@
 // Shape dispatch:
 //   Aabb   vs Aabb   — parry3d Aabb wrapper
 //   Sphere vs Sphere — distance² < (r_a + r_b)²
-//   Mixed  pair      — treat sphere as its bounding AABB (conservative)
+//   Mixed  pair      — exact closest-point-on-AABB sphere test
 
 use crate::aabb::Aabb;
 use crate::broadphase::CandidatePairs;
@@ -113,12 +113,25 @@ fn shapes_overlap(
             pos_a.distance_squared(pos_b) < (r_a + r_b) * (r_a + r_b)
         }
         (CollisionShape::Sphere { radius }, CollisionShape::Aabb { half_extents }) => {
-            Aabb::new(pos_a, Vec3::splat(*radius)).overlaps(&Aabb::new(pos_b, *half_extents))
+            sphere_aabb_overlap(pos_a, *radius, pos_b, *half_extents)
         }
         (CollisionShape::Aabb { half_extents }, CollisionShape::Sphere { radius }) => {
-            Aabb::new(pos_a, *half_extents).overlaps(&Aabb::new(pos_b, Vec3::splat(*radius)))
+            sphere_aabb_overlap(pos_b, *radius, pos_a, *half_extents)
         }
     }
+}
+
+/// Exact sphere-vs-AABB test: clamp the sphere center into the box to get the
+/// closest point, then compare squared distance to the radius. The bounding-box
+/// approximation this replaces reports false positives on diagonal near-misses
+/// (corner region up to sqrt(2)x the true radius).
+fn sphere_aabb_overlap(sphere_pos: Vec3, radius: f32, aabb_pos: Vec3, half_extents: Vec3) -> bool {
+    let closest = Vec3::new(
+        (sphere_pos.x - aabb_pos.x).clamp(-half_extents.x, half_extents.x) + aabb_pos.x,
+        (sphere_pos.y - aabb_pos.y).clamp(-half_extents.y, half_extents.y) + aabb_pos.y,
+        (sphere_pos.z - aabb_pos.z).clamp(-half_extents.z, half_extents.z) + aabb_pos.z,
+    );
+    sphere_pos.distance_squared(closest) < radius * radius
 }
 
 #[cfg(test)]
@@ -151,6 +164,22 @@ mod tests {
     // happens to iterate in. Repeated with fresh System/ActivePairs instances
     // (each gets a different SipHash seed) so a flaky pre-fix ordering can't
     // hide behind one lucky seed.
+    // A sphere and an AABB placed on a shared diagonal where the true
+    // closest-point distance exceeds the radius (no overlap) but the
+    // conservative bounding-box test (sphere treated as its own AABB) would
+    // report overlap on both axes independently. Guards against regressing
+    // to the box approximation.
+    #[test]
+    fn sphere_aabb_diagonal_near_miss_does_not_collide() {
+        let sphere = CollisionShape::Sphere { radius: 1.0 };
+        let cube = CollisionShape::Aabb { half_extents: Vec3::splat(0.5) };
+        let sphere_pos = Vec3::new(1.3, 0.0, 1.3);
+        let cube_pos = Vec3::ZERO;
+
+        assert!(!shapes_overlap(sphere_pos, &sphere, cube_pos, &cube));
+        assert!(!shapes_overlap(cube_pos, &cube, sphere_pos, &sphere));
+    }
+
     #[test]
     fn collision_started_order_is_canonical_every_run() {
         for _ in 0..20 {
