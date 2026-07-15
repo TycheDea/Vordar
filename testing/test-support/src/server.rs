@@ -22,9 +22,8 @@ pub fn temp_db(tag: &str) -> String {
 
 /// Compact two-zone topology so walks stay short: start's portal at x=10
 /// drops you at x=-6 in east; east's portal at x=-10 sends you back to x=6.
-/// Shared by `zones.rs` (multi-zone e2e) and `shutdown.rs` (networking
-/// rework plan 2026-07-12, finding 4: the shutdown wiring test mirrors this
-/// exact topology).
+/// Shared by `zones.rs` (multi-zone e2e) and `shutdown.rs` (the shutdown
+/// wiring test mirrors this exact topology).
 pub fn test_zones() -> Vec<ZoneDef> {
     let zones = vec![
         ZoneDef {

@@ -30,11 +30,11 @@ pub fn walk_into_portal(bot: &mut Bot, portal: Vec3, timeout: Duration) {
 /// that session, so every bot in a multi-bot test needs its own character.
 static NEXT_BOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-/// Deterministic account token for `name` (networking rework 1, finding 3):
-/// name bytes zero-padded/truncated into the 32-byte token. Every bot derives
-/// its token this way, so two bots sharing a name (same-name tests:
-/// `login_takeover`, reconnect kicks) automatically share credentials
-/// too — token-gated takeover keeps working for them unchanged.
+/// Deterministic account token for `name`: name bytes zero-padded/truncated
+/// into the 32-byte token. Every bot derives its token this way, so two bots
+/// sharing a name (same-name tests: `login_takeover`, reconnect kicks)
+/// automatically share credentials too — token-gated takeover keeps working
+/// for them unchanged.
 pub fn name_token(name: &str) -> AccountToken {
     let mut token = [0u8; 32];
     let bytes = name.as_bytes();
@@ -47,32 +47,30 @@ pub struct Bot {
     pub client: NetClient,
     /// Character name sent as Login when the connection opens.
     pub name: String,
-    /// Account token sent alongside `name` — `name_token(&name)` (networking
-    /// rework 1, finding 3).
+    /// Account token sent alongside `name` — `name_token(&name)`.
     pub token: AccountToken,
     pub player_id: Option<u32>,
     /// id → position, maintained from enter/leave/state messages
     pub last_snapshot: HashMap<u32, glam::Vec3>,
     /// id → prefab name, learned from AOI enters — indices arriving in
-    /// `EntityState::prefab` (protocol v13, networking rework 5 finding 4)
-    /// are resolved through `prefab_names` in `pump`, so every existing
-    /// name-based assertion keeps working unchanged.
+    /// `EntityState::prefab` are resolved through `prefab_names` in `pump`,
+    /// so every existing name-based assertion keeps working unchanged.
     pub prefabs: HashMap<u32, String>,
     /// This zone's prefab name table (`ServerMsg::PrefabTable`), received
     /// once per connection right after `Welcome`.
     pub prefab_names: Vec<String>,
     pub seq: u32,
-    /// Last 3 sent `MoveIntentEntry`s, oldest first (protocol v15, networking
-    /// rework 3 finding 5) — resent every tick as the `ClientMsg::MoveIntents`
-    /// batch. Cleared implicitly on reconnect: `follow_redirect` and the
-    /// `connect_*` constructors always build a fresh `Bot`.
+    /// Last 3 sent `MoveIntentEntry`s, oldest first — resent every tick as
+    /// the `ClientMsg::MoveIntents` batch (last-3 redundancy). Cleared
+    /// implicitly on reconnect: `follow_redirect` and the `connect_*`
+    /// constructors always build a fresh `Bot`.
     pub move_ring: VecDeque<MoveIntentEntry>,
     /// last_processed_seq from the latest snapshot — the server's intent ack
     pub last_ack: u32,
     /// total bytes received in app messages (bandwidth measurement)
     pub bytes: usize,
     /// per-frame byte size of every `Snapshot` message received, in arrival
-    /// order (networking rework 5 finding 5: the crowd-snapshot size gate).
+    /// order — the crowd-snapshot size gate reads this.
     pub snapshot_bytes: Vec<usize>,
     /// scheduled mechanics as (id, resolve_at_micros), in arrival order
     pub mechanics: Vec<(u64, u64)>,
@@ -89,20 +87,19 @@ pub struct Bot {
     pub snapshot_at: Vec<Instant>,
     /// ids that appeared in the latest snapshot's `states` list
     pub last_states: Vec<u32>,
-    /// latest replicated hp per entity (v8)
+    /// latest replicated hp per entity
     pub last_hp: HashMap<u32, i32>,
-    /// EntityDied messages as (id, pos), in arrival order (v8)
+    /// EntityDied messages as (id, pos), in arrival order
     pub deaths: Vec<(u32, glam::Vec3)>,
-    /// Set once `ClientEvent::Disconnected` is observed (networking rework 8,
-    /// finding 3: proves a server-side shutdown actually closed the wire).
+    /// Set once `ClientEvent::Disconnected` is observed — proves a
+    /// server-side shutdown actually closed the wire.
     pub disconnected: bool,
-    /// Latest `LoginDenied` reason received, if any (networking rework 1,
-    /// finding 3).
+    /// Latest `LoginDenied` reason received, if any.
     pub denied: Option<LoginDenyReason>,
     /// Highest `ServerMsg::Snapshot.tick` applied so far — mirrors the
-    /// client's tick guard (protocol v14, networking rework 3 finding 4):
-    /// `Snapshot` rides an unreliable datagram, so a stale/reordered copy
-    /// must be dropped before any field is read (ack included).
+    /// client's tick guard: `Snapshot` rides an unreliable datagram, so a
+    /// stale/reordered copy must be dropped before any field is read (ack
+    /// included).
     pub latest_state_tick: u64,
 }
 
@@ -121,10 +118,10 @@ impl Bot {
     }
 
     /// Like `connect_as`, but returns `None` on a failed dial instead of
-    /// panicking (zone-watchdog rework 10, finding 3): a test polling a
-    /// rebinding address across the supervisor's teardown-then-rebuild
-    /// window expects some attempts to fail before the new listener is up,
-    /// not to end the test. `NetClient::connect_impaired` itself only
+    /// panicking: a test polling a rebinding address across the
+    /// supervisor's teardown-then-rebuild window expects some attempts to
+    /// fail before the new listener is up, not to end the test.
+    /// `NetClient::connect_impaired` itself only
     /// reports a synchronous thread-spawn failure — a dial rejected because
     /// the old listener is mid-teardown (or refused because no listener is
     /// up yet) surfaces later as a `ClientEvent::Disconnected`, not as an
@@ -205,8 +202,7 @@ impl Bot {
     }
 
     /// Latency plus send-side (client→server) datagram loss below QUIC — the
-    /// upstream loss-probe constructor (networking audit 2026-07-11, finding
-    /// 17: before this, only downstream loss could be simulated at all).
+    /// upstream loss-probe constructor.
     pub fn connect_upstream_impaired_as(addr: SocketAddr, name: &str, simulated_rtt: Duration, loss: f32) -> Self {
         Self::connect_full_as(
             addr,
@@ -273,19 +269,18 @@ impl Bot {
                 match decode::<ServerMsg>(&data) {
                     Some(ServerMsg::Welcome { player_id }) => self.player_id = Some(player_id),
                     Some(ServerMsg::PrefabTable { names }) => self.prefab_names = names,
-                    // Reliable-stream identity delta (protocol v14, networking
-                    // rework 3 finding 4): AOI enters/leaves, sent only when
-                    // non-empty. Stream ordering means no tick guard is needed.
+                    // Reliable-stream identity delta: AOI enters/leaves, sent
+                    // only when non-empty. Stream ordering means no tick
+                    // guard is needed.
                     Some(ServerMsg::AoiDelta { enters, leaves, .. }) => {
                         for e in enters {
                             self.last_snapshot.insert(e.id, e.pos.0);
-                            // None (v12) = no Health component — record only
-                            // real readings, never a stand-in 0.
+                            // None = no Health component — record only real
+                            // readings, never a stand-in 0.
                             if let Some(hp) = e.hp {
                                 self.last_hp.insert(e.id, hp);
                             }
-                            // Resolve the u16 wire index through the table
-                            // (protocol v13, networking rework 5 finding 4).
+                            // Resolve the u16 wire index through the table.
                             // A miss panics rather than silently dropping the
                             // entity: test hygiene — it also proves the
                             // table always arrives before any enter that
@@ -302,10 +297,9 @@ impl Bot {
                             self.prefabs.remove(&id);
                         }
                     }
-                    // Datagram state update (protocol v14, networking rework 3
-                    // finding 4): a stale/reordered copy is dropped before any
-                    // field is read (ack included) — mirrors the client's
-                    // `apply_states` tick guard.
+                    // Datagram state update: a stale/reordered copy is
+                    // dropped before any field is read (ack included) —
+                    // mirrors the client's `apply_states` tick guard.
                     Some(ServerMsg::Snapshot { tick, last_processed_seq, states }) => {
                         if tick <= self.latest_state_tick {
                             continue;
@@ -381,9 +375,8 @@ impl Bot {
     pub fn send_move(&mut self, dir: glam::Vec2) {
         if let Some(t_server_micros) = self.client.server_now_micros() {
             self.seq += 1;
-            // Last-3 redundancy (protocol v15, networking rework 3 finding
-            // 5): mirrors NetSendInputSystem's ring buffer — this tick's
-            // entry plus the two previous, sent via datagram.
+            // Last-3 redundancy: mirrors NetSendInputSystem's ring buffer —
+            // this tick's entry plus the two previous, sent via datagram.
             self.move_ring.push_back(MoveIntentEntry { seq: self.seq, t_server_micros, dir });
             if self.move_ring.len() > 3 {
                 self.move_ring.pop_front();
