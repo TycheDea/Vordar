@@ -11,7 +11,6 @@
 use super::apply;
 use super::NetClientState;
 use engine_app::scheduler::System;
-use engine_app::time::Time;
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
 use engine_net::{ClientEvent, NetClient};
@@ -139,11 +138,6 @@ impl System for NetReceiveSystem {
             }
         }
 
-        // Publish the synced clock for anything that schedules in server time.
-        let offset = resources.get::<NetClientState>().unwrap().client.as_ref().and_then(|c| c.server_offset_micros());
-        if let Some(offset) = offset {
-            resources.get_mut::<Time>().unwrap().server_offset_micros = offset;
-        }
     }
 }
 
