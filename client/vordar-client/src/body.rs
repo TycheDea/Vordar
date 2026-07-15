@@ -32,9 +32,8 @@ pub struct BodyComposeSystem;
 impl System for BodyComposeSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let candidates: Vec<(Entity, String, Option<String>)> = world
-            .query::<(Entity, &RaceId, Option<&ClassId>)>()
+            .query::<hecs::Without<(Entity, &RaceId, Option<&ClassId>), &BodyComposed>>()
             .iter()
-            .filter(|&(entity, ..)| world.get::<&BodyComposed>(entity).is_err())
             .map(|(entity, race, class)| (entity, race.id.clone(), class.map(|c| c.id.clone())))
             .collect();
         if candidates.is_empty() {
