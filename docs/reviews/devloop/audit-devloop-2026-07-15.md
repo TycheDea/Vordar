@@ -296,14 +296,209 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-15.md`):
 - **Path:** (1) edits; (2) proof: next loop containing a tagged finding asks
   at launch and completes with zero mid-loop decision defaults.
 
+## Same-day rerun addendum (second pass — token axis)
+
+Findings 12–17 were added by the same-day second-pass sweep, run after the
+user re-weighted the ordering axis to token spend first (parallel-worker
+rework declined on the same ground). Telemetry corpus: the session ledger of
+today's game-architecture loop — 20 primary worker spawns, 1 resume
+correction, 1 rework-planner, ≈2.118M subagent tokens (haiku 3×/165.5k raw,
+sonnet 11×/1,310.4k, opus 5×/370.9k, planner 190.7k, correction 80.4k) — plus
+the morning devloop loop (11 spawns + 1 correction, 651.8k). Every number
+below is from recorded per-spawn `subagent_tokens`/`tool_uses` usage lines,
+not estimates.
+
+Queue extension (mirrored in `reworks-devloop-2026-07-15.md`):
+
+> **finding 12 → finding 13 → finding 14 → finding 15 → finding 16 →
+> finding 17 (user-decides — ask at loop launch).**
+>
+> 12 first: it is the single largest weighted-spend lever and changes how
+> every later finding's own implementation gets routed.
+
+### 12. Opus routing is ~54% of weighted spend and its depth went unused — route sonnet-first, escalate on failure
+
+- **Evidence:** 5 of today's 20 game-arch spawns went to opus (findings 1, 4,
+  9, 13; plan step 5) totaling 370.9k raw tokens — 24% of raw but, weighted
+  by model price (opus ≈ 5× sonnet per token), ≈54% of the loop's weighted
+  spend (≈1.85M sonnet-equivalents of ≈3.4M total). Outcomes: all five landed
+  first-pass with zero fail-first debugging cycles beyond what sonnet spawns
+  handled elsewhere the same day (sonnet took the 69–81-tool multi-crate
+  steps — findings 3, 7, 11, plan step 3 — at 141–179k each, zero misses).
+  The routing rule sent them to opus on *anticipated* subtlety ("timing-
+  sensitive", "engine-wide blast radius"); the anticipation never cashed out.
+- **Ideal:** the router pays the opus premium only on demonstrated need: a
+  step a cheaper worker already missed, or a Path that names an actual
+  debugging activity (a failing timing test to diagnose, a race to find) —
+  not adjectives about the code's importance. Sonnet is the default even for
+  scheduler/netcode steps whose Path dictates the design.
+- **Gap:** the current bracket prices fear, not evidence; today that fear
+  cost ≈1.5M sonnet-equivalents of premium for zero prevented failures.
+- **Tradeoffs:** *Wins:* ~5× cost cut on every reclassified step; today that
+  was 5 spawns. *Losses:* a sonnet miss on a genuinely subtle step costs a
+  follow-up (observed follow-up cost 59–106k) plus an escalated opus re-run —
+  if sonnet's miss rate on ex-opus steps exceeds ~1 in 6, the savings invert;
+  the miss also costs a user-visible hiccup and wall time (which the user has
+  explicitly deprioritized).
+- **Suggestion:** rewrite the opus bullet in `implement-finding/SKILL.md`'s
+  routing list: opus = "a previous worker failed this step, or the Path names
+  a concrete failing-behavior diagnosis (not code sensitivity)". `fable`
+  keeps its current reserve wording.
+- **Path:** (1) one bullet edit; (2) proof: next loop's ledger shows opus
+  spawns ≤1 per 15 findings with follow-up rate on ex-opus-shaped steps ≤ 1
+  in 6.
+
+### 13. Every worker re-reads the report the orchestrator just read — embed the finding text in the spawn task
+
+- **Evidence:** the spawn template commands "Read the finding's full section
+  from that file first" — so all 20 workers today opened the 424-line audit
+  (or 476-line plan) to extract their ~30-line section, and most read beyond
+  it for context. The orchestrator had *already read the same section* to
+  route the model (the skill requires it). The cheapest spawns measure the
+  fixed boot cost this contributes to: 37.5–38.8k tokens for one-comment
+  diffs (morning findings 2, 8, 9 — diffs under 10 lines each).
+- **Ideal:** the routing read is reused: the orchestrator pastes the finding's
+  verbatim section into the spawn task; the worker is told the section is
+  complete and the report file is off-limits (its Evidence file:line pointers
+  are what it explores, not the report).
+- **Gap:** the same ~30 lines are paid for twice per finding — once in
+  orchestrator context, once in worker context plus the worker's surrounding
+  overread — ~20× per loop.
+- **Tradeoffs:** *Wins:* kills one Read per spawn and the overread tail;
+  bounds what a worker knows to exactly its finding (less drift). *Losses:*
+  orchestrator output grows ~1–2k per spawn (net still positive); a worker
+  that legitimately needs a neighboring finding's context (rare — queue
+  dependencies are supposed to be resolved by ordering) must ask or miss it;
+  the template change must keep the "execute its Path faithfully" framing or
+  workers lose their contract anchor.
+- **Suggestion:** edit `implement-finding/SKILL.md`'s spawn template (embed
+  section, forbid report re-read) and `finding-worker.md`'s reading rules to
+  match.
+- **Path:** (1) two edits; (2) proof: next loop's cheapest spawn drops below
+  ~30k and no worker transcript shows a report/plan Read.
+
+### 14. Resume-corrections replay a whole transcript to make a 3-tool fix — small corrections get fresh minimal spawns
+
+- **Evidence:** both corrections today were transcript resumes: the morning
+  misplaced-file fix cost 59.4k (6 tools), and the game-arch step-4 orphan
+  deletion cost 80.4k for 3 tool calls — a `Remove-Item`, a `cargo check`,
+  and a scoped test run — because resuming replays the agent's full prior
+  context (~65k) under the new instruction.
+- **Ideal:** a correction whose instruction is self-contained (delete this
+  file, rename this test, re-run this gate) goes to a fresh haiku spawn with
+  a 5-line task; resumes are reserved for corrections that genuinely need the
+  original working context (a design misunderstanding, a partial edit to
+  continue).
+- **Gap:** the correction channel costs 10–25× its work when the work is
+  mechanical.
+- **Tradeoffs:** *Wins:* ~60–70k saved per mechanical correction (today:
+  2 of 2 qualified). *Losses:* a fresh spawn lacks the original's context —
+  if the orchestrator's correction brief is wrong or incomplete, the fresh
+  worker can't catch the discrepancy the way the original (which knows what
+  it did) would; writing the self-contained brief is orchestrator output
+  spend (~0.5k).
+- **Suggestion:** a note in `implement-finding/SKILL.md`'s orchestrator
+  rules: corrections enumerable in ≤5 lines with no dependence on the prior
+  transcript spawn fresh (haiku unless the fix itself is subtle); otherwise
+  resume.
+- **Path:** (1) one note; (2) proof: next mechanical correction's ledger
+  entry lands under 20k.
+
+### 15. "Crosses crates" was judged three different ways — make the full-gate rule mechanical and worker-owned
+
+- **Evidence:** today's cross-crate diffs split three ways: finding 7's
+  worker ran the full workspace gate itself (correct); findings 5 and 8's
+  workers argued domain containment and skipped it; findings 3, 6, 11's
+  workers ran scoped suites only — so the orchestrator ran the full gate
+  before committing, four times total. Each ambiguity costs an orchestrator
+  decision turn, and the duplicated gates cost ~40s each (wall, cheap in
+  tokens — the real cost is the judgment churn and inconsistent history).
+- **Ideal:** one mechanical rule both sides apply identically: `git status`
+  touches files under ≥2 workspace crate roots → the WORKER runs the full
+  gate once before reporting; the orchestrator never re-runs a gate a worker
+  reported green.
+- **Gap:** a rule that needs judgment gets three interpretations across one
+  loop.
+- **Tradeoffs:** *Wins:* zero duplicate gates, zero orchestrator gate turns,
+  consistent commit evidence. *Losses:* a strictly mechanical trigger
+  full-gates some diffs a human would wave through (e.g. two crates' comment
+  headers), costing ~40s wall each — accepted, since wall is the cheap axis.
+- **Suggestion:** replace the conditional wording in `finding-worker.md`'s
+  gate section with the ≥2-crate-roots trigger; add the "never re-run a
+  reported-green gate" line to `implement-finding/SKILL.md`.
+- **Path:** (1) two edits; (2) proof: next loop shows zero orchestrator-run
+  workspace gates.
+
+### 16. Audit sweeps read test-module bodies they don't judge — window them out
+
+- **Evidence:** today's game-architecture audit (main context) read ~25
+  source files end-to-end; in the ten with `#[cfg(test)]` modules, test
+  bodies were ~37% of lines read (e.g. scheduler.rs 168 of 427, enemies/mod
+  378→185, projectile 281→111, buff 228→106) and produced zero findings —
+  every finding cited non-test code. Audit context is the most expensive
+  context in the pipeline (longest-lived, feeds summarization).
+- **Ideal:** audit sweeps read implementation to the end of the impl and stop
+  at `#[cfg(test)]` unless the audit's scope is test quality (project-meta)
+  or a finding needs a test as evidence — then window into it deliberately.
+- **Gap:** ~a third of audit read volume buys nothing on most domains.
+- **Tradeoffs:** *Wins:* ~30–40% less main-context read volume per audit at
+  unchanged coverage of the code being judged. *Losses:* tests sometimes
+  reveal intent the impl hides (a test named for a bug documents the
+  invariant) — the auditor must notice the test module exists and choose,
+  which is one more judgment; a lazy application could under-read genuinely
+  test-relevant domains.
+- **Suggestion:** one line in `audit-base.md`'s Method ("read impl; stop at
+  test modules unless the domain or a specific finding needs them").
+- **Path:** (1) one edit; (2) proof: next audit's read ledger shows test-body
+  lines <10% of volume with finding count unaffected.
+
+### 17. (user-decides) Micro-findings pay a ~40k spawn to land a <10-line diff — an inline orchestrator path would skip the boot entirely
+
+- **Evidence:** the morning loop's smallest findings — one added sentence
+  (finding 2, 37.7k), one comment block (finding 9, 37.5k), one gate-wording
+  edit (finding 8, 38.8k) — each cost a full worker boot for a diff under 10
+  lines: >100× the tokens of the change itself. The boot floor (~35–38k) is
+  the irreducible cost of ANY spawn, however routed.
+- **Ideal:** findings an audit tags "(micro)" — strictly enumerated, single
+  file, no test to write beyond an existing gate — are applied by the
+  orchestrator inline (Edit + the scoped gate), no spawn at all.
+- **Gap:** the orchestrator-never-implements contract, which exists to keep
+  the orchestrator's context clean and its judgment un-conflicted, currently
+  has no floor below which its own overhead dominates.
+- **Tradeoffs:** *Wins:* ~35k saved per micro-finding (3 today ≈ 105k).
+  *Losses:* this erodes the contract that has kept the orchestrator honest —
+  inline edits grow orchestrator context, skip the worker's independent
+  fail-first discipline, and create a judgment call ("is this really micro?")
+  exactly where the pipeline currently has none; a misjudged "micro" that
+  needed a test lands untested. This is a real contract change, hence
+  user-decides, asked at loop launch per finding 11's convention.
+- **Suggestion:** if adopted: audits may tag "(micro)" under stated criteria;
+  `implement-finding/SKILL.md` gains the inline path for tagged findings
+  only. If declined: strike this finding; the boot floor stays the price of
+  the clean contract.
+- **Path:** (1) user decision; (2) if adopted, two edits; proof: micro-tagged
+  findings land at <5k tokens each in the next loop's ledger.
+
 ## Carried forward from previous report
 
-None — first run of this audit.
+None — first run of this audit (the addendum extends the same day's report).
 
 ## Resolved since last report
 
-None — first run. Worth recording as *working as designed* from today's
-telemetry: zero retry loops (the 5-run stability cap and probe rules held);
-Reads/Greps at 0.6% of tool time across 908 calls (read windows held); cache
-serving 311.8M of 311.9M input tokens; the two-tier plan-absorbs-thinking
-design showing up as haiku executing planner-dictated extractions cleanly.
+First-pass findings 1–11 all landed the same day (2026-07-15): the repo-file
+changes in commits `b77b46f` (dev profile, nextest header, lint-comments
+script) and the `.claude/` config edits for gates, routing, contracts, and
+conventions. Rework 1 (parallel execution) had its gate met by the
+game-architecture serial loop and was **declined by the user** — token spend
+outranks wall time; recorded in the reworks file and the skill's ordering
+axis.
+
+Worth recording as *working as designed* from the second pass's ledger: zero
+baseline re-establishments (the "HEAD green at N/N" line held across all 20
+spawns); scoped gates held (full runs only on cross-crate diffs and
+loop-final); the widened haiku bracket held for plan-dictated steps (2 of 3
+haiku spawns clean, the miss was a rename-leaves-orphan, not a routing
+error); worker reports stayed ~15–35 lines (cap mostly held, no compaction
+events this loop); and the first-pass findings' own implementation loop ran
+at 651.8k tokens for 11 findings — cheaper per finding than the game-arch
+loop, consistent with its smaller diffs.

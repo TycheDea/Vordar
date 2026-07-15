@@ -23,6 +23,11 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-15.md`):
 > the binding constraint is the weekly token budget, not the stopwatch. The
 > dev loop optimizes for token spend first; do not re-file this rework while
 > that holds.**
+>
+> Same-day second-pass extension (token axis, mirrored from the audit file's
+> addendum): **finding 12 → finding 13 → finding 14 → finding 15 → finding 16
+> → finding 17 (user-decides — ask at loop launch).** All fix-scale; no new
+> reworks filed by the second pass.
 
 ### 1. Parallel execution of independent queue items (declined 2026-07-15)
 
