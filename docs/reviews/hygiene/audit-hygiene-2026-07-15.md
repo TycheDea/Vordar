@@ -477,6 +477,29 @@ written. That ruling is now written into the comment policy (project CLAUDE.md �
 - **Path:** (1) edit the 14 sites; (2) green gate: `cargo check --workspace` zero
   warnings, `cargo nextest run --workspace` green — comments only.
 
+### 20. Fourth-pass residue: two bench headers still cite WEAKPOINTS gaps
+
+- **Evidence:** `benchmarks/benches/prefab_spawn.rs:1` ("Prefab spawn cost —
+  WEAKPOINTS gap A") and `benchmarks/benches/client_netcode.rs:1` ("Client netcode
+  hot paths — WEAKPOINTS gap B") — the same external-doc provenance class finding 4
+  stripped from `loss.rs`; finding 3's evidence cited these files only for their
+  protocol-vN lines, so the headers survived.
+- **Ideal:** the headers state what cost is measured and the budget guarded, minus
+  the gap tags.
+- **Gap:** two sites.
+- **Suggestion:** strip the tags, keep the measured-cost rationale.
+- **Path:** (1) edit both headers; (2) green gate: `cargo check --workspace` zero
+  warnings — comments only.
+
+Scope handoff recorded by the fourth pass: the remaining Phase tags live in
+`content/` file contents (`zones/zones.ron:1`, `races/{human,dwarf,elf,valkyrie}.ron`
+pre-Phase-C fallback notes, `chapters/chapter01/chapter.ron:1`,
+`source/CREDITS.md:23`, `source/characters/mixamo/SHOPPING_LIST.md`) — content file
+contents are audit-content-pipeline territory per this audit's scope boundary
+(hygiene owns the content tree's layout and naming only), so they are recorded here
+as a handoff, not findings. SHOPPING_LIST.md additionally describes a genuinely
+pending manual step (the blocked Mixamo downloads) and must not be blindly purged.
+
 ## Carried forward from previous report
 
 None — the full 2026-07-14 queue was implemented and verified before this run.
