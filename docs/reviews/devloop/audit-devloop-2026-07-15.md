@@ -310,8 +310,10 @@ not estimates.
 
 Queue extension (mirrored in `reworks-devloop-2026-07-15.md`):
 
-> **finding 12 → finding 13 → finding 14 → finding 15 → finding 16 →
-> finding 17 (user-decides — ask at loop launch).**
+> **~~finding 12 → finding 13 → finding 14 → finding 15 → finding 16 →
+> finding 17 (user-decides — ask at loop launch)~~ — all adopted and landed
+> 2026-07-15 (finding 17 answered at launch: micro path adopted; all six
+> applied inline as its first run).**
 >
 > 12 first: it is the single largest weighted-spend lever and changes how
 > every later finding's own implementation gets routed.

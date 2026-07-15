@@ -25,9 +25,12 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-15.md`):
 > that holds.**
 >
 > Same-day second-pass extension (token axis, mirrored from the audit file's
-> addendum): **finding 12 → finding 13 → finding 14 → finding 15 → finding 16
-> → finding 17 (user-decides — ask at loop launch).** All fix-scale; no new
-> reworks filed by the second pass.
+> addendum): **~~finding 12 → finding 13 → finding 14 → finding 15 → finding
+> 16 → finding 17 (user-decides)~~ — all adopted and landed 2026-07-15. The
+> user answered finding 17's question at queue launch (micro path: adopted),
+> and all six were applied inline by the orchestrator as the micro path's
+> first run — each is a strictly-enumerated single/two-file prose edit to
+> gitignored `.claude/` config, exactly the shape the path exists for.**
 
 ### 1. Parallel execution of independent queue items (declined 2026-07-15)
 
