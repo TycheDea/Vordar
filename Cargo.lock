@@ -4319,6 +4319,7 @@ dependencies = [
  "engine-renderer",
  "glam 0.32.1",
  "hecs",
+ "test-support",
  "vordar-client",
  "vordar-game",
  "vordar-protocol",

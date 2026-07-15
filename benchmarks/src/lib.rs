@@ -19,30 +19,10 @@ use hecs::Entity;
 pub const DT: f32 = 1.0 / 60.0;
 /// Matches PhysicsPlugin's SpatialGrid::new(10.0).
 pub const CELL_SIZE: f32 = 10.0;
-/// Matches the server net module's AOI_RADIUS.
-pub const AOI_RADIUS: f32 = 40.0;
+/// Taken from the server's bench seam (net::bench::AOI) — cannot drift.
+pub const AOI_RADIUS: f32 = vordar_server::net::bench::AOI;
 
-/// Prefabs load from content/ relative to cwd — run as if from workspace root
-/// (same trick as server/vordar-server/tests/common).
-pub fn workspace_root() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    std::env::set_current_dir(root).unwrap();
-}
-
-/// Deterministic LCG — same constants as tests/soak.rs's Wander.
-pub struct Lcg(u64);
-
-impl Lcg {
-    pub fn new(seed: u64) -> Self {
-        Self(seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493))
-    }
-
-    /// Uniform in [0, 1).
-    pub fn next_f32(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        ((self.0 >> 33) as u32) as f32 / (u32::MAX as f32 + 1.0)
-    }
-}
+pub use test_support::{workspace_root, Lcg};
 
 /// Half-extent that spreads `n` entities at a realistic zone density of
 /// ~2.5 entities per 10×10 grid cell (constant density across sweep sizes).

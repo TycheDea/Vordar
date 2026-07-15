@@ -6,7 +6,7 @@
 //
 //   cargo test -p vordar-server --release --test soak -- --ignored --nocapture
 
-use test_support::{percentile, Bot, MetricMirror};
+use test_support::{percentile, Bot, Lcg, MetricMirror};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::Resources;
 use engine_core::World;
@@ -52,14 +52,14 @@ impl System for PhaseMeter {
 /// sends; beyond r=30 the bot is pulled back toward the origin so the crowd
 /// stays mutually in-AOI (the worst case for snapshot fan-out).
 struct Wander {
-    rng: u64,
+    rng: Lcg,
     dir: glam::Vec2,
     sends: u32,
 }
 
 impl Wander {
     fn new(seed: u64) -> Self {
-        Self { rng: seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493), dir: glam::Vec2::X, sends: 30 }
+        Self { rng: Lcg::new(seed), dir: glam::Vec2::X, sends: 30 }
     }
 
     fn next_dir(&mut self, pos: Option<glam::Vec3>) -> glam::Vec2 {
@@ -71,8 +71,7 @@ impl Wander {
         self.sends += 1;
         if self.sends >= 30 {
             self.sends = 0;
-            self.rng = self.rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            let angle = (self.rng >> 33) as f32 / (u32::MAX >> 1) as f32 * std::f32::consts::TAU;
+            let angle = (self.rng.next_u64() >> 33) as f32 / (u32::MAX >> 1) as f32 * std::f32::consts::TAU;
             self.dir = glam::Vec2::new(angle.cos(), angle.sin());
         }
         self.dir
