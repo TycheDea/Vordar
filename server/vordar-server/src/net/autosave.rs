@@ -1,11 +1,9 @@
 use engine_app::scheduler::System;
-use engine_core::components::{Health, Transform};
 use engine_core::traits::Resources;
 use engine_core::World;
 use engine_net::ConnId;
 
-use crate::db::CharacterRecord;
-use super::{cooldown_remainders, NetServerState};
+use super::{save_character, NetServerState};
 
 /// Autosave every Nth PostUpdate run (60 Hz → ~30 s).
 const AUTOSAVE_TICKS: u64 = 1800;
@@ -32,13 +30,7 @@ impl System for AutosaveSystem {
             if !autosave_due(conn, tick) {
                 continue;
             }
-            if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
-                state.db.save(
-                    pc.name.clone(),
-                    CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
-                );
-            }
+            save_character(world, state, pc);
         }
     }
 }

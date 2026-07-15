@@ -1,13 +1,11 @@
 use engine_app::app::AppExit;
 use engine_app::scheduler::System;
-use engine_core::components::{Health, Transform};
 use engine_core::traits::Resources;
 use engine_core::World;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::db::CharacterRecord;
-use super::{cooldown_remainders, NetServerState};
+use super::{save_character, NetServerState};
 
 /// Process-wide shutdown signal: `main` shares one `Arc<AtomicBool>` with its
 /// OS signal handler and inserts a clone into every zone App. Absent from
@@ -34,13 +32,7 @@ impl System for ShutdownSystem {
         for pc in state.conns.values() {
             // Players still in `state.loading` have no entity yet — nothing
             // to save.
-            if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
-                state.db.save(
-                    pc.name.clone(),
-                    CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
-                );
-            }
+            save_character(world, state, pc);
         }
         log::info!("zone '{}': shutdown flag set, saved {saved} connected player(s), requesting app exit", state.zone.name);
         resources.get_mut::<AppExit>().unwrap().0 = true;

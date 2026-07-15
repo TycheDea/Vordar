@@ -26,7 +26,7 @@ use vordar_game::world::WorldTime;
 use vordar_game::Mechanic;
 use vordar_protocol::{decode, encode, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg};
 
-use super::{aoi_conns, cooldown_remainders, NetServerState, PlayerConn, HISTORY_CAP, MAX_REWIND_MICROS};
+use super::{aoi_conns, save_character, NetServerState, PlayerConn, HISTORY_CAP, MAX_REWIND_MICROS};
 
 /// Slack on the arrival deadline for clock-sync error and jitter.
 const ARRIVAL_MARGIN_MICROS: u64 = 100_000;
@@ -78,19 +78,7 @@ impl System for NetReceiveSystem {
                     log::info!("conn {conn}: connected, awaiting login");
                 }
                 ServerEvent::Disconnected(conn) => {
-                    let state = resources.get_mut::<NetServerState>().unwrap();
-                    state.loading.remove(&conn);
-                    if let Some(pc) = state.conns.remove(&conn) {
-                        // Persist before queuing the despawn — DespawnFlush
-                        // runs later in the frame, the entity is still alive.
-                        if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                            let zone = state.zone.name.clone();
-                            let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
-                            state.db.save(pc.name.clone(), CharacterRecord { zone, pos: tr.position, health: hp.current, cooldowns });
-                        }
-                        resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
-                        log::info!("conn {conn}: disconnected, despawning {:?}", pc.entity);
-                    }
+                    handle_disconnect(world, resources, conn);
                 }
                 ServerEvent::Message { conn, data, recv_micros } => {
                     let state = resources.get_mut::<NetServerState>().unwrap();
@@ -150,11 +138,7 @@ impl System for NetReceiveSystem {
                             // Same save-then-despawn as a real disconnect, so
                             // the takeover load (FIFO behind it) restores the
                             // freshest state.
-                            if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
-                                let zone = state.zone.name.clone();
-                                let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
-                                state.db.save(pc.name.clone(), CharacterRecord { zone, pos: tr.position, health: hp.current, cooldowns });
-                            }
+                            save_character(world, state, &pc);
                             state.server.disconnect(old_conn);
                             log::info!("conn {conn}: '{name}' takes over session from conn {old_conn}");
                             resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
@@ -516,6 +500,18 @@ impl System for NetReceiveSystem {
         for (entity, dir) in intents {
             bus.emit(MoveIntent { entity, dir });
         }
+    }
+}
+
+fn handle_disconnect(world: &mut World, resources: &mut Resources, conn: ConnId) {
+    let state = resources.get_mut::<NetServerState>().unwrap();
+    state.loading.remove(&conn);
+    if let Some(pc) = state.conns.remove(&conn) {
+        // Persist before queuing the despawn — DespawnFlush
+        // runs later in the frame, the entity is still alive.
+        save_character(world, state, &pc);
+        resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
+        log::info!("conn {conn}: disconnected, despawning {:?}", pc.entity);
     }
 }
 

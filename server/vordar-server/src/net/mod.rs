@@ -3,12 +3,12 @@
 // Module family: receive = Input edge, broadcast/mechanics/transfer/autosave = PostUpdate,
 // shutdown = Input; state lives here.
 
-use crate::db::{DbHandle, DbWorker};
+use crate::db::{CharacterRecord, DbHandle, DbWorker};
 use engine_app::app::App;
 use engine_app::plugin::Plugin;
 use engine_app::scheduler::{Phase, SystemOrder};
 use engine_app::tick_rate::TickRate;
-use engine_core::components::Transform;
+use engine_core::components::{Health, Transform};
 use engine_core::World;
 use engine_net::{ConnId, NetLimits, NetMetrics, NetServer};
 use glam::{Vec2, Vec3};
@@ -268,6 +268,19 @@ fn cooldown_remainders(ready: &HashMap<String, u64>, now: u64) -> HashMap<String
             (remaining > 0).then(|| (id.clone(), remaining))
         })
         .collect()
+}
+
+/// Persist a connected player's live state (position, health, cooldown
+/// remainders) under this zone's name. A player whose entity is already
+/// gone from the world has nothing to save — silently skipped.
+fn save_character(world: &World, state: &NetServerState, pc: &PlayerConn) {
+    if let (Ok(tr), Ok(hp)) = (world.get::<&Transform>(pc.entity), world.get::<&Health>(pc.entity)) {
+        let cooldowns = cooldown_remainders(&pc.cooldown_ready, state.server.now_micros());
+        state.db.save(
+            pc.name.clone(),
+            CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns },
+        );
+    }
 }
 
 /// Connections whose player is within AOI range of `center` — the interest-
