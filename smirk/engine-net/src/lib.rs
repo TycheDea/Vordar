@@ -38,6 +38,7 @@
 
 mod common;
 mod client;
+mod clock;
 mod impair;
 mod metrics;
 mod server;
