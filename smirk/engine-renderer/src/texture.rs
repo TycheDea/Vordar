@@ -27,7 +27,7 @@ fn make_sampler(device: &Device) -> Sampler {
         mag_filter:      FilterMode::Linear,
         min_filter:      FilterMode::Linear,
         mipmap_filter:   MipmapFilterMode::Linear,
-        // VQ-C1: anisotropic filtering on every surface sampler. Requires all
+        // Anisotropic filtering on every surface sampler. Requires all
         // three filters Linear (they are).
         anisotropy_clamp: 8,
         ..Default::default()
@@ -35,7 +35,7 @@ fn make_sampler(device: &Device) -> Sampler {
 }
 
 /// Load a BC7-encoded DDS file directly as a GPU texture, uploading every
-/// baked mip level the file carries (VQ-C1).
+/// baked mip level the file carries.
 /// Returns Err if the file cannot be read or parsed.
 pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTexture, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {path}: {e}"))?;
@@ -93,8 +93,8 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTextu
     Ok(ColorTexture { texture, view, sampler })
 }
 
-/// Upload RGBA8 pixels and build a full mip chain via the blit generator
-/// (VQ-C1). `srgb` as in `create_rgba_texture`. 1×1 textures skip mipgen.
+/// Upload RGBA8 pixels and build a full mip chain via the blit generator.
+/// `srgb` as in `create_rgba_texture`. 1×1 textures skip mipgen.
 pub(crate) fn create_rgba_texture_mipped(
     device: &Device,
     queue:  &Queue,

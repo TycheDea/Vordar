@@ -1,4 +1,4 @@
-// Dual-filter Kawase bloom (VQ-C3 payoff): soft-knee prefilter from the HDR
+// Dual-filter Kawase bloom: soft-knee prefilter from the HDR
 // resolve, then a downsample/upsample chain (Bjørge dual-filter taps). The
 // upsample legs blend additively; the tonemap pass composites the result.
 

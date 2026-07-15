@@ -168,7 +168,7 @@ impl System for MeshRenderSyncSystem {
                 let tint = [mesh.tint.x, mesh.tint.y, mesh.tint.z, 1.0];
 
                 match store.meshes[idx].skin.as_ref() {
-                    // Static mesh — Phase-A path.
+                    // Static mesh — no skeleton to pose.
                     None => self.items.push((idx, MeshInstance {
                         model: model.to_cols_array_2d(),
                         tint,

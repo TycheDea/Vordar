@@ -1,18 +1,14 @@
-//! Regression tests for the networking audit 2026-07-11, finding 17:
-//! "Impairment layer only simulates server→client loss — the intent path,
-//! jitter, and clock skew are untestable." Before this, `Impairment`
-//! (formerly a bare `loss: f32` on `connect_impaired`) could only drop
-//! server→client datagrams, had no jitter/reorder, and had no way to
-//! simulate a client clock running at a different rate than the server's.
+//! `Impairment` simulates server→client loss, jitter/reorder, and client
+//! clock skew — not just downstream loss.
 //!
-//! Path step 1 (send-side loss on `try_send`) is covered by deterministic
-//! unit tests in `impair.rs` itself (`LossySocket::try_send` against a fake
-//! socket) rather than here: on a live QUIC connection the dropped datagram
-//! is transparently retransmitted (it rides the one reliable stream), so
-//! the *observable* effect is a timing stall too noisy for a fast test to
+//! Send-side loss on `try_send` is covered by deterministic unit tests in
+//! `impair.rs` itself (`LossySocket::try_send` against a fake socket) rather
+//! than here: on a live QUIC connection the dropped datagram is
+//! transparently retransmitted (it rides the one reliable stream), so the
+//! *observable* effect is a timing stall too noisy for a fast test to
 //! assert a hard bound on — that cadence effect is what the ignored,
 //! `--release`-only probe in `vordar-server`'s `tests/loss.rs`
-//! (`loss_probe_upstream_intent_lag`, path step 2) measures instead.
+//! (`loss_probe_upstream_intent_lag`) measures instead.
 
 use engine_net::{Impairment, NetClient, NetServer, ServerEvent};
 use std::time::{Duration, Instant};
@@ -28,11 +24,9 @@ fn wait_connected(server: &mut NetServer) {
     }
 }
 
-/// Path step 3 (jitter half): a per-frame random extra delay must be able to
-/// reorder frames relative to their send order — unlike the old fixed
-/// symmetric latency (a monotonic FIFO delay that could never reorder
-/// anything). Sends a sequence of numbered frames well under the token-
-/// bucket refill rate, with jitter several times larger than the send
+/// A per-frame random extra delay must be able to reorder frames relative
+/// to their send order. Sends a sequence of numbered frames well under the
+/// token-bucket refill rate, with jitter several times larger than the send
 /// spacing, and checks the server sees at least one inversion in arrival
 /// order — real reordering through the actual `NetClient`/`NetServer`
 /// pipeline, not a direct test of the private delay queue.
@@ -69,9 +63,8 @@ fn jitter_reorders_frames_relative_to_send_order() {
     );
 }
 
-/// Path step 4: a simulated client clock running at a different rate than
-/// real elapsed time — the harness Finding 6's deferred skewed-clock e2e
-/// test needs. `local_micros()` (the basis for every Ping/`server_now_micros`
+/// A simulated client clock running at a different rate than real elapsed
+/// time: `local_micros()` (the basis for every Ping/`server_now_micros`
 /// computation) must reflect the configured ppm skew against real wall time.
 #[test]
 fn clock_skew_harness_skews_reported_local_time() {

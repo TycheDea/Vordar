@@ -1,10 +1,8 @@
-//! Regression test for the MAX_FRAME split (networking audit 2026-07-11, finding 1).
-//!
-//! One client inside a 100-entity crowd: the server emits snapshot-sized frames
-//! (~2.2 KiB — 100 entities at ~22 bytes each) that exceed the 1 KiB inbound cap.
-//! Under the old shared 1 KiB `MAX_FRAME`, the client's reader rejected the first
-//! such frame as "bad frame length" and the connection died. With the split caps
-//! the client must receive every wave and stay connected.
+//! One client inside a 100-entity crowd: the server emits snapshot-sized
+//! frames (~2.2 KiB — 100 entities at ~22 bytes each) that exceed the 1 KiB
+//! inbound cap. `MAX_FRAME_IN`/`MAX_FRAME_OUT` split the cap so an oversized
+//! outbound snapshot frame isn't rejected by the inbound limit; the client
+//! must receive every wave and stay connected.
 
 use engine_net::{ClientEvent, NetClient, NetServer, ServerEvent, MAX_FRAME_IN, MAX_FRAME_OUT};
 use std::time::{Duration, Instant};

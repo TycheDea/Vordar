@@ -1,9 +1,6 @@
-//! Regression test for the networking audit 2026-07-11, finding 16: a
-//! protocol version mismatch used to be a silent close — the server returned
-//! an `Err` and dropped the connection with no reason ever reaching the
-//! client. This asserts the server now sends a `Ctrl::Reject` frame carrying
-//! the reason, and the client surfaces it as `ClientEvent::Rejected` instead
-//! of just a bare `Disconnected`.
+//! A protocol version mismatch must not be a silent close: the server sends
+//! a `Ctrl::Reject` frame carrying the reason, and the client surfaces it as
+//! `ClientEvent::Rejected` instead of a bare `Disconnected`.
 
 use engine_net::{ClientEvent, NetClient, NetServer, ServerEvent};
 use std::time::{Duration, Instant};

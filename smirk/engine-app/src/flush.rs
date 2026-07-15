@@ -53,8 +53,8 @@ impl System for DespawnFlushSystem {
 mod tests {
     use super::*;
 
-    // Regression: apps without PhysicsPlugin (networked client) have no
-    // SpatialGrid resource but still despawn CellOccupant entities.
+    // Apps without PhysicsPlugin (networked client) have no SpatialGrid
+    // resource but still despawn CellOccupant entities.
     #[test]
     fn despawn_with_cell_occupant_but_no_spatial_grid() {
         let mut world = World::new();

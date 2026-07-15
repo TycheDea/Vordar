@@ -1,7 +1,4 @@
-//! Regression tests for the networking audit 2026-07-11, finding 4: "No flood
-//! control: unbounded queues, no rate limiting, no connection caps."
-//!
-//! Two hostile-bot scenarios:
+//! Two hostile-bot scenarios the server must bound:
 //!   - a single connection flooding app frames far faster than the sim's poll
 //!     cadence must not have every frame forwarded into `ServerEvent`s (the
 //!     reader-side token bucket bounds it) and must not be disconnected just

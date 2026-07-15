@@ -8,8 +8,8 @@ use vordar_benches::Lcg;
 use vordar_protocol::{decode, encode, ClientMsg, EntityPos, EntityState, MoveIntentEntry, ServerMsg, WirePos};
 
 /// The steady-state worst frame under crowd throttling: a full 64-entry
-/// states budget (protocol v14, networking rework 3 finding 4: this is the
-/// datagram half of a snapshot — `states` only, no enters/leaves).
+/// states budget — the datagram half of a snapshot (`states` only, no
+/// enters/leaves).
 fn snapshot_64() -> ServerMsg {
     let mut rng = Lcg::new(7);
     let mut pos = |i: u32| Vec3::new(rng.next_f32() * 80.0 - 40.0, 0.0, i as f32);
@@ -20,8 +20,8 @@ fn snapshot_64() -> ServerMsg {
     }
 }
 
-/// A same-tick AOI delta (the stream half, protocol v14): a handful of
-/// enters/leaves alongside the datagram `Snapshot` above.
+/// A same-tick AOI delta (the stream half): a handful of enters/leaves
+/// alongside the datagram `Snapshot` above.
 fn aoi_delta_8() -> ServerMsg {
     let mut rng = Lcg::new(7);
     let mut pos = |i: u32| Vec3::new(rng.next_f32() * 80.0 - 40.0, 0.0, i as f32);
@@ -41,8 +41,8 @@ fn bench_protocol(c: &mut Criterion) {
     let aoi_delta = aoi_delta_8();
     let aoi_delta_bytes = encode(&aoi_delta);
     eprintln!("aoi_delta_8 encoded size: {} B", aoi_delta_bytes.len());
-    // The last-3 redundancy batch (protocol v15, networking rework 3 finding
-    // 5): this tick's entry plus the two previous, sent every Input tick.
+    // The last-3 redundancy batch: this tick's entry plus the two previous,
+    // sent every Input tick.
     let intent = ClientMsg::MoveIntents {
         intents: vec![
             MoveIntentEntry { seq: 40, t_server_micros: 1_234_534, dir: Vec2::new(0.6, -0.8) },

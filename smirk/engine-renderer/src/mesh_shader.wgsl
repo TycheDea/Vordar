@@ -1,6 +1,6 @@
 // Textured mesh pass — full PBR: Cook-Torrance GGX with normal mapping,
-// metallic-roughness, emissive and AO (VQ-A2/C2/C4). Same camera/light
-// uniforms as the other geometry passes so mixed scenes light consistently.
+// metallic-roughness, emissive and AO. Same camera/light uniforms as the
+// other geometry passes so mixed scenes light consistently.
 
 struct Camera {
     view_proj:     mat4x4<f32>,
@@ -23,7 +23,7 @@ struct LightUniform {
 @group(0) @binding(1)
 var<uniform> light: LightUniform;
 
-// Shadow receiving (VQ-D3) — shared scene group.
+// Shadow receiving — shared scene group.
 @group(0) @binding(2) var<uniform> light_vp: mat4x4<f32>;
 @group(0) @binding(3) var t_shadow: texture_depth_2d;
 @group(0) @binding(4) var s_shadow: sampler_comparison;
@@ -65,7 +65,7 @@ struct MaterialUniform {
 @group(1) @binding(6)
 var<uniform> material: MaterialUniform;
 
-// ── Environment (group 2) — IBL ambient (VQ-D2) ─────────────────────────────
+// ── Environment (group 2) — IBL ambient ─────────────────────────────────────
 
 @group(2) @binding(0) var t_irradiance: texture_cube<f32>;
 @group(2) @binding(1) var t_prefilter:  texture_cube<f32>;
@@ -210,7 +210,7 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = shade_pbr(N, V, albedo, metallic, roughness, ao, emissive, shadow);
     return vec4<f32>(apply_fog(color, in.world_pos), 1.0);
 }
-/// Exponential distance fog (VQ-A5); density 0 disables.
+/// Exponential distance fog; density 0 disables.
 fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
     let dist = length(camera.eye.xyz - world_pos);
     let t = 1.0 - exp(-light.fog_density * dist);

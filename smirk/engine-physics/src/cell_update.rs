@@ -1,8 +1,9 @@
 // CellUpdateSystem — keeps SpatialGrid in sync with entity positions.
 //
 // Runs Phase::Collision, First — right before broadphase reads the grid, at
-// the full collision rate (PostUpdate runs at snapshot rate on the server,
-// which left the grid up to 100 ms stale for 60 Hz collision tests).
+// the full collision rate: collision needs the grid no more than one frame
+// stale, and PostUpdate's snapshot-rate cadence would leave it up to 100 ms
+// stale.
 //
 // Per frame:
 //   1. Clear the grid.

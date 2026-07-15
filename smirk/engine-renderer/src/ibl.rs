@@ -215,7 +215,7 @@ impl Environment {
     }
 
     /// Fallback environment when a zone sets no HDRI: a uniform mid-gray sky
-    /// that degrades IBL ambient to roughly the old flat ambient.
+    /// giving flat, non-directional IBL ambient.
     pub(crate) fn default_gray(
         device:     &Device,
         queue:      &Queue,

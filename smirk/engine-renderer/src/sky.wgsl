@@ -1,4 +1,4 @@
-// Skybox pass (VQ-D2): the zone's IBL cubemap rendered as the background.
+// Skybox pass: the zone's IBL cubemap rendered as the background.
 // Fullscreen triangle pinned to the far plane (z = w ⇒ depth 1.0), depth
 // test LessEqual with writes off, so geometry always wins. Unprojects each
 // pixel through inv_view_proj to a world-space view ray.

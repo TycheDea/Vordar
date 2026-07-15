@@ -1,6 +1,6 @@
 // Fullscreen blit used to build mip chains: each pass samples the previous
 // mip level with a linear filter, halving resolution. Also the base of the
-// Phase 2 IBL prefilter and Phase 4 bloom chains.
+// IBL prefilter and bloom chains.
 
 @group(0) @binding(0) var t_src: texture_2d<f32>;
 @group(0) @binding(1) var s_src: sampler;

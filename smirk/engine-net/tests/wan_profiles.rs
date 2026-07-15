@@ -1,9 +1,9 @@
-//! Networking audit 2026-07-11, finding 17, path step 5: named WAN profiles
-//! so client-feel claims have a headless test at recognizable real-world
-//! conditions instead of only hand-picked individual numbers. Smoke test,
-//! not a budget test: connect under each profile, send a small burst, and
-//! confirm the connection survives and (eventually, since satellite's 600 ms
-//! RTT plus loss means real retransmission delay) delivers most of it.
+//! Named WAN profiles give client-feel claims a headless test at
+//! recognizable real-world conditions instead of only hand-picked individual
+//! numbers. Smoke test, not a budget test: connect under each profile, send
+//! a small burst, and confirm the connection survives and (eventually, since
+//! satellite's 600 ms RTT plus loss means real retransmission delay)
+//! delivers most of it.
 //!
 //!   cargo test -p engine-net --test wan_profiles -- --ignored --nocapture
 

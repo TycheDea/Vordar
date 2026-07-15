@@ -1,4 +1,4 @@
-// Shadow depth pre-pass (VQ-D3): scene geometry rendered from the sun's
+// Shadow depth pre-pass: scene geometry rendered from the sun's
 // fitted orthographic view into a depth-only target. Three vertex entry
 // points — one per geometry pipeline's vertex/instance layout. No fragment
 // stage; slope-scaled bias lives in the pipeline's DepthBiasState.

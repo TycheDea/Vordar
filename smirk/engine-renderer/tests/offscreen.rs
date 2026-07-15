@@ -1,4 +1,4 @@
-// Offscreen render harness tests — VQ-G1.
+// Offscreen render harness tests.
 //
 // Analytic assertions only (coverage %, brighter-than, monotonic, uniformity
 // bands) — never exact pixel values, so driver/adapter variance can't flake
@@ -120,7 +120,7 @@ fn nearer_cube_occludes_farther_cube() {
     );
 }
 
-// ── Phase 1: PBR / mipmaps ───────────────────────────────────────────────────
+// ── PBR / mipmaps ────────────────────────────────────────────────────────────
 
 /// A ground quad at y=0 spanning ±extent, normal +Y, with a uniform material.
 fn ground_quad(extent: f32, roughness: f32, metallic: f32) -> MeshData {
@@ -152,7 +152,7 @@ fn quad_with_material(extent: f32, material: MaterialData) -> MeshData {
     }
 }
 
-/// VQ-G1 for the GGX BRDF: on the same quad under the same sun, a smooth
+/// GGX BRDF: on the same quad under the same sun, a smooth
 /// surface concentrates specular energy (brighter peak, smaller hotspot) than
 /// a fully rough one — monotonic, no exact pixels.
 #[test]
@@ -276,7 +276,7 @@ fn damaged_helmet_renders() {
     );
 }
 
-/// VQ-C1: the blit chain really downsamples — mip 1 of a 1-px checkerboard
+/// The blit chain really downsamples — mip 1 of a 1-px checkerboard
 /// averages toward mid-gray, far from both extremes.
 #[test]
 fn mip_chain_downsamples_checkerboard_to_gray() {
@@ -306,9 +306,9 @@ fn mip_chain_downsamples_checkerboard_to_gray() {
     }
 }
 
-// ── Phase 2: HDR / tonemap / MSAA / IBL ─────────────────────────────────────
+// ── HDR / tonemap / MSAA / IBL ───────────────────────────────────────────────
 
-/// VQ-D1: HDR values survive to the tonemap — an 8× emissive quad tonemaps
+/// HDR values survive to the tonemap — an 8× emissive quad tonemaps
 /// brighter than a 1× one (monotonic) yet stays below clipping.
 #[test]
 fn hdr_emissive_tonemaps_monotonically_without_clipping() {
@@ -342,7 +342,7 @@ fn hdr_emissive_tonemaps_monotonically_without_clipping() {
     assert!(p1 > 100, "1x white emissive is clearly visible, got {p1}");
 }
 
-/// VQ-D4: MSAA 4× produces intermediate coverage values along a silhouette
+/// MSAA 4× produces intermediate coverage values along a silhouette
 /// edge that 1× sampling cannot (a black frame with a lit cube must contain
 /// edge pixels strictly between background and body brightness).
 #[test]
@@ -370,7 +370,7 @@ fn msaa_produces_intermediate_edge_pixels() {
     );
 }
 
-/// VQ-D2 white-furnace-style sanity: under a uniform white environment with
+/// White-furnace-style sanity: under a uniform white environment with
 /// no sun, a fully rough white quad shades nearly flat (IBL irradiance of a
 /// uniform sky is constant) and clearly non-black.
 #[test]
@@ -408,7 +408,7 @@ fn uniform_white_environment_lights_surfaces_uniformly() {
     );
 }
 
-// ── Phase 4: bloom ───────────────────────────────────────────────────────────
+// ── Bloom ────────────────────────────────────────────────────────────────────
 
 /// A small HDR-bright quad on black spreads energy beyond its own rect with
 /// bloom on; the identical render with bloom off keeps that region black.
@@ -446,9 +446,9 @@ fn bloom_spreads_hdr_energy_beyond_the_emitter() {
     assert!(halo > 300, "bloom must spread beyond the emitter: halo={halo}px");
 }
 
-// ── Phase 3: shadows ─────────────────────────────────────────────────────────
+// ── Shadows ──────────────────────────────────────────────────────────────────
 
-/// VQ-D3: a cube floating above a ground slab under a 45° sun casts a dark
+/// A cube floating above a ground slab under a 45° sun casts a dark
 /// band — pixel-wise darker than the identical scene without the caster,
 /// over an area clearly larger than the caster's own silhouette; far ground
 /// stays untouched.
@@ -520,7 +520,7 @@ fn floating_cube_casts_shadow_band_on_ground() {
     );
 }
 
-/// VQ-D2: with the sky pass on, background pixels show the environment
+/// With the sky pass on, background pixels show the environment
 /// rather than the black clear.
 #[test]
 fn sky_pass_fills_background_with_environment() {

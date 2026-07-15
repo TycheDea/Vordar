@@ -745,8 +745,8 @@ mod tests {
         };
         assert!(disconnected, "client never observed Disconnected after the server was dropped");
 
-        // (b) The listening socket must be released immediately — before the
-        // fix the leaked endpoint still owned the port and this rebind failed.
+        // (b) The listening socket must be released immediately: dropping
+        // the server frees the port so this rebind succeeds.
         let _rebound = NetServer::bind(addr, 1)
             .expect("rebind on the same address should succeed immediately after drop");
     }

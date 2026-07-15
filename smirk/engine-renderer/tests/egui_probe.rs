@@ -1,13 +1,12 @@
-// Regression guard: game input must reach the game when the pointer is over
-// open playfield, even with the HUD overlays drawn.
+// Game input must reach the game when the pointer is over open playfield,
+// even with the HUD overlays drawn.
 //
-// RenderSystem runs the egui frame with begin_pass/end_pass. It must NOT use
+// RenderSystem must run the egui frame with begin_pass/end_pass, not
 // `Context::run_ui`: run_ui wraps the frame in a full-screen background Ui
 // and allocates it as a central panel, making egui claim the entire viewport.
 // egui-winit then reports clicks and wheel events as consumed whenever no
 // button is held (`egui_wants_pointer_input` = pointer-over-egui && !any_down),
-// which broke left-click casting (unless right-click was already held) and
-// mouse-wheel zoom entirely.
+// swallowing game input over open playfield.
 //
 // This test mirrors the production frame (non-interactable HUD area, pointer
 // mid-screen) and asserts what egui-winit consults to decide `consumed`.

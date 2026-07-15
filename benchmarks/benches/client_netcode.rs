@@ -67,9 +67,8 @@ fn bench_apply_states(c: &mut Criterion) {
             .enumerate()
             .map(|(i, &pos)| EntityPos { id: i as u32 + 1, pos: WirePos(pos + Vec3::X), hp: None })
             .collect();
-        // Snapshot ticks must strictly increase (protocol v14's tick guard,
-        // networking rework 3 finding 4) — a monotonic counter mirrors the
-        // server's per-connection tick.
+        // Snapshot ticks must strictly increase (the tick guard) — a
+        // monotonic counter mirrors the server's per-connection tick.
         let mut tick = 0u64;
         group.bench_function(format!("states_a{a}"), |b| {
             b.iter_batched(

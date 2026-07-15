@@ -24,7 +24,7 @@ struct LightUniform {
 @group(0) @binding(1)
 var<uniform> light: LightUniform;
 
-// Shadow receiving (VQ-D3) — shared scene group.
+// Shadow receiving — shared scene group.
 @group(0) @binding(2) var<uniform> light_vp: mat4x4<f32>;
 @group(0) @binding(3) var t_shadow: texture_depth_2d;
 @group(0) @binding(4) var s_shadow: sampler_comparison;
@@ -64,7 +64,7 @@ var<uniform> material: MaterialUniform;
 
 @group(2) @binding(0) var<storage, read> joints: array<mat4x4<f32>>;
 
-// ── Environment (group 3) — IBL ambient (VQ-D2) ─────────────────────────────
+// ── Environment (group 3) — IBL ambient ─────────────────────────────────────
 
 @group(3) @binding(0) var t_irradiance: texture_cube<f32>;
 @group(3) @binding(1) var t_prefilter:  texture_cube<f32>;
@@ -217,7 +217,7 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = shade_pbr(N, V, albedo, metallic, roughness, ao, emissive, shadow);
     return vec4<f32>(apply_fog(color, in.world_pos), 1.0);
 }
-/// Exponential distance fog (VQ-A5); density 0 disables.
+/// Exponential distance fog; density 0 disables.
 fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
     let dist = length(camera.eye.xyz - world_pos);
     let t = 1.0 - exp(-light.fog_density * dist);

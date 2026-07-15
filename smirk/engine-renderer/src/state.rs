@@ -55,12 +55,12 @@ pub(crate) struct RendererState {
     pub(crate) camera_buffer:     wgpu::Buffer,
     pub(crate) light_buffer:      wgpu::Buffer,
     pub(crate) camera_bind_group: wgpu::BindGroup,
-    // ── HDR + post (VQ-D1/D4) ──
+    // ── HDR + post ──
     pub(crate) hdr:     post::HdrTargets,
     pub(crate) tonemap: post::TonemapPass,
     pub(crate) bloom:   bloom::BloomPass,
     pub(crate) gpu_timer: Option<gpu_timer::GpuTimer>,
-    // ── shadows (VQ-D3) ──
+    // ── shadows ──
     pub(crate) shadow_view:       wgpu::TextureView,
     pub(crate) shadow_pipelines:  shadow::ShadowPipelines,
     pub(crate) shadow_bind_group: wgpu::BindGroup,
@@ -70,7 +70,7 @@ pub(crate) struct RendererState {
     // CPU copy of the full light uniform so set_light / set_fog can update
     // their halves independently.
     pub(crate) light_state: LightUniform,
-    // ── IBL environment (VQ-D2) ──
+    // ── IBL environment ──
     pub(crate) env_bgl:      wgpu::BindGroupLayout,
     pub(crate) sky_bgl:      wgpu::BindGroupLayout,
     pub(crate) sky_pipeline: wgpu::RenderPipeline,
@@ -104,7 +104,7 @@ impl RendererState {
 
         let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor {
-                // Timestamps are optional (dev-overlay GPU timing, Phase 8).
+                // Timestamps are optional (dev-overlay GPU timing).
                 required_features: wgpu::Features::TEXTURE_COMPRESSION_BC
                     | (adapter.features() & wgpu::Features::TIMESTAMP_QUERY),
                 ..Default::default()
@@ -141,7 +141,7 @@ impl RendererState {
         let default_tex     = texture::create_default_white(&device, &queue);
         let default_bg      = texture::create_bind_group(&device, &texture_bgl, &default_tex);
 
-        // HDR scene targets + post chain (VQ-D1/D4): every scene pipeline
+        // HDR scene targets + post chain: every scene pipeline
         // renders MSAA into Rgba16Float; the tonemap pass owns the swapchain.
         let env_bgl = ibl::create_env_bind_group_layout(&device);
         let sky_bgl = sky::create_sky_bind_group_layout(&device);
@@ -164,7 +164,7 @@ impl RendererState {
         let skinned_render_pipeline = skinned_pipeline::create_skinned_pipeline(
             &device, scene_format, &camera_bgl, &material_bgl, &joint_bgl, &env_bgl,
         );
-        // Particle pass resources (VQ-E3): atlas + soft-fade depth + params.
+        // Particle pass resources: atlas + soft-fade depth + params.
         let particle_fx_bgl = particle_pipeline::create_particle_fx_bind_group_layout(&device);
         let (particle_additive, particle_alpha) = particle_pipeline::create_particle_pipelines(
             &device, scene_format, &camera_bgl, &particle_fx_bgl,
@@ -184,7 +184,7 @@ impl RendererState {
             bytemuck::cast_slice(&[size.width as f32, size.height as f32, 0.6, 0.0]),
         );
 
-        // Depth-only shadow variants of the three geometry pipelines (VQ-D3).
+        // Depth-only shadow variants of the three geometry pipelines.
         let shadow_pipelines = shadow::ShadowPipelines::new(&device, &joint_bgl);
         let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label:   Some("Shadow Cast Bind Group"),

@@ -1,8 +1,8 @@
-// Render-side CPU baselines (Phase 8, VQ-F1): the per-frame costs that grow
-// with the future enemy influx.
+// Render-side CPU baselines: the per-frame costs that grow with the future
+// enemy influx.
 //
 //   joint_palette — sample + globals + palette multiply for 40 skinned rigs
-//                   of 64 joints (the VQ-F1 stress-scene figure)
+//                   of 64 joints (the stress-scene figure)
 //   particle_fill — draw-list conversion at the 4096-particle cap
 //
 // Baselines to compare against when enemies land:

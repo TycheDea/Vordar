@@ -1,4 +1,4 @@
-// Image-based lighting bake passes (VQ-D2), all one-time at environment load:
+// Image-based lighting bake passes, all one-time at environment load:
 //   equirect_frag   — equirectangular .hdr → one cubemap face
 //   irradiance_frag — cosine-convolved diffuse irradiance cube face
 //   prefilter_frag  — GGX-prefiltered specular cube face (roughness per mip)

@@ -115,7 +115,7 @@ pub fn unproject_to_ground(view_proj: Mat4, ndc: glam::Vec2) -> Option<GlamVec3>
 }
 
 /// Load a Radiance .hdr equirect as the zone's environment: IBL ambient for
-/// every lit pass and the visible sky (VQ-D2). Returns false (keeping the
+/// every lit pass and the visible sky. Returns false (keeping the
 /// previous environment) when the file is missing or invalid.
 pub fn set_environment(path: &str, resources: &mut Resources) -> bool {
     // Headless / pre-window: nothing to do (same contract as the sync systems).
@@ -132,7 +132,7 @@ pub fn set_environment(path: &str, resources: &mut Resources) -> bool {
     }
 }
 
-/// Exposure applied in the tonemap pass (VQ-D1). 1.0 is neutral; the
+/// Exposure applied in the tonemap pass. 1.0 is neutral; the
 /// day/night system may drive it.
 pub fn set_exposure(exposure: f32, resources: &mut Resources) {
     let Some(state) = resources.get_mut::<RendererState>() else { return };
@@ -171,7 +171,7 @@ pub fn register_procedural_mesh(key: &str, data: mesh::MeshData, resources: &mut
     ok
 }
 
-/// Distance fog for the current zone (VQ-A5): linear-space color, exponential
+/// Distance fog for the current zone: linear-space color, exponential
 /// density per world unit (0.0 disables).
 pub fn set_fog(color: GlamVec3, density: f32, resources: &mut Resources) {
     let Some(state) = resources.get_mut::<RendererState>() else { return };

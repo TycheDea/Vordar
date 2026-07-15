@@ -1,4 +1,4 @@
-// Headless offscreen render harness — VQ-G1.
+// Headless offscreen render harness.
 //
 // Lets integration tests exercise the real scene pipelines (same WGSL, same
 // pipeline factories, same HDR → MSAA-resolve → ACES-tonemap composition as
@@ -405,7 +405,7 @@ impl OffscreenRenderer {
 }
 
 /// Upload RGBA8 pixels and build the full mip chain through the real blit
-/// generator (VQ-C1). Exposed so tests can assert on downsampled levels.
+/// generator. Exposed so tests can assert on downsampled levels.
 pub fn create_mipped_rgba8(
     gpu:    &HeadlessGpu,
     width:  u32,

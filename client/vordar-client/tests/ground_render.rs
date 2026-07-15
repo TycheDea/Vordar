@@ -1,6 +1,6 @@
-// Phase 6 offscreen verification (VQ-G1): the procedural zone ground renders
-// through the real mesh pipeline with visible texture variation — not a flat
-// slab. Skips without a GPU adapter or the ground texture set.
+// The procedural zone ground renders through the real mesh pipeline with
+// visible texture variation — not a flat slab. Skips without a GPU adapter
+// or the ground texture set.
 
 use engine_renderer::offscreen::OffscreenRenderer;
 use vordar_client::ground::{generate_ground, load_ground_material};

@@ -1,4 +1,4 @@
-// Billboard particles (VQ-E3): atlas-textured quads expanded toward the
+// Billboard particles: atlas-textured quads expanded toward the
 // camera (or velocity-aligned when the instance carries stretch), soft-faded
 // against the scene depth. Color arrives pre-faded from the CPU sim; the
 // alpha channel drives the premultiplied-alpha variant, ignored by additive.

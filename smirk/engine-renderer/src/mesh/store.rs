@@ -28,7 +28,7 @@ pub(crate) struct CpuSkin {
 pub(crate) struct GpuMesh {
     pub(crate) primitives: Vec<GpuPrimitive>,
     /// Some => primitives' vertex buffers hold `SkinnedVertex` and the mesh
-    /// draws with the skinned pipeline; None => static (Phase-A) path.
+    /// draws with the skinned pipeline; None => static-geometry path.
     pub(crate) skin: Option<CpuSkin>,
 }
 

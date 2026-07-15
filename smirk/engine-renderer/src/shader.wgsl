@@ -21,7 +21,7 @@ struct LightUniform {
 @group(0) @binding(1)
 var<uniform> light: LightUniform;
 
-// Shadow receiving (VQ-D3) — shared scene group.
+// Shadow receiving — shared scene group.
 @group(0) @binding(2) var<uniform> light_vp: mat4x4<f32>;
 @group(0) @binding(3) var t_shadow: texture_depth_2d;
 @group(0) @binding(4) var s_shadow: sampler_comparison;
@@ -49,7 +49,7 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
 @group(1) @binding(0) var t_color: texture_2d<f32>;
 @group(1) @binding(1) var s_color: sampler;
 
-// ── Environment (group 2) — IBL ambient (VQ-D2) ─────────────────────────────
+// ── Environment (group 2) — IBL ambient ─────────────────────────────────────
 
 @group(2) @binding(0) var t_irradiance: texture_cube<f32>;
 @group(2) @binding(1) var t_prefilter:  texture_cube<f32>;
@@ -147,7 +147,7 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let V = normalize(camera.eye.xyz - in.world_pos);
     let shadow = shadow_factor(in.world_pos);
 
-    // VQ-C3: instance color components above 1.0 are HDR emissive — the part
+    // Instance color components above 1.0 are HDR emissive — the part
     // over 1 bypasses lighting and feeds bloom. Content cranks RON colors
     // past 1 to glow (portals, projectiles, telegraph accents).
     let emissive = max(base - vec3<f32>(1.0), vec3<f32>(0.0));
@@ -155,7 +155,7 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = shade_pbr(N, V, albedo, 0.0, 0.85, 1.0, shadow) + emissive;
     return vec4<f32>(apply_fog(color, in.world_pos), 1.0);
 }
-/// Exponential distance fog (VQ-A5); density 0 disables.
+/// Exponential distance fog; density 0 disables.
 fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
     let dist = length(camera.eye.xyz - world_pos);
     let t = 1.0 - exp(-light.fog_density * dist);

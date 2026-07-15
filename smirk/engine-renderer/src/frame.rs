@@ -158,7 +158,7 @@ impl System for RenderSystem {
         let mesh_store    = resources.get_mut::<MeshStore>().map(std::mem::take);
         let particle_list = resources.get_mut::<ParticleDrawList>().map(std::mem::take);
 
-        // Cap guardrail (VQ-F2): meter + throttled warning past 80%.
+        // Cap guardrail: meter + throttled warning past 80%.
         {
             let count = particle_list.as_ref().map(|l| l.instances.len()).unwrap_or(0);
             if let Some(stats) = resources.get_mut::<engine_app::dev_stats::DevStats>() {
@@ -263,7 +263,7 @@ impl System for RenderSystem {
             &wgpu::CommandEncoderDescriptor { label: Some("Render Encoder") }
         );
 
-        // Shadow pre-pass (VQ-D3): fit the sun's ortho volume around the
+        // Shadow pre-pass: fit the sun's ortho volume around the
         // camera target (texel-snapped) and render depth-only variants of
         // every opaque draw. Particles don't cast.
         {
@@ -337,7 +337,7 @@ impl System for RenderSystem {
         }
 
         // Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the
-        // particle pass, which resolves at its end (VQ-D1/D4).
+        // particle pass, which resolves at its end.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Pass"),
@@ -415,14 +415,14 @@ impl System for RenderSystem {
             }
 
             // Sky pass — the IBL cubemap as background, pinned to the far
-            // plane behind everything opaque (VQ-D2).
+            // plane behind everything opaque.
             pass.set_pipeline(&state.sky_pipeline);
             pass.set_bind_group(0, &state.camera_bind_group, &[]);
             pass.set_bind_group(1, &state.environment.sky_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
-        // Particle pass (VQ-E3): depth read-only so the shader can sample the
+        // Particle pass: depth read-only so the shader can sample the
         // scene depth for the soft fade; additive first, then premultiplied
         // alpha; the MSAA resolve happens at the end of this pass.
         {

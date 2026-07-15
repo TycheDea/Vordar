@@ -572,7 +572,7 @@ mod tests {
         }
     }
 
-    /// Real game character (the KayKit human race): a Phase-C skinned humanoid,
+    /// Real game character (the KayKit human race): a skinned humanoid,
     /// preprocessed so its armature carries a scale + ground offset. Proves the
     /// clip mapping the locomotion controller expects, and that the root offset
     /// baked onto the armature is picked up (feet grounded, character scaled).

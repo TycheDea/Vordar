@@ -1,4 +1,4 @@
-// HDR → LDR tonemap (VQ-D1): fullscreen pass sampling the resolved
+// HDR → LDR tonemap: fullscreen pass sampling the resolved
 // Rgba16Float scene, ACES-fitted curve (Narkowicz) with an exposure uniform.
 // Output lands on the sRGB swapchain, which handles the transfer encode.
 
