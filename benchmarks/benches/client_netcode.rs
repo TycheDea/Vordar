@@ -1,4 +1,4 @@
-// Client netcode hot paths — WEAKPOINTS gap B. Everything headless:
+// Client netcode hot paths. Everything headless:
 // apply_snapshot / reconcile_own are plain functions over (World, Resources)
 // fed fabricated snapshot payloads through vordar-client's bench-internals
 // seam; the NetClientState's socket points nowhere.

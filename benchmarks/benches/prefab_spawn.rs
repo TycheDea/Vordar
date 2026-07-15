@@ -1,4 +1,4 @@
-// Prefab spawn cost — WEAKPOINTS gap A. spawn_prefab re-parses RON per
+// Prefab spawn cost. spawn_prefab re-parses RON per
 // component per spawn, and spawn_projectile goes straight through it, so
 // every bolt from every player and ranged enemy is a multi-component parse
 // at combat rate. The churn group adds the despawn side: the flush's
