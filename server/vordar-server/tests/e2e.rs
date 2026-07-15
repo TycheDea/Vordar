@@ -234,6 +234,7 @@ fn world_clock_and_blood_moon() {
                         glam::Vec3::new(-10.0, 0.0, 0.0),
                     ],
                 }],
+                waves: vec![],
             }],
         });
     });
