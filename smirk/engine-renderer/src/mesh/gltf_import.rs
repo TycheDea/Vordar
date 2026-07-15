@@ -620,11 +620,9 @@ mod tests {
             assert!(mats.iter().all(|m| m.is_finite()), "clip {} produced NaN", clip.name);
         }
     }
-    /// DIAGNOSTIC (the "half under the field" report): with the armature's
-    /// baked ground offset applied, no clip may pose any joint meaningfully
-    /// below the floor plane (floor top = −0.5, joints sit above the sole).
-    /// Catches clips whose ground reference disagrees with the bind pose —
-    /// prime suspect for a character rendering half-sunk.
+    /// Root-motion offset must come from the skeleton root, not the mesh
+    /// origin. This test verifies that all animation clips pose the skeleton
+    /// above the floor plane when the root offset is applied.
     #[test]
     fn human_clips_stay_above_the_floor() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.glb");
@@ -652,10 +650,9 @@ mod tests {
         }
     }
 
-    /// DIAGNOSTIC: CPU-skin the actual mesh vertices through the same palette
-    /// the GPU gets (root · global · inverse_bind) — the grounded-joints probe
-    /// above can't see an inverse-bind inconsistency, this can. The idle pose
-    /// must put the soles on the floor (−0.5) and the crown near +1.24.
+    /// Root-motion offset must come from the skeleton root, not the mesh
+    /// origin. This test verifies the idle pose by CPU-skinning vertices
+    /// through the skeletal palette and checking that soles and crown align.
     #[test]
     fn human_skinned_vertices_stand_on_the_floor() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.glb");

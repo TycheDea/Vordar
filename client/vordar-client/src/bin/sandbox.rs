@@ -28,9 +28,6 @@ impl System for SpawnPlayerSystem {
         // rigged human.glb mesh + locomotion, so WASD drives a real skinned
         // character that idles / runs / turns and swings on a cast.
         queue_prefab_spawn(resources, "ravager", glam::Vec3::ZERO);
-        // Static-mesh probe (Phase A): a textured glTF prop beside the spawn,
-        // proving the static pipeline still draws. Remove once real props land.
-        queue_prefab_spawn(resources, "mesh_probe", glam::Vec3::new(4.0, -0.5, 0.0));
     }
 }
 
