@@ -6,7 +6,7 @@
 use engine_app::events::EventBus;
 use engine_app::scheduler::System;
 use engine_core::components::{Health, Transform};
-use engine_core::traits::Resources;
+use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
 use glam::Vec3;
 use hecs::Entity;
@@ -114,7 +114,7 @@ impl System for MechanicResolveSystem {
             for c in aoi_conns(&state.conns, world, center) {
                 state.server.send(c, frame.clone());
             }
-            let _ = world.despawn(mech_entity);
+            resources.get_mut::<DespawnQueue>().unwrap().push(mech_entity, None);
         }
     }
 }
@@ -139,8 +139,42 @@ fn rewound_position(current: Vec3, history: &VecDeque<(u64, Vec3)>, t_eff: u64, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine_net::NetServer;
     use glam::Vec2;
+    use std::collections::HashMap;
     use vordar_game::player::movement_velocity;
+    use vordar_game::zones::ZoneDef;
+    use vordar_protocol::PROTOCOL_VERSION;
+
+    /// A resolved mechanic must go through DespawnQueue like every other
+    /// structural change, not straight to `world.despawn` — the engine's
+    /// "systems never mutate the world mid-frame" contract has no exceptions.
+    /// No live targets in range, so the run touches nothing but the queue.
+    #[test]
+    fn resolved_mechanic_is_queued_for_despawn_not_despawned_directly() {
+        let worker = crate::db::DbWorker::spawn(":memory:").unwrap();
+        let server = NetServer::bind("127.0.0.1:0".parse().unwrap(), PROTOCOL_VERSION).unwrap();
+        let zone = ZoneDef { name: "test".into(), chapter: None, portals: Vec::new(), visuals: Default::default() };
+        let directory = HashMap::from([("test".to_owned(), server.local_addr())]);
+
+        let mut resources = Resources::new();
+        resources.insert(NetServerState::new(server, worker.handle(), None, zone, directory, std::time::Instant::now()));
+        resources.insert(DespawnQueue::new());
+
+        let mut world = World::new();
+        let caster = world.spawn(()); // excluded from targets; no other entity is a valid hit
+        let mech_entity = world.spawn((
+            Transform::new(Vec3::ZERO),
+            Mechanic { id: 1, radius: 5.0, damage: 10, damage_type: Default::default(), resolve_at_micros: 0, caster },
+        ));
+
+        MechanicResolveSystem::new().run(&mut world, &mut resources, 1.0 / 60.0);
+
+        assert!(world.contains(mech_entity), "a resolved mechanic must not be despawned directly mid-frame");
+        let queue = &resources.get::<DespawnQueue>().unwrap().0;
+        assert_eq!(queue.len(), 1, "the resolved mechanic must be queued for DespawnFlush instead");
+        assert_eq!(queue[0].0, mech_entity);
+    }
 
     /// A player who dashed out of a mechanic's blast between T and now: the
     /// leap carried them 12 units away (30 u/s over a 0.4 s cast). Rewinding

@@ -16,6 +16,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use engine_app::scheduler::System;
 use engine_core::components::{CellOccupant, CollisionShape, Health, Hitbox, Solid, Transform};
 use engine_core::prefab::PrefabId;
+use engine_core::traits::DespawnQueue;
 use engine_core::World;
 use engine_net::NetServer;
 use glam::Vec3;
@@ -136,9 +137,11 @@ fn bench_mechanic_resolve(c: &mut Criterion) {
         seam::fill_histories(&mut state, u64::MAX / 2);
         resources.insert(state);
 
-        // The system despawns each resolved mechanic — respawn it untimed.
-        // A fresh system per iteration keeps its 10 Hz self-gate open (only
-        // the first run after construction resolves unconditionally).
+        // The system queues each resolved mechanic's despawn rather than
+        // applying it directly — drain it here so the entity doesn't
+        // accumulate across iterations; respawn it untimed. A fresh system
+        // per iteration keeps its 10 Hz self-gate open (only the first run
+        // after construction resolves unconditionally).
         group.bench_function(format!("c{clients}"), |b| {
             b.iter_custom(|iters| {
                 let mut total = Duration::ZERO;
@@ -153,6 +156,10 @@ fn bench_mechanic_resolve(c: &mut Criterion) {
                     let t = Instant::now();
                     sys.run(&mut world, &mut resources, DT);
                     total += t.elapsed();
+                    let queued: Vec<_> = resources.get_mut::<DespawnQueue>().unwrap().0.drain(..).collect();
+                    for (entity, _) in queued {
+                        world.despawn(entity).ok();
+                    }
                 }
                 total
             });

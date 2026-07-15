@@ -6,13 +6,25 @@
 use super::chapter::{camp_slot_pos, ActiveChapter};
 use engine_app::scheduler::System;
 use engine_core::prefab::spawn_prefab;
-use engine_core::traits::{Resources, SpawnContext};
+use engine_core::traits::{Resources, SpawnQueue};
 use engine_core::World;
 use glam::Vec3;
-use hecs::Entity;
+use std::collections::HashSet;
+
+/// Marks an entity as occupying a camp's slot. CampSystem finds a slot's
+/// occupant by querying for this component rather than caching an Entity id,
+/// so a slot reads as free the instant its entity is gone, regardless of
+/// despawn order elsewhere in the frame.
+pub struct CampMember {
+    pub camp: usize,
+    pub slot: usize,
+}
 
 struct Slot {
-    entity: Option<Entity>,
+    /// Was this slot's entity alive as of the last tick — distinguishes
+    /// "just died" (start the respawn timer) from "already empty" (keep
+    /// counting down).
+    occupied: bool,
     /// Seconds until this slot refills; 0 with no entity = spawn now.
     respawn_in: f32,
 }
@@ -40,23 +52,33 @@ impl System for CampSystem {
                     .def
                     .camps
                     .iter()
-                    .map(|c| (0..c.count).map(|_| Slot { entity: None, respawn_in: 0.0 }).collect())
+                    .map(|c| (0..c.count).map(|_| Slot { occupied: false, respawn_in: 0.0 }).collect())
                     .collect();
             }
+
+            let occupied: HashSet<(usize, usize)> =
+                world.query::<&CampMember>().iter().map(|m| (m.camp, m.slot)).collect();
 
             let mut due = Vec::new();
             for (ci, camp) in chapter.def.camps.iter().enumerate() {
                 for (si, slot) in self.slots[ci].iter_mut().enumerate() {
-                    if let Some(entity) = slot.entity {
-                        if !world.contains(entity) {
-                            slot.entity = None;
-                            slot.respawn_in = camp.respawn_seconds;
-                        }
+                    if occupied.contains(&(ci, si)) {
+                        slot.occupied = true;
+                        continue;
+                    }
+                    if slot.occupied {
+                        slot.occupied = false;
+                        slot.respawn_in = camp.respawn_seconds;
                         continue;
                     }
                     slot.respawn_in = (slot.respawn_in - delta).max(0.0);
                     if slot.respawn_in == 0.0 {
                         due.push((camp.prefab.clone(), camp_slot_pos(camp, si), ci, si));
+                        // Mark filled the instant the spawn is queued (not
+                        // when the query later confirms it) — the entity
+                        // isn't visible in the world until next SpawnFlush,
+                        // but the slot must read as taken before then too.
+                        slot.occupied = true;
                     }
                 }
             }
@@ -64,10 +86,12 @@ impl System for CampSystem {
         };
 
         for (prefab, pos, ci, si) in due {
-            match spawn_prefab(&prefab, pos, &mut SpawnContext { world, resources }) {
-                Ok(entity) => self.slots[ci][si].entity = Some(entity),
-                Err(e) => log::error!("camp spawn '{prefab}' failed: {e}"),
-            }
+            resources.get_mut::<SpawnQueue>().unwrap().push(move |ctx| {
+                match spawn_prefab(&prefab, pos, ctx) {
+                    Ok(entity) => { let _ = ctx.world.insert_one(entity, CampMember { camp: ci, slot: si }); }
+                    Err(e) => log::error!("camp spawn '{prefab}' failed: {e}"),
+                }
+            });
         }
     }
 }
@@ -77,6 +101,8 @@ mod tests {
     use super::*;
     use crate::chapter::{CampDef, ChapterDef, SpawnConfig};
     use engine_core::prefab::{register_core_components, ComponentRegistry, PrefabDef, PrefabLibrary};
+    use engine_core::traits::SpawnContext;
+    use hecs::Entity;
 
     fn camp_resources(respawn_seconds: f32) -> Resources {
         let mut registry = ComponentRegistry::new();
@@ -108,7 +134,30 @@ mod tests {
         resources.insert(registry);
         resources.insert(library);
         resources.insert(chapter);
+        resources.insert(SpawnQueue::new());
         resources
+    }
+
+    /// Runs the system, then drains SpawnQueue the way engine-app's
+    /// SpawnFlushSystem does — CampSystem now queues instead of spawning
+    /// directly, so a tick isn't complete until the queue is flushed.
+    fn tick(system: &mut CampSystem, world: &mut World, resources: &mut Resources, delta: f32) {
+        system.run(world, resources, delta);
+        let fns: Vec<_> = resources.get_mut::<SpawnQueue>().unwrap().0.drain(..).collect();
+        for f in fns {
+            f(&mut SpawnContext { world, resources });
+        }
+    }
+
+    #[test]
+    fn camp_run_only_queues_the_spawn_never_mutates_the_world_directly() {
+        let mut world = World::new();
+        let mut resources = camp_resources(0.5);
+        let mut system = CampSystem::new();
+
+        system.run(&mut world, &mut resources, 1.0 / 60.0);
+        assert_eq!(world.len(), 0, "CampSystem must not spawn directly — only queue");
+        assert_eq!(resources.get::<SpawnQueue>().unwrap().0.len(), 1, "spawn queued for the flush phase");
     }
 
     #[test]
@@ -117,18 +166,19 @@ mod tests {
         let mut resources = camp_resources(0.5);
         let mut system = CampSystem::new();
 
-        system.run(&mut world, &mut resources, 1.0 / 60.0);
+        tick(&mut system, &mut world, &mut resources, 1.0 / 60.0);
         assert_eq!(world.len(), 1, "camp fills immediately");
 
-        // Kill the resident.
-        let victim = world.iter().next().unwrap().entity();
+        // Kill the resident, identified by its CampMember slot rather than a
+        // cached Entity id.
+        let victim: Entity = world.query::<(Entity, &CampMember)>().iter().next().unwrap().0;
         world.despawn(victim).unwrap();
 
-        system.run(&mut world, &mut resources, 1.0 / 60.0);
+        tick(&mut system, &mut world, &mut resources, 1.0 / 60.0);
         assert_eq!(world.len(), 0, "death starts the respawn timer");
-        system.run(&mut world, &mut resources, 0.3);
+        tick(&mut system, &mut world, &mut resources, 0.3);
         assert_eq!(world.len(), 0, "0.3 s elapsed of 0.5");
-        system.run(&mut world, &mut resources, 0.3);
+        tick(&mut system, &mut world, &mut resources, 0.3);
         assert_eq!(world.len(), 1, "slot refilled after the timer");
     }
 }
