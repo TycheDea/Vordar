@@ -105,122 +105,9 @@ impl System for NetReceiveSystem {
             spawn_projectile(world, resources, &b.prefab, b.origin, b.dir, b.speed, b.damage, b.damage_type, b.ttl_secs, b.caster, false);
         }
 
-        // Finished character loads → spawn + Welcome (or a denial). The
-        // connection enters the game only now; anything it sent earlier was
-        // dropped by the PlayerConn guard.
         let loaded = resources.get_mut::<NetServerState>().unwrap().db.poll();
-        for DbLoaded { conn, name, outcome } in loaded {
-            // The in-flight login's presented token, captured either way —
-            // a `Granted` record below seeds the new PlayerConn's token
-            // without re-reading the wire.
-            let Some((_, token)) = resources.get_mut::<NetServerState>().unwrap().loading.remove(&conn) else {
-                continue; // disconnected while the load was in flight
-            };
-            let record = match outcome {
-                DbLoginOutcome::Granted(record) => record,
-                DbLoginOutcome::BadToken => {
-                    log::warn!("conn {conn}: '{name}' login denied — token mismatch");
-                    let state = resources.get_mut::<NetServerState>().unwrap();
-                    // The conn may already have dropped while the DB
-                    // roundtrip was in flight — peer_ip is then None, and
-                    // there is nothing to record against.
-                    if let Some(ip) = state.server.peer_ip(conn) {
-                        let now = state.server.now_micros();
-                        state.login_failures.record(ip, now);
-                    }
-                    state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
-                    continue;
-                }
-            };
-            // Login routing: this zone serves only characters it owns. The
-            // owner's address comes from the directory; the client closes
-            // this connection and logs in there instead.
-            {
-                let state = resources.get_mut::<NetServerState>().unwrap();
-                if record.zone != state.zone.name {
-                    match state.directory.get(&record.zone) {
-                        Some(&addr) => {
-                            log::info!("conn {conn}: '{name}' belongs to zone '{}' — redirecting to {addr}", record.zone);
-                            state.server.send(conn, encode(&ServerMsg::Redirect { zone: record.zone, addr }));
-                        }
-                        None => {
-                            log::error!("conn {conn}: '{name}' in unknown zone '{}' — disconnecting", record.zone);
-                            state.server.disconnect(conn);
-                        }
-                    }
-                    continue;
-                }
-            }
-            // This zone's prefab table is built lazily, once, on the first
-            // grant reaching this point — by App-build time every chapter's
-            // prefab dir has loaded, so PrefabLibrary is fully populated.
-            // Read here, before spawn_prefab needs `resources` mutably below.
-            let new_prefab_table: Option<Vec<String>> = {
-                let has_table = resources.get::<NetServerState>().unwrap().prefab_table.is_some();
-                if has_table {
-                    None
-                } else {
-                    let library = resources.get::<PrefabLibrary>().expect("PrefabLibrary not in resources");
-                    let names = library.names();
-                    assert!(
-                        names.len() <= u16::MAX as usize + 1,
-                        "zone prefab count {} exceeds the u16 wire index space",
-                        names.len()
-                    );
-                    Some(names)
-                }
-            };
-
-            let result = spawn_prefab(PLAYER_PREFAB, record.pos, &mut SpawnContext { world, resources });
-            let state = resources.get_mut::<NetServerState>().unwrap();
-            if let Some(names) = new_prefab_table {
-                let by_name: HashMap<String, u16> =
-                    names.iter().cloned().enumerate().map(|(i, n)| (n, i as u16)).collect();
-                state.prefab_table = Some((Arc::new(names), by_name));
-            }
-            match result {
-                Ok(entity) => {
-                    // The prefab is the source of truth for everything but
-                    // the persisted fields; the DB overrides Health.current.
-                    if let Ok(mut hp) = world.get::<&mut Health>(entity) {
-                        hp.current = record.health;
-                    }
-                    // Cooldowns are persisted as remainders (`record.cooldowns`),
-                    // so a relog or zone transfer restores the exact remaining
-                    // cooldown instead of resetting every ability to full.
-                    let spawn_now = state.server.now_micros();
-                    let cooldown_ready: HashMap<String, u64> = record.cooldowns
-                        .into_iter()
-                        .map(|(id, remaining)| (id, spawn_now + remaining))
-                        .collect();
-                    state.conns.insert(conn, PlayerConn {
-                        entity,
-                        name: name.clone(),
-                        token,
-                        queue: VecDeque::new(),
-                        applied_seq: 0,
-                        last_seq: 0,
-                        last_t: 0,
-                        known: HashSet::new(),
-                        history: VecDeque::new(),
-                        cooldown_ready,
-                        rr_cursor: 0,
-                    });
-                    let player_id = state.repl_ids.id_for(entity);
-                    state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
-                    // Prefab table right after Welcome, on the same ordered
-                    // stream, so it always precedes the first Snapshot's
-                    // enters. NOT resent on the respawn re-Welcome below —
-                    // the connection keeps its table.
-                    let names = (*state.prefab_table.as_ref().expect("prefab table built above").0).clone();
-                    state.server.send(conn, encode(&ServerMsg::PrefabTable { names }));
-                    let at_server_micros = state.server.now_micros();
-                    let world_micros = state.world_at(at_server_micros);
-                    state.server.send(conn, encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
-                    log::info!("conn {conn}: '{name}' joined as {entity:?} ({} online)", state.conns.len());
-                }
-                Err(e) => log::error!("conn {conn}: player spawn failed: {e}"),
-            }
+        for l in loaded {
+            complete_db_load(world, resources, l);
         }
 
         // A connection must always own a live player: combat can kill the
@@ -544,6 +431,126 @@ fn dispatch_cast(
             }
             log::info!("conn {conn}: leap mechanic {id} ('{skill_id}') resolves at {resolve_at_micros}");
         }
+    }
+}
+
+/// The connection enters the game only now; anything it sent earlier was
+/// dropped by the PlayerConn guard. Routes a finished load to a denial, a
+/// Redirect to the character's owning zone, or a grant: spawns the player
+/// prefab, applies the DB overrides (health, cooldown remainders), and
+/// sends Welcome → PrefabTable → WorldClock on the ordered stream.
+fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoaded) {
+    let DbLoaded { conn, name, outcome } = loaded;
+    // The in-flight login's presented token, captured either way —
+    // a `Granted` record below seeds the new PlayerConn's token
+    // without re-reading the wire.
+    let Some((_, token)) = resources.get_mut::<NetServerState>().unwrap().loading.remove(&conn) else {
+        return; // disconnected while the load was in flight
+    };
+    let record = match outcome {
+        DbLoginOutcome::Granted(record) => record,
+        DbLoginOutcome::BadToken => {
+            log::warn!("conn {conn}: '{name}' login denied — token mismatch");
+            let state = resources.get_mut::<NetServerState>().unwrap();
+            // The conn may already have dropped while the DB
+            // roundtrip was in flight — peer_ip is then None, and
+            // there is nothing to record against.
+            if let Some(ip) = state.server.peer_ip(conn) {
+                let now = state.server.now_micros();
+                state.login_failures.record(ip, now);
+            }
+            state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
+            return;
+        }
+    };
+    // Login routing: this zone serves only characters it owns. The
+    // owner's address comes from the directory; the client closes
+    // this connection and logs in there instead.
+    {
+        let state = resources.get_mut::<NetServerState>().unwrap();
+        if record.zone != state.zone.name {
+            match state.directory.get(&record.zone) {
+                Some(&addr) => {
+                    log::info!("conn {conn}: '{name}' belongs to zone '{}' — redirecting to {addr}", record.zone);
+                    state.server.send(conn, encode(&ServerMsg::Redirect { zone: record.zone, addr }));
+                }
+                None => {
+                    log::error!("conn {conn}: '{name}' in unknown zone '{}' — disconnecting", record.zone);
+                    state.server.disconnect(conn);
+                }
+            }
+            return;
+        }
+    }
+    // This zone's prefab table is built lazily, once, on the first
+    // grant reaching this point — by App-build time every chapter's
+    // prefab dir has loaded, so PrefabLibrary is fully populated.
+    // Read here, before spawn_prefab needs `resources` mutably below.
+    let new_prefab_table: Option<Vec<String>> = {
+        let has_table = resources.get::<NetServerState>().unwrap().prefab_table.is_some();
+        if has_table {
+            None
+        } else {
+            let library = resources.get::<PrefabLibrary>().expect("PrefabLibrary not in resources");
+            let names = library.names();
+            assert!(
+                names.len() <= u16::MAX as usize + 1,
+                "zone prefab count {} exceeds the u16 wire index space",
+                names.len()
+            );
+            Some(names)
+        }
+    };
+
+    let result = spawn_prefab(PLAYER_PREFAB, record.pos, &mut SpawnContext { world, resources });
+    let state = resources.get_mut::<NetServerState>().unwrap();
+    if let Some(names) = new_prefab_table {
+        let by_name: HashMap<String, u16> =
+            names.iter().cloned().enumerate().map(|(i, n)| (n, i as u16)).collect();
+        state.prefab_table = Some((Arc::new(names), by_name));
+    }
+    match result {
+        Ok(entity) => {
+            // The prefab is the source of truth for everything but
+            // the persisted fields; the DB overrides Health.current.
+            if let Ok(mut hp) = world.get::<&mut Health>(entity) {
+                hp.current = record.health;
+            }
+            // Cooldowns are persisted as remainders (`record.cooldowns`),
+            // so a relog or zone transfer restores the exact remaining
+            // cooldown instead of resetting every ability to full.
+            let spawn_now = state.server.now_micros();
+            let cooldown_ready: HashMap<String, u64> = record.cooldowns
+                .into_iter()
+                .map(|(id, remaining)| (id, spawn_now + remaining))
+                .collect();
+            state.conns.insert(conn, PlayerConn {
+                entity,
+                name: name.clone(),
+                token,
+                queue: VecDeque::new(),
+                applied_seq: 0,
+                last_seq: 0,
+                last_t: 0,
+                known: HashSet::new(),
+                history: VecDeque::new(),
+                cooldown_ready,
+                rr_cursor: 0,
+            });
+            let player_id = state.repl_ids.id_for(entity);
+            state.server.send(conn, encode(&ServerMsg::Welcome { player_id }));
+            // Prefab table right after Welcome, on the same ordered
+            // stream, so it always precedes the first Snapshot's
+            // enters. NOT resent on the respawn re-Welcome below —
+            // the connection keeps its table.
+            let names = (*state.prefab_table.as_ref().expect("prefab table built above").0).clone();
+            state.server.send(conn, encode(&ServerMsg::PrefabTable { names }));
+            let at_server_micros = state.server.now_micros();
+            let world_micros = state.world_at(at_server_micros);
+            state.server.send(conn, encode(&ServerMsg::WorldClock { world_micros, at_server_micros }));
+            log::info!("conn {conn}: '{name}' joined as {entity:?} ({} online)", state.conns.len());
+        }
+        Err(e) => log::error!("conn {conn}: player spawn failed: {e}"),
     }
 }
 
