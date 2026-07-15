@@ -1,4 +1,4 @@
-// Zone topology: named zones connected by portals (Phase 7).
+// Zone topology: named zones connected by portals.
 //
 // Zones are shared content like world events — the server runs one App per
 // zone and uses portals to hand players off; the client only ever learns
@@ -26,8 +26,8 @@ pub struct ZoneDef {
     pub visuals: ZoneVisuals,
 }
 
-/// Per-zone presentation (VQ-A5): environment HDRI (IBL + sky), distance
-/// fog, ground material, scattered props. All optional with dusk defaults.
+/// Per-zone presentation: environment HDRI (IBL + sky), distance fog, ground
+/// material, scattered props. All optional with dusk defaults.
 #[derive(Clone, serde::Deserialize)]
 pub struct ZoneVisuals {
     /// Radiance .hdr path; None = the shared dusk default.

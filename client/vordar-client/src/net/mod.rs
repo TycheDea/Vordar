@@ -1,6 +1,6 @@
 // Networked-client plugin — replicates the server's world into this one.
 //
-// Phase 2 model: remote entities are server-driven — each carries a
+// Remote entities are server-driven — each carries a
 // tick-indexed sample buffer (NetBuffer) and is rendered by a playback
 // cursor a fixed ~200 ms behind the newest received snapshot tick
 // (NetInterpolateSystem), absorbing jitter and single-datagram loss without

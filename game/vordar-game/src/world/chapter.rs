@@ -93,9 +93,8 @@ pub struct ChapterDef {
     pub spawning:      SpawnConfig,
     #[serde(default)]
     pub initial_spawns: Vec<InitialSpawn>,
-    /// World-resident enemy populations (Phase 7.5): fixed places, fixed
-    /// headcount, respawn timers — the world exists whether or not anyone
-    /// is nearby. Replaces around-the-player waves as the population model.
+    /// World-resident enemy populations: fixed places, fixed headcount,
+    /// respawn timers — the world exists whether or not anyone is nearby.
     #[serde(default)]
     pub camps: Vec<CampDef>,
 }

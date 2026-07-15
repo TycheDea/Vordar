@@ -1,8 +1,8 @@
 // Minimap — disc with entity dots, portal markers, heading tick (top-right).
 //
-// Moved out of the engine (Phase 8): the minimap is game presentation, not
-// engine machinery. HudSyncSystem publishes HudState each display frame; the
-// `draw` callback (registered as a UiLayers layer) renders it.
+// Game presentation, not engine machinery: HudSyncSystem publishes HudState
+// each display frame; the `draw` callback (registered as a UiLayers layer)
+// renders it.
 
 use crate::presentation::{CurrentZone, HudHidden};
 use engine_app::scheduler::System;
@@ -38,8 +38,8 @@ pub struct HudState {
     /// Caption under the disc (e.g. zone name).
     pub label: String,
     /// Set while the network connection is down and a redial is being
-    /// retried in the background (networking audit 2026-07-11, finding 7).
-    /// None when connected, or offline (no NetClientState at all).
+    /// retried in the background. None when connected, or offline (no
+    /// NetClientState at all).
     pub reconnecting: Option<u32>,
 }
 

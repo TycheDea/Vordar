@@ -12,8 +12,8 @@ pub struct RaceId {
     pub id: String,
 }
 
-/// A skinned glTF character for a race — the Phase-C alternative to the SDF
-/// base body. Clip names are read from whatever the asset ships; the client
+/// A skinned glTF character for a race — an alternative to the SDF base
+/// body. Clip names are read from whatever the asset ships; the client
 /// maps them into its `LocomotionClips`. `attack`/`death` may be empty when the
 /// rig lacks them. Scale + ground offset are baked into the asset's armature
 /// (honoured by the renderer's skeleton root transform), so no scale knob here.
@@ -119,7 +119,7 @@ impl RaceLibrary {
         self.races.get(race_id).map(|d| d.body.as_slice())
     }
 
-    /// The race's skinned model, if it renders as a rigged mesh (Phase C).
+    /// The race's skinned model, if it renders as a rigged mesh.
     pub fn model(&self, race_id: &str) -> Option<&RaceModel> {
         self.races.get(race_id).and_then(|d| d.model.as_ref())
     }
@@ -147,7 +147,7 @@ mod tests {
         assert!(file.body.is_empty(), "a mesh race needs no SDF body");
     }
 
-    /// The real Phase-C content: race models parse off disk.
+    /// The real content: race models parse off disk.
     #[test]
     fn real_race_content_parses_if_present() {
         let races_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/races");

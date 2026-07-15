@@ -1,4 +1,4 @@
-// Projectile flight + hits (Phase 7.5).
+// Projectile flight + hits.
 //
 // Projectiles are ordinary replicated entities: the prefab supplies visuals
 // and a small Hitbox (never Solid), code attaches Projectile + Velocity at

@@ -1,4 +1,4 @@
-// Chapter-driven spawning — replaces the old hard-coded SetupSystem/EnemySpawnerSystem.
+// Chapter-driven spawning.
 //
 // Spawn requests go directly through SpawnQueue (via queue_prefab_spawn), NOT
 // an EventBus hop: events are cleared only in Phase::Input, so a same-phase

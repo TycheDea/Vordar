@@ -2,18 +2,18 @@
 // too (it never reads them). The client's vfx module turns them into
 // particles.
 //
-// Three beats per ability (VQ-E1):
+// Three beats per ability:
 //   cast   — content/vfx/<ability-id>.ron, at the caster's hand socket
 //   travel — VfxTrail on the projectile prefab (server-spawned bolts too)
 //   impact — VfxTrail.impact, burst where the projectile dies
 // Scheduled abilities telegraph instead of travelling; their impact fires at
-// telegraph resolve (client code, threat-colored per VQ-A4).
+// telegraph resolve (client code, threat-colored).
 
 use glam::Vec3;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-/// How a particle composites (VQ-E3): additive for energy (glows, sparks),
+/// How a particle composites: additive for energy (glows, sparks),
 /// premultiplied alpha for occluding media (smoke, dust).
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 pub enum ParticleBlend {
@@ -28,7 +28,7 @@ pub struct BurstDef {
     pub count: usize,
     pub speed: f32,
     pub size:  f32,
-    /// Components above 1.0 are HDR emissive (bloom, VQ-C3).
+    /// Components above 1.0 are HDR emissive (bloom).
     pub color: Vec3,
     /// Atlas cell (4×4 grid; 0 = soft glow, 1 = core glow, 2 = streak, 3 = smoke).
     #[serde(default)]
@@ -56,8 +56,8 @@ fn default_drag() -> f32 {
     2.5
 }
 
-/// One ability's effect beats. Missing beats fall back to the legacy tinted
-/// spark burst so unauthored abilities still read.
+/// One ability's effect beats. Missing beats fall back to the default
+/// tinted spark burst so unauthored abilities still read.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct VfxDef {
     #[serde(default)]
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn legacy_trail_shape_still_parses() {
-        // Pre-Phase-7 prefabs author only color + rate.
+        // Only color + rate authored — cell/blend/stretch/impact must default.
         let t: VfxTrail = ron::from_str(r#"(color: (1.0, 0.5, 0.1), rate: 45.0)"#).unwrap();
         assert_eq!(t.stretch, 0.0);
         assert!(t.impact.is_none());

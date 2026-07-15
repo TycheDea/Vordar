@@ -160,8 +160,8 @@ fn ability_vfx_beats_exist() {
     }
 }
 
-/// Phase 6: every zone visual reference resolves — env HDRI, ground texture
-/// set (diff/nor_gl/rough maps), and every prop glTF parses.
+/// Every zone visual reference resolves — env HDRI, ground texture set
+/// (diff/nor_gl/rough maps), and every prop glTF parses.
 #[test]
 fn zone_visual_refs_load() {
     let root = repo_root();
@@ -191,8 +191,7 @@ fn zone_visual_refs_load() {
 }
 
 /// VQ-B3: every socket bone the renderer attaches to exists in each rig.
-/// (Socket names are the engine default set until Phase 5 makes them
-/// data-driven per race.)
+/// (Socket names are the engine default set.)
 #[test]
 fn race_models_expose_sockets() {
     let sockets = SocketConfig::default();

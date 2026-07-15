@@ -1,7 +1,7 @@
-// CampSystem — keeps the world's resident enemy populations alive
-// (Phase 7.5). Each camp is `count` slots at deterministic golden-angle
-// positions; a slot whose entity died refills after `respawn_seconds`.
-// No-op without an ActiveChapter resource (networked display clients).
+// CampSystem — keeps the world's resident enemy populations alive. Each
+// camp is `count` slots at deterministic golden-angle positions; a slot
+// whose entity died refills after `respawn_seconds`. No-op without an
+// ActiveChapter resource (networked display clients).
 
 use super::chapter::{camp_slot_pos, ActiveChapter};
 use engine_app::scheduler::System;

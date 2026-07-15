@@ -18,8 +18,8 @@ pub struct MoveIntent {
 }
 
 /// Damage landed on a target — emitted by every damage-application site
-/// (contact, projectile, mechanic) right after the health change. Consumers:
-/// the Ravager's Rage stacks today; loot/damage attribution later (roadmap).
+/// (contact, projectile, mechanic) right after the health change. Consumer:
+/// the Ravager's Rage stacks.
 #[derive(Clone, Copy, Debug)]
 pub struct DamageDealt {
     pub attacker: Entity,

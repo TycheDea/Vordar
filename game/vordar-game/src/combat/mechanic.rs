@@ -6,7 +6,8 @@ use super::stats::DamageType;
 /// at server time `resolve_at_micros`" — resolved once, authoritatively, by
 /// the server. Lives on a server-local entity (with Transform for the
 /// center); no Hitbox/PrefabId, so it neither collides nor replicates.
-/// Code-only for now; boss timelines (roadmap P11) will spawn these from data.
+/// Constructed directly by ability/combat code — no authored (RON) path
+/// builds one.
 #[derive(Clone, Copy)]
 pub struct Mechanic {
     pub id: u64,

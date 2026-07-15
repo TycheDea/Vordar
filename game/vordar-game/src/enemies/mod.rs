@@ -18,7 +18,7 @@ use engine_core::traits::Resources;
 use engine_core::World;
 use glam::Vec3;
 
-/// Marker + behavior profile for enemy entities (Phase 7.5).
+/// Marker + behavior profile for enemy entities.
 ///
 /// Engagement model: an enemy ENGAGES (chases / attacks) when it is Provoked
 /// (took damage) or a player stands within `aggro_range`. `aggro_range: 0`
@@ -58,7 +58,7 @@ const GRID_AGGRO_MAX: f32 = 50.0;
 /// per-enemy grid query (~400 ns of cell hash lookups) — break-even ≈ 64.
 const GRID_PLAYER_MIN: usize = 64;
 
-/// Engagement-driven enemy AI (Phase 7.5).
+/// Engagement-driven enemy AI.
 ///
 /// Enemies live in the world and IDLE until engaged: either a player walks
 /// into `aggro_range` (aggressive types) or the enemy takes targeted damage
@@ -181,7 +181,7 @@ impl System for EnemyAISystem {
                 shot.order.dir,
                 shot.order.speed,
                 shot.order.damage,
-                Default::default(), // enemy shots are untyped (Physical) for now
+                Default::default(), // enemy shots deal untyped (Physical) damage
                 shot.order.ttl,
                 shot.caster,
                 true, // enemy-fired: damages players only
