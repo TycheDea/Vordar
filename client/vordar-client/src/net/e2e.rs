@@ -15,7 +15,7 @@ use engine_net::NetClient;
 use glam::{Vec2, Vec3};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use test_support::{name_token, percentile, workspace_root, Bot};
+use test_support::{name_token, percentile, spawn_server, workspace_root, Bot};
 use vordar_game::motion::MovementSystem;
 use vordar_game::player::PlayerMovementSystem;
 use vordar_game::Player;
@@ -61,10 +61,7 @@ fn kicked_connection_reconnects_and_relogs_in() {
     workspace_root();
 
     let addr: SocketAddr = "127.0.0.1:25400".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(1800));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 1800);
 
     let mut world = World::new();
     let mut resources = Resources::new();
@@ -157,10 +154,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     workspace_root();
 
     let addr: SocketAddr = "127.0.0.1:25402".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(2400));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 2400);
 
     // Real ability data (cast time, range) instead of hardcoded numbers —
     // the same content the server and a real client both load.
@@ -368,10 +362,7 @@ fn remote_render_smoothness_under_loss_probe() {
     const SETTLE: Duration = Duration::from_secs(2);
 
     let addr: SocketAddr = "127.0.0.1:25404".parse().unwrap();
-    std::thread::spawn(move || {
-        vordar_server::build_server_app(addr, ":memory:").run_headless(60.0, Some(60 * 60));
-    });
-    std::thread::sleep(Duration::from_millis(300));
+    spawn_server(addr, ":memory:", 60 * 60);
 
     // The mover: a second Bot (the kicker pattern above) that logs in and
     // streams MoveIntents — unimpaired; only the observer's connection

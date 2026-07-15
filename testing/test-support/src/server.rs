@@ -124,3 +124,31 @@ pub fn spawn_zones(
     std::thread::sleep(Duration::from_millis(300));
     (handles, worker)
 }
+
+/// Fire-and-forget server bring-up: spawns a server thread on `addr` with
+/// the given database path and tick budget, waits for it to stabilize
+/// (300 ms settle), and returns. The server shuts down when `max_ticks`
+/// expire (60 Hz, so `max_ticks / 60` real seconds).
+pub fn spawn_server(addr: SocketAddr, db_path: &str, max_ticks: u64) {
+    spawn_server_with(addr, db_path, max_ticks, |_| {})
+}
+
+/// Server bring-up with custom configuration: spawns a server thread on
+/// `addr`, calls `configure` on the app between build and run (for e.g.
+/// registering test systems), then runs headless until `max_ticks` expire.
+/// Returns after a 300 ms settle sleep so the server is stable before tests
+/// proceed.
+pub fn spawn_server_with(
+    addr: SocketAddr,
+    db_path: &str,
+    max_ticks: u64,
+    configure: impl FnOnce(&mut engine_app::app::App) + Send + 'static,
+) {
+    let db_path = db_path.to_owned();
+    std::thread::spawn(move || {
+        let mut app = vordar_server::build_server_app(addr, &db_path);
+        configure(&mut app);
+        app.run_headless(60.0, Some(max_ticks));
+    });
+    std::thread::sleep(Duration::from_millis(300));
+}
