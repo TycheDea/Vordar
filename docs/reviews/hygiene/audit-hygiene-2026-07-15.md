@@ -26,7 +26,10 @@ Cross-type queue (mirrored in `reworks-hygiene-2026-07-15.md`):
 > **finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
 > finding 7 → finding 8 → finding 9 → finding 10 → finding 11 → finding 12 →
 > finding 13 → finding 14 → finding 15 → finding 16 → finding 17 → finding 18 →
-> ~~rework 1~~ → ~~rework 2~~.**
+> ~~rework 1~~ → ~~rework 2~~ → finding 19.**
+>
+> Finding 19 was added by the same-day third-pass sweep after the queue above
+> landed; it closes the residue that pass found.
 >
 > Findings 1–5 (comment work) go first: they edit only comments, and doing them before
 > the placement findings and reworks means moved code carries clean comments (clean
@@ -440,6 +443,39 @@ Cross-type queue (mirrored in `reworks-hygiene-2026-07-15.md`):
   whole point is to be boring; (c) touches workspace members and every path reference.
 - **Path:** (1) user picks a/b/c; (2) if b/c: mechanical move, green gate
   `cargo nextest run --workspace` green at unchanged count.
+
+### 19. Third-pass residue: manifest citations, two "before the fix" narrations, five phase-tagged client headers
+
+Added by the same-day third-pass sweep (run after findings 1–18 and both reworks
+landed). The sweep also settled a policy boundary: `docs/visual-quality.md` exists as
+a living spec, so `VQ-*` references that anchor a stated constraint (content_lint's
+budget asserts, "HDR emissive (VQ-C3)", `ground_render.rs:39`'s assert message) are
+spec-clause references — the allowed class `DESIGN.md §N` belongs to — and are NOT
+findings; the forbidden use is a tag riding no constraint or explaining when code was
+written. That ruling is now written into the comment policy (project CLAUDE.md §5).
+
+- **Evidence:**
+  - Manifest comments (no purge finding ever evidenced Cargo.tomls):
+    `client/vordar-client/Cargo.toml:44` "(hygiene finding 16)" and `:47` "net.rs's
+    reconnect test (networking audit 2026-07-11, finding 7)" (also a stale `net.rs`
+    pointer); `smirk/engine-renderer/Cargo.toml:7` "(hygiene finding 16)";
+    `server/vordar-server/Cargo.toml:38` "(hygiene rework 4, finding 1)".
+  - "Before the fix" narration: `server/vordar-server/tests/watchdog.rs:86` ("before
+    the fix there is no supervisor…"), `server/vordar-server/tests/shutdown.rs:54`
+    ("before the fix, run_headless(_, None) never returns…").
+  - Phase tags in never-swept client headers: `src/ground.rs:1` "(Phase 6)" plus
+    "replacing the SDF slab" change-log; `src/credentials.rs:1` "(networking rework 1,
+    finding 3)"; `src/body.rs:4,7` "Phase-B runtime" / "the pre-Phase-C path";
+    `src/net/mod.rs:52` "reproduces the Phase 1 server-driven feel";
+    `src/presentation.rs:1` "(Phase 7.5)"; `src/bin/vordar.rs:3` "(Phase 2)".
+- **Ideal:** as findings 2–5 — constraint stays, citation/phase/history framing goes
+  (e.g. watchdog: "without a supervisor the zone thread stays dead and every retry
+  times out"; body.rs: "the skinned-mesh runtime animates it" / "the SDF path").
+- **Gap:** 14 sites across 10 files, all in surfaces (manifests, two test bodies,
+  client file headers) outside every earlier finding's evidence list.
+- **Suggestion:** constraint-core rewrite, one pass.
+- **Path:** (1) edit the 14 sites; (2) green gate: `cargo check --workspace` zero
+  warnings, `cargo nextest run --workspace` green — comments only.
 
 ## Carried forward from previous report
 
