@@ -141,6 +141,11 @@ impl RenderSystem {
 
 impl System for RenderSystem {
     fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
+        // ── Bake + swap the environment if its background decode arrived ──────
+        if let Some(state) = resources.get_mut::<RendererState>() {
+            state.poll_pending_environment();
+        }
+
         // ── Apply deferred menu actions from the last frame ───────────────────
         crate::menu_actions::apply_menu_actions(std::mem::take(&mut self.pending_menu), resources);
 

@@ -82,6 +82,11 @@ pub(crate) struct RendererState {
     // BRDF LUT is a pure function of (NdotV, roughness) — baked once here
     // and shared by every `Environment` rather than rebaked per zone.
     pub(crate) brdf_view:    wgpu::TextureView,
+    // Zone HDRI decoding on a detached thread; polled once per frame
+    // (`poll_pending_environment`) so a zone crossing never blocks the frame
+    // on decode + f16 conversion.
+    pub(crate) pending_env:      Option<ibl::PendingEnvironment>,
+    pub(crate) current_env_path: Option<String>,
     // ── textures ──
     pub(crate) texture_bgl:          wgpu::BindGroupLayout,
     pub(crate) material_bgl:         wgpu::BindGroupLayout,
@@ -160,6 +165,8 @@ impl RendererState {
                 _shadow_texture: shadow_texture,
                 light_state: LightUniform::default_sun(),
                 env_bgl, sky_bgl, sky_pipeline, baker, environment, brdf_view,
+                pending_env:      None,
+                current_env_path: None,
                 texture_bgl,
                 material_bgl,
                 mipgen,
@@ -195,6 +202,29 @@ impl RendererState {
         self.camera.aspect = w as f32 / h as f32;
         let uniform = CameraUniform::from_camera(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    /// Bakes and swaps in the environment whose background HDRI decode has
+    /// completed, so a zone crossing never blocks the frame on decode + f16
+    /// conversion. A no-op while the decode is still in flight. On decode
+    /// failure the previous environment stays current (only the log line
+    /// covers the seam `set_environment`'s old synchronous error path did).
+    pub(crate) fn poll_pending_environment(&mut self) {
+        let Some(pending) = &self.pending_env else { return };
+        let Some(result) = pending.try_take() else { return };
+        let path = pending.path.clone();
+        match result {
+            Ok(image) => {
+                let start = std::time::Instant::now();
+                self.environment = ibl::Environment::from_equirect_pixels(
+                    &self.device, &self.queue, &self.baker, &self.env_bgl, &self.sky_bgl, &self.brdf_view, &image,
+                );
+                log::info!("environment bake for {path} took {:?}", start.elapsed());
+                self.current_env_path = Some(path);
+            }
+            Err(e) => log::error!("environment decode failed: {e}"),
+        }
+        self.pending_env = None;
     }
 }
 

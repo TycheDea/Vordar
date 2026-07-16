@@ -10,7 +10,7 @@
 // fallback adapters lack it), so harness assets must be RGBA8/procedural.
 
 use crate::camera::{self, Camera, CameraUniform, GpuPointLight, LightUniform, MAX_POINT_LIGHTS};
-use crate::ibl::{Baker, Environment};
+use crate::ibl::{Baker, Environment, EquirectImage};
 use crate::instance::SdfInstance;
 use crate::mesh::{self, MeshData};
 use crate::mesh_pipeline::{self, MeshInstance};
@@ -243,8 +243,9 @@ impl OffscreenRenderer {
     /// Swap in a uniform-radiance environment (the white-furnace seam).
     pub fn set_uniform_environment(&mut self, rgb: [f32; 3]) {
         let pixels: Vec<f32> = (0..4 * 2).flat_map(|_| [rgb[0], rgb[1], rgb[2], 1.0]).collect();
+        let image = EquirectImage::from_rgba_f32(4, 2, &pixels);
         self.environment = Environment::from_equirect_pixels(
-            &self.gpu.device, &self.gpu.queue, &self.baker, &self.env_bgl, &self.sky_bgl, &self.brdf_view, 4, 2, &pixels,
+            &self.gpu.device, &self.gpu.queue, &self.baker, &self.env_bgl, &self.sky_bgl, &self.brdf_view, &image,
         );
     }
 

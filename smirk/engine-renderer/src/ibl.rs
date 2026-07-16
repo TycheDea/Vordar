@@ -6,6 +6,7 @@
 // bakes once (`bake_brdf_lut`) and every `Environment` shares that view.
 
 use half::f16;
+use std::sync::mpsc;
 use wgpu::util::DeviceExt;
 use wgpu::{Device, Queue, TextureFormat};
 
@@ -67,26 +68,7 @@ pub(crate) struct Environment {
 }
 
 impl Environment {
-    /// Load a Radiance .hdr equirect from disk and bake the full IBL set.
-    pub(crate) fn from_hdr(
-        device:     &Device,
-        queue:      &Queue,
-        baker:      &Baker,
-        env_layout: &wgpu::BindGroupLayout,
-        sky_layout: &wgpu::BindGroupLayout,
-        brdf_view:  &wgpu::TextureView,
-        path:       &str,
-    ) -> Result<Self, String> {
-        let img = image::open(path).map_err(|e| format!("{path}: {e}"))?.into_rgb32f();
-        let (w, h) = (img.width(), img.height());
-        let pixels: Vec<f32> = img
-            .pixels()
-            .flat_map(|p| [p.0[0], p.0[1], p.0[2], 1.0])
-            .collect();
-        Ok(Self::from_equirect_pixels(device, queue, baker, env_layout, sky_layout, brdf_view, w, h, &pixels))
-    }
-
-    /// Bake from raw RGBA f32 equirect pixels (also the test seam: a uniform
+    /// Bake from a decoded equirect image (also the test seam: a uniform
     /// image gives a white-furnace environment). `brdf_view` is the LUT baked
     /// once at renderer init (see `bake_brdf_lut`) and shared across every
     /// `Environment` — it depends only on (NdotV, roughness), never on the
@@ -99,12 +81,10 @@ impl Environment {
         env_layout: &wgpu::BindGroupLayout,
         sky_layout: &wgpu::BindGroupLayout,
         brdf_view:  &wgpu::TextureView,
-        width:      u32,
-        height:     u32,
-        rgba_f32:   &[f32],
+        image:      &EquirectImage,
     ) -> Self {
+        let (width, height) = (image.width, image.height);
         // Upload the equirect as Rgba16Float (filterable everywhere).
-        let halves: Vec<f16> = rgba_f32.iter().map(|&v| f16::from_f32(v)).collect();
         let equirect = device.create_texture(&wgpu::TextureDescriptor {
             label:           Some("IBL Equirect"),
             size:            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -122,7 +102,7 @@ impl Environment {
                 origin:    wgpu::Origin3d::ZERO,
                 aspect:    wgpu::TextureAspect::All,
             },
-            bytemuck::cast_slice(&halves),
+            bytemuck::cast_slice(&image.pixels),
             wgpu::TexelCopyBufferLayout {
                 offset:         0,
                 bytes_per_row:  Some(width * 8),
@@ -230,7 +210,73 @@ impl Environment {
     ) -> Self {
         let v = 0.18f32;
         let pixels: Vec<f32> = (0..4 * 2).flat_map(|_| [v, v, v, 1.0]).collect();
-        Self::from_equirect_pixels(device, queue, baker, env_layout, sky_layout, brdf_view, 4, 2, &pixels)
+        let image = EquirectImage::from_rgba_f32(4, 2, &pixels);
+        Self::from_equirect_pixels(device, queue, baker, env_layout, sky_layout, brdf_view, &image)
+    }
+}
+
+/// A decoded equirect ready for `Environment::from_equirect_pixels` — RGBA
+/// already converted to f16, the format the equirect texture upload wants.
+pub(crate) struct EquirectImage {
+    pub(crate) width:  u32,
+    pub(crate) height: u32,
+    pub(crate) pixels: Vec<f16>,
+}
+
+impl EquirectImage {
+    /// Decode a Radiance .hdr equirect from disk on the calling thread — the
+    /// `image::open` + `into_rgb32f` decode and the f32→f16 conversion (tens
+    /// to hundreds of ms for a multi-megapixel HDRI) run wherever this is
+    /// called from, so `PendingEnvironment::spawn` calls it off the main
+    /// thread.
+    pub(crate) fn decode_hdr(path: &str) -> Result<Self, String> {
+        let img = image::open(path).map_err(|e| format!("{path}: {e}"))?.into_rgb32f();
+        let (width, height) = (img.width(), img.height());
+        let pixels: Vec<f16> = img
+            .pixels()
+            .flat_map(|p| [p.0[0], p.0[1], p.0[2], 1.0])
+            .map(f16::from_f32)
+            .collect();
+        Ok(Self { width, height, pixels })
+    }
+
+    /// Build from raw RGBA f32 equirect pixels — stays synchronous for the
+    /// call sites that need init/test determinism: `default_gray` and the
+    /// offscreen harness's `set_uniform_environment`.
+    pub(crate) fn from_rgba_f32(width: u32, height: u32, rgba_f32: &[f32]) -> Self {
+        Self { width, height, pixels: rgba_f32.iter().map(|&v| f16::from_f32(v)).collect() }
+    }
+}
+
+/// A zone's HDRI decode in flight on a detached thread. `set_environment`
+/// spawns one per requested path; `RendererState::poll_pending_environment`
+/// bakes and swaps the environment the frame the decode arrives.
+pub(crate) struct PendingEnvironment {
+    pub(crate) path: String,
+    rx: mpsc::Receiver<Result<EquirectImage, String>>,
+}
+
+impl PendingEnvironment {
+    pub(crate) fn spawn(path: &str) -> Self {
+        let (tx, rx) = mpsc::channel();
+        let owned = path.to_string();
+        std::thread::spawn(move || {
+            let _ = tx.send(EquirectImage::decode_hdr(&owned));
+        });
+        Self { path: path.to_string(), rx }
+    }
+
+    /// `None` while the decode is still running. `Disconnected` (the decode
+    /// thread panicked without sending) also yields `Some(Err(..))` so a
+    /// crashed decode clears the pending slot instead of wedging it forever.
+    pub(crate) fn try_take(&self) -> Option<Result<EquirectImage, String>> {
+        match self.rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                Some(Err(format!("{}: decode thread ended without a result", self.path)))
+            }
+        }
     }
 }
 
@@ -549,5 +595,52 @@ impl Baker {
         pass.set_bind_group(0, src_bg, &[]);
         pass.set_bind_group(1, cube_bg, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Encode a tiny known-color HDR, spawn the decode, and poll until it
+    /// lands on the background thread — no GPU needed since this only
+    /// exercises decode, not the bake.
+    #[test]
+    fn pending_environment_decodes_hdr_on_a_worker_thread() {
+        let path = std::env::temp_dir()
+            .join(format!("vordar_ibl_pending_env_test_{}.hdr", std::process::id()));
+        let color = [0.5f32, 0.25, 0.75];
+        {
+            let file = std::fs::File::create(&path).expect("create temp hdr");
+            let pixels: Vec<image::Rgb<f32>> = (0..4 * 2).map(|_| image::Rgb(color)).collect();
+            image::codecs::hdr::HdrEncoder::new(std::io::BufWriter::new(file))
+                .encode(&pixels, 4, 2)
+                .expect("encode temp hdr");
+        }
+
+        let pending = PendingEnvironment::spawn(path.to_str().unwrap());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = loop {
+            if let Some(r) = pending.try_take() {
+                break r;
+            }
+            assert!(std::time::Instant::now() < deadline, "decode did not complete within 5s");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        std::fs::remove_file(&path).ok();
+
+        let image = result.expect("decode_hdr should succeed for a validly encoded file");
+        assert_eq!(image.width, 4);
+        assert_eq!(image.height, 2);
+        assert_eq!(image.pixels.len(), 4 * 2 * 4);
+        // RGBE round-trips at ~1/128 relative precision (the image crate's
+        // own to_rgbe8_test); f16 conversion adds negligible further error.
+        for texel in image.pixels.chunks_exact(4) {
+            for (channel, &authored) in color.iter().enumerate() {
+                let got = texel[channel].to_f32();
+                assert!((got - authored).abs() < 0.02, "channel {channel}: expected ~{authored}, got {got}");
+            }
+            assert_eq!(texel[3].to_f32(), 1.0);
+        }
     }
 }

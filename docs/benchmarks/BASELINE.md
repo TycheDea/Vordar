@@ -207,6 +207,22 @@ transitions between render passes made it legal, and the full offscreen suite (f
 reflection, sky) stayed green. Re-measured: ~6.5-7.3 ms per `set_uniform_environment`
 (three runs), down from ~20 ms — the per-submit overhead was indeed the dominant cost.
 
+Rendering rework 2 finding 4: `set_uniform_environment`'s bake (~6.5-7.3 ms above) skips
+the real HDR decode — zone crossings call `Environment::from_hdr` on the 5 MB, 2048×1024
+`evening_road_01_puresky_2k.hdr`, which also runs `image::open`/`into_rgb32f` and an
+8.4M-float f32→f16 conversion synchronously on the main thread. Measured directly (debug
+build, two runs): 577.9 ms and 597.4 ms for the full synchronous decode+bake — an order
+of magnitude past the "tens of ms" estimated from file size alone, confirming the frame
+hitch is real and larger than assumed. Finding 4 moves the decode+conversion to a
+detached thread; `RenderSystem::run` bakes and swaps on arrival instead of blocking the
+zone-change frame on it. Post-fix split (debug build, two runs), same HDRI:
+`EquirectImage::decode_hdr` (now off-thread) 540.7 ms / 543.0 ms; bake-on-arrival
+(`RendererState::poll_pending_environment`'s `Environment::from_equirect_pixels`, main
+thread) 6.8 ms / 7.3 ms — matching the finding-3 bake baseline and well under the ~8 ms
+residual threshold, so no pre-baked-IBL follow-up is warranted yet. The ~540 ms decode
+no longer lands in the zone-change frame; the frame only pays the ~7 ms bake the frame
+the background decode arrives.
+
 ### Snapshot path — `snapshot` (server; broadcast = full 6-tick round covering every
 conn once, comparable to the old un-staggered number; broadcast_slice = one 60 Hz
 tick, i.e. the actual per-tick cost the sim thread pays)

@@ -114,27 +114,26 @@ pub fn unproject_to_ground(view_proj: Mat4, ndc: glam::Vec2) -> Option<GlamVec3>
     (t >= 0.0).then(|| p0 + d * t)
 }
 
-/// Load a Radiance .hdr equirect as the zone's environment: IBL ambient for
-/// every lit pass and the visible sky. Returns false (keeping the
-/// previous environment) when the file is missing or invalid.
+/// Request a Radiance .hdr equirect as the zone's environment: IBL ambient
+/// for every lit pass and the visible sky. Decode + f16 conversion run on a
+/// detached thread; the bake and swap happen on the main thread the frame
+/// the pixels arrive (`RenderSystem::run` polls every frame) — the previous
+/// environment stays visible until then. Failure (logged when it surfaces)
+/// keeps the previous environment. Returns false headless (no renderer to
+/// request against); returns true otherwise, including when `path` is
+/// already applied or already pending (no-op).
 pub fn set_environment(path: &str, resources: &mut Resources) -> bool {
     // Headless / pre-window: nothing to do (same contract as the sync systems).
     let Some(state) = resources.get_mut::<RendererState>() else { return false };
-    let start = std::time::Instant::now();
-    let result = ibl::Environment::from_hdr(
-        &state.device, &state.queue, &state.baker, &state.env_bgl, &state.sky_bgl, &state.brdf_view, path,
-    );
-    log::info!("set_environment({path}) bake took {:?}", start.elapsed());
-    match result {
-        Ok(env) => {
-            state.environment = env;
-            true
-        }
-        Err(e) => {
-            log::error!("set_environment failed: {e}");
-            false
-        }
+    if state.current_env_path.as_deref() == Some(path) {
+        return true;
     }
+    if state.pending_env.as_ref().is_some_and(|p| p.path == path) {
+        return true;
+    }
+    // Last write wins: the stale thread's send lands in a dropped receiver.
+    state.pending_env = Some(ibl::PendingEnvironment::spawn(path));
+    true
 }
 
 /// Exposure applied in the tonemap pass. 1.0 is neutral; the
