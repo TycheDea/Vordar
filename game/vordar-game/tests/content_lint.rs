@@ -311,34 +311,40 @@ fn ground_sets_within_dimension_cap() {
     }
 }
 
-/// VQ-C5: total texture memory budget ≤ 1 GB (including mip chain overhead).
+/// VQ-C5: total texture memory budget ≤ 1 GB — matching what the runtime
+/// actually residents: a bound DDS sidecar's own byte size, or the RGBA8 +
+/// mip-chain estimate when no sidecar wins the slot.
 #[test]
 fn total_texture_memory_within_budget() {
     use engine_renderer::mesh::load_image_rgba;
+    use engine_renderer::texture::load_dds_image;
 
     const BUDGET_BYTES: u64 = 1_073_741_824; // 1 GB
-    let root = repo_root();
 
+    fn slot_bytes(image: &Option<TextureSource>) -> u64 {
+        match image {
+            Some(TextureSource::Compressed(c)) => c.data.len() as u64,
+            // Estimate: RGBA8 + mip chain: w × h × 4 × 4/3
+            Some(TextureSource::Rgba8(img)) => (img.width as u64) * (img.height as u64) * 4 * 4 / 3,
+            None => 0,
+        }
+    }
+
+    let root = repo_root();
     let mut total_bytes: u64 = 0;
 
     // (a) Race model image slots
     for (_id, _model, data) in race_models() {
         for prim in &data.primitives {
             let mat = &prim.material;
-            let slots = [
+            for image in [
                 &mat.base_color_image,
                 &mat.normal_image,
                 &mat.metallic_roughness_image,
                 &mat.emissive_image,
                 &mat.occlusion_image,
-            ];
-
-            for image in slots {
-                if let Some(TextureSource::Rgba8(img)) = image {
-                    // Estimate: RGBA8 + mip chain: w × h × 4 × 4/3
-                    let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
-                    total_bytes += bytes;
-                }
+            ] {
+                total_bytes += slot_bytes(image);
             }
         }
     }
@@ -347,28 +353,27 @@ fn total_texture_memory_within_budget() {
     let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
 
     for zone in &def.zones {
-        // (c) Ground sets: diff/nor_gl/rough maps
+        // (c) Ground sets: diff/nor_gl/mr maps — same sidecar-then-source
+        // preference as `client::ground::load_ground_material`.
         if let Some(g) = &zone.visuals.ground {
             let dir = root.join(&g.texture_dir);
+            let find = |tag: &str, dds_only: bool| -> Option<PathBuf> {
+                std::fs::read_dir(&dir).ok()?.flatten().find_map(|f| {
+                    let name = f.file_name().to_string_lossy().into_owned();
+                    (name.contains(tag) && name.ends_with(".dds") == dds_only).then(|| f.path())
+                })
+            };
 
-            for tag in ["diff", "nor_gl", "rough"] {
-                if let Some(path) = std::fs::read_dir(&dir)
-                    .ok()
-                    .and_then(|mut entries| entries.find_map(|f| {
-                        let f = f.ok()?;
-                        let name = f.file_name();
-                        let name_str = name.to_string_lossy();
-                        if name_str.contains(tag) && !name_str.ends_with(".dds") {
-                            Some(f.path())
-                        } else {
-                            None
-                        }
-                    })) {
-                    if let Ok(img) = load_image_rgba(path.to_str().unwrap()) {
-                        let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
-                        total_bytes += bytes;
+            for (dds_tag, src_tag) in [("diff", "diff"), ("nor_gl", "nor_gl"), ("mr", "rough")] {
+                let bytes = match find(dds_tag, true) {
+                    Some(path) => {
+                        load_dds_image(path.to_str().unwrap()).ok().map(|img| img.data.len() as u64)
                     }
-                }
+                    None => find(src_tag, false)
+                        .and_then(|path| load_image_rgba(path.to_str().unwrap()).ok())
+                        .map(|img| (img.width as u64) * (img.height as u64) * 4 * 4 / 3),
+                };
+                total_bytes += bytes.unwrap_or(0);
             }
         }
 
@@ -378,19 +383,14 @@ fn total_texture_memory_within_budget() {
             if let Ok(data) = load_gltf_data(path.to_str().unwrap()) {
                 for prim in &data.primitives {
                     let mat = &prim.material;
-                    let slots = [
+                    for image in [
                         &mat.base_color_image,
                         &mat.normal_image,
                         &mat.metallic_roughness_image,
                         &mat.emissive_image,
                         &mat.occlusion_image,
-                    ];
-
-                    for image in slots {
-                        if let Some(TextureSource::Rgba8(img)) = image {
-                            let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
-                            total_bytes += bytes;
-                        }
+                    ] {
+                        total_bytes += slot_bytes(image);
                     }
                 }
             }
@@ -398,9 +398,136 @@ fn total_texture_memory_within_budget() {
     }
 
     let total_mb = total_bytes as f64 / (1024.0 * 1024.0);
+    println!("VQ-C5: total texture memory {total_mb:.1} MB (budget 1024 MB)");
     assert!(
         total_bytes <= BUDGET_BYTES,
         "VQ-C5: total texture memory {:.1} MB exceeds 1 GB budget",
         total_mb
     );
+}
+
+/// VQ-C5: every shipped material image has a sidecar that is present and
+/// fresh. A re-export that isn't re-baked (e.g. a Mixamo clip merge into
+/// human.glb) would silently shift glTF image indices — binding the wrong
+/// texture to a slot, or falling back to RGBA8, with no other signal.
+#[test]
+fn material_textures_have_fresh_sidecars() {
+    use sha2::{Digest, Sha256};
+
+    fn sha256_hex(path: &Path) -> String {
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        format!("{:x}", Sha256::digest(&bytes))
+    }
+
+    #[derive(serde::Deserialize)]
+    struct GltfManifest {
+        sha256: String,
+        images: Vec<GltfManifestImage>,
+    }
+    #[derive(serde::Deserialize)]
+    struct GltfManifestImage {
+        file: String,
+    }
+
+    fn check_gltf_sidecars(asset: &Path) {
+        let sidecar_dir = asset.with_extension("textures");
+        let manifest_path = sidecar_dir.join("manifest.json");
+        let regen =
+            format!("node scripts/asset-pipeline/bake_textures.mjs gltf {}", asset.display());
+        assert!(
+            manifest_path.exists(),
+            "VQ-C5: {} has no sidecar manifest at {manifest_path:?} — regenerate: {regen}",
+            asset.display()
+        );
+        let text = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
+        let manifest: GltfManifest =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
+
+        assert_eq!(
+            sha256_hex(asset),
+            manifest.sha256,
+            "VQ-C5: {} sidecar manifest is stale (source hash changed) — regenerate: {regen}",
+            asset.display()
+        );
+        for image in &manifest.images {
+            let file = sidecar_dir.join(&image.file);
+            assert!(
+                file.exists(),
+                "VQ-C5: {} manifest lists sidecar '{}' but it's missing — regenerate: {regen}",
+                asset.display(),
+                image.file
+            );
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct GroundManifest {
+        images: Vec<GroundManifestImage>,
+    }
+    #[derive(serde::Deserialize)]
+    struct GroundManifestImage {
+        slot: String,
+        file: String,
+        source: String,
+        sha256: String,
+    }
+
+    fn check_ground_sidecars(dir: &Path) {
+        let manifest_path = dir.join("manifest.json");
+        let regen =
+            format!("node scripts/asset-pipeline/bake_textures.mjs ground {}", dir.display());
+        assert!(
+            manifest_path.exists(),
+            "VQ-C5: ground set {dir:?} has no sidecar manifest — regenerate: {regen}"
+        );
+        let text = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
+        let manifest: GroundManifest =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
+
+        for image in &manifest.images {
+            let source = dir.join(&image.source);
+            assert_eq!(
+                sha256_hex(&source),
+                image.sha256,
+                "VQ-C5: ground set {dir:?} source '{}' sidecar is stale — regenerate: {regen}",
+                image.source
+            );
+            let dds = dir.join(&image.file);
+            assert!(
+                dds.exists(),
+                "VQ-C5: ground set {dir:?} manifest lists sidecar '{}' but it's missing — regenerate: {regen}",
+                image.file
+            );
+        }
+        for required in ["diff", "normal"] {
+            assert!(
+                manifest.images.iter().any(|i| i.slot == required),
+                "VQ-C5: ground set {dir:?} manifest lacks a required '{required}' sidecar — regenerate: {regen}"
+            );
+        }
+    }
+
+    let root = repo_root();
+
+    for (_id, model, _data) in race_models() {
+        check_gltf_sidecars(&root.join(&model.asset));
+    }
+
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+    let mut checked_assets = std::collections::HashSet::new();
+    let mut checked_ground = std::collections::HashSet::new();
+    for zone in &def.zones {
+        for prop in &zone.visuals.props {
+            if checked_assets.insert(prop.model.clone()) {
+                check_gltf_sidecars(&root.join(&prop.model));
+            }
+        }
+        if let Some(g) = &zone.visuals.ground {
+            if checked_ground.insert(g.texture_dir.clone()) {
+                check_ground_sidecars(&root.join(&g.texture_dir));
+            }
+        }
+    }
 }

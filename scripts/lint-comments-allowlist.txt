@@ -29,5 +29,16 @@ game/vordar-game/tests/content_lint.rs:148
 game/vordar-game/tests/content_lint.rs:156
 game/vordar-game/tests/content_lint.rs:193
 game/vordar-game/tests/content_lint.rs:203
+game/vordar-game/tests/content_lint.rs:314
+game/vordar-game/tests/content_lint.rs:401
+game/vordar-game/tests/content_lint.rs:404
+game/vordar-game/tests/content_lint.rs:409
+game/vordar-game/tests/content_lint.rs:439
+game/vordar-game/tests/content_lint.rs:450
+game/vordar-game/tests/content_lint.rs:457
+game/vordar-game/tests/content_lint.rs:482
+game/vordar-game/tests/content_lint.rs:494
+game/vordar-game/tests/content_lint.rs:500
+game/vordar-game/tests/content_lint.rs:507
 smirk/engine-renderer/tests/offscreen.rs:555
 smirk/engine-renderer/src/mesh/store.rs:319

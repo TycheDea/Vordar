@@ -18,7 +18,7 @@ Cross-type queue (mirrored verbatim from `audit-rendering-2026-07-16.md`):
 
 > **Cross-type queue**: **~~finding 1 → finding 2 → finding 3 → finding 4 →
 > finding 5 → finding 6 → finding 7 → rework 1 → finding 8 → finding 9 →
-> finding 10 → rework 2 → rework 3~~ → rework 4 → rework 5 → rework 6.**
+> finding 10 → rework 2 → rework 3 → rework 4~~ → rework 5 → rework 6.**
 > Findings 1–10 all done 2026-07-16 (one commit each, loop-final gate
 > 340/340; finding 7's worker filed rework 7 — per-environment bake-pipeline
 > recompilation — during its bounded probe, absorbed by rework 2 steps 2–3).
@@ -32,7 +32,14 @@ Cross-type queue (mirrored verbatim from `audit-rendering-2026-07-16.md`):
 > (plan-rendering-rework-3-2026-07-16.md, 4 steps; sorted per-primitive
 > blending for order-independent transparency — intersecting transparents and
 > particle-vs-glass ordering remain approximate; loop-final gate 360/360).
-> Reworks 4–6 remain open, none planned yet.
+> Rework 4 done 2026-07-16 (plan-rendering-rework-4-2026-07-16.md, 9 steps;
+> a texture-memory meter and VQ-C5 content-lint land first, `bake_textures.mjs`
+> transcodes shipped material maps to committed BC7/BC5 DDS sidecars,
+> `TextureSource` carries compressed images through the importer/ground-loader/
+> store with a shared shader z-reconstruct for BC5 normals, and close-out adds
+> sidecar freshness lint plus a compressed-aware budget assert (138.0 MB
+> measured on current content, was ≈300 MB RGBA8-estimated) — loop-final gate
+> 377/377). Reworks 5–6 remain open, none planned yet.
 > Finding 1 first: findings 3, 4, 9 and rework 1 all edit shader lighting
 > code, and landing them against three divergent copies multiplies every
 > diff by three. Finding 2 second: it is the measurement instrument findings

@@ -413,15 +413,19 @@ adds on top of the now-flat baseline above.
 
 `ColorTexture::bytes` (`gpu_texture_bytes`, summed across a mip chain) and
 `MeshStore::texture_memory_bytes` give the dev overlay's "tex mem (assets)"
-line a real number to show. Before (all-RGBA8, no BC compression), measured by
+line a real number to show. Measured by
 `statue_and_human_texture_memory_measurement` streaming both assets through
 the real `get_or_request`/`integrate` path:
 
-| Asset pair | Resident texture memory |
-|---|---|
-| statue_vroid.glb + human.glb | 130 MB (137 019 568 B) |
+| Asset pair | Before (all-RGBA8) | After (BC7/BC5 sidecars, steps 3–8) |
+|---|---|---|
+| statue_vroid.glb + human.glb | 130 MB (137 019 568 B) | 32 MB (34 256 176 B) |
 
-This covers only those two assets; the ground set's ~67 MB is tracked by the
-`zone_ground` bench instead. BC7/BC5 compression (a later step in this
-rework) is expected to cut this substantially — re-measure the same test
-after that change lands to record the After.
+≈4.1× down on the measured pair. This covers only those two assets; the ground
+set is tracked by the `zone_ground` bench instead (its BC7/BC5 sidecars land
+in step 6). `content_lint.rs`'s `total_texture_memory_within_budget` (step 9)
+sums races + zone props + the ground set with the same sidecar-aware
+estimate (DDS byte size when a sidecar is bound, RGBA8 + mip-chain estimate
+otherwise) and now reports 138.0 MB for the current content set, down from
+the ≈300 MB all-RGBA8 estimate recorded when that lint was first written
+(step 2, before any sidecar existed).
