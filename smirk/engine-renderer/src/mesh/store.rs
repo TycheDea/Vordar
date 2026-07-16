@@ -106,10 +106,10 @@ pub(crate) fn upload_mesh(
         let emissive = slot_texture(device, queue, mipgen, &m.emissive_image, true, [255; 4]);
         let ao       = slot_texture(device, queue, mipgen, &m.occlusion_image, false, [255; 4]);
 
-        let cutoff = match m.alpha_mode {
-            super::gltf_import::AlphaMode::Opaque => 0.0,
-            super::gltf_import::AlphaMode::Mask(c) => c,
-            super::gltf_import::AlphaMode::Blend => 0.5,
+        let (cutoff, blend_w) = match m.alpha_mode {
+            super::gltf_import::AlphaMode::Opaque => (0.0, 0.0),
+            super::gltf_import::AlphaMode::Mask(c) => (c, 0.0),
+            super::gltf_import::AlphaMode::Blend => (0.0, 1.0),
         };
         let blend = m.alpha_mode == super::gltf_import::AlphaMode::Blend;
 
@@ -134,7 +134,7 @@ pub(crate) fn upload_mesh(
                 m.emissive_factor[2] * m.emissive_strength,
                 0.0,
             ],
-            mr: [m.metallic_factor, m.roughness_factor, cutoff, 0.0],
+            mr: [m.metallic_factor, m.roughness_factor, cutoff, blend_w],
         };
         let material_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label:    Some("Material Uniform"),

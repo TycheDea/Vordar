@@ -39,7 +39,7 @@ pub(crate) const MESH_INSTANCE_SIZE: usize = size_of::<MeshInstance>(); // 80
 pub(crate) struct MaterialUniform {
     pub(crate) base_color: [f32; 4], // baseColorFactor
     pub(crate) emissive:   [f32; 4], // emissiveFactor × KHR emissive_strength; w unused
-    pub(crate) mr:         [f32; 4], // x = metallicFactor, y = roughnessFactor, z = alpha cutoff (0 = opaque)
+    pub(crate) mr:         [f32; 4], // x = metallicFactor, y = roughnessFactor, z = mask cutoff (0 = opaque), w = 1 for BLEND
 }
 
 fn texture_entry(binding: u32) -> BindGroupLayoutEntry {
@@ -94,6 +94,7 @@ pub(crate) fn create_mesh_pipeline(
     camera_bind_group_layout:   &BindGroupLayout,
     material_bind_group_layout: &BindGroupLayout,
     env_bind_group_layout:      &BindGroupLayout,
+    transparent:                bool,
 ) -> RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label:  Some("mesh_shader.wgsl"),
@@ -137,8 +138,27 @@ pub(crate) fn create_mesh_pipeline(
         attributes:   &instance_attributes,
     };
 
+    // Shader outputs premultiplied rgb for BLEND fragments (particle_pipeline.rs's premultiplied BlendState).
+    let premultiplied = wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation:  wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation:  wgpu::BlendOperation::Add,
+        },
+    };
+    let (label, depth_write_enabled, alpha_to_coverage_enabled, blend) = if transparent {
+        ("Mesh Pipeline (transparent)", false, false, premultiplied)
+    } else {
+        ("Mesh Pipeline", true, true, wgpu::BlendState::REPLACE)
+    };
+
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label:  Some("Mesh Pipeline"),
+        label:  Some(label),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module:      &shader,
@@ -149,14 +169,14 @@ pub(crate) fn create_mesh_pipeline(
         primitive: Default::default(),
         depth_stencil: Some(wgpu::DepthStencilState {
             format:              TextureFormat::Depth32Float,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(depth_write_enabled),
             depth_compare:       Some(wgpu::CompareFunction::Less),
             stencil:             Default::default(),
             bias:                Default::default(),
         }),
         multisample: wgpu::MultisampleState {
             count: crate::post::SCENE_SAMPLES,
-            alpha_to_coverage_enabled: true,
+            alpha_to_coverage_enabled,
             ..Default::default()
         },
         fragment: Some(wgpu::FragmentState {
@@ -164,7 +184,7 @@ pub(crate) fn create_mesh_pipeline(
             entry_point: Some("frag_main"),
             targets:     &[Some(wgpu::ColorTargetState {
                 format:     surface_format,
-                blend:      Some(wgpu::BlendState::REPLACE),
+                blend:      Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),

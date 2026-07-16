@@ -132,6 +132,7 @@ pub struct OffscreenRenderer {
     sky_bgl:        wgpu::BindGroupLayout,
     sdf_pipeline:   wgpu::RenderPipeline,
     mesh_pipeline:  wgpu::RenderPipeline,
+    mesh_transparent_pipeline: wgpu::RenderPipeline,
     sky_pipeline:   wgpu::RenderPipeline,
     tonemap:        TonemapPass,
     baker:          Baker,
@@ -157,6 +158,10 @@ pub struct OffscreenRenderer {
     /// Sky pass on/off — off keeps the clear color as background so coverage
     /// assertions stay simple.
     pub draw_sky:   bool,
+    /// World-space eye position, kept in lockstep with the GPU camera buffer
+    /// so `render_mesh` can sort blend primitives back-to-front without a
+    /// GPU readback.
+    camera_eye:     Vec3,
 }
 
 impl OffscreenRenderer {
@@ -194,7 +199,9 @@ impl OffscreenRenderer {
         let sdf_pipeline =
             sdf_pipeline::create_pipeline(device, HDR_FORMAT, &camera_bgl, &texture_bgl, &env_bgl);
         let mesh_pipeline =
-            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl);
+            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl, false);
+        let mesh_transparent_pipeline =
+            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl, true);
         let sky_pipeline = sky::create_sky_pipeline(device, &camera_bgl, &sky_bgl);
         let mut tonemap = TonemapPass::new(device, wgpu::TextureFormat::Rgba8Unorm);
         tonemap.set_exposure(&gpu.queue, 1.0);
@@ -221,6 +228,7 @@ impl OffscreenRenderer {
             sky_bgl,
             sdf_pipeline,
             mesh_pipeline,
+            mesh_transparent_pipeline,
             sky_pipeline,
             tonemap,
             baker,
@@ -232,6 +240,7 @@ impl OffscreenRenderer {
             white_bg,
             _white: white,
             draw_sky: false,
+            camera_eye: camera.eye(),
             gpu,
         })
     }
@@ -273,6 +282,7 @@ impl OffscreenRenderer {
         camera.orbit(0.0, -0.8); // Camera::new's default pitch is 0.8; net pitch 0.0
         let cam_uniform = CameraUniform::from_camera(&camera);
         self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
+        self.camera_eye = camera.eye();
     }
 
     /// Overrides distance-fog color/density only; direction/color/ambient/
@@ -350,6 +360,7 @@ impl OffscreenRenderer {
                     pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
                 }
             },
+            |_pass, _this| {},
         );
     }
 
@@ -369,6 +380,24 @@ impl OffscreenRenderer {
             contents: bytemuck::cast_slice(&[instance]),
             usage:    wgpu::BufferUsages::VERTEX,
         });
+
+        // Transparents don't cast shadows and don't draw in the opaque pass;
+        // they draw back-to-front, after the sky, through their own pipeline.
+        let opaque: Vec<usize> = gpu_mesh.primitives.iter().enumerate()
+            .filter(|(_, p)| !p.blend)
+            .map(|(i, _)| i)
+            .collect();
+        let mut blend: Vec<usize> = gpu_mesh.primitives.iter().enumerate()
+            .filter(|(_, p)| p.blend)
+            .map(|(i, _)| i)
+            .collect();
+        let eye = self.camera_eye;
+        blend.sort_by(|&a, &b| {
+            let da = eye.distance_squared(gpu_mesh.primitives[a].centroid);
+            let db = eye.distance_squared(gpu_mesh.primitives[b].centroid);
+            db.partial_cmp(&da).unwrap()
+        });
+
         self.compose(
             target,
             clear,
@@ -376,7 +405,8 @@ impl OffscreenRenderer {
                 pass.set_pipeline(&this.shadow_pipelines.mesh);
                 pass.set_bind_group(0, &this.shadow_bind_group, &[]);
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
-                for prim in &gpu_mesh.primitives {
+                for &i in &opaque {
+                    let prim = &gpu_mesh.primitives[i];
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..prim.index_count, 0, 0..1);
@@ -387,7 +417,21 @@ impl OffscreenRenderer {
                 pass.set_bind_group(0, &this.camera_bind_group, &[]);
                 pass.set_bind_group(2, &this.environment.bind_group, &[]);
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
-                for prim in &gpu_mesh.primitives {
+                for &i in &opaque {
+                    let prim = &gpu_mesh.primitives[i];
+                    pass.set_bind_group(1, &prim.material_bind_group, &[]);
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                }
+            },
+            |pass, this| {
+                pass.set_pipeline(&this.mesh_transparent_pipeline);
+                pass.set_bind_group(0, &this.camera_bind_group, &[]);
+                pass.set_bind_group(2, &this.environment.bind_group, &[]);
+                pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                for &i in &blend {
+                    let prim = &gpu_mesh.primitives[i];
                     pass.set_bind_group(1, &prim.material_bind_group, &[]);
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -402,10 +446,11 @@ impl OffscreenRenderer {
     /// output — the same composition as the real frame.
     fn compose(
         &mut self,
-        target:      &SceneTarget,
-        clear:       wgpu::Color,
-        shadow_draw: impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
-        draw:        impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
+        target:           &SceneTarget,
+        clear:            wgpu::Color,
+        shadow_draw:      impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
+        draw:             impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
+        transparent_draw: impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
     ) {
         let bloom = crate::bloom::BloomPass::new(
             &self.gpu.device, &target.resolve_view, target.width, target.height,
@@ -465,6 +510,7 @@ impl OffscreenRenderer {
                 pass.set_bind_group(1, &self.environment.sky_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
+            transparent_draw(&mut pass, self);
         }
         bloom.encode(&mut encoder, None);
         self.tonemap.encode(&mut encoder, &target.output_view, None);

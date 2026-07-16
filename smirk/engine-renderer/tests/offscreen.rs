@@ -325,6 +325,20 @@ fn mip_chain_downsamples_checkerboard_to_gray() {
 /// colored pixel in a render comes from the material's own alpha cutout,
 /// never from geometry.
 fn camera_filling_quad(material: MaterialData) -> MeshData {
+    MeshData {
+        primitives: vec![view_quad(1.0, material)],
+        skeleton:   None,
+        clips:      Vec::new(),
+    }
+}
+
+/// Generalizes the frame-filling quad to any depth along the view ray:
+/// same eye/right/up math as `camera_filling_quad`, but centered at
+/// `dist_frac` of the way from the eye to the origin, with the half-extent
+/// scaled so the quad still exactly fills the frame at that depth. Lets a
+/// scene stack multiple depth-separated quads (opaque backdrop + one or more
+/// blend layers) all facing the camera.
+fn view_quad(dist_frac: f32, material: MaterialData) -> PrimitiveData {
     let radius = 34.0f32;
     let angle: f32 = std::f32::consts::FRAC_PI_4;
     let pitch = 0.8f32;
@@ -337,25 +351,22 @@ fn camera_filling_quad(material: MaterialData) -> MeshData {
     let right = forward.cross(Vec3::Y).normalize();
     let up = right.cross(forward);
     let normal = -forward;
+    let center = eye + forward * (radius * dist_frac);
 
     let fovy = 45.0_f32.to_radians();
-    let half = radius * (fovy / 2.0).tan() * 1.02; // 2% past the exact frustum edge
+    let half = radius * dist_frac * (fovy / 2.0).tan() * 1.02; // 2% past the exact frustum edge
 
     let vert = |u: f32, v: f32| MeshVertex {
-        position: (right * (u * 2.0 - 1.0) * half + up * (v * 2.0 - 1.0) * half).to_array(),
+        position: (center + right * (u * 2.0 - 1.0) * half + up * (v * 2.0 - 1.0) * half).to_array(),
         normal:   normal.to_array(),
         uv:       [u, v],
         tangent:  [1.0, 0.0, 0.0, 1.0],
     };
-    MeshData {
-        primitives: vec![PrimitiveData {
-            vertices: vec![vert(0.0, 0.0), vert(1.0, 0.0), vert(1.0, 1.0), vert(0.0, 1.0)],
-            indices:  vec![0, 2, 1, 0, 3, 2],
-            material,
-            skin: None,
-        }],
-        skeleton: None,
-        clips:    Vec::new(),
+    PrimitiveData {
+        vertices: vec![vert(0.0, 0.0), vert(1.0, 0.0), vert(1.0, 1.0), vert(0.0, 1.0)],
+        indices:  vec![0, 2, 1, 0, 3, 2],
+        material,
+        skin: None,
     }
 }
 
@@ -409,6 +420,99 @@ fn masked_cutout_edge_has_intermediate_resolved_pixels() {
     assert!(
         intermediates > 50,
         "alpha-to-coverage must leave intermediate pixels along the diagonal cutout edge, found {intermediates}"
+    );
+}
+
+/// A Blend material must composite real coverage instead of the old
+/// mask-approximated cutout: a red glass quad in front of a white opaque
+/// quad must let the white show through (tinted red), not punch an opaque
+/// red hole in the frame.
+#[test]
+fn blend_material_blends_instead_of_cutout() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_uniform_environment([1.0, 1.0, 1.0]);
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+
+    let white_opaque = view_quad(1.0, MaterialData {
+        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+        roughness_factor:  1.0,
+        metallic_factor:   0.0,
+        ..Default::default()
+    });
+    let red_glass = view_quad(0.5, MaterialData {
+        base_color_factor: [1.0, 0.0, 0.0, 0.6],
+        alpha_mode:        AlphaMode::Blend,
+        roughness_factor:  1.0,
+        metallic_factor:   0.0,
+        ..Default::default()
+    });
+    let data = MeshData {
+        primitives: vec![white_opaque, red_glass],
+        skeleton:   None,
+        clips:      Vec::new(),
+    };
+
+    let target = r.target(W, H);
+    r.render_mesh(&target, data, wgpu::Color::BLACK);
+    let pixels = r.read(&target);
+
+    let (r_mean, g_mean) = (channel_mean(&pixels, 0), channel_mean(&pixels, 1));
+    assert!(
+        g_mean > 25.0,
+        "white layer must show through the glass (not an opaque cutout), g_mean={g_mean:.1}"
+    );
+    assert!(
+        r_mean > g_mean * 1.3,
+        "the glass must tint the frame red: r={r_mean:.1} g={g_mean:.1}"
+    );
+}
+
+/// Stacked transparents must composite back-to-front regardless of the
+/// primitive vec's order: a near blue glass drawn before a far red glass
+/// (deliberately adversarial order) over an opaque white backdrop must still
+/// resolve as if drawn far-to-near — the near blue layer dominates. Drawing
+/// in raw vec order instead would let the (nearer, but vec-first) blue layer
+/// get overpainted by the farther red one, flipping the dominant channel.
+#[test]
+fn stacked_glass_composites_back_to_front() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_uniform_environment([1.0, 1.0, 1.0]);
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+
+    let white_opaque = view_quad(1.0, MaterialData {
+        base_color_factor: [1.0, 1.0, 1.0, 1.0],
+        roughness_factor:  1.0,
+        metallic_factor:   0.0,
+        ..Default::default()
+    });
+    let blue_near = view_quad(0.5, MaterialData {
+        base_color_factor: [0.0, 0.0, 1.0, 0.5],
+        alpha_mode:        AlphaMode::Blend,
+        roughness_factor:  1.0,
+        metallic_factor:   0.0,
+        ..Default::default()
+    });
+    let red_far = view_quad(0.75, MaterialData {
+        base_color_factor: [1.0, 0.0, 0.0, 0.5],
+        alpha_mode:        AlphaMode::Blend,
+        roughness_factor:  1.0,
+        metallic_factor:   0.0,
+        ..Default::default()
+    });
+    let data = MeshData {
+        primitives: vec![white_opaque, blue_near, red_far], // adversarial: near before far
+        skeleton:   None,
+        clips:      Vec::new(),
+    };
+
+    let target = r.target(W, H);
+    r.render_mesh(&target, data, wgpu::Color::BLACK);
+    let pixels = r.read(&target);
+
+    let (r_mean, b_mean) = (channel_mean(&pixels, 0), channel_mean(&pixels, 2));
+    assert!(
+        b_mean > r_mean,
+        "correct back-to-front order must let the near blue layer dominate: r={r_mean:.1} b={b_mean:.1}"
     );
 }
 

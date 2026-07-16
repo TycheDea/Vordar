@@ -332,7 +332,7 @@ fn create_scene_pipelines(
     let render_pipeline =
         sdf_pipeline::create_pipeline(device, scene_format, camera_bgl, texture_bgl, env_bgl);
     let mesh_render_pipeline =
-        mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl);
+        mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl, false);
     (scene_format, render_pipeline, mesh_render_pipeline)
 }
 
