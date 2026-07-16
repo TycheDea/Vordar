@@ -63,12 +63,14 @@ pub(crate) struct RendererState {
     pub(crate) bloom:   bloom::BloomPass,
     pub(crate) gpu_timer: Option<gpu_timer::GpuTimer>,
     // ── shadows ──
-    pub(crate) shadow_view:       wgpu::TextureView,
-    pub(crate) shadow_pipelines:  shadow::ShadowPipelines,
-    pub(crate) shadow_bind_group: wgpu::BindGroup,
-    pub(crate) light_vp_buffer:   wgpu::Buffer,
-    pub(crate) light_dir:         GlamVec3,
-    _shadow_texture: wgpu::Texture,
+    pub(crate) shadow_cascade_views: Vec<wgpu::TextureView>,
+    pub(crate) shadow_pipelines:     shadow::ShadowPipelines,
+    pub(crate) shadow_bind_group:    wgpu::BindGroup,
+    pub(crate) light_vp_buffer:      wgpu::Buffer,
+    pub(crate) shadow_cast_buffer:   wgpu::Buffer,
+    pub(crate) light_dir:            GlamVec3,
+    _shadow_texture:    wgpu::Texture,
+    _shadow_array_view: wgpu::TextureView,
     // CPU copy of the full light uniform so set_light / set_fog can update
     // their halves independently.
     pub(crate) light_state: LightUniform,
@@ -105,7 +107,7 @@ impl RendererState {
     fn init(window: Arc<Window>, vsync: bool) -> (Self, InstancePool, Arc<Mutex<egui_winit::State>>) {
         let (surface, device, queue, config, format, size) = create_surface_and_device(&window, vsync);
 
-        let (camera, shadow_texture, shadow_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
+        let (camera, shadow_texture, shadow_cascade_views, shadow_array_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
             create_camera_and_shadow_view(&device, size);
 
         let (vertex_buffer, index_buffer, texture_bgl, material_bgl, mipgen, default_tex, default_bg) =
@@ -127,8 +129,9 @@ impl RendererState {
             create_particle_resources(&device, &queue, scene_format, &camera_bgl, &hdr.depth_view, size);
 
         // Depth-only shadow variants of the three geometry pipelines.
+        let shadow_cast_buffer = shadow::create_cast_buffer(&device);
         let (shadow_pipelines, shadow_bind_group) =
-            create_shadow_pass_resources(&device, &joint_bgl, &light_vp_buffer);
+            create_shadow_pass_resources(&device, &joint_bgl, &shadow_cast_buffer);
 
         let (instance_buffer, mesh_instance_buffer, skinned_instance_buffer, particle_instance_buffer, joint_buffer, joint_bind_group) =
             create_instance_buffers(&device, &joint_bgl);
@@ -161,12 +164,14 @@ impl RendererState {
                 particle_instance_buffer,
                 camera, camera_buffer, light_buffer, camera_bind_group,
                 hdr, tonemap, bloom, gpu_timer,
-                shadow_view,
+                shadow_cascade_views,
                 shadow_pipelines,
                 shadow_bind_group,
                 light_vp_buffer,
+                shadow_cast_buffer,
                 light_dir: GlamVec3::new(-1.0, 2.0, -1.0).normalize(),
                 _shadow_texture: shadow_texture,
+                _shadow_array_view: shadow_array_view,
                 light_state: LightUniform::default_sun(),
                 env_bgl, sky_bgl, sky_pipeline, baker, environment, brdf_view,
                 pending_env:      None,
@@ -281,12 +286,12 @@ fn create_surface_and_device(
 fn create_camera_and_shadow_view(
     device: &wgpu::Device,
     size:   winit::dpi::PhysicalSize<u32>,
-) -> (Camera, wgpu::Texture, wgpu::TextureView, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroupLayout, wgpu::BindGroup) {
+) -> (Camera, wgpu::Texture, Vec<wgpu::TextureView>, wgpu::TextureView, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroupLayout, wgpu::BindGroup) {
     let camera = Camera::new(size.width as f32 / size.height as f32);
-    let (shadow_texture, shadow_view) = shadow::create_shadow_texture(device);
+    let (shadow_texture, shadow_cascade_views, shadow_array_view) = shadow::create_shadow_texture(device);
     let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
-        camera::create_gpu_resources(device, &camera, &shadow_view);
-    (camera, shadow_texture, shadow_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group)
+        camera::create_gpu_resources(device, &camera, &shadow_array_view);
+    (camera, shadow_texture, shadow_cascade_views, shadow_array_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group)
 }
 
 fn create_geometry_and_texture_resources(
@@ -389,9 +394,9 @@ fn create_particle_resources(
 }
 
 fn create_shadow_pass_resources(
-    device:          &wgpu::Device,
-    joint_bgl:       &wgpu::BindGroupLayout,
-    light_vp_buffer: &wgpu::Buffer,
+    device:             &wgpu::Device,
+    joint_bgl:          &wgpu::BindGroupLayout,
+    shadow_cast_buffer: &wgpu::Buffer,
 ) -> (shadow::ShadowPipelines, wgpu::BindGroup) {
     let shadow_pipelines = shadow::ShadowPipelines::new(device, joint_bgl);
     let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -399,7 +404,11 @@ fn create_shadow_pass_resources(
         layout:  &shadow_pipelines.bgl,
         entries: &[wgpu::BindGroupEntry {
             binding:  0,
-            resource: light_vp_buffer.as_entire_binding(),
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: shadow_cast_buffer,
+                offset: 0,
+                size:   wgpu::BufferSize::new(64),
+            }),
         }],
     });
     (shadow_pipelines, shadow_bind_group)

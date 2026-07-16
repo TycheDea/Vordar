@@ -235,9 +235,9 @@ impl LightUniform {
 /// of 4 bind groups.
 /// Returns (camera_buffer, light_buffer, light_vp_buffer, layout, bind_group).
 pub(crate) fn create_gpu_resources(
-    device:      &wgpu::Device,
-    camera:      &Camera,
-    shadow_view: &wgpu::TextureView,
+    device:            &wgpu::Device,
+    camera:            &Camera,
+    shadow_array_view: &wgpu::TextureView,
 ) -> (Buffer, Buffer, Buffer, BindGroupLayout, BindGroup) {
     let cam_uniform = CameraUniform::from_camera(camera);
     let camera_buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -252,9 +252,12 @@ pub(crate) fn create_gpu_resources(
         usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
     });
 
+    let identity_cascades: Vec<f32> = (0..crate::shadow::CASCADE_COUNT)
+        .flat_map(|_| glam::Mat4::IDENTITY.to_cols_array())
+        .collect();
     let light_vp_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label:    Some("Light VP Uniform"),
-        contents: bytemuck::cast_slice(&glam::Mat4::IDENTITY.to_cols_array()),
+        contents: bytemuck::cast_slice(&identity_cascades),
         usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
     });
 
@@ -279,7 +282,7 @@ pub(crate) fn create_gpu_resources(
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
                     multisampled:   false,
-                    view_dimension: TextureViewDimension::D2,
+                    view_dimension: TextureViewDimension::D2Array,
                     sample_type:    wgpu::TextureSampleType::Depth,
                 },
                 count: None,
@@ -300,7 +303,7 @@ pub(crate) fn create_gpu_resources(
             BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
             BindGroupEntry { binding: 1, resource: light_buffer.as_entire_binding() },
             BindGroupEntry { binding: 2, resource: light_vp_buffer.as_entire_binding() },
-            BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(shadow_view) },
+            BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(shadow_array_view) },
             BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
         ],
     });

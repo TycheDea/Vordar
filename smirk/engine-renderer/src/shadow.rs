@@ -15,10 +15,26 @@ pub(crate) const SHADOW_SIZE: u32 = 2048;
 const HALF_EXTENT: f32 = 80.0;
 const DEPTH_RANGE: f32 = 400.0;
 
-pub(crate) fn create_shadow_texture(device: &Device) -> (wgpu::Texture, wgpu::TextureView) {
+/// Shadow map layer count. 1 today (single fitted cascade); the array
+/// plumbing (texture layers, receiver light-VP array, cast dynamic-offset
+/// buffer) is sized off this constant so a future multi-cascade split only
+/// changes `fit_cascades` and this number.
+pub(crate) const CASCADE_COUNT: u32 = 1;
+
+/// Stride between cascades in the cast uniform buffer. Must be a multiple of
+/// `Limits::min_uniform_buffer_offset_alignment` (256 covers every wgpu
+/// backend's default) so each cascade's slice is selectable by dynamic offset.
+const CAST_STRIDE: wgpu::BufferAddress = 256;
+
+/// Creates the shadow depth texture (`CASCADE_COUNT` array layers) plus a
+/// per-layer view for each cascade's render-pass depth attachment and one
+/// `D2Array` view over the whole texture for the receiver's sampled binding.
+pub(crate) fn create_shadow_texture(
+    device: &Device,
+) -> (wgpu::Texture, Vec<wgpu::TextureView>, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label:           Some("Shadow Map"),
-        size:            wgpu::Extent3d { width: SHADOW_SIZE, height: SHADOW_SIZE, depth_or_array_layers: 1 },
+        size:            wgpu::Extent3d { width: SHADOW_SIZE, height: SHADOW_SIZE, depth_or_array_layers: CASCADE_COUNT },
         mip_level_count: 1,
         sample_count:    1,
         dimension:       wgpu::TextureDimension::D2,
@@ -26,8 +42,23 @@ pub(crate) fn create_shadow_texture(device: &Device) -> (wgpu::Texture, wgpu::Te
         usage:           wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats:    &[],
     });
-    let view = texture.create_view(&Default::default());
-    (texture, view)
+    let cascade_views = (0..CASCADE_COUNT)
+        .map(|layer| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                label:             Some("Shadow Map Cascade View"),
+                dimension:         Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: layer,
+                array_layer_count: Some(1),
+                ..Default::default()
+            })
+        })
+        .collect();
+    let array_view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label:     Some("Shadow Map Array View"),
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    (texture, cascade_views, array_view)
 }
 
 /// Comparison sampler for PCF (hardware 2×2 per tap).
@@ -74,6 +105,46 @@ pub(crate) fn fit_light_vp(target: Vec3, light_dir: Vec3) -> Mat4 {
     proj * view
 }
 
+/// Per-cascade fitted light view-projections. `CASCADE_COUNT` == 1 today, so
+/// this is `fit_light_vp` wrapped in a single-element array; a future
+/// multi-cascade split fits each element to its own depth slice.
+pub(crate) fn fit_cascades(target: Vec3, light_dir: Vec3) -> [Mat4; CASCADE_COUNT as usize] {
+    [fit_light_vp(target, light_dir)]
+}
+
+/// Creates the dynamic-offset cast uniform buffer: `CASCADE_COUNT` slots of
+/// `CAST_STRIDE` bytes, one 64-byte light-VP mat4 per cascade, so a shadow
+/// draw selects its cascade via `set_bind_group`'s dynamic offset.
+pub(crate) fn create_cast_buffer(device: &Device) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label:              Some("Shadow Cast Uniform"),
+        size:               CAST_STRIDE * CASCADE_COUNT as u64,
+        usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+/// Dynamic offset (bytes) of `cascade`'s slot in the cast uniform buffer.
+pub(crate) fn cast_offset(cascade: u32) -> wgpu::DynamicOffset {
+    cascade as wgpu::DynamicOffset * CAST_STRIDE as wgpu::DynamicOffset
+}
+
+/// Writes `cascades` into both the tight receiver uniform (`array<mat4x4,
+/// CASCADE_COUNT>`, sampled by `shadow_sample.wgsl`) and the 256-stride cast
+/// buffer (dynamic-offset per cascade, read by `shadow.wgsl`).
+pub(crate) fn write_cascade_uniforms(
+    queue:           &wgpu::Queue,
+    light_vp_buffer: &wgpu::Buffer,
+    cast_buffer:     &wgpu::Buffer,
+    cascades:        &[Mat4; CASCADE_COUNT as usize],
+) {
+    let tight: Vec<f32> = cascades.iter().flat_map(|m| m.to_cols_array()).collect();
+    queue.write_buffer(light_vp_buffer, 0, bytemuck::cast_slice(&tight));
+    for (i, m) in cascades.iter().enumerate() {
+        queue.write_buffer(cast_buffer, cast_offset(i as u32) as u64, bytemuck::cast_slice(&m.to_cols_array()));
+    }
+}
+
 /// Depth-only pipeline variants of the three geometry pipelines.
 pub(crate) struct ShadowPipelines {
     pub(crate) sdf:     wgpu::RenderPipeline,
@@ -101,8 +172,8 @@ impl ShadowPipelines {
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
                     ty:                 wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size:   None,
+                    has_dynamic_offset: true,
+                    min_binding_size:   wgpu::BufferSize::new(64),
                 },
                 count: None,
             }],

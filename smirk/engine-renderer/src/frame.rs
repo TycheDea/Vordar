@@ -380,7 +380,8 @@ fn upload_gpu_buffers(
 }
 
 /// Shadow pre-pass: fit the sun's ortho volume around the camera target
-/// (texel-snapped) and render depth-only variants of every opaque draw.
+/// (texel-snapped) and render depth-only variants of every opaque draw into
+/// each cascade's layer (`CASCADE_COUNT` == 1 today, so one iteration).
 /// Particles don't cast.
 fn record_shadow_pass(
     state:        &RendererState,
@@ -391,73 +392,74 @@ fn record_shadow_pass(
     skinned_list: Option<&SkinnedDrawList>,
     mesh_store:   Option<&MeshStore>,
 ) {
-    let light_vp = shadow::fit_light_vp(state.camera.target, state.light_dir);
-    state.queue.write_buffer(
-        &state.light_vp_buffer, 0,
-        bytemuck::cast_slice(&light_vp.to_cols_array()),
-    );
+    let cascades = shadow::fit_cascades(state.camera.target, state.light_dir);
+    shadow::write_cascade_uniforms(&state.queue, &state.light_vp_buffer, &state.shadow_cast_buffer, &cascades);
 
-    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("Shadow Pass"),
-        color_attachments: &[],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-            view: &state.shadow_view,
-            depth_ops: Some(wgpu::Operations {
-                load:  wgpu::LoadOp::Clear(1.0),
-                store: wgpu::StoreOp::Store,
+    for (cascade, view) in state.shadow_cascade_views.iter().enumerate() {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Shadow Pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view,
+                depth_ops: Some(wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
             }),
-            stencil_ops: None,
-        }),
-        timestamp_writes: if sample_gpu {
-            state.gpu_timer.as_ref().map(|t| t.pass_writes(GpuPass::Shadow))
-        } else {
-            None
-        },
-        ..Default::default()
-    });
+            timestamp_writes: if sample_gpu {
+                state.gpu_timer.as_ref().map(|t| t.pass_writes(GpuPass::Shadow))
+            } else {
+                None
+            },
+            ..Default::default()
+        });
 
-    // SDF primitives.
-    pass.set_pipeline(&state.shadow_pipelines.sdf);
-    pass.set_bind_group(0, &state.shadow_bind_group, &[]);
-    pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
-    pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
-    pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-    for &(first, count) in sdf_runs {
-        pass.draw_indexed(0..INDICES.len() as u32, 0, first..first + count);
-    }
+        let offset = shadow::cast_offset(cascade as u32);
 
-    // Static meshes.
-    if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
-        if !list.instances.is_empty() {
-            pass.set_pipeline(&state.shadow_pipelines.mesh);
-            pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
-            for &(mesh_idx, first, count) in &list.shadow_ranges {
-                if first as usize >= MAX_MESH_INSTANCES { break; }
-                let count = count.min(MAX_MESH_INSTANCES as u32 - first);
-                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
-                for prim in &gpu_mesh.primitives {
-                    if prim.blend { continue; }
-                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+        // SDF primitives.
+        pass.set_pipeline(&state.shadow_pipelines.sdf);
+        pass.set_bind_group(0, &state.shadow_bind_group, &[offset]);
+        pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
+        pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        for &(first, count) in sdf_runs {
+            pass.draw_indexed(0..INDICES.len() as u32, 0, first..first + count);
+        }
+
+        // Static meshes.
+        if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
+            if !list.instances.is_empty() {
+                pass.set_pipeline(&state.shadow_pipelines.mesh);
+                pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
+                for &(mesh_idx, first, count) in &list.shadow_ranges {
+                    if first as usize >= MAX_MESH_INSTANCES { break; }
+                    let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                    let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                    for prim in &gpu_mesh.primitives {
+                        if prim.blend { continue; }
+                        pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                        pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                    }
                 }
             }
         }
-    }
 
-    // Skinned meshes (re-binds the shared joint palette).
-    if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
-        if !list.instances.is_empty() {
-            pass.set_pipeline(&state.shadow_pipelines.skinned);
-            pass.set_bind_group(1, &state.joint_bind_group, &[]);
-            pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
-            for &(mesh_idx, first, count) in &list.shadow_ranges {
-                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
-                for prim in &gpu_mesh.primitives {
-                    if prim.blend { continue; }
-                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+        // Skinned meshes (re-binds the shared joint palette).
+        if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
+            if !list.instances.is_empty() {
+                pass.set_pipeline(&state.shadow_pipelines.skinned);
+                pass.set_bind_group(1, &state.joint_bind_group, &[]);
+                pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
+                for &(mesh_idx, first, count) in &list.shadow_ranges {
+                    let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                    for prim in &gpu_mesh.primitives {
+                        if prim.blend { continue; }
+                        pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                        pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                    }
                 }
             }
         }

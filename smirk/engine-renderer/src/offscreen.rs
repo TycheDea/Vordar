@@ -143,12 +143,14 @@ pub struct OffscreenRenderer {
     environment:    Environment,
     brdf_view:      wgpu::TextureView,
     mipgen:         MipGenerator,
-    shadow_view:       wgpu::TextureView,
-    shadow_pipelines:  ShadowPipelines,
-    shadow_bind_group: wgpu::BindGroup,
-    light_vp_buffer:   wgpu::Buffer,
-    light_dir:         Vec3,
-    _shadow_texture:   wgpu::Texture,
+    shadow_cascade_views: Vec<wgpu::TextureView>,
+    shadow_pipelines:     ShadowPipelines,
+    shadow_bind_group:    wgpu::BindGroup,
+    light_vp_buffer:      wgpu::Buffer,
+    shadow_cast_buffer:   wgpu::Buffer,
+    light_dir:            Vec3,
+    _shadow_texture:      wgpu::Texture,
+    _shadow_array_view:   wgpu::TextureView,
     // CPU copy of the full light uniform so set_light / set_fog /
     // set_point_lights can update their fields independently (the
     // RendererState pattern, state.rs:70-72).
@@ -176,18 +178,23 @@ impl OffscreenRenderer {
         let device = &gpu.device;
 
         let camera = Camera::new(aspect);
-        let (shadow_texture, shadow_view) = shadow::create_shadow_texture(device);
+        let (shadow_texture, shadow_cascade_views, shadow_array_view) = shadow::create_shadow_texture(device);
         let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
-            camera::create_gpu_resources(device, &camera, &shadow_view);
+            camera::create_gpu_resources(device, &camera, &shadow_array_view);
 
         let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(device);
         let shadow_pipelines = ShadowPipelines::new(device, &joint_bgl);
+        let shadow_cast_buffer = shadow::create_cast_buffer(device);
         let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label:   Some("Offscreen Shadow BG"),
             layout:  &shadow_pipelines.bgl,
             entries: &[wgpu::BindGroupEntry {
                 binding:  0,
-                resource: light_vp_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &shadow_cast_buffer,
+                    offset: 0,
+                    size:   wgpu::BufferSize::new(64),
+                }),
             }],
         });
 
@@ -220,12 +227,14 @@ impl OffscreenRenderer {
             camera_buffer,
             vertex_buffer,
             index_buffer,
-            shadow_view,
+            shadow_cascade_views,
             shadow_pipelines,
             shadow_bind_group,
             light_vp_buffer,
+            shadow_cast_buffer,
             light_dir: Vec3::new(-1.0, 2.0, -1.0).normalize(),
             _shadow_texture: shadow_texture,
+            _shadow_array_view: shadow_array_view,
             light_state: LightUniform::default_sun(),
             material_bgl,
             env_bgl,
@@ -350,10 +359,10 @@ impl OffscreenRenderer {
         self.compose(
             target,
             clear,
-            |pass, this| {
+            |pass, this, offset| {
                 if !instances.is_empty() {
                     pass.set_pipeline(&this.shadow_pipelines.sdf);
-                    pass.set_bind_group(0, &this.shadow_bind_group, &[]);
+                    pass.set_bind_group(0, &this.shadow_bind_group, &[offset]);
                     pass.set_vertex_buffer(0, this.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, instance_buffer.slice(..));
                     pass.set_index_buffer(this.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
@@ -413,9 +422,9 @@ impl OffscreenRenderer {
         self.compose(
             target,
             clear,
-            |pass, this| {
+            |pass, this, offset| {
                 pass.set_pipeline(&this.shadow_pipelines.mesh);
-                pass.set_bind_group(0, &this.shadow_bind_group, &[]);
+                pass.set_bind_group(0, &this.shadow_bind_group, &[offset]);
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
                 for &i in &opaque {
                     let prim = &gpu_mesh.primitives[i];
@@ -453,14 +462,15 @@ impl OffscreenRenderer {
         );
     }
 
-    /// Shared frame skeleton: shadow depth pre-pass, scene pass
-    /// (MSAA→resolve, optional sky), then the ACES tonemap into the LDR
-    /// output — the same composition as the real frame.
+    /// Shared frame skeleton: shadow depth pre-pass (one render pass per
+    /// cascade — `CASCADE_COUNT` == 1 today), scene pass (MSAA→resolve,
+    /// optional sky), then the ACES tonemap into the LDR output — the same
+    /// composition as the real frame.
     fn compose(
         &mut self,
         target:           &SceneTarget,
         clear:            wgpu::Color,
-        shadow_draw:      impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
+        shadow_draw:      impl Fn(&mut wgpu::RenderPass<'_>, &Self, wgpu::DynamicOffset),
         draw:             impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
         transparent_draw: impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
     ) {
@@ -469,20 +479,17 @@ impl OffscreenRenderer {
         );
         bloom.set_exposure(&self.gpu.queue, self.tonemap.exposure());
         self.tonemap.set_source(&self.gpu.device, &target.resolve_view, &bloom.output_view);
-        let light_vp = shadow::fit_light_vp(Vec3::ZERO, self.light_dir);
-        self.gpu.queue.write_buffer(
-            &self.light_vp_buffer, 0,
-            bytemuck::cast_slice(&light_vp.to_cols_array()),
-        );
+        let cascades = shadow::fit_cascades(Vec3::ZERO, self.light_dir);
+        shadow::write_cascade_uniforms(&self.gpu.queue, &self.light_vp_buffer, &self.shadow_cast_buffer, &cascades);
         let mut encoder = self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Offscreen Encoder"),
         });
-        {
+        for (cascade, view) in self.shadow_cascade_views.iter().enumerate() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Offscreen Shadow Pass"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.shadow_view,
+                    view,
                     depth_ops: Some(wgpu::Operations {
                         load:  wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -491,7 +498,7 @@ impl OffscreenRenderer {
                 }),
                 ..Default::default()
             });
-            shadow_draw(&mut pass, self);
+            shadow_draw(&mut pass, self, shadow::cast_offset(cascade as u32));
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

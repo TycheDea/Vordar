@@ -21,6 +21,7 @@ fn main() {
     let src_dir = Path::new("src");
 
     let shadow_size = extract_u32_const(&src_dir.join("shadow.rs"), "SHADOW_SIZE");
+    let cascade_count = extract_u32_const(&src_dir.join("shadow.rs"), "CASCADE_COUNT");
     let prefilter_mips = extract_u32_const(&src_dir.join("ibl.rs"), "PREFILTER_MIPS");
     let max_point_lights = extract_u32_const(&src_dir.join("camera.rs"), "MAX_POINT_LIGHTS");
 
@@ -30,6 +31,7 @@ fn main() {
 
     let mut u32_consts: HashMap<&str, u32> = HashMap::new();
     u32_consts.insert("MAX_POINT_LIGHTS", max_point_lights);
+    u32_consts.insert("CASCADE_COUNT", cascade_count);
 
     for name in PREPROCESSED_SHADERS {
         let path = src_dir.join(name);
