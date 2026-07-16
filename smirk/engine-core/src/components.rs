@@ -157,6 +157,24 @@ pub struct RenderMesh {
 
 fn white() -> Vec3 { Vec3::ONE }
 
+/// A dynamic point light any prefab can author. `color` is linear RGB;
+/// `intensity` is radiance at 1 m on the engine's unitless scale; `radius`
+/// is the hard falloff cutoff in meters. Contributes additive HDR light,
+/// independent of the day/night ambient scale. `offset` is in the entity's
+/// local space (rotated by `Transform.rotation` at sync time); `flicker` in
+/// [0, 1] is how much a deterministic per-entity time modulation may cut
+/// intensity by.
+#[derive(Clone, serde::Deserialize)]
+pub struct PointLight {
+    pub color:     Vec3,
+    pub intensity: f32,
+    pub radius:    f32,
+    #[serde(default)]
+    pub offset:    Vec3,
+    #[serde(default)]
+    pub flicker:   f32,
+}
+
 /// Skeletal animation playback state for a skinned `RenderMesh` entity.
 /// Code-inserted only (never RON): the engine attaches a default and the
 /// game's controller drives it via `transition_to`. Sampling/skinning lives in

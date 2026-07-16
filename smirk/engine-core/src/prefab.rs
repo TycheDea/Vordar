@@ -13,7 +13,7 @@
 // (component names, prefab ids) is reachable from data files today and from
 // a scripting layer later without touching engine code.
 
-use crate::components::{Anchored, CellOccupant, Health, Hitbox, PreviousTransform, RenderMesh, RenderShape, ShapeGroup, Solid, Transform, Velocity};
+use crate::components::{Anchored, CellOccupant, Health, Hitbox, PointLight, PreviousTransform, RenderMesh, RenderShape, ShapeGroup, Solid, Transform, Velocity};
 use crate::traits::{Resources, SpawnContext, SpawnQueue};
 use glam::Vec3;
 use hecs::{Entity, EntityBuilder};
@@ -278,4 +278,30 @@ pub fn register_core_components(reg: &mut ComponentRegistry) {
     reg.register::<RenderShape>("RenderShape");
     reg.register::<ShapeGroup>("ShapeGroup");
     reg.register::<RenderMesh>("RenderMesh");
+    reg.register::<PointLight>("PointLight");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_light_registers_and_defaults_offset_and_flicker() {
+        let mut registry = ComponentRegistry::new();
+        register_core_components(&mut registry);
+
+        let raw: Box<RawValue> = ron::from_str("(color: (1.0, 0.6, 0.2), intensity: 12.0, radius: 6.0)").unwrap();
+        let compiled = registry.compile("PointLight", &raw).expect("PointLight must be registered");
+
+        let mut builder = EntityBuilder::new();
+        compiled(&mut builder);
+        let mut world = hecs::World::new();
+        let entity = world.spawn(builder.build());
+        let light = world.get::<&PointLight>(entity).unwrap();
+        assert_eq!(light.color, Vec3::new(1.0, 0.6, 0.2));
+        assert_eq!(light.intensity, 12.0);
+        assert_eq!(light.radius, 6.0);
+        assert_eq!(light.offset, Vec3::ZERO);
+        assert_eq!(light.flicker, 0.0);
+    }
 }

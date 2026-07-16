@@ -8,6 +8,7 @@ pub(crate) mod gpu_timer;
 pub(crate) mod ibl;
 pub mod instance;
 pub(crate) mod instance_sync;
+pub(crate) mod light_sync;
 pub mod menu;
 pub(crate) mod menu_actions;
 pub mod mesh;
@@ -49,6 +50,7 @@ mod generated_shader_tests {
 pub use dev_overlay::DevOverlaySystem;
 pub use facade::{alloc_render_slot, alloc_shape_group_slots, camera_eye, camera_movement_axes, camera_yaw, clear_texture, create_checker_texture, free_render_slot, load_texture, register_procedural_mesh, screen_to_ground, set_camera_target, set_environment, set_exposure, set_fog, set_light, set_texture, unproject_to_ground, update_camera, zoom_camera, CameraConfig, TextureHandle};
 pub use instance_sync::RenderSyncSystem;
+pub use light_sync::PointLightSyncSystem;
 pub use menu::{MenuState, MenuSystem};
 pub use mesh::{MeshDrawList, MeshRenderSyncSystem, MeshStore, SkinnedDrawList, SocketConfig, SocketTransforms};
 pub use mesh_pipeline::MeshVertex;
@@ -84,6 +86,7 @@ impl Plugin for RenderPlugin {
             .add_system(RenderSlotAttachSystem,    Phase::RenderSync,   SystemOrder::First)
             .add_system(RenderSyncSystem,          Phase::RenderSync,   SystemOrder::Default)
             .add_system(MeshRenderSyncSystem::new(), Phase::RenderSync, SystemOrder::Default)
+            .add_system(PointLightSyncSystem::default(), Phase::RenderSync, SystemOrder::Default)
             .add_system(RenderSystem::new(),       Phase::Render,       SystemOrder::Default);
     }
 }
