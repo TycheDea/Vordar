@@ -2,6 +2,7 @@
 //! sky) → particles → bloom/tonemap → egui → present.
 
 use crate::dev_overlay;
+use crate::gpu_timer::{GpuPass, GpuPassTimings};
 use crate::instance::{InstancePool, SdfInstance, INSTANCE_SIZE};
 use crate::menu::{draw_menu, MenuAction, MenuState};
 use crate::mesh::{MeshDrawList, MeshStore, SkinnedDrawList};
@@ -26,7 +27,7 @@ pub(crate) struct RenderSystem {
     particle_warn: u32,
     /// GPU frame timing (dev overlay): sampled sparsely, last value cached.
     frame_index: u64,
-    last_gpu_ms: Option<f32>,
+    last_gpu: Option<GpuPassTimings>,
 }
 
 /// Sample the GPU frame time once every N frames while the overlay is open
@@ -41,7 +42,7 @@ impl RenderSystem {
             pending_menu: Vec::new(),
             particle_warn: 0,
             frame_index: 0,
-            last_gpu_ms: None,
+            last_gpu: None,
         }
     }
 
@@ -152,12 +153,16 @@ impl System for RenderSystem {
             .get::<engine_app::dev_stats::DevStats>()
             .map(|s| s.open)
             .unwrap_or(false);
-        // Publish last frame's GPU time before the lines snapshot below.
+        // Publish last frame's per-pass GPU times before the lines snapshot below.
         if overlay_open {
-            if let (Some(ms), Some(stats)) =
-                (self.last_gpu_ms, resources.get_mut::<engine_app::dev_stats::DevStats>())
+            if let (Some(t), Some(stats)) =
+                (self.last_gpu, resources.get_mut::<engine_app::dev_stats::DevStats>())
             {
-                stats.set("gpu", format!("{ms:.2} ms"));
+                stats.set("gpu shadow",        format!("{:.2} ms", t.shadow));
+                stats.set("gpu main",          format!("{:.2} ms", t.main));
+                stats.set("gpu particles",     format!("{:.2} ms", t.particles));
+                stats.set("gpu bloom+tonemap", format!("{:.2} ms", t.bloom_tonemap));
+                stats.set("gpu egui",          format!("{:.2} ms", t.egui));
             }
         }
         let sample_gpu = overlay_open && self.frame_index % GPU_TIMING_INTERVAL == 0;
@@ -246,26 +251,29 @@ impl System for RenderSystem {
         );
 
         record_main_pass(
-            state, &mut encoder, slot_count,
+            state, &mut encoder, slot_count, sample_gpu,
             mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
         );
 
-        record_particle_pass(state, &mut encoder, particle_list.as_ref(), particle_count);
+        record_particle_pass(state, &mut encoder, sample_gpu, particle_list.as_ref(), particle_count);
 
         // Bloom chain from the HDR resolve, then tonemap (ACES + exposure +
         // bloom composite) onto the swapchain.
-        state.bloom.encode(&mut encoder);
+        state.bloom.encode(&mut encoder, if sample_gpu { state.gpu_timer.as_ref() } else { None });
         state.tonemap.encode(
             &mut encoder,
             &view,
             if sample_gpu {
-                state.gpu_timer.as_ref().map(|t| t.end_writes())
+                state.gpu_timer.as_ref().map(|t| t.pass_writes(GpuPass::Tonemap))
             } else {
                 None
             },
         );
 
-        record_egui_overlay_pass(state, &mut encoder, &view, egui_primitives.as_ref(), egui_screen.as_ref());
+        record_egui_overlay_pass(
+            state, &mut encoder, &view,
+            egui_primitives.as_ref(), egui_screen.as_ref(), sample_gpu,
+        );
 
         // Free textures, submit, present
         if let Some(ref fo) = egui_output {
@@ -281,7 +289,7 @@ impl System for RenderSystem {
         state.queue.submit(std::iter::once(encoder.finish()));
         if sample_gpu {
             if let Some(timer) = state.gpu_timer.as_ref() {
-                self.last_gpu_ms = timer.read_blocking(&state.device).or(self.last_gpu_ms);
+                self.last_gpu = timer.read_blocking(&state.device).or(self.last_gpu);
             }
         }
         surface_texture.present();
@@ -373,7 +381,7 @@ fn record_shadow_pass(
             stencil_ops: None,
         }),
         timestamp_writes: if sample_gpu {
-            state.gpu_timer.as_ref().map(|t| t.begin_writes())
+            state.gpu_timer.as_ref().map(|t| t.pass_writes(GpuPass::Shadow))
         } else {
             None
         },
@@ -430,6 +438,7 @@ fn record_main_pass(
     state:        &RendererState,
     encoder:      &mut wgpu::CommandEncoder,
     slot_count:   usize,
+    sample_gpu:   bool,
     mesh_list:    Option<&MeshDrawList>,
     skinned_list: Option<&SkinnedDrawList>,
     mesh_store:   Option<&MeshStore>,
@@ -453,6 +462,11 @@ fn record_main_pass(
             }),
             stencil_ops: None,
         }),
+        timestamp_writes: if sample_gpu {
+            state.gpu_timer.as_ref().map(|t| t.pass_writes(GpuPass::Main))
+        } else {
+            None
+        },
         ..Default::default()
     });
     let tex_bg = &state.texture_store[state.active_texture_idx].1;
@@ -523,6 +537,7 @@ fn record_main_pass(
 fn record_particle_pass(
     state:          &RendererState,
     encoder:        &mut wgpu::CommandEncoder,
+    sample_gpu:     bool,
     particle_list:  Option<&ParticleDrawList>,
     particle_count: usize,
 ) {
@@ -545,6 +560,11 @@ fn record_particle_pass(
             depth_ops:   None, // read-only: tested by particles, sampled for softness
             stencil_ops: None,
         }),
+        timestamp_writes: if sample_gpu {
+            state.gpu_timer.as_ref().map(|t| t.pass_writes(GpuPass::Particles))
+        } else {
+            None
+        },
         ..Default::default()
     });
     if particle_count > 0 {
@@ -569,6 +589,7 @@ fn record_egui_overlay_pass(
     view:            &wgpu::TextureView,
     egui_primitives: Option<&Vec<egui::ClippedPrimitive>>,
     egui_screen:     Option<&egui_wgpu::ScreenDescriptor>,
+    sample_gpu:      bool,
 ) {
     if let (Some(prims), Some(sd)) = (egui_primitives, egui_screen) {
         state.egui_renderer.update_buffers(
@@ -586,6 +607,11 @@ fn record_egui_overlay_pass(
                 },
             })],
             depth_stencil_attachment: None,
+            timestamp_writes: if sample_gpu {
+                state.gpu_timer.as_ref().map(|t| t.pass_writes(GpuPass::Egui))
+            } else {
+                None
+            },
             ..Default::default()
         });
         let mut rpass_static = rpass.forget_lifetime();

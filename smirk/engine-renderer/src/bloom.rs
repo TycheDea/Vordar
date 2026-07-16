@@ -3,6 +3,7 @@
 // the chain, then additive tent upsamples back to mip 0, which the tonemap
 // pass composites.
 
+use crate::gpu_timer::{GpuPass, GpuTimer};
 use crate::post::HDR_FORMAT;
 use wgpu::util::DeviceExt;
 use wgpu::Device;
@@ -180,9 +181,12 @@ impl BloomPass {
     }
 
     /// Record the full bloom chain. Call between the main-pass resolve and
-    /// the tonemap pass.
-    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    /// the tonemap pass. `timer` brackets the whole chain (first stage's
+    /// begin write, last stage's end write) under `GpuPass::Bloom` — a
+    /// single stage gets both writes on its one pass.
+    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, timer: Option<&GpuTimer>) {
         let levels = (self.stages.len() + 1) / 2; // prefilter + (levels-1) down + (levels-1) up
+        let last = self.stages.len().saturating_sub(1);
         for (i, (bind_group, target)) in self.stages.iter().enumerate() {
             let (pipeline, load) = if i == 0 {
                 (&self.prefilter, wgpu::LoadOp::Clear(wgpu::Color::BLACK))
@@ -190,6 +194,12 @@ impl BloomPass {
                 (&self.down, wgpu::LoadOp::Clear(wgpu::Color::BLACK))
             } else {
                 (&self.up, wgpu::LoadOp::Load) // additive over the down result
+            };
+            let timestamp_writes = match timer {
+                Some(t) if i == 0 && i == last => Some(t.pass_writes(GpuPass::Bloom)),
+                Some(t) if i == 0              => Some(t.begin_writes(GpuPass::Bloom)),
+                Some(t) if i == last           => Some(t.end_writes(GpuPass::Bloom)),
+                _                               => None,
             };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Bloom Stage"),
@@ -200,6 +210,7 @@ impl BloomPass {
                     ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
+                timestamp_writes,
                 ..Default::default()
             });
             pass.set_pipeline(pipeline);

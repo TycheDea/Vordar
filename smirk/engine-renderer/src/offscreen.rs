@@ -393,7 +393,7 @@ impl OffscreenRenderer {
                 pass.draw(0..3, 0..1);
             }
         }
-        bloom.encode(&mut encoder);
+        bloom.encode(&mut encoder, None);
         self.tonemap.encode(&mut encoder, &target.output_view, None);
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
     }
