@@ -124,6 +124,11 @@ impl Camera {
         self.eye.y = self.target.y + self.radius * self.pitch.sin();
     }
 
+    /// The camera's world-space eye position.
+    pub(crate) fn eye(&self) -> glam::Vec3 {
+        self.eye
+    }
+
     /// The camera's world-space right and up vectors — the plane billboards
     /// (particles) expand in. Derived from the same look-at inputs as
     /// `build_view_projection_matrix`, including the TopDown up-flip.

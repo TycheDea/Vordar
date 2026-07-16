@@ -188,9 +188,11 @@ pub fn step(particles: &mut Vec<Particle>, dt: f32) {
 /// into the color and shrinks the quad; alpha carries the fade for the
 /// premultiplied-alpha variant. Additive particles fill the front of the
 /// list (the renderer draws `[..additive_count]` additively, the rest with
-/// alpha blending). Stops at the renderer's particle cap. Returns
-/// `additive_count`.
-pub fn fill_draw_list(particles: &[Particle], out: &mut Vec<ParticleInstance>) -> usize {
+/// alpha blending); additive is order-independent, but the alpha partition
+/// is sorted back-to-front by distance from `eye` so overlapping alpha
+/// particles composite correctly regardless of pool order. Stops at the
+/// renderer's particle cap. Returns `additive_count`.
+pub fn fill_draw_list(particles: &[Particle], eye: Vec3, out: &mut Vec<ParticleInstance>) -> usize {
     out.clear();
     let instance = |p: &Particle| {
         let fade = (p.ttl / p.life).clamp(0.0, 1.0);
@@ -208,7 +210,9 @@ pub fn fill_draw_list(particles: &[Particle], out: &mut Vec<ParticleInstance>) -
         out.push(instance(p));
     }
     let additive_count = out.len();
-    for p in particles.iter().filter(|p| p.blend == ParticleBlend::Alpha) {
+    let mut alpha: Vec<&Particle> = particles.iter().filter(|p| p.blend == ParticleBlend::Alpha).collect();
+    alpha.sort_by(|a, b| b.pos.distance_squared(eye).total_cmp(&a.pos.distance_squared(eye)));
+    for p in alpha {
         if out.len() >= MAX_PARTICLES {
             break;
         }
@@ -355,8 +359,9 @@ impl System for VfxSystem {
         }
         self.accum.retain(|e, _| seen.contains(e));
 
+        let eye = engine_renderer::camera_eye(resources);
         if let Some(list) = resources.get_mut::<ParticleDrawList>() {
-            list.additive_count = fill_draw_list(&sim.particles, &mut list.instances);
+            list.additive_count = fill_draw_list(&sim.particles, eye, &mut list.instances);
         }
         resources.insert(sim);
     }
@@ -434,7 +439,7 @@ mod tests {
             axis:    Vec3::ZERO,
         };
         let mut out = Vec::new();
-        fill_draw_list(&[half_faded], &mut out);
+        fill_draw_list(&[half_faded], Vec3::ZERO, &mut out);
         assert_eq!(out.len(), 1);
         assert!((out[0].color[0] - 0.5).abs() < 1e-6, "rgb scaled by fade");
         assert!((out[0].size - 0.1).abs() < 1e-6, "size shrinks with fade");
@@ -455,7 +460,7 @@ mod tests {
                 axis:    Vec3::ZERO,
             })
             .collect();
-        fill_draw_list(&many, &mut out);
+        fill_draw_list(&many, Vec3::ZERO, &mut out);
         assert_eq!(out.len(), MAX_PARTICLES, "draw list capped");
     }
 
@@ -483,13 +488,53 @@ mod tests {
             make(ParticleBlend::Additive, 0.4),
         ];
         let mut out = Vec::new();
-        let additive = fill_draw_list(&particles, &mut out);
+        let additive = fill_draw_list(&particles, Vec3::ZERO, &mut out);
         assert_eq!(additive, 2);
         assert_eq!(out.len(), 4);
         assert_eq!(out[0].color[0], 0.2);
         assert_eq!(out[1].color[0], 0.4);
         assert_eq!(out[2].color[0], 0.1);
         assert_eq!(out[3].color[0], 0.3);
+    }
+
+    #[test]
+    fn fill_sorts_alpha_partition_far_first_regardless_of_pool_order() {
+        let make = |blend: ParticleBlend, pos: Vec3, r: f32| Particle {
+            pos,
+            vel:     Vec3::ZERO,
+            ttl:     1.0,
+            life:    1.0,
+            size:    0.1,
+            color:   Vec3::new(r, 0.0, 0.0),
+            gravity: 0.0,
+            drag:    0.0,
+            cell:    0,
+            blend,
+            stretch: 0.0,
+            axis:    Vec3::ZERO,
+        };
+        let eye = Vec3::ZERO;
+        // Pool order puts the near puff first and the far puff second — the
+        // opposite of the back-to-front draw order the alpha blend needs.
+        let particles = vec![
+            make(ParticleBlend::Alpha, Vec3::new(0.0, 0.0, 2.0), 0.2),  // near
+            make(ParticleBlend::Alpha, Vec3::new(0.0, 0.0, 10.0), 0.8), // far
+        ];
+        let mut out = Vec::new();
+        fill_draw_list(&particles, eye, &mut out);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].color[0], 0.8, "far particle draws first (back-to-front)");
+        assert_eq!(out[1].color[0], 0.2, "near particle draws last");
+
+        // Swap-remove on expiry can flip pool order; the sort must not care.
+        let particles_swapped = vec![
+            make(ParticleBlend::Alpha, Vec3::new(0.0, 0.0, 10.0), 0.8), // far
+            make(ParticleBlend::Alpha, Vec3::new(0.0, 0.0, 2.0), 0.2),  // near
+        ];
+        let mut out2 = Vec::new();
+        fill_draw_list(&particles_swapped, eye, &mut out2);
+        assert_eq!(out2[0].color[0], 0.8, "far-first holds regardless of pool order");
+        assert_eq!(out2[1].color[0], 0.2);
     }
 
     #[test]

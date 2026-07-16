@@ -237,6 +237,16 @@ pub fn camera_yaw(resources: &Resources) -> f32 {
         .unwrap_or(0.0)
 }
 
+/// Returns the camera's current world-space eye position. Used to
+/// depth-sort alpha-blended particles back-to-front.
+/// Returns `Vec3::ZERO` if RendererState is not yet initialised.
+pub fn camera_eye(resources: &Resources) -> GlamVec3 {
+    resources
+        .get::<RendererState>()
+        .map(|s| s.camera.eye())
+        .unwrap_or(GlamVec3::ZERO)
+}
+
 /// Returns `(forward, right)` world-space XZ vectors for WASD input, accounting for
 /// the current camera projection mode and yaw.
 /// In TopDown mode the up vector is NEG_Z so the axes are fixed: W = -Z, D = +X.

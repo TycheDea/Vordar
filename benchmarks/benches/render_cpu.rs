@@ -81,10 +81,11 @@ fn particle_fill(c: &mut Criterion) {
             p.blend = ParticleBlend::Alpha;
         }
     }
+    let eye = Vec3::new(0.0, 5.0, 15.0);
     let mut out = Vec::new();
     c.bench_function("particle_fill_4096", |b| {
         b.iter(|| {
-            let additive = fill_draw_list(black_box(&sim.particles), &mut out);
+            let additive = fill_draw_list(black_box(&sim.particles), eye, &mut out);
             black_box((additive, out.len()))
         })
     });
