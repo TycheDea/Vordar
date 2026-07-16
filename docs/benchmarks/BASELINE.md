@@ -174,67 +174,25 @@ by `pose_player_into_stops_growing_scratch_buffers_after_warmup`
 (`engine-renderer`, `mesh::sync`): scratch buffer capacity is unchanged across five
 repeated calls once warmed, i.e. zero further allocations in steady state.
 
-### Asset streaming — `asset_load` (rendering rework 2)
+### Asset streaming — `asset_load` (rendering rework 2, steps 1–6)
 
-| Bench | Before |
-|---|---|
-| first_sight/statue_vroid (11 MB, embedded textures) | 122.11 ms |
-| first_sight/human (9 MB, skinned + clips) | 101.63 ms |
-| zone_ground/decode_and_generate (3× 2k JPG decode + mesh gen) | 246.27 ms |
+| Asset | Before | After | Notes |
+|---|---|---|---|
+| statue_vroid (11 MB, embedded textures) upload | 122.11 ms | 24–28 ms | decode off-thread (step 1); upload cost residual, BC compression targeted (rework 4) |
+| human (9 MB, skinned + clips) upload | 101.63 ms | 24–28 ms | same streaming path as statue |
+| zone_ground (3× 2k JPG decode + mesh gen) | 246.27 ms | 6.5–7.3 ms | decode off-thread (step 1); mesh gen on background thread, GPU submission at draw |
+| environment bake (per load, synchronous) | ~24 ms → ~20 ms | 6.8–7.3 ms | Baker hoist (step 2, pipeline compile once); single submit (step 3) collects 42 render passes |
+| HDRI decode (zone-change path) | 577.9–597.4 ms | 540.7–543.0 ms | off-thread (step 4); frame pays only bake cost at arrival |
 
-These are the synchronous costs blocking the frame during zone entry and dressing.
-Rework 2 moves these off-frame via streaming: `load_gltf_data` and
-`load_ground_material` become async tasks, uploads (`upload_mesh`, indirect GPU
-setup) stay synchronous but run on a small pool instead of the frame's main thread.
-The environment load baseline (rework 7 finding 7): ~24 ms per `set_uniform_environment`,
-241 ms/10 loads in the zone-change path (steps 2–3 re-measure this after the refactor).
-Rendering rework 2 finding 2 hoists `Baker::new` (shader module + all four bake
-pipelines) to compile once per device instead of once per environment load, sharing
-it the way `bake_brdf_lut`'s LUT already was. Re-measured after the hoist: ~20 ms per
-`set_uniform_environment` (187–230 ms/10 loads across three runs) — a smaller drop
-than the ~9–10 ms `Baker::new` isolation predicted (expected ~14 ms/load). The hoist
-is verified correct regardless (`repeated_environment_loads_skip_redundant_baker_construction`
-asserts zero `Baker` reconstructions across 3 reloads); the remaining ~20 ms per load
-is the cubemap/irradiance/prefilter bake work itself (216 render passes), not pipeline
-compilation.
-
-Rendering rework 2 finding 3 threads one `CommandEncoder` through all 42 bake passes
-(6 equirect + 6 irradiance + 30 prefilter faces) per environment load, replacing the
-per-face encoder/submit round trip with a single `queue.submit` at the end — the
-same-encoder write-then-sample ordering (equirect passes write the base cubemap,
-irradiance/prefilter passes sample it) needed no fallback: wgpu's automatic usage
-transitions between render passes made it legal, and the full offscreen suite (furnace,
-reflection, sky) stayed green. Re-measured: ~6.5-7.3 ms per `set_uniform_environment`
-(three runs), down from ~20 ms — the per-submit overhead was indeed the dominant cost.
-
-Rendering rework 2 finding 5: `MeshStore` streamed the same way — `get_or_request` spawns
-a detached decode thread on a path miss and returns `None` immediately (nothing to draw
-until upload), and `MeshRenderSyncSystem` drains completed decodes via `integrate` under
-a `MESH_UPLOADS_PER_FRAME = 1` budget. `statue_streams_and_uploads_within_budget`
-(`engine-renderer`, `mesh::store`) times the single `integrate` call that performs the
-statue's upload once its background decode has landed: 24.15 ms, 26.18 ms, 25.15 ms,
-27.57 ms across four runs (debug build). This exceeds the ~10 ms residual-cost estimate,
-but the fix still lands as designed: the ~540 ms decode (finding 4's HDRI number is the
-same order of magnitude for a comparable embedded-texture asset) no longer blocks the
-frame, only the upload does. Rework 4's BC-compressed textures (4-6x smaller uploads) is
-the identified reducer for the remaining ~25 ms; no per-texture upload chunking is
-warranted for this pass.
-
-Rendering rework 2 finding 4: `set_uniform_environment`'s bake (~6.5-7.3 ms above) skips
-the real HDR decode — zone crossings call `Environment::from_hdr` on the 5 MB, 2048×1024
-`evening_road_01_puresky_2k.hdr`, which also runs `image::open`/`into_rgb32f` and an
-8.4M-float f32→f16 conversion synchronously on the main thread. Measured directly (debug
-build, two runs): 577.9 ms and 597.4 ms for the full synchronous decode+bake — an order
-of magnitude past the "tens of ms" estimated from file size alone, confirming the frame
-hitch is real and larger than assumed. Finding 4 moves the decode+conversion to a
-detached thread; `RenderSystem::run` bakes and swaps on arrival instead of blocking the
-zone-change frame on it. Post-fix split (debug build, two runs), same HDRI:
-`EquirectImage::decode_hdr` (now off-thread) 540.7 ms / 543.0 ms; bake-on-arrival
-(`RendererState::poll_pending_environment`'s `Environment::from_equirect_pixels`, main
-thread) 6.8 ms / 7.3 ms — matching the finding-3 bake baseline and well under the ~8 ms
-residual threshold, so no pre-baked-IBL follow-up is warranted yet. The ~540 ms decode
-no longer lands in the zone-change frame; the frame only pays the ~7 ms bake the frame
-the background decode arrives.
+The synchronous-frame costs (statue/human/zone-ground uploads, environment bake, HDRI decode)
+blocked zone entry and dressing. Rework 2 moves decodes off-frame via spawned background
+threads (`load_gltf_data`, `EquirectImage::decode_hdr`); uploads stay on-frame but run under
+a `MESH_UPLOADS_PER_FRAME = 1` budget, and environment bakes run only once per zone crossing
+(Baker shared since step 2, single encoder through all passes since step 3). The residual
+main-thread costs — mesh upload (~25 ms) and bake-on-arrival (~7 ms) — are accepted;
+BC-texture compression (rework 4) and potential pre-baked IBL (deferred if residual grows)
+are the identified reducers. The ~540 ms HDRI decode and ~250 ms mesh decode no longer land
+in frame-critical paths.
 
 ### Snapshot path — `snapshot` (server; broadcast = full 6-tick round covering every
 conn once, comparable to the old un-staggered number; broadcast_slice = one 60 Hz
