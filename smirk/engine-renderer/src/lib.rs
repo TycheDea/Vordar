@@ -1,6 +1,7 @@
 pub mod anim;
 pub(crate) mod bloom;
 pub mod camera;
+pub mod culling;
 pub mod dev_overlay;
 pub(crate) mod facade;
 pub(crate) mod frame;

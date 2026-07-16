@@ -620,7 +620,7 @@ fn collect_transparent_draws(
                 if !prim.blend { continue; }
                 for instance in first..first + count {
                     let model = glam::Mat4::from_cols_array_2d(&list.instances[instance as usize].model);
-                    let depth_sq = eye.distance_squared(model.transform_point3(prim.centroid));
+                    let depth_sq = eye.distance_squared(model.transform_point3(prim.centroid()));
                     out.push(TransparentDraw { skinned: false, mesh_idx, prim_idx, instance, depth_sq });
                 }
             }
@@ -634,7 +634,7 @@ fn collect_transparent_draws(
                 if !prim.blend { continue; }
                 for instance in first..first + count {
                     let model = glam::Mat4::from_cols_array_2d(&list.instances[instance as usize].model);
-                    let depth_sq = eye.distance_squared(model.transform_point3(prim.centroid));
+                    let depth_sq = eye.distance_squared(model.transform_point3(prim.centroid()));
                     out.push(TransparentDraw { skinned: true, mesh_idx, prim_idx, instance, depth_sq });
                 }
             }

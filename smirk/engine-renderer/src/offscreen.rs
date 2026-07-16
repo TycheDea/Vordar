@@ -397,8 +397,8 @@ impl OffscreenRenderer {
             .collect();
         let eye = self.camera_eye;
         blend.sort_by(|&a, &b| {
-            let da = eye.distance_squared(gpu_mesh.primitives[a].centroid);
-            let db = eye.distance_squared(gpu_mesh.primitives[b].centroid);
+            let da = eye.distance_squared(gpu_mesh.primitives[a].centroid());
+            let db = eye.distance_squared(gpu_mesh.primitives[b].centroid());
             db.partial_cmp(&da).unwrap()
         });
 

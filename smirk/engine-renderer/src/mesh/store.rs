@@ -1,5 +1,6 @@
 use super::gltf_import::{MeshData, TextureSource, VertexSkin};
 use crate::anim::{AnimationClip, Skeleton};
+use crate::culling::Aabb;
 use crate::mesh_pipeline::MaterialUniform;
 use crate::mipgen::MipGenerator;
 use crate::skinned_pipeline::SkinnedVertex;
@@ -18,7 +19,13 @@ pub(crate) struct GpuPrimitive {
     pub(crate) _material_buffer:   Buffer,
     pub(crate) material_bind_group: BindGroup,
     pub(crate) blend:   bool,
-    pub(crate) centroid: glam::Vec3,
+    pub(crate) aabb: Aabb,
+}
+
+impl GpuPrimitive {
+    pub(crate) fn centroid(&self) -> glam::Vec3 {
+        self.aabb.center()
+    }
 }
 
 /// CPU-side animation data kept next to a skinned GpuMesh so sampling needs no
@@ -33,7 +40,18 @@ pub(crate) struct GpuMesh {
     /// Some => primitives' vertex buffers hold `SkinnedVertex` and the mesh
     /// draws with the skinned pipeline; None => static-geometry path.
     pub(crate) skin: Option<CpuSkin>,
+    /// Union of primitive bounds in mesh-local space, inflated for skinned
+    /// meshes (see `SKINNED_AABB_INFLATE`) since animation can pose vertices
+    /// outside the bind-pose box.
+    #[allow(dead_code)]
+    pub(crate) local_aabb: Aabb,
 }
+
+/// Skinned meshes may pose outside their bind-pose silhouette; doubling the
+/// half-extents keeps `local_aabb` a valid culling bound as long as animation
+/// stays within double the bind-pose half-extents — the convention culling
+/// relies on.
+const SKINNED_AABB_INFLATE: f32 = 2.0;
 
 /// One material texture slot: the image (sRGB or linear, mipped) when the
 /// asset has one, else a 1×1 neutral default so the bind group is complete.
@@ -62,7 +80,7 @@ pub(crate) fn upload_mesh(
     data:   MeshData,
 ) -> GpuMesh {
     let skinned = data.skeleton.is_some();
-    let primitives = data.primitives.iter().map(|p| {
+    let primitives: Vec<GpuPrimitive> = data.primitives.iter().map(|p| {
         // Skinned meshes upload SkinnedVertex (adds joints/weights); static
         // meshes upload MeshVertex directly.
         let vertex_buffer = if skinned {
@@ -114,8 +132,8 @@ pub(crate) fn upload_mesh(
         };
         let blend = m.alpha_mode == super::gltf_import::AlphaMode::Blend;
 
-        let centroid = if p.vertices.is_empty() {
-            glam::Vec3::ZERO
+        let aabb = if p.vertices.is_empty() {
+            Aabb { min: glam::Vec3::ZERO, max: glam::Vec3::ZERO }
         } else {
             let mut min = glam::Vec3::from(p.vertices[0].position);
             let mut max = min;
@@ -124,7 +142,7 @@ pub(crate) fn upload_mesh(
                 min = min.min(pos);
                 max = max.max(pos);
             }
-            (min + max) / 2.0
+            Aabb { min, max }
         };
 
         let uniform = MaterialUniform {
@@ -165,12 +183,19 @@ pub(crate) fn upload_mesh(
             _material_buffer: material_buffer,
             material_bind_group,
             blend,
-            centroid,
+            aabb,
         }
     }).collect();
 
+    let local_aabb = {
+        let mut prims = primitives.iter().map(|p| p.aabb);
+        let first = prims.next().unwrap_or(Aabb { min: glam::Vec3::ZERO, max: glam::Vec3::ZERO });
+        prims.fold(first, Aabb::union)
+    };
+    let local_aabb = if skinned { local_aabb.inflated(SKINNED_AABB_INFLATE) } else { local_aabb };
+
     let skin = data.skeleton.map(|skeleton| CpuSkin { skeleton, clips: data.clips });
-    GpuMesh { primitives, skin }
+    GpuMesh { primitives, skin, local_aabb }
 }
 
 /// A path's streaming state. `Pending` while a detached decode thread is in
@@ -338,9 +363,25 @@ pub(crate) const MESH_UPLOADS_PER_FRAME: usize = 1;
 #[cfg(all(test, feature = "offscreen"))]
 mod tests {
     use super::*;
+    use crate::anim::{Joint, LocalTransform};
     use crate::mesh::gltf_import::{AlphaMode, ImageData, MaterialData, PrimitiveData, TextureSource};
     use crate::mesh_pipeline::{self, MeshVertex};
     use crate::offscreen::HeadlessGpu;
+
+    /// The `stub_skin` construction pattern from sync.rs:315-331, inlined —
+    /// this module needs only the `Skeleton` half (`MeshData::skeleton`), not
+    /// the `CpuSkin` sync.rs builds around it.
+    fn stub_skeleton(joint_count: usize) -> Skeleton {
+        let joints = (0..joint_count)
+            .map(|i| Joint {
+                parent:       if i == 0 { None } else { Some(i - 1) },
+                inverse_bind: glam::Mat4::IDENTITY,
+                rest:         LocalTransform::IDENTITY,
+                name:         format!("bone{i}"),
+            })
+            .collect();
+        Skeleton { joints, root: glam::Mat4::IDENTITY }
+    }
 
     fn triangle_mesh_data() -> MeshData {
         let vertex = |x: f32, y: f32| MeshVertex {
@@ -565,8 +606,34 @@ mod tests {
         assert!(gpu_mesh.primitives[1].blend, "alpha_mode::Blend should set blend flag");
 
         let centroid = glam::Vec3::new(0.5, 0.5, 0.0);
-        assert!(gpu_mesh.primitives[0].centroid.abs_diff_eq(centroid, 1e-5), "prim0 centroid");
-        assert!(gpu_mesh.primitives[1].centroid.abs_diff_eq(centroid, 1e-5), "prim1 centroid");
+        assert!(gpu_mesh.primitives[0].centroid().abs_diff_eq(centroid, 1e-5), "prim0 centroid");
+        assert!(gpu_mesh.primitives[1].centroid().abs_diff_eq(centroid, 1e-5), "prim1 centroid");
+    }
+
+    /// The triangle fixture's local_aabb is the min/max of its vertices, and
+    /// a skinned mesh's local_aabb is inflated ×2 about its center (see
+    /// `SKINNED_AABB_INFLATE`) since animation can pose outside the bind-pose
+    /// box.
+    #[test]
+    fn upload_records_mesh_aabb() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — GpuMesh aabb test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+
+        let static_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, triangle_mesh_data());
+        assert!(static_mesh.local_aabb.min.abs_diff_eq(glam::Vec3::new(0.0, 0.0, 0.0), 1e-5), "static min");
+        assert!(static_mesh.local_aabb.max.abs_diff_eq(glam::Vec3::new(1.0, 1.0, 0.0), 1e-5), "static max");
+
+        let mut skinned_data = triangle_mesh_data();
+        skinned_data.skeleton = Some(stub_skeleton(1));
+        let skinned_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, skinned_data);
+        // Bind-pose box is min(0,0,0)/max(1,1,0), center (0.5,0.5,0), half-extents
+        // (0.5,0.5,0) — doubled to (1.0,1.0,0.0) about the same center.
+        assert!(skinned_mesh.local_aabb.min.abs_diff_eq(glam::Vec3::new(-0.5, -0.5, 0.0), 1e-5), "skinned min");
+        assert!(skinned_mesh.local_aabb.max.abs_diff_eq(glam::Vec3::new(1.5, 1.5, 0.0), 1e-5), "skinned max");
     }
 
     /// `texture_memory_bytes` sums every registered primitive's live material
