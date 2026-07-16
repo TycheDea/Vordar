@@ -6,10 +6,11 @@
 // Frames go through the real chain: MSAA HDR → resolve → ACES tonemap.
 
 use engine_renderer::instance::SdfInstance;
-use engine_renderer::mesh::{load_gltf_data, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData};
+use engine_renderer::mesh::{load_gltf_data, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData, TextureSource};
 use engine_renderer::offscreen::{
     create_mipped_rgba8, read_texture_mip, HeadlessGpu, OffscreenRenderer, TestLight, TestPointLight,
 };
+use engine_renderer::texture::parse_dds;
 use engine_renderer::MeshVertex;
 use glam::{Mat4, Vec3};
 
@@ -286,6 +287,39 @@ fn damaged_helmet_renders() {
     );
 }
 
+/// A compressed BC7 sRGB material renders through the real mesh pipeline:
+/// decode + color-space handling must land red-dominant at the quad's
+/// center, same as the RGBA8 path other tests in this file already cover.
+/// Skips without a GPU adapter or without BC support (fallback adapters).
+#[test]
+fn compressed_bc7_texture_renders_through_real_pipeline() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    if !r.gpu.device.features().contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
+        eprintln!("SKIP: adapter lacks TEXTURE_COMPRESSION_BC");
+        return;
+    }
+    r.set_uniform_environment([1.0, 1.0, 1.0]);
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+
+    let img = parse_dds(include_bytes!("data/red8x8_bc7_srgb.dds")).expect("fixture parses");
+    let material = MaterialData {
+        base_color_image: Some(TextureSource::Compressed(img)),
+        roughness_factor: 1.0,
+        metallic_factor:  0.0,
+        ..Default::default()
+    };
+    let target = r.target(W, H);
+    r.render_mesh(&target, quad_with_material(40.0, material), wgpu::Color::BLACK);
+    let pixels = r.read(&target);
+
+    let center = ((H / 2 * W + W / 2) * 4) as usize;
+    let p = &pixels[center..center + 4];
+    assert!(
+        p[0] as u32 > 2 * p[1] as u32 && p[0] as u32 > 2 * p[2] as u32,
+        "BC7 sRGB red fixture must dominate at center: {p:?}"
+    );
+}
+
 /// The blit chain really downsamples — mip 1 of a 1-px checkerboard
 /// averages toward mid-gray, far from both extremes.
 #[test]
@@ -391,7 +425,7 @@ fn masked_billboard() -> MeshData {
         alpha_mode:        AlphaMode::Mask(0.5),
         metallic_factor:   0.0,
         roughness_factor:  1.0,
-        base_color_image:  Some(diagonal_alpha_texture(64)),
+        base_color_image:  Some(TextureSource::Rgba8(diagonal_alpha_texture(64))),
         ..Default::default()
     })
 }

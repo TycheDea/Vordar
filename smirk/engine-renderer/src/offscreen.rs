@@ -6,8 +6,9 @@
 // assert analytically (coverage %, darker-than, monotonic — never exact
 // pixel values).
 //
-// Device requirements are deliberately minimal (no TEXTURE_COMPRESSION_BC —
-// fallback adapters lack it), so harness assets must be RGBA8/procedural.
+// Device requirements request TEXTURE_COMPRESSION_BC only when the adapter
+// supports it (fallback adapters lack it), so BC-dependent tests must check
+// `device.features().contains(...)` and skip rather than assume it's there.
 
 use crate::camera::{self, Camera, CameraUniform, GpuPointLight, LightUniform, MAX_POINT_LIGHTS};
 use crate::ibl::{Baker, Environment, EquirectImage};
@@ -42,7 +43,10 @@ impl HeadlessGpu {
             },
         )).ok()?;
         let (device, queue) = pollster::block_on(
-            adapter.request_device(&wgpu::DeviceDescriptor::default())
+            adapter.request_device(&wgpu::DeviceDescriptor {
+                required_features: adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC,
+                ..Default::default()
+            })
         ).ok()?;
         Some(Self { device, queue })
     }

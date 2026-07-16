@@ -29,6 +29,15 @@ pub struct ImageData {
     pub pixels: Vec<u8>,
 }
 
+/// A material texture slot's image data, either decoded RGBA8 (glTF-embedded
+/// or loose PNG/JPG) or a pre-compressed DDS parsed off disk. Color-space
+/// (sRGB vs linear) is carried alongside by the slot, not the variant —
+/// `Compressed`'s format is self-describing (the DDS's own DXGI tag).
+pub enum TextureSource {
+    Rgba8(ImageData),
+    Compressed(crate::texture::CompressedImage),
+}
+
 /// Per-vertex skin binding, parallel to `PrimitiveData::vertices`. Kept
 /// separate from `Vertex` so static meshes carry no skinning overhead and the
 /// static GPU path is untouched.
@@ -51,11 +60,11 @@ pub struct MaterialData {
     /// KHR_materials_emissive_strength (1.0 when absent) — HDR emissive for
     /// bloom.
     pub emissive_strength: f32,
-    pub base_color_image:         Option<ImageData>, // sRGB
-    pub normal_image:             Option<ImageData>, // linear
-    pub metallic_roughness_image: Option<ImageData>, // linear (g=rough, b=metal)
-    pub emissive_image:           Option<ImageData>, // sRGB
-    pub occlusion_image:          Option<ImageData>, // linear (r)
+    pub base_color_image:         Option<TextureSource>, // sRGB
+    pub normal_image:             Option<TextureSource>, // linear
+    pub metallic_roughness_image: Option<TextureSource>, // linear (g=rough, b=metal)
+    pub emissive_image:           Option<TextureSource>, // sRGB
+    pub occlusion_image:          Option<TextureSource>, // linear (r)
 }
 
 impl Default for MaterialData {
@@ -236,13 +245,13 @@ fn read_material(
     images: &[gltf::image::Data],
     path:   &str,
 ) -> MaterialData {
-    let fetch = |index: usize, slot: &str| -> Option<ImageData> {
+    let fetch = |index: usize, slot: &str| -> Option<TextureSource> {
         let img = images.get(index)?;
         let converted = to_rgba8(img);
         if converted.is_none() {
             log::warn!("{path}: unsupported {slot} image format {:?}", img.format);
         }
-        converted
+        converted.map(TextureSource::Rgba8)
     };
 
     let pbr = mat.pbr_metallic_roughness();
@@ -405,7 +414,8 @@ mod tests {
         assert!(!data.primitives.is_empty());
         let p = &data.primitives[0];
         assert!(p.vertices.len() > 100, "real mesh, not a placeholder");
-        let img = p.material.base_color_image.as_ref().expect("avocado has a base-color texture");
+        let source = p.material.base_color_image.as_ref().expect("avocado has a base-color texture");
+        let TextureSource::Rgba8(img) = source else { panic!("avocado's base-color must decode as RGBA8") };
         assert_eq!(img.pixels.len() as u32, img.width * img.height * 4, "tightly packed RGBA8");
     }
 

@@ -1,4 +1,4 @@
-use super::gltf_import::{ImageData, MeshData, VertexSkin};
+use super::gltf_import::{MeshData, TextureSource, VertexSkin};
 use crate::anim::{AnimationClip, Skeleton};
 use crate::mesh_pipeline::MaterialUniform;
 use crate::mipgen::MipGenerator;
@@ -41,14 +41,15 @@ fn slot_texture(
     device:  &Device,
     queue:   &Queue,
     mipgen:  &MipGenerator,
-    image:   &Option<ImageData>,
+    image:   &Option<TextureSource>,
     srgb:    bool,
     neutral: [u8; 4],
 ) -> ColorTexture {
     match image {
-        Some(img) => texture::create_rgba_texture_mipped(
+        Some(TextureSource::Rgba8(img)) => texture::create_rgba_texture_mipped(
             device, queue, mipgen, img.width, img.height, &img.pixels, srgb,
         ),
+        Some(TextureSource::Compressed(img)) => texture::create_bc_texture(device, queue, img),
         None => texture::create_rgba_texture(device, queue, 1, 1, &neutral, false),
     }
 }
@@ -337,7 +338,7 @@ pub(crate) const MESH_UPLOADS_PER_FRAME: usize = 1;
 #[cfg(all(test, feature = "offscreen"))]
 mod tests {
     use super::*;
-    use crate::mesh::gltf_import::{AlphaMode, ImageData, MaterialData, PrimitiveData};
+    use crate::mesh::gltf_import::{AlphaMode, ImageData, MaterialData, PrimitiveData, TextureSource};
     use crate::mesh_pipeline::{self, MeshVertex};
     use crate::offscreen::HeadlessGpu;
 
@@ -584,11 +585,11 @@ mod tests {
         let mut store = MeshStore::default();
 
         let mut data = triangle_mesh_data();
-        data.primitives[0].material.base_color_image = Some(ImageData {
+        data.primitives[0].material.base_color_image = Some(TextureSource::Rgba8(ImageData {
             width:  8,
             height: 8,
             pixels: vec![255u8; 8 * 8 * 4],
-        });
+        }));
 
         store.register(&gpu.device, &gpu.queue, &layout, &mipgen, "tex-mem-test", data);
 

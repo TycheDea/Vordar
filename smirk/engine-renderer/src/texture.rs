@@ -1,7 +1,8 @@
-// GPU texture creation and the shared `ColorTexture` bind-group unit: the
-// compressed-BC7 loader (`load_dds`), plain/mipped RGBA8 uploads, and the
-// procedural checker/white textures used when no asset is set. Every texture
-// shares one sampler configuration (`make_sampler`).
+// GPU texture creation and the shared `ColorTexture` bind-group unit: DDS
+// parsing (`parse_dds`) and BC7/BC5 upload (`create_bc_texture`, `load_dds`),
+// plain/mipped RGBA8 uploads, and the procedural checker/white textures used
+// when no asset is set. Every texture shares one sampler configuration
+// (`make_sampler`).
 
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
@@ -54,41 +55,94 @@ fn make_sampler(device: &Device) -> Sampler {
     })
 }
 
-/// Load a BC7-encoded DDS file directly as a GPU texture, uploading every
-/// baked mip level the file carries. `srgb` picks Bc7RgbaUnormSrgb (for
-/// sRGB-encoded images, e.g. albedo) vs Bc7RgbaUnorm (for linear data).
-/// Returns Err if the file cannot be read or parsed.
-pub fn load_dds(device: &Device, queue: &Queue, path: &str, srgb: bool) -> Result<ColorTexture, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {path}: {e}"))?;
+/// A compressed image parsed straight off a DDS file: dims, baked mip count,
+/// the GPU format the file itself declares, and every mip's block data
+/// contiguous in `data` (DDS layout) — no GPU device needed to produce this,
+/// so it can be built on a worker thread.
+pub struct CompressedImage {
+    pub width:     u32,
+    pub height:    u32,
+    pub mip_count: u32,
+    pub format:    TextureFormat,
+    pub data:      Vec<u8>,
+}
+
+/// Parse a DDS file's bytes plus whether it carried its own DXGI (DX10) tag.
+/// Shared by `parse_dds` (which drops the bool) and `load_dds` (which needs
+/// it to decide whether the caller's `srgb` hint applies).
+fn parse_dds_with_dxgi_flag(bytes: &[u8]) -> Result<(CompressedImage, bool), String> {
     let mut cursor = std::io::Cursor::new(bytes);
     let dds = ddsfile::Dds::read(&mut cursor).map_err(|e| format!("DDS parse error: {e}"))?;
+    let dxgi = dds.get_dxgi_format();
+    let format = match dxgi {
+        Some(ddsfile::DxgiFormat::BC7_UNorm)      => TextureFormat::Bc7RgbaUnorm,
+        Some(ddsfile::DxgiFormat::BC7_UNorm_sRGB) => TextureFormat::Bc7RgbaUnormSrgb,
+        Some(ddsfile::DxgiFormat::BC5_UNorm)      => TextureFormat::Bc5RgUnorm,
+        Some(other) => return Err(format!("unsupported DDS DXGI format {other:?}")),
+        // Pre-DX10 DDS files carry no DXGI tag; BC5 is the one format our
+        // pipeline still recognizes from its legacy fourCC.
+        None if dds.header.spf.fourcc == Some(ddsfile::FourCC(ddsfile::FourCC::ATI2)) => {
+            TextureFormat::Bc5RgUnorm
+        }
+        None => return Err("DDS has no supported DXGI format or recognized legacy fourCC".to_string()),
+    };
+    let image = CompressedImage {
+        width:     dds.header.width,
+        height:    dds.header.height,
+        mip_count: dds.get_num_mipmap_levels().max(1),
+        format,
+        data:      dds.data,
+    };
+    Ok((image, dxgi.is_some()))
+}
 
-    let width  = dds.header.width;
-    let height = dds.header.height;
-    let mips   = dds.get_num_mipmap_levels().max(1);
+/// Parse a DDS file's bytes into a `CompressedImage`, reading the format the
+/// file itself declares (its DX10 DXGI tag, or the legacy ATI2 fourCC for
+/// BC5) rather than assuming BC7. Runs on a worker thread — no GPU device
+/// needed.
+pub fn parse_dds(bytes: &[u8]) -> Result<CompressedImage, String> {
+    parse_dds_with_dxgi_flag(bytes).map(|(image, _)| image)
+}
+
+/// Parse a DDS file from disk — the worker-thread entry point for the
+/// engine's streamed-mesh material path, mirroring `load_image_rgba`'s
+/// RGBA8 counterpart.
+pub fn load_dds_image(path: &str) -> Result<CompressedImage, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {path}: {e}"))?;
+    parse_dds(&bytes)
+}
+
+/// Upload a parsed compressed image's full mip chain as a GPU texture. Block
+/// dimensions and bytes-per-block come from the image's own format, so BC7
+/// and BC5 (both 4×4 blocks, 16 B) share this path.
+pub(crate) fn create_bc_texture(device: &Device, queue: &Queue, img: &CompressedImage) -> ColorTexture {
+    let (block_w, block_h) = img.format.block_dimensions();
+    let block_bytes = img.format.block_copy_size(None).unwrap();
 
     let texture = device.create_texture(&TextureDescriptor {
-        label:           Some("Color Texture BC7"),
-        size:            Extent3d { width, height, depth_or_array_layers: 1 },
-        mip_level_count: mips,
+        label:           Some("Compressed Texture"),
+        size:            Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
+        mip_level_count: img.mip_count,
         sample_count:    1,
         dimension:       TextureDimension::D2,
-        format:          dds_format(srgb),
+        format:          img.format,
         usage:           TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
         view_formats:    &[],
     });
 
-    // BC7: 4×4 blocks, 16 bytes each; levels are stored contiguously.
     let mut offset = 0usize;
-    for level in 0..mips {
-        let w = (width >> level).max(1);
-        let h = (height >> level).max(1);
-        let blocks_x      = w.div_ceil(4);
-        let blocks_y      = h.div_ceil(4);
-        let bytes_per_row = blocks_x * 16;
-        let mip_size      = (blocks_x * blocks_y * 16) as usize;
-        if offset + mip_size > dds.data.len() {
-            log::warn!("{path}: DDS data truncated at mip {level} — uploaded {level} of {mips} levels");
+    for level in 0..img.mip_count {
+        let w = (img.width >> level).max(1);
+        let h = (img.height >> level).max(1);
+        let blocks_x      = w.div_ceil(block_w);
+        let blocks_y      = h.div_ceil(block_h);
+        let bytes_per_row = blocks_x * block_bytes;
+        let mip_size      = (blocks_x * blocks_y * block_bytes) as usize;
+        if offset + mip_size > img.data.len() {
+            log::warn!(
+                "compressed image data truncated at mip {level} — uploaded {level} of {} levels",
+                img.mip_count
+            );
             break;
         }
         queue.write_texture(
@@ -98,21 +152,37 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str, srgb: bool) -> Resul
                 origin:    wgpu::Origin3d::ZERO,
                 aspect:    TextureAspect::All,
             },
-            &dds.data[offset..offset + mip_size],
+            &img.data[offset..offset + mip_size],
             wgpu::TexelCopyBufferLayout {
                 offset:         0,
                 bytes_per_row:  Some(bytes_per_row),
                 rows_per_image: Some(blocks_y),
             },
-            Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            // wgpu requires the copy extent itself (not just the texture's
+            // virtual mip size) to be a block-size multiple, so sub-block
+            // mips (2×2, 1×1, ...) round up to the physical block grid.
+            Extent3d { width: blocks_x * block_w, height: blocks_y * block_h, depth_or_array_layers: 1 },
         );
         offset += mip_size;
     }
 
     let view    = texture.create_view(&TextureViewDescriptor::default());
     let sampler = make_sampler(device);
-    let tex_bytes = gpu_texture_bytes(dds_format(srgb), width, height, mips);
-    Ok(ColorTexture { texture, view, sampler, bytes: tex_bytes })
+    let bytes   = gpu_texture_bytes(img.format, img.width, img.height, img.mip_count);
+    ColorTexture { texture, view, sampler, bytes }
+}
+
+/// Load a compressed DDS file directly as a GPU texture, honoring the format
+/// the file itself declares. `srgb` (Bc7RgbaUnormSrgb vs Bc7RgbaUnorm) only
+/// matters for a genuinely legacy (pre-DX10) header, which carries no DXGI
+/// tag and so leaves color-space intent to the caller.
+pub fn load_dds(device: &Device, queue: &Queue, path: &str, srgb: bool) -> Result<ColorTexture, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {path}: {e}"))?;
+    let (mut img, had_dxgi_format) = parse_dds_with_dxgi_flag(&bytes)?;
+    if !had_dxgi_format {
+        img.format = dds_format(srgb);
+    }
+    Ok(create_bc_texture(device, queue, &img))
 }
 
 /// Upload RGBA8 pixels and build a full mip chain via the blit generator.
@@ -356,5 +426,31 @@ mod tests {
         // format, so the mip chain totals match BC7's exactly.
         let bytes = gpu_texture_bytes(TextureFormat::Bc5RgUnorm, 8, 8, 4);
         assert_eq!(bytes, (4 + 1 + 1 + 1) * 16);
+    }
+
+    #[test]
+    fn parse_dds_reads_srgb_bc7_fixture() {
+        let img = parse_dds(include_bytes!("../tests/data/red8x8_bc7_srgb.dds")).expect("fixture parses");
+        assert_eq!((img.width, img.height, img.mip_count), (8, 8, 4));
+        assert_eq!(img.format, TextureFormat::Bc7RgbaUnormSrgb);
+    }
+
+    #[test]
+    fn parse_dds_reads_linear_bc7_fixture() {
+        let img = parse_dds(include_bytes!("../tests/data/gray8x8_bc7_linear.dds")).expect("fixture parses");
+        assert_eq!((img.width, img.height, img.mip_count), (8, 8, 4));
+        assert_eq!(img.format, TextureFormat::Bc7RgbaUnorm);
+    }
+
+    #[test]
+    fn parse_dds_reads_bc5_fixture() {
+        let img = parse_dds(include_bytes!("../tests/data/tilt8x8_bc5.dds")).expect("fixture parses");
+        assert_eq!((img.width, img.height, img.mip_count), (8, 8, 4));
+        assert_eq!(img.format, TextureFormat::Bc5RgUnorm);
+    }
+
+    #[test]
+    fn parse_dds_garbage_bytes_is_err() {
+        assert!(parse_dds(b"not a dds file at all").is_err());
     }
 }

@@ -8,7 +8,7 @@
 //   VQ-B3 — socket bones exist in the rig
 //   VQ-B4 — every clip named in a race .ron exists in the referenced .glb
 
-use engine_renderer::mesh::{load_gltf_data, MeshData};
+use engine_renderer::mesh::{load_gltf_data, MeshData, TextureSource};
 use engine_renderer::SocketConfig;
 use std::path::{Path, PathBuf};
 use vordar_game::player::race::{RaceLibrary, RaceModel};
@@ -265,7 +265,7 @@ fn character_maps_within_dimension_cap() {
             ];
 
             for (slot_name, image) in &slots {
-                if let Some(img) = image {
+                if let Some(TextureSource::Rgba8(img)) = image {
                     assert!(
                         img.width <= MAX_DIM && img.height <= MAX_DIM,
                         "VQ-C5: race '{}' primitive {} slot '{}' exceeds 2048² ({}×{})",
@@ -294,7 +294,7 @@ fn ground_sets_within_dimension_cap() {
                 let path = std::fs::read_dir(&dir)
                     .unwrap_or_else(|e| panic!("zone '{}': ground dir {dir:?}: {e}", zone.name))
                     .flatten()
-                    .find(|f| f.file_name().to_string_lossy().contains(tag))
+                    .find(|f| f.file_name().to_string_lossy().contains(tag) && !f.file_name().to_string_lossy().ends_with(".dds"))
                     .unwrap_or_else(|| panic!("zone '{}': ground set lacks a *{tag}* map", zone.name))
                     .path();
 
@@ -334,7 +334,7 @@ fn total_texture_memory_within_budget() {
             ];
 
             for image in slots {
-                if let Some(img) = image {
+                if let Some(TextureSource::Rgba8(img)) = image {
                     // Estimate: RGBA8 + mip chain: w × h × 4 × 4/3
                     let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
                     total_bytes += bytes;
@@ -358,7 +358,7 @@ fn total_texture_memory_within_budget() {
                         let f = f.ok()?;
                         let name = f.file_name();
                         let name_str = name.to_string_lossy();
-                        if name_str.contains(tag) {
+                        if name_str.contains(tag) && !name_str.ends_with(".dds") {
                             Some(f.path())
                         } else {
                             None
@@ -387,7 +387,7 @@ fn total_texture_memory_within_budget() {
                     ];
 
                     for image in slots {
-                        if let Some(img) = image {
+                        if let Some(TextureSource::Rgba8(img)) = image {
                             let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
                             total_bytes += bytes;
                         }

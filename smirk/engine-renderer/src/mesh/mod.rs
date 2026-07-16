@@ -21,7 +21,7 @@ mod test_glb;
 mod store;
 mod sync;
 
-pub use gltf_import::{load_gltf_data, load_image_rgba, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData, VertexSkin};
+pub use gltf_import::{load_gltf_data, load_image_rgba, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData, TextureSource, VertexSkin};
 pub use store::MeshStore;
 #[cfg(feature = "offscreen")]
 pub(crate) use store::upload_mesh;

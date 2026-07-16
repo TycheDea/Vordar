@@ -5,7 +5,7 @@
 //
 // Pure mesh math — unit-tested without a GPU.
 
-use engine_renderer::mesh::{load_image_rgba, ImageData, MaterialData, MeshData, PrimitiveData};
+use engine_renderer::mesh::{load_image_rgba, ImageData, MaterialData, MeshData, PrimitiveData, TextureSource};
 use engine_renderer::tangent::generate_tangents;
 use engine_renderer::MeshVertex;
 
@@ -120,7 +120,7 @@ pub fn load_ground_material(dir: &str) -> Result<MaterialData, String> {
     let find = |tag: &str| -> Result<String, String> {
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{dir}: {e}"))?.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.contains(tag) {
+            if name.contains(tag) && !name.ends_with(".dds") {
                 return Ok(entry.path().to_string_lossy().into_owned());
             }
         }
@@ -140,9 +140,9 @@ pub fn load_ground_material(dir: &str) -> Result<MaterialData, String> {
     let mr = ImageData { width: rough.width, height: rough.height, pixels: mr_pixels };
 
     Ok(MaterialData {
-        base_color_image:         Some(albedo),
-        normal_image:             Some(normal),
-        metallic_roughness_image: Some(mr),
+        base_color_image:         Some(TextureSource::Rgba8(albedo)),
+        normal_image:             Some(TextureSource::Rgba8(normal)),
+        metallic_roughness_image: Some(TextureSource::Rgba8(mr)),
         metallic_factor:          1.0, // texture already encodes 0
         roughness_factor:         1.0,
         ..Default::default()
