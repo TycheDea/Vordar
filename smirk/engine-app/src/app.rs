@@ -84,7 +84,7 @@ impl App {
         let mut scheduler = Scheduler::new();
         scheduler.add(ClearEventsSystem,  Phase::Input,        SystemOrder::First);
         #[cfg(feature = "winit")]
-        scheduler.add(crate::input::InputEdgeFlushSystem, Phase::Input, SystemOrder::Last);
+        scheduler.add(crate::input::InputEdgeFlushSystem, Phase::PostUpdate, SystemOrder::Last);
         scheduler.add(SpawnFlushSystem,   Phase::SpawnFlush,   SystemOrder::Default);
         scheduler.add(DespawnFlushSystem, Phase::DespawnFlush, SystemOrder::Default);
 
@@ -300,7 +300,7 @@ mod tests {
     use super::*;
     use crate::scheduler::SystemOrder;
     use engine_core::World;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
     use std::sync::Arc;
 
     // A system that counts its own runs and requests app exit on the 5th run.
@@ -333,5 +333,60 @@ mod tests {
         app.run_headless(1000.0, None);
 
         assert_eq!(counter.load(Ordering::SeqCst), 5);
+    }
+
+    // Counts how many times `resources` reports KeyCode::KeyQ as just-pressed
+    // when this system runs — placed at whichever phase the test registers it.
+    #[cfg(feature = "winit")]
+    struct EdgeCounter {
+        count: Arc<AtomicU32>,
+    }
+
+    #[cfg(feature = "winit")]
+    impl System for EdgeCounter {
+        fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
+            if resources.get::<crate::input::KeyboardState>()
+                .unwrap()
+                .just_pressed(winit::keyboard::KeyCode::KeyQ)
+            {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    #[cfg(feature = "winit")]
+    #[test]
+    fn edge_visible_to_every_fixed_phase_exactly_once_per_press() {
+        let input_count      = Arc::new(AtomicU32::new(0));
+        let post_update_count = Arc::new(AtomicU32::new(0));
+
+        let mut app = App::new();
+        app.add_system(
+            EdgeCounter { count: input_count.clone() },
+            Phase::Input,
+            SystemOrder::Default,
+        );
+        app.add_system(
+            EdgeCounter { count: post_update_count.clone() },
+            Phase::PostUpdate,
+            SystemOrder::First,
+        );
+
+        app.resources.get_mut::<crate::input::KeyboardState>()
+            .unwrap()
+            .press(winit::keyboard::KeyCode::KeyQ);
+
+        // One frame, exactly 3 fixed steps (fp-safe multiplier, as in the
+        // scheduler's own multi-step tests).
+        app.run_ticks(3.5 / 60.0, 1);
+
+        assert_eq!(input_count.load(Ordering::SeqCst), 1, "Input-phase consumer must see the edge exactly once");
+        assert_eq!(post_update_count.load(Ordering::SeqCst), 1, "PostUpdate consumer must see the edge exactly once — not dropped, not replayed");
+
+        // A second frame with no new input must not replay the stale edge.
+        app.run_ticks(3.5 / 60.0, 1);
+
+        assert_eq!(input_count.load(Ordering::SeqCst), 1);
+        assert_eq!(post_update_count.load(Ordering::SeqCst), 1);
     }
 }

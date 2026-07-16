@@ -7,9 +7,13 @@
 // just_pressed/just_released record raw press/release events independently of
 // the level (`pressed`) state, so a press+release that both land within one
 // frame's event batch still yields one edge instead of cancelling to nothing.
-// InputEdgeFlushSystem drains them once per fixed Input tick (SystemOrder::Last,
-// after every Input-phase consumer has had a chance to observe them), so a
-// multi-step catch-up frame doesn't replay the same edge into later steps.
+// InputEdgeFlushSystem drains them once per fixed step, at the end of
+// Phase::PostUpdate (the last fixed phase), so every fixed phase in the step
+// observes an edge exactly once and a multi-step catch-up frame doesn't
+// replay it. Edge consumers register at First/Default of any fixed phase,
+// never PostUpdate/Last. Render-cadence systems (RenderSync/Render) run once
+// per frame after all steps and must read level state (`is_pressed`), never
+// `just_*`.
 
 use std::collections::HashSet;
 use winit::event::MouseButton;
@@ -140,11 +144,14 @@ impl MouseState {
     }
 }
 
-/// Drains KeyboardState/MouseState edge sets once per fixed Input tick.
-/// Registered at Phase::Input, SystemOrder::Last by App::new() so every
-/// Input-phase consumer (ability casts, etc.) observes an edge before it's
-/// cleared for the next step.
-pub(crate) struct InputEdgeFlushSystem;
+/// Drains KeyboardState/MouseState edge sets once per fixed step. Registered
+/// by `App::new()` at `Phase::PostUpdate`, `SystemOrder::Last` — the last
+/// fixed phase of a step — so every fixed phase (Input, PreUpdate, Update,
+/// Collision, CollisionResolve, PostUpdate, ...) observes an edge exactly
+/// once per press, and a multi-step catch-up frame doesn't replay it into
+/// later steps. `pub` so cross-crate headless tests can reproduce this
+/// wiring against a real `Scheduler`.
+pub struct InputEdgeFlushSystem;
 
 impl crate::scheduler::System for InputEdgeFlushSystem {
     fn run(&mut self, _world: &mut engine_core::World, resources: &mut engine_core::traits::Resources, _delta: f32) {
@@ -183,7 +190,7 @@ mod tests {
         kb.press(KeyCode::KeyE);
 
         assert!(kb.just_pressed(KeyCode::KeyE));
-        kb.drain_edges(); // end of step 1's Input phase
+        kb.drain_edges(); // end of step 1
         assert!(!kb.just_pressed(KeyCode::KeyE), "step 2 must not replay step 1's edge");
     }
 
