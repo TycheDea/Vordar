@@ -157,8 +157,10 @@ pub struct MeshStore {
 
 impl MeshStore {
     /// Upload procedurally-built mesh data under a synthetic key (e.g.
-    /// "zone-ground:start"). Re-registering a key uploads fresh data — zone
-    /// rebuilds replace their ground.
+    /// "zone-ground:start"). Re-registering a key uploads fresh data and
+    /// replaces the existing slot in place — zone rebuilds replace their
+    /// ground without growing `meshes` (indices must stay stable, so nothing
+    /// can ever be removed from it).
     pub(crate) fn register(
         &mut self,
         device: &Device,
@@ -168,8 +170,13 @@ impl MeshStore {
         key:    &str,
         data:   MeshData,
     ) -> usize {
+        let mesh = upload_mesh(device, queue, layout, mipgen, data);
+        if let Some(&Some(idx)) = self.by_path.get(key) {
+            self.meshes[idx] = mesh;
+            return idx;
+        }
         let idx = self.meshes.len();
-        self.meshes.push(upload_mesh(device, queue, layout, mipgen, data));
+        self.meshes.push(mesh);
         self.by_path.insert(key.to_owned(), Some(idx));
         idx
     }
@@ -198,5 +205,56 @@ impl MeshStore {
         };
         self.by_path.insert(path.to_owned(), result);
         result
+    }
+}
+
+#[cfg(all(test, feature = "offscreen"))]
+mod tests {
+    use super::*;
+    use crate::mesh::gltf_import::PrimitiveData;
+    use crate::mesh_pipeline::{self, MeshVertex};
+    use crate::offscreen::HeadlessGpu;
+
+    fn triangle_mesh_data() -> MeshData {
+        let vertex = |x: f32, y: f32| MeshVertex {
+            position: [x, y, 0.0],
+            normal:   [0.0, 0.0, 1.0],
+            uv:       [x, y],
+            tangent:  [1.0, 0.0, 0.0, 1.0],
+        };
+        MeshData {
+            primitives: vec![PrimitiveData {
+                vertices: vec![vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)],
+                indices:  vec![0, 1, 2],
+                material: Default::default(),
+                skin:     None,
+            }],
+            skeleton: None,
+            clips:    vec![],
+        }
+    }
+
+    /// Re-registering the same key must replace the GpuMesh in place — not
+    /// grow `meshes` — so indices stay stable and the replaced buffers/
+    /// textures drop instead of leaking (finding: re-registration leak).
+    #[test]
+    fn register_same_key_replaces_in_place() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — MeshStore::register test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+        let mut store = MeshStore::default();
+
+        let idx1 = store.register(
+            &gpu.device, &gpu.queue, &layout, &mipgen, "zone-ground:start", triangle_mesh_data(),
+        );
+        let idx2 = store.register(
+            &gpu.device, &gpu.queue, &layout, &mipgen, "zone-ground:start", triangle_mesh_data(),
+        );
+
+        assert_eq!(idx1, idx2, "re-registering the same key must return the same index");
+        assert_eq!(store.meshes.len(), 1, "re-registering must not grow the mesh vec");
     }
 }
