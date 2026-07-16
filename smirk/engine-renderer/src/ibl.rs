@@ -1,8 +1,9 @@
 // Image-based lighting: bake a Radiance .hdr equirect into the cubemaps the
-// PBR shaders consume — base environment (sky), diffuse irradiance,
-// GGX-prefiltered specular chain, and the split-sum BRDF LUT. All baking
-// happens once at environment load through render passes (the mipgen blit
-// skeleton with IBL fragments).
+// PBR shaders consume — base environment (sky), diffuse irradiance, and the
+// GGX-prefiltered specular chain — through render passes (the mipgen blit
+// skeleton with IBL fragments), once per environment load. The split-sum
+// BRDF LUT depends only on (NdotV, roughness), never the equirect, so it
+// bakes once (`bake_brdf_lut`) and every `Environment` shares that view.
 
 use half::f16;
 use wgpu::util::DeviceExt;
@@ -62,7 +63,6 @@ pub(crate) struct Environment {
     _cubemap:    wgpu::Texture,
     _irradiance: wgpu::Texture,
     _prefilter:  wgpu::Texture,
-    _brdf:       wgpu::Texture,
     _sampler:    wgpu::Sampler,
 }
 
@@ -73,6 +73,7 @@ impl Environment {
         queue:      &Queue,
         env_layout: &wgpu::BindGroupLayout,
         sky_layout: &wgpu::BindGroupLayout,
+        brdf_view:  &wgpu::TextureView,
         path:       &str,
     ) -> Result<Self, String> {
         let img = image::open(path).map_err(|e| format!("{path}: {e}"))?.into_rgb32f();
@@ -81,16 +82,20 @@ impl Environment {
             .pixels()
             .flat_map(|p| [p.0[0], p.0[1], p.0[2], 1.0])
             .collect();
-        Ok(Self::from_equirect_pixels(device, queue, env_layout, sky_layout, w, h, &pixels))
+        Ok(Self::from_equirect_pixels(device, queue, env_layout, sky_layout, brdf_view, w, h, &pixels))
     }
 
     /// Bake from raw RGBA f32 equirect pixels (also the test seam: a uniform
-    /// image gives a white-furnace environment).
+    /// image gives a white-furnace environment). `brdf_view` is the LUT baked
+    /// once at renderer init (see `bake_brdf_lut`) and shared across every
+    /// `Environment` — it depends only on (NdotV, roughness), never on the
+    /// pixels baked here.
     pub(crate) fn from_equirect_pixels(
         device:     &Device,
         queue:      &Queue,
         env_layout: &wgpu::BindGroupLayout,
         sky_layout: &wgpu::BindGroupLayout,
+        brdf_view:  &wgpu::TextureView,
         width:      u32,
         height:     u32,
         rgba_f32:   &[f32],
@@ -160,19 +165,6 @@ impl Environment {
             }
         }
 
-        // 4. BRDF LUT.
-        let brdf = device.create_texture(&wgpu::TextureDescriptor {
-            label:           Some("IBL BRDF LUT"),
-            size:            wgpu::Extent3d { width: BRDF_SIZE, height: BRDF_SIZE, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count:    1,
-            dimension:       wgpu::TextureDimension::D2,
-            format:          TextureFormat::Rgba16Float,
-            usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats:    &[],
-        });
-        baker.bake_2d(device, queue, &baker.brdf_pipeline, &brdf);
-
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label:          Some("Environment Sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -190,7 +182,7 @@ impl Environment {
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&cube_view(&irradiance)) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&cube_view(&prefilter)) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&brdf.create_view(&Default::default())) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(brdf_view) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&sampler) },
             ],
         });
@@ -209,7 +201,6 @@ impl Environment {
             _cubemap:    cubemap,
             _irradiance: irradiance,
             _prefilter:  prefilter,
-            _brdf:       brdf,
             _sampler:    sampler,
         }
     }
@@ -221,11 +212,50 @@ impl Environment {
         queue:      &Queue,
         env_layout: &wgpu::BindGroupLayout,
         sky_layout: &wgpu::BindGroupLayout,
+        brdf_view:  &wgpu::TextureView,
     ) -> Self {
         let v = 0.18f32;
         let pixels: Vec<f32> = (0..4 * 2).flat_map(|_| [v, v, v, 1.0]).collect();
-        Self::from_equirect_pixels(device, queue, env_layout, sky_layout, 4, 2, &pixels)
+        Self::from_equirect_pixels(device, queue, env_layout, sky_layout, brdf_view, 4, 2, &pixels)
     }
+}
+
+/// Bakes the split-sum BRDF LUT once — a pure function of (NdotV,
+/// roughness) with no environment input (`ibl.wgsl:155-183`), so every
+/// `Environment` shares this view instead of rebaking it per zone crossing.
+pub(crate) fn bake_brdf_lut(device: &Device, queue: &Queue) -> wgpu::TextureView {
+    let baker = Baker::new(device);
+    let brdf = device.create_texture(&wgpu::TextureDescriptor {
+        label:           Some("IBL BRDF LUT"),
+        size:            wgpu::Extent3d { width: BRDF_SIZE, height: BRDF_SIZE, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          TextureFormat::Rgba16Float,
+        usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats:    &[],
+    });
+    baker.bake_2d(device, queue, &baker.brdf_pipeline, &brdf);
+    #[cfg(feature = "offscreen")]
+    BAKE_COUNT.with(|c| c.set(c.get() + 1));
+    brdf.create_view(&Default::default())
+}
+
+// Thread-local rather than a process-global counter: the default test
+// harness runs each `#[test]` on its own thread, so a test's count of its
+// own renderer's bakes can't be polluted by other tests' renderers running
+// concurrently on other threads.
+#[cfg(feature = "offscreen")]
+thread_local! {
+    static BAKE_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// BRDF LUT bakes performed on the calling thread so far — lets tests assert
+/// that repeated `Environment` construction shares the LUT rather than
+/// rebaking it.
+#[cfg(feature = "offscreen")]
+pub(crate) fn brdf_bake_count() -> u32 {
+    BAKE_COUNT.with(|c| c.get())
 }
 
 fn create_cube(device: &Device, label: &str, size: u32, mips: u32) -> wgpu::Texture {

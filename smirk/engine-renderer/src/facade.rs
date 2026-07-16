@@ -120,7 +120,12 @@ pub fn unproject_to_ground(view_proj: Mat4, ndc: glam::Vec2) -> Option<GlamVec3>
 pub fn set_environment(path: &str, resources: &mut Resources) -> bool {
     // Headless / pre-window: nothing to do (same contract as the sync systems).
     let Some(state) = resources.get_mut::<RendererState>() else { return false };
-    match ibl::Environment::from_hdr(&state.device, &state.queue, &state.env_bgl, &state.sky_bgl, path) {
+    let start = std::time::Instant::now();
+    let result = ibl::Environment::from_hdr(
+        &state.device, &state.queue, &state.env_bgl, &state.sky_bgl, &state.brdf_view, path,
+    );
+    log::info!("set_environment({path}) bake took {:?}", start.elapsed());
+    match result {
         Ok(env) => {
             state.environment = env;
             true

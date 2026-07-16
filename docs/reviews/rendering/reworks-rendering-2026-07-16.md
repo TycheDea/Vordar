@@ -203,6 +203,52 @@ Cross-type queue (mirrored verbatim from `audit-rendering-2026-07-16.md`):
 - **Path:** ordered last; plan the items individually when their layer
   below (lights, culling) is in place.
 
+### 7. Per-environment IBL pipeline recompilation dominates the zone-crossing cost the LUT hoist targeted
+
+- **Origin:** measured while implementing audit finding 7 (BRDF LUT
+  re-baked per environment). The fix landed as specified — `bake_brdf_lut`
+  runs once at `RendererState`/`OffscreenRenderer` init and every
+  `Environment` shares the view (`ibl.rs`) — but the wall-clock win the
+  finding expected from removing the redundant bake did not show up.
+- **Evidence:** instrumented timing (removed after measurement) over 10
+  offscreen `set_uniform_environment` calls showed ~24ms/environment both
+  before and after the fix (241ms vs ~240ms for 10 loads). Breaking a single
+  load down: `Baker::new(device)` (recompiles the shader module and all 4
+  bake pipelines — equirect, irradiance, prefilter, brdf — from scratch)
+  costs ~9-10ms; the equirect+irradiance+prefilter bake passes together cost
+  ~14ms. `Baker::new` runs unconditionally inside
+  `Environment::from_equirect_pixels` on every zone crossing
+  (`ibl.rs:from_equirect_pixels`), including compiling a `brdf_pipeline` that
+  is now never invoked there (the shared LUT already exists) — pure waste
+  post-fix, on top of the pre-existing waste of recompiling the other three
+  pipelines identically every load.
+- **Ideal:** none of the four bake pipelines' compiled state depends on the
+  equirect pixel data — only the per-face bind groups and the source texture
+  do. All four pipelines (and the shader module) should compile once at
+  init, like the LUT itself, and every environment load should reuse them.
+- **Gap:** the measured per-zone-crossing cost is dominated by pipeline
+  recompilation, not by any of the bake passes — the actual target of
+  finding 7's fix is a small fraction of the total, so hoisting the LUT
+  alone doesn't move the number that matters (zone-crossing wall time).
+- **Tradeoffs:** *Wins:* likely the largest remaining win for zone-crossing
+  latency, directly feeds rework 2 (asset streaming) which already cites
+  finding 7 as shrinking "the moving parts" — this shrinks the same moving
+  part further. *Losses:* `Baker` currently borrows `device` for its
+  lifetime and is constructed fresh per bake; hoisting it means either
+  storing it on `RendererState`/`OffscreenRenderer` (more fields) or
+  restructuring bake calls to take pipelines by reference instead of owning
+  a `Baker`.
+- **Suggestion:** /plan-rework alongside or as a prerequisite step of rework
+  2. The plan should hoist `Baker`'s shader module + 4 pipelines to init
+  (same treatment as `bake_brdf_lut`), leaving only the per-environment
+  texture/bind-group creation and the actual bake draw calls in
+  `from_equirect_pixels`.
+- **Path:** plan → hoist `Baker` construction to
+  `RendererState::init`/`OffscreenRenderer::new` → thread it (or its
+  pipelines) into `from_equirect_pixels` → re-measure the same
+  zone-crossing timing this finding used, confirm the ~9-10ms/load drops
+  out.
+
 ## Carried forward from previous report
 
 None — first run of this audit.

@@ -125,6 +125,7 @@ pub struct OffscreenRenderer {
     sky_pipeline:   wgpu::RenderPipeline,
     tonemap:        TonemapPass,
     environment:    Environment,
+    brdf_view:      wgpu::TextureView,
     mipgen:         MipGenerator,
     shadow_view:       wgpu::TextureView,
     shadow_pipelines:  ShadowPipelines,
@@ -170,7 +171,8 @@ impl OffscreenRenderer {
         let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
         let env_bgl      = crate::ibl::create_env_bind_group_layout(device);
         let sky_bgl      = sky::create_sky_bind_group_layout(device);
-        let environment  = Environment::default_gray(device, &gpu.queue, &env_bgl, &sky_bgl);
+        let brdf_view    = crate::ibl::bake_brdf_lut(device, &gpu.queue);
+        let environment  = Environment::default_gray(device, &gpu.queue, &env_bgl, &sky_bgl, &brdf_view);
         let mipgen       = MipGenerator::new(device);
 
         let sdf_pipeline =
@@ -205,6 +207,7 @@ impl OffscreenRenderer {
             sky_pipeline,
             tonemap,
             environment,
+            brdf_view,
             mipgen,
             light_buffer,
             camera_bind_group,
@@ -223,8 +226,15 @@ impl OffscreenRenderer {
     pub fn set_uniform_environment(&mut self, rgb: [f32; 3]) {
         let pixels: Vec<f32> = (0..4 * 2).flat_map(|_| [rgb[0], rgb[1], rgb[2], 1.0]).collect();
         self.environment = Environment::from_equirect_pixels(
-            &self.gpu.device, &self.gpu.queue, &self.env_bgl, &self.sky_bgl, 4, 2, &pixels,
+            &self.gpu.device, &self.gpu.queue, &self.env_bgl, &self.sky_bgl, &self.brdf_view, 4, 2, &pixels,
         );
+    }
+
+    /// BRDF LUT bakes performed on the calling thread so far — proves
+    /// repeated `Environment` construction (zone crossings) shares the LUT
+    /// baked in `new` rather than rebaking it.
+    pub fn brdf_bake_count() -> u32 {
+        crate::ibl::brdf_bake_count()
     }
 
     /// Re-aims the camera to boresight elevation 0 (looking exactly at the

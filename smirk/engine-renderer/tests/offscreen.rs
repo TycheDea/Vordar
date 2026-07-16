@@ -692,3 +692,22 @@ fn sky_fog_blends_toward_horizon_and_stays_bit_stable_at_zero_density() {
         "near-zenith rows must stay close to the unfogged sky"
     );
 }
+
+/// The BRDF LUT depends only on (NdotV, roughness), never on environment
+/// data, so it must bake once at renderer init and every `Environment`
+/// (zone crossing) shares that view rather than rebaking it.
+#[test]
+fn repeated_environment_loads_skip_redundant_brdf_bake() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    let after_init = OffscreenRenderer::brdf_bake_count();
+
+    for i in 0..5 {
+        let v = 0.1 + i as f32 * 0.05;
+        r.set_uniform_environment([v, v * 0.8, v * 1.1]);
+    }
+
+    assert_eq!(
+        OffscreenRenderer::brdf_bake_count(), after_init,
+        "5 environment loads (zone crossings) must not rebake the shared BRDF LUT"
+    );
+}
