@@ -24,7 +24,11 @@ Cross-type queue (mirrored verbatim from
 > the rework designs)~~ — all done 2026-07-15: fixes 1–13 landed, rework 1's
 > plan (`plan-game-architecture-rework-1-2026-07-15.md`) executed in 6 steps,
 > loop-final gate 316/316. Rework 2 (filed mid-loop by finding 6's latch
-> sweep) remains open, not yet planned.**
+> sweep) done 2026-07-16 (plan-game-architecture-rework-2-2026-07-16.md,
+> 4 steps; the edge drain moved to PostUpdate/Last so every fixed phase
+> observes an edge exactly once, OS key repeats no longer re-fire
+> `just_pressed`, and MenuSystem, CycleCameraSystem, and DevOverlaySystem
+> consume the edge API with their hand-rolled `was_*` latches deleted).**
 
 ### 1. A multiplayer population & progression model for chapter content
 
