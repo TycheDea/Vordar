@@ -5,6 +5,23 @@ use glam::{Mat3, Mat4};
 
 use super::anim_import::{extract_skeleton, extract_clips};
 
+/// The three glTF alpha modes with their associated parameters.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum AlphaMode {
+    /// No transparency; all fragments are opaque.
+    Opaque,
+    /// Binary transparency with a discard threshold.
+    Mask(f32),
+    /// Blended transparency (encoded as mask 0.5 until step 2 implements sorted rendering).
+    Blend,
+}
+
+impl Default for AlphaMode {
+    fn default() -> Self {
+        AlphaMode::Opaque
+    }
+}
+
 /// RGBA8 pixels, sRGB-encoded (glTF base-color convention).
 pub struct ImageData {
     pub width:  u32,
@@ -28,10 +45,8 @@ pub struct MaterialData {
     pub base_color_factor: [f32; 4],
     pub metallic_factor:   f32,
     pub roughness_factor:  f32,
-    /// Fragment-discard threshold from glTF alphaMode: 0.0 for OPAQUE (never
-    /// discards), the cutoff for MASK. BLEND is approximated as MASK at 0.5 —
-    /// there is no sorted transparency pass.
-    pub alpha_cutoff:      f32,
+    /// Alpha mode from the glTF material: distinguishes OPAQUE, MASK, and BLEND.
+    pub alpha_mode:        AlphaMode,
     pub emissive_factor:   [f32; 3],
     /// KHR_materials_emissive_strength (1.0 when absent) — HDR emissive for
     /// bloom.
@@ -49,7 +64,7 @@ impl Default for MaterialData {
             base_color_factor: [1.0; 4],
             metallic_factor:   1.0,
             roughness_factor:  1.0,
-            alpha_cutoff:      0.0,
+            alpha_mode:        AlphaMode::Opaque,
             emissive_factor:   [0.0; 3],
             emissive_strength: 1.0,
             base_color_image:         None,
@@ -235,10 +250,10 @@ fn read_material(
         base_color_factor: pbr.base_color_factor(),
         metallic_factor:   pbr.metallic_factor(),
         roughness_factor:  pbr.roughness_factor(),
-        alpha_cutoff: match mat.alpha_mode() {
-            gltf::material::AlphaMode::Opaque => 0.0,
-            gltf::material::AlphaMode::Mask => mat.alpha_cutoff().unwrap_or(0.5),
-            gltf::material::AlphaMode::Blend => 0.5,
+        alpha_mode: match mat.alpha_mode() {
+            gltf::material::AlphaMode::Opaque => AlphaMode::Opaque,
+            gltf::material::AlphaMode::Mask => AlphaMode::Mask(mat.alpha_cutoff().unwrap_or(0.5)),
+            gltf::material::AlphaMode::Blend => AlphaMode::Blend,
         },
         emissive_factor:   mat.emissive_factor(),
         emissive_strength: mat.emissive_strength().unwrap_or(1.0),
@@ -316,8 +331,8 @@ mod tests {
         // Solid-color material, no texture.
         assert_eq!(p.material.base_color_factor, [0.2, 0.4, 0.8, 1.0]);
         assert!(p.material.base_color_image.is_none());
-        // alphaMode MASK carries its cutoff (OPAQUE would read 0.0).
-        assert_eq!(p.material.alpha_cutoff, 0.35);
+        // alphaMode MASK carries its cutoff (OPAQUE would read AlphaMode::Opaque).
+        assert_eq!(p.material.alpha_mode, AlphaMode::Mask(0.35));
         // No TANGENT accessor in the file — generated from UVs. This
         // triangle's UVs map u to +X, so the tangent points along +X.
         assert_eq!(p.vertices[0].tangent, [1.0, 0.0, 0.0, 1.0]);
@@ -364,6 +379,17 @@ mod tests {
         let mats = joint_matrices(skel, &pose);
         let skinned = mats[1].transform_point3(Vec3::new(0.0, 1.0, 0.0));
         assert!(skinned.abs_diff_eq(Vec3::new(-1.0, 0.0, 0.0), 1e-4), "got {skinned}");
+    }
+
+    #[test]
+    fn blend_alpha_mode_survives_import() {
+        let path = std::env::temp_dir().join("vordar_mesh_test_blend.glb");
+        crate::mesh::test_glb::write_blend_glb(&path);
+
+        let data = load_gltf_data(path.to_str().unwrap()).unwrap();
+        assert_eq!(data.primitives.len(), 1);
+        let p = &data.primitives[0];
+        assert_eq!(p.material.alpha_mode, AlphaMode::Blend);
     }
 
     /// Exercises real-asset paths the synthetic GLB can't: embedded PNG

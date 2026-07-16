@@ -150,3 +150,60 @@ pub(crate) fn write_skinned_glb(path: &std::path::Path) {
     glb.extend_from_slice(&bin);
     std::fs::write(path, glb).unwrap();
 }
+
+/// Build a minimal single-triangle GLB with BLEND alpha mode and red semi-transparent baseColorFactor.
+pub(crate) fn write_blend_glb(path: &std::path::Path) {
+    let mut bin: Vec<u8> = Vec::new();
+    let positions: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    let normals:   [[f32; 3]; 3] = [[0.0, 0.0, 1.0]; 3];
+    let uvs:       [[f32; 2]; 3] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    let indices:   [u16; 3]      = [0, 1, 2];
+    for v in positions.iter().flatten() { bin.extend_from_slice(&v.to_le_bytes()); }
+    for v in normals.iter().flatten()   { bin.extend_from_slice(&v.to_le_bytes()); }
+    for v in uvs.iter().flatten()       { bin.extend_from_slice(&v.to_le_bytes()); }
+    for i in indices                    { bin.extend_from_slice(&i.to_le_bytes()); }
+
+    let json = format!(r#"{{
+        "asset": {{"version": "2.0"}},
+        "scene": 0,
+        "scenes": [{{"nodes": [0]}}],
+        "nodes": [{{"mesh": 0, "translation": [1, 2, 3]}}],
+        "meshes": [{{"primitives": [{{
+            "attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}},
+            "indices": 3, "material": 0
+        }}]}}],
+        "materials": [{{"pbrMetallicRoughness": {{"baseColorFactor": [1.0, 0.0, 0.0, 0.6]}},
+                        "alphaMode": "BLEND"}}],
+        "buffers": [{{"byteLength": {bin_len}}}],
+        "bufferViews": [
+            {{"buffer": 0, "byteOffset": 0,  "byteLength": 36}},
+            {{"buffer": 0, "byteOffset": 36, "byteLength": 36}},
+            {{"buffer": 0, "byteOffset": 72, "byteLength": 24}},
+            {{"buffer": 0, "byteOffset": 96, "byteLength": 6}}
+        ],
+        "accessors": [
+            {{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 0.0]}},
+            {{"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"}},
+            {{"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"}},
+            {{"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}}
+        ]
+    }}"#, bin_len = bin.len());
+
+    let mut json_bytes = json.into_bytes();
+    while json_bytes.len() % 4 != 0 { json_bytes.push(b' '); }
+    while bin.len() % 4 != 0 { bin.push(0); }
+
+    let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
+    let mut glb = Vec::with_capacity(total);
+    glb.extend_from_slice(&0x46546C67u32.to_le_bytes()); // magic "glTF"
+    glb.extend_from_slice(&2u32.to_le_bytes());
+    glb.extend_from_slice(&(total as u32).to_le_bytes());
+    glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+    glb.extend_from_slice(&0x4E4F534Au32.to_le_bytes()); // "JSON"
+    glb.extend_from_slice(&json_bytes);
+    glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
+    glb.extend_from_slice(&0x004E4942u32.to_le_bytes()); // "BIN\0"
+    glb.extend_from_slice(&bin);
+    std::fs::write(path, glb).unwrap();
+}

@@ -6,7 +6,7 @@
 // Frames go through the real chain: MSAA HDR → resolve → ACES tonemap.
 
 use engine_renderer::instance::SdfInstance;
-use engine_renderer::mesh::{load_gltf_data, ImageData, MaterialData, MeshData, PrimitiveData};
+use engine_renderer::mesh::{load_gltf_data, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData};
 use engine_renderer::offscreen::{
     create_mipped_rgba8, read_texture_mip, HeadlessGpu, OffscreenRenderer, TestLight, TestPointLight,
 };
@@ -377,7 +377,7 @@ fn diagonal_alpha_texture(size: u32) -> ImageData {
 
 fn masked_billboard() -> MeshData {
     camera_filling_quad(MaterialData {
-        alpha_cutoff:      0.5,
+        alpha_mode:        AlphaMode::Mask(0.5),
         metallic_factor:   0.0,
         roughness_factor:  1.0,
         base_color_image:  Some(diagonal_alpha_texture(64)),

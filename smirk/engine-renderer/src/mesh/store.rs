@@ -17,6 +17,8 @@ pub(crate) struct GpuPrimitive {
     pub(crate) _textures:          Vec<ColorTexture>,
     pub(crate) _material_buffer:   Buffer,
     pub(crate) material_bind_group: BindGroup,
+    pub(crate) blend:   bool,
+    pub(crate) centroid: glam::Vec3,
 }
 
 /// CPU-side animation data kept next to a skinned GpuMesh so sampling needs no
@@ -104,6 +106,26 @@ pub(crate) fn upload_mesh(
         let emissive = slot_texture(device, queue, mipgen, &m.emissive_image, true, [255; 4]);
         let ao       = slot_texture(device, queue, mipgen, &m.occlusion_image, false, [255; 4]);
 
+        let cutoff = match m.alpha_mode {
+            super::gltf_import::AlphaMode::Opaque => 0.0,
+            super::gltf_import::AlphaMode::Mask(c) => c,
+            super::gltf_import::AlphaMode::Blend => 0.5,
+        };
+        let blend = m.alpha_mode == super::gltf_import::AlphaMode::Blend;
+
+        let centroid = if p.vertices.is_empty() {
+            glam::Vec3::ZERO
+        } else {
+            let mut min = glam::Vec3::from(p.vertices[0].position);
+            let mut max = min;
+            for v in &p.vertices {
+                let pos = glam::Vec3::from(v.position);
+                min = min.min(pos);
+                max = max.max(pos);
+            }
+            (min + max) / 2.0
+        };
+
         let uniform = MaterialUniform {
             base_color: m.base_color_factor,
             emissive: [
@@ -112,7 +134,7 @@ pub(crate) fn upload_mesh(
                 m.emissive_factor[2] * m.emissive_strength,
                 0.0,
             ],
-            mr: [m.metallic_factor, m.roughness_factor, m.alpha_cutoff, 0.0],
+            mr: [m.metallic_factor, m.roughness_factor, cutoff, 0.0],
         };
         let material_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label:    Some("Material Uniform"),
@@ -141,6 +163,8 @@ pub(crate) fn upload_mesh(
             _textures: vec![albedo, normal, mr, emissive, ao],
             _material_buffer: material_buffer,
             material_bind_group,
+            blend,
+            centroid,
         }
     }).collect();
 
@@ -302,7 +326,7 @@ pub(crate) const MESH_UPLOADS_PER_FRAME: usize = 1;
 #[cfg(all(test, feature = "offscreen"))]
 mod tests {
     use super::*;
-    use crate::mesh::gltf_import::PrimitiveData;
+    use crate::mesh::gltf_import::{AlphaMode, MaterialData, PrimitiveData};
     use crate::mesh_pipeline::{self, MeshVertex};
     use crate::offscreen::HeadlessGpu;
 
@@ -482,6 +506,55 @@ mod tests {
         );
         assert_eq!(store.meshes.len(), 1);
         assert_eq!(store.get_or_request(key), Some(idx));
+    }
+
+    #[test]
+    fn upload_records_blend_flag_and_centroid() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — GpuPrimitive metadata test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+
+        let vertex = |x: f32, y: f32| MeshVertex {
+            position: [x, y, 0.0],
+            normal:   [0.0, 0.0, 1.0],
+            uv:       [x, y],
+            tangent:  [1.0, 0.0, 0.0, 1.0],
+        };
+
+        let data = MeshData {
+            primitives: vec![
+                PrimitiveData {
+                    vertices: vec![vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)],
+                    indices:  vec![0, 1, 2],
+                    material: Default::default(),
+                    skin:     None,
+                },
+                PrimitiveData {
+                    vertices: vec![vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)],
+                    indices:  vec![0, 1, 2],
+                    material: MaterialData {
+                        alpha_mode: AlphaMode::Blend,
+                        ..Default::default()
+                    },
+                    skin:     None,
+                },
+            ],
+            skeleton: None,
+            clips:    vec![],
+        };
+
+        let gpu_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, data);
+
+        assert_eq!(gpu_mesh.primitives.len(), 2);
+        assert!(!gpu_mesh.primitives[0].blend, "default material should not be blend");
+        assert!(gpu_mesh.primitives[1].blend, "alpha_mode::Blend should set blend flag");
+
+        let centroid = glam::Vec3::new(0.5, 0.5, 0.0);
+        assert!(gpu_mesh.primitives[0].centroid.abs_diff_eq(centroid, 1e-5), "prim0 centroid");
+        assert!(gpu_mesh.primitives[1].centroid.abs_diff_eq(centroid, 1e-5), "prim1 centroid");
     }
 
     /// Content-gated: streams the real statue asset (11 MB, embedded
