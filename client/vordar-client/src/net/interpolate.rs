@@ -2,7 +2,8 @@
 // entity's NetBuffer sample ring is rendered a fixed INTERP_DELAY_TICKS
 // behind the newest received snapshot tick via a slewed playback cursor
 // (absorbing jitter without freezing or warbling), with capped extrapolation
-// bridging short gaps in arrivals. Runs in Phase::Update, SystemOrder::First.
+// bridging short gaps in arrivals and holding terminally through a sustained
+// stall. Runs in Phase::Update, SystemOrder::First.
 
 use super::*;
 
@@ -23,9 +24,15 @@ const INTERP_DELAY_TICKS: f64 = 2.0 * (TICK_HZ / SNAPSHOT_HZ) as f64;
 /// INTERP_DELAY_TICKS` always reads as a smooth change of pace, never a pop.
 const MAX_SLEW_FRACTION: f64 = 0.10;
 
-/// Divergence (in ticks) beyond which the playback cursor gives up slewing
-/// and hard-snaps to the target delay instead — a reconnect or a stall long
-/// enough that smooth catch-up would take too long to be worth it.
+/// Forward divergence (in ticks) beyond which the playback cursor gives up
+/// slewing and hard-snaps to the target delay instead — a reconnect or a
+/// stall long enough that smooth catch-up would take too long to be worth
+/// it. One-sided: the cursor never moves backward within a session, so
+/// backward divergence is never resynced this way — it's bounded instead by
+/// the horizon clamp in `advance_playback` at `INTERP_DELAY_TICKS +
+/// EXTRAP_CAP_TICKS` ticks behind `latest_state_tick`. A genuine reconnect
+/// resets `playback` to `None` (see `lifecycle.rs`) rather than relying on
+/// this constant to snap backward.
 const RESYNC_TICKS: f64 = 30.0;
 
 /// Cap on capped extrapolation past an entity's newest buffered sample, in
@@ -119,18 +126,22 @@ impl System for NetInterpolateSystem {
 /// TICK_HZ` ticks, slewed toward `latest_state_tick as f64 -
 /// INTERP_DELAY_TICKS` within `±MAX_SLEW_FRACTION` of that nominal advance so
 /// catching up never pops — except `playback == None` (never driven) or a
-/// divergence past `RESYNC_TICKS`, which hard-snap to the target instead of
-/// slewing toward it.
+/// forward divergence past `RESYNC_TICKS`, which snaps to the target instead
+/// of slewing toward it. The result is clamped to `latest_state_tick as f64 +
+/// EXTRAP_CAP_TICKS`: advancing the cursor past that horizon changes no
+/// rendered position (`sample_buffer` already holds at the capped point), so
+/// a sustained stall is a terminal capped hold rather than a cursor that
+/// keeps running ahead and periodically snapping backward.
 fn advance_playback(playback: Option<f64>, latest_state_tick: u64, delta: f32) -> f64 {
     let target = latest_state_tick as f64 - INTERP_DELAY_TICKS;
     let Some(prev) = playback else { return target };
     let error = target - prev;
-    if error.abs() > RESYNC_TICKS {
+    if error > RESYNC_TICKS {
         return target;
     }
     let nominal = delta as f64 * TICK_HZ as f64;
     let max_correction = nominal * MAX_SLEW_FRACTION;
-    prev + nominal + error.clamp(-max_correction, max_correction)
+    (prev + nominal + error.clamp(-max_correction, max_correction)).min(latest_state_tick as f64 + EXTRAP_CAP_TICKS)
 }
 
 /// Position and velocity at fractional server `tick` position `cursor`
@@ -278,22 +289,20 @@ mod tests {
     /// 30 arrives at its natural client tick, and nothing more is ever
     /// delivered after that (the buffer runs permanently dry).
     ///
-    /// The held window asserted below is the last 3 of `TOTAL_TICKS` (65),
-    /// not the full `RESYNC_TICKS` (30), because once no more real samples
-    /// arrive, the shared playback cursor's resync hard-snap sits only 3
-    /// ticks past `EXTRAP_CAP_TICKS + INTERP_DELAY_TICKS` (27) and pulls the
-    /// render back into the pre-cap interpolation range — a periodic
-    /// backward pop under a sustained stall that this test stops short of.
+    /// Once no more real samples arrive, the playback cursor's horizon clamp
+    /// holds it at `EXTRAP_CAP_TICKS + INTERP_DELAY_TICKS` (27) past tick
+    /// 30's sample — a terminal capped hold, so the held window asserted
+    /// below stays bit-identical all the way to `TOTAL_TICKS` (120) with no
+    /// backward step anywhere in the run.
     #[test]
     fn extrapolation_bridges_lost_snapshots_then_caps() {
         const SPEED: f32 = 6.0;
         // Deliveries: server ticks 6 and 12 land on time; 18 and 24 are
         // simply never sent; 30 lands on time; nothing after.
         const DELIVERIES: [u64; 3] = [6, 12, 30];
-        // Stops strictly before the measured RESYNC pop (tick 66) so the
-        // capped/held tail is observed without the out-of-scope interaction
-        // documented above.
-        const TOTAL_TICKS: usize = 65;
+        // Runs well past the horizon clamp engaging (tick ~57) to observe
+        // the terminal capped hold sustained for the rest of the run.
+        const TOTAL_TICKS: usize = 120;
 
         let pos_at = |tick: u64| Vec3::new(tick as f32 / 60.0 * SPEED, 0.0, 0.0);
 
@@ -362,9 +371,8 @@ mod tests {
         let max_pos = positions.iter().map(|p| p.x).fold(f32::MIN, f32::max);
         assert!(max_pos <= cap_bound, "extrapolation exceeded its cap: max position {max_pos:.4}, bound {cap_bound:.4}");
 
-        // Bit-identical hold once capped, for the window that is actually
-        // stable before the out-of-scope RESYNC interaction (see the test's
-        // doc comment) — the last 3 ticks of this run.
+        // Bit-identical hold once capped — the terminal state for the rest
+        // of the run, so the last 3 ticks hold exactly.
         let held = &positions[TOTAL_TICKS - 3..];
         assert!(held[0] == held[1] && held[1] == held[2], "capped position must hold bit-identical, got {held:?}");
         let held_motion = &motions[TOTAL_TICKS - 3..];
@@ -372,5 +380,12 @@ mod tests {
             held_motion.iter().all(|m| m.length_squared() == 0.0),
             "NetMotion must be exactly zero once capped, got {held_motion:?}"
         );
+
+        // (d) The capped hold is terminal: the playback cursor never moves
+        // backward, so no tick may render an earlier position than the last.
+        for t in 1..TOTAL_TICKS {
+            let step = (positions[t] - positions[t - 1]).x;
+            assert!(step >= -1e-6, "tick {t}: position stepped backward by {step:.4} during the stall");
+        }
     }
 }
