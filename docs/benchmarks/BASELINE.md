@@ -406,3 +406,22 @@ Implication for future work: with structural items #1–#4 fixed, the sim has br
 headroom at the design point (200 players, 200 NPCs). The next real constraint is
 content-driven — dense-cell piles (#5) and whatever load real enemy/ability code
 adds on top of the now-flat baseline above.
+
+### Texture memory — rework 4
+
+(`docs/reviews/rendering/plan-rendering-rework-4-2026-07-16.md` finding 1)
+
+`ColorTexture::bytes` (`gpu_texture_bytes`, summed across a mip chain) and
+`MeshStore::texture_memory_bytes` give the dev overlay's "tex mem (assets)"
+line a real number to show. Before (all-RGBA8, no BC compression), measured by
+`statue_and_human_texture_memory_measurement` streaming both assets through
+the real `get_or_request`/`integrate` path:
+
+| Asset pair | Resident texture memory |
+|---|---|
+| statue_vroid.glb + human.glb | 130 MB (137 019 568 B) |
+
+This covers only those two assets; the ground set's ~67 MB is tracked by the
+`zone_ground` bench instead. BC7/BC5 compression (a later step in this
+rework) is expected to cut this substantially — re-measure the same test
+after that change lands to record the After.

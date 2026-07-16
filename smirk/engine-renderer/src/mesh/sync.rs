@@ -273,6 +273,7 @@ impl System for MeshRenderSyncSystem {
         if let Some(stats) = resources.get_mut::<engine_app::dev_stats::DevStats>() {
             stats.set("skinned", format!("{skinned_count}/{MAX_SKINNED_INSTANCES}"));
             stats.set("streaming", format!("{} pending", store.pending_count()));
+            stats.set("tex mem (assets)", format!("{} MB", store.texture_memory_bytes() / (1024 * 1024)));
         }
         self.warn_accum += delta;
         if skinned_count * 10 > MAX_SKINNED_INSTANCES * 8 && self.warn_accum >= 5.0 {

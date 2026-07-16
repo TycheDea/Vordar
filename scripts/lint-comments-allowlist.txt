@@ -30,3 +30,4 @@ game/vordar-game/tests/content_lint.rs:156
 game/vordar-game/tests/content_lint.rs:193
 game/vordar-game/tests/content_lint.rs:203
 smirk/engine-renderer/tests/offscreen.rs:555
+smirk/engine-renderer/src/mesh/store.rs:319

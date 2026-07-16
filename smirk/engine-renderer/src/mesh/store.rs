@@ -315,6 +315,17 @@ impl MeshStore {
         self.by_path.values().filter(|e| matches!(e, MeshEntry::Pending)).count()
     }
 
+    /// Sum of every loaded mesh's material textures' resident GPU bytes —
+    /// feeds the dev overlay's "tex mem (assets)" line (VQ-C5's budget).
+    pub(crate) fn texture_memory_bytes(&self) -> u64 {
+        self.meshes
+            .iter()
+            .flat_map(|m| &m.primitives)
+            .flat_map(|p| &p._textures)
+            .map(|t| t.bytes)
+            .sum()
+    }
+
     #[cfg(test)]
     pub(crate) fn entry_state(&self, path: &str) -> Option<&MeshEntry> {
         self.by_path.get(path)
@@ -326,7 +337,7 @@ pub(crate) const MESH_UPLOADS_PER_FRAME: usize = 1;
 #[cfg(all(test, feature = "offscreen"))]
 mod tests {
     use super::*;
-    use crate::mesh::gltf_import::{AlphaMode, MaterialData, PrimitiveData};
+    use crate::mesh::gltf_import::{AlphaMode, ImageData, MaterialData, PrimitiveData};
     use crate::mesh_pipeline::{self, MeshVertex};
     use crate::offscreen::HeadlessGpu;
 
@@ -557,6 +568,33 @@ mod tests {
         assert!(gpu_mesh.primitives[1].centroid.abs_diff_eq(centroid, 1e-5), "prim1 centroid");
     }
 
+    /// `texture_memory_bytes` sums every registered primitive's live material
+    /// textures: an 8×8 mipped base-color image (4 mips: 64+16+4+1 texels ×
+    /// 4 B/texel RGBA8 = 340 B) plus the four maps this fixture leaves unset
+    /// (normal/metallic-roughness/emissive/occlusion), each a 1×1 neutral
+    /// default at 4 B. Total: 340 + 4×4 = 356.
+    #[test]
+    fn texture_memory_bytes_sums_live_material_textures() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — MeshStore::texture_memory_bytes test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+        let mut store = MeshStore::default();
+
+        let mut data = triangle_mesh_data();
+        data.primitives[0].material.base_color_image = Some(ImageData {
+            width:  8,
+            height: 8,
+            pixels: vec![255u8; 8 * 8 * 4],
+        });
+
+        store.register(&gpu.device, &gpu.queue, &layout, &mipgen, "tex-mem-test", data);
+
+        assert_eq!(store.texture_memory_bytes(), 356);
+    }
+
     /// Content-gated: streams the real statue asset (11 MB, embedded
     /// textures) and times the single `integrate` call that performs its
     /// upload — the residual main-thread cost once decode has moved
@@ -591,5 +629,42 @@ mod tests {
 
         assert_eq!(store.get_or_request(path), Some(0));
         println!("statue_vroid.glb single-integrate upload cost: {upload_time:?}");
+    }
+
+    /// Content-gated: streams the statue + human assets (the heaviest
+    /// shipped pair) through the real `get_or_request`/`integrate` path and
+    /// prints resident texture memory, recorded in BASELINE.md. Uses
+    /// `MeshStore`'s `pub(crate)` streaming API, so this must live inside
+    /// the engine crate rather than an integration test.
+    #[test]
+    fn statue_and_human_texture_memory_measurement() {
+        let statue_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/statue_vroid.glb");
+        let human_path  = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.glb");
+        if !std::path::Path::new(statue_path).exists() || !std::path::Path::new(human_path).exists() {
+            return;
+        }
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — MeshStore streaming test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+        let mut store = MeshStore::default();
+
+        store.get_or_request(statue_path);
+        store.get_or_request(human_path);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while store.meshes.len() < 2 {
+            store.integrate(&gpu.device, &gpu.queue, &layout, &mipgen, 1);
+            assert!(std::time::Instant::now() < deadline, "statue+human decode did not complete within 60s");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let bytes = store.texture_memory_bytes();
+        println!(
+            "statue_vroid.glb + human.glb resident texture memory: {} MB ({bytes} B)",
+            bytes / (1024 * 1024)
+        );
     }
 }

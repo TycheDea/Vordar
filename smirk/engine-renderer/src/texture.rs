@@ -16,6 +16,26 @@ pub struct ColorTexture {
     pub texture: Texture,
     pub view:    TextureView,
     pub sampler: Sampler,
+    /// Resident GPU bytes across the whole mip chain (`gpu_texture_bytes`) —
+    /// feeds the dev overlay's texture-memory meter.
+    pub bytes:   u64,
+}
+
+/// Resident GPU bytes for a texture's full mip chain: for each level, the
+/// mip's texel dimensions rounded up to whole compressed/uncompressed blocks,
+/// times the format's per-block byte size.
+pub fn gpu_texture_bytes(format: TextureFormat, width: u32, height: u32, mip_count: u32) -> u64 {
+    let (block_w, block_h) = format.block_dimensions();
+    let block_bytes = format.block_copy_size(None).unwrap() as u64;
+    (0..mip_count)
+        .map(|level| {
+            let w = (width >> level).max(1);
+            let h = (height >> level).max(1);
+            let blocks_x = w.div_ceil(block_w) as u64;
+            let blocks_y = h.div_ceil(block_h) as u64;
+            blocks_x * blocks_y * block_bytes
+        })
+        .sum()
 }
 
 fn make_sampler(device: &Device) -> Sampler {
@@ -91,7 +111,8 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str, srgb: bool) -> Resul
 
     let view    = texture.create_view(&TextureViewDescriptor::default());
     let sampler = make_sampler(device);
-    Ok(ColorTexture { texture, view, sampler })
+    let tex_bytes = gpu_texture_bytes(dds_format(srgb), width, height, mips);
+    Ok(ColorTexture { texture, view, sampler, bytes: tex_bytes })
 }
 
 /// Upload RGBA8 pixels and build a full mip chain via the blit generator.
@@ -140,7 +161,8 @@ pub(crate) fn create_rgba_texture_mipped(
 
     let view    = texture.create_view(&TextureViewDescriptor::default());
     let sampler = make_sampler(device);
-    ColorTexture { texture, view, sampler }
+    let bytes   = gpu_texture_bytes(format, width, height, mips);
+    ColorTexture { texture, view, sampler, bytes }
 }
 
 /// Upload tightly-packed RGBA8 pixels as a GPU texture. `srgb` picks
@@ -184,7 +206,8 @@ pub(crate) fn create_rgba_texture(
 
     let view    = texture.create_view(&TextureViewDescriptor::default());
     let sampler = make_sampler(device);
-    ColorTexture { texture, view, sampler }
+    let bytes   = gpu_texture_bytes(format, width, height, 1);
+    ColorTexture { texture, view, sampler, bytes }
 }
 
 /// Procedural RGBA8 checkerboard texture (size×size, tile_size pixels per square).
@@ -237,7 +260,8 @@ pub fn create_checker_texture(
 
     let view    = texture.create_view(&TextureViewDescriptor::default());
     let sampler = make_sampler(device);
-    ColorTexture { texture, view, sampler }
+    let bytes   = gpu_texture_bytes(TextureFormat::Rgba8Unorm, size, size, 1);
+    ColorTexture { texture, view, sampler, bytes }
 }
 
 /// 1×1 white RGBA8 texture. Used as default when no texture is set —
@@ -272,7 +296,8 @@ pub fn create_default_white(device: &Device, queue: &Queue) -> ColorTexture {
 
     let view    = texture.create_view(&TextureViewDescriptor::default());
     let sampler = make_sampler(device);
-    ColorTexture { texture, view, sampler }
+    let bytes   = gpu_texture_bytes(TextureFormat::Rgba8Unorm, 1, 1, 1);
+    ColorTexture { texture, view, sampler, bytes }
 }
 
 /// Create a bind group for a `ColorTexture` against the texture bind group layout.
@@ -309,5 +334,27 @@ mod tests {
     #[test]
     fn dds_format_srgb_false_returns_unorm() {
         assert_eq!(dds_format(false), TextureFormat::Bc7RgbaUnorm);
+    }
+
+    #[test]
+    fn gpu_texture_bytes_rgba8_uncompressed_sums_mip_chain() {
+        // 8x8 + 4x4 + 2x2 + 1x1 = 85 texels x 4 bytes/texel (1x1 block, no compression).
+        let bytes = gpu_texture_bytes(TextureFormat::Rgba8Unorm, 8, 8, 4);
+        assert_eq!(bytes, (64 + 16 + 4 + 1) * 4);
+    }
+
+    #[test]
+    fn gpu_texture_bytes_bc7_sums_mip_chain_in_4x4_blocks() {
+        // 8x8 -> 2x2 blocks, 4x4 -> 1x1, 2x2 -> 1x1, 1x1 -> 1x1: 4+1+1+1 = 7 blocks x 16 B/block.
+        let bytes = gpu_texture_bytes(TextureFormat::Bc7RgbaUnormSrgb, 8, 8, 4);
+        assert_eq!(bytes, (4 + 1 + 1 + 1) * 16);
+    }
+
+    #[test]
+    fn gpu_texture_bytes_bc5_same_block_math_as_bc7() {
+        // Same 4x4 block grid as BC7, and BC5 is also a 128-bit (16 B) block
+        // format, so the mip chain totals match BC7's exactly.
+        let bytes = gpu_texture_bytes(TextureFormat::Bc5RgUnorm, 8, 8, 4);
+        assert_eq!(bytes, (4 + 1 + 1 + 1) * 16);
     }
 }
