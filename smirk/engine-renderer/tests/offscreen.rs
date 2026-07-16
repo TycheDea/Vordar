@@ -48,6 +48,16 @@ fn channel_mean(pixels: &[u8], channel: usize) -> f64 {
     sum as f64 / (pixels.len() / 4) as f64
 }
 
+/// True if every pixel within `rows` (row-major, `width` px wide, 4
+/// bytes/pixel) differs by at most `tol` per channel between the two images.
+fn rows_close(a: &[u8], b: &[u8], width: u32, rows: std::ops::Range<u32>, tol: i32) -> bool {
+    a.chunks_exact(4)
+        .zip(b.chunks_exact(4))
+        .enumerate()
+        .filter(|(i, _)| rows.contains(&(*i as u32 / width)))
+        .all(|(_, (pa, pb))| pa.iter().zip(pb).all(|(x, y)| (*x as i32 - *y as i32).abs() <= tol))
+}
+
 fn coverage(pixels: &[u8]) -> usize {
     pixels
         .chunks_exact(4)
@@ -536,4 +546,53 @@ fn sky_pass_fills_background_with_environment() {
     let (r_m, g_m, b_m) = (channel_mean(&pixels, 0), channel_mean(&pixels, 1), channel_mean(&pixels, 2));
     assert!(b_m > 60.0, "sky visible, b mean {b_m:.1}");
     assert!(b_m > g_m && g_m > r_m, "sky tint ordering holds: {r_m:.1} {g_m:.1} {b_m:.1}");
+}
+
+/// A fogged zone's sky must blend toward the fog color near the horizon
+/// instead of showing a hard seam against the fogged ground. `set_camera_level`
+/// puts the boresight exactly on the horizon: the bottom half of the frustum
+/// sees below-horizon rays (clamped, so the blend factor there is exactly 1),
+/// the top rows sit near the zenith where the blend must stay negligible.
+/// Density 0 must reproduce today's image bit-for-bit regardless of fog color.
+#[test]
+fn sky_fog_blends_toward_horizon_and_stays_bit_stable_at_zero_density() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.draw_sky = true;
+    r.set_camera_level();
+
+    let env = Vec3::new(0.05, 0.05, 0.4);
+    let fog = Vec3::new(0.8, 0.5, 0.2);
+
+    r.set_uniform_environment(env.to_array());
+    let target = r.target(W, H);
+    r.render_sdf(&target, &[], wgpu::Color::BLACK);
+    let baseline = r.read(&target);
+
+    r.set_fog(fog, 0.0);
+    let target = r.target(W, H);
+    r.render_sdf(&target, &[], wgpu::Color::BLACK);
+    let zero_density = r.read(&target);
+    assert_eq!(zero_density, baseline, "fog_density 0 must not perturb the image");
+
+    r.set_fog(fog, 1.0);
+    let target = r.target(W, H);
+    r.render_sdf(&target, &[], wgpu::Color::BLACK);
+    let high_density = r.read(&target);
+
+    // Reference: sky texture == fog color, so any blend factor reproduces it.
+    r.set_uniform_environment(fog.to_array());
+    r.set_fog(fog, 0.0);
+    let target = r.target(W, H);
+    r.render_sdf(&target, &[], wgpu::Color::BLACK);
+    let fog_reference = r.read(&target);
+
+    assert!(
+        rows_close(&high_density, &fog_reference, W, H / 2..H, 2),
+        "below-horizon rows must converge on the fog color"
+    );
+    let zenith_band = 0..(H * 15 / 100);
+    assert!(
+        rows_close(&high_density, &zero_density, W, zenith_band, 18),
+        "near-zenith rows must stay close to the unfogged sky"
+    );
 }

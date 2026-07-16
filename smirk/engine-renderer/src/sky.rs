@@ -12,7 +12,10 @@ pub(crate) fn create_sky_pipeline(
     camera_bgl: &wgpu::BindGroupLayout,
     sky_bgl:    &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("sky.wgsl"));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label:  Some("sky.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/sky.wgsl")).into()),
+    });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label:              Some("Sky Pipeline Layout"),
         bind_group_layouts: &[Some(camera_bgl), Some(sky_bgl)],

@@ -1,17 +1,19 @@
 // Preprocesses the three geometry shaders (shader.wgsl, mesh_shader.wgsl,
-// skinned_mesh_shader.wgsl): `//#include "snippets/x.wgsl"` lines splice in
-// the shared PBR/shadow/uniform snippets, `//#const NAME` markers become
-// `const NAME: f32 = ...;` declarations whose values are read straight out of
-// shadow.rs / ibl.rs so the WGSL text can never drift from the Rust side.
-// Resolved output lands in OUT_DIR; src/lib.rs's shader modules
-// `include_str!` it instead of `wgpu::include_wgsl!`.
+// skinned_mesh_shader.wgsl) and the sky shader (sky.wgsl):
+// `//#include "snippets/x.wgsl"` lines splice in the shared PBR/shadow/uniform
+// snippets, `//#const NAME` markers become `const NAME: f32 = ...;`
+// declarations whose values are read straight out of shadow.rs / ibl.rs so
+// the WGSL text can never drift from the Rust side. Resolved output lands in
+// OUT_DIR; src/lib.rs's shader modules `include_str!` it instead of
+// `wgpu::include_wgsl!`.
 
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
 
-const GEOMETRY_SHADERS: [&str; 3] = ["shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl"];
+const PREPROCESSED_SHADERS: [&str; 4] =
+    ["shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl", "sky.wgsl"];
 const SNIPPETS: [&str; 3] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl"];
 
 fn main() {
@@ -25,7 +27,7 @@ fn main() {
     consts.insert("SHADOW_TEXEL", 1.0 / shadow_size as f64);
     consts.insert("PREFILTER_MAX_MIP", (prefilter_mips - 1) as f64);
 
-    for name in GEOMETRY_SHADERS {
+    for name in PREPROCESSED_SHADERS {
         let path = src_dir.join(name);
         let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let resolved = resolve(&text, src_dir, &consts);

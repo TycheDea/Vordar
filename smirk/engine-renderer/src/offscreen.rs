@@ -9,7 +9,7 @@
 // Device requirements are deliberately minimal (no TEXTURE_COMPRESSION_BC —
 // fallback adapters lack it), so harness assets must be RGBA8/procedural.
 
-use crate::camera::{self, Camera, LightUniform};
+use crate::camera::{self, Camera, CameraUniform, LightUniform};
 use crate::ibl::Environment;
 use crate::instance::SdfInstance;
 use crate::mesh::{self, MeshData};
@@ -115,6 +115,8 @@ pub struct TestLight {
 /// RendererState, minus the window.
 pub struct OffscreenRenderer {
     pub gpu:        HeadlessGpu,
+    aspect:         f32,
+    camera_buffer:  wgpu::Buffer,
     material_bgl:   wgpu::BindGroupLayout,
     env_bgl:        wgpu::BindGroupLayout,
     sky_bgl:        wgpu::BindGroupLayout,
@@ -150,7 +152,7 @@ impl OffscreenRenderer {
 
         let camera = Camera::new(aspect);
         let (shadow_texture, shadow_view) = shadow::create_shadow_texture(device);
-        let (_camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
+        let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
             camera::create_gpu_resources(device, &camera, &shadow_view);
 
         let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(device);
@@ -185,6 +187,8 @@ impl OffscreenRenderer {
         let index_buffer  = sdf_pipeline::create_index_buffer(device);
 
         Some(Self {
+            aspect,
+            camera_buffer,
             vertex_buffer,
             index_buffer,
             shadow_view,
@@ -221,6 +225,28 @@ impl OffscreenRenderer {
         self.environment = Environment::from_equirect_pixels(
             &self.gpu.device, &self.gpu.queue, &self.env_bgl, &self.sky_bgl, 4, 2, &pixels,
         );
+    }
+
+    /// Re-aims the camera to boresight elevation 0 (looking exactly at the
+    /// horizon): the lower half of the frustum sees below-horizon rays, the
+    /// upper half sees increasing elevation — the sky fog-blend test needs
+    /// both, which the fixed default downward-pitched camera never produces.
+    pub fn set_camera_level(&mut self) {
+        let mut camera = Camera::new(self.aspect);
+        camera.orbit(0.0, -0.8); // Camera::new's default pitch is 0.8; net pitch 0.0
+        let cam_uniform = CameraUniform::from_camera(&camera);
+        self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
+    }
+
+    /// Overrides distance-fog color/density, keeping direction/color/ambient
+    /// at their `default_sun` values (`light_dir` stays whatever `set_light`
+    /// last set).
+    pub fn set_fog(&mut self, color: Vec3, density: f32) {
+        let mut uniform = LightUniform::default_sun();
+        uniform.direction = self.light_dir.to_array();
+        uniform.fog_color = color.to_array();
+        uniform.fog_density = density;
+        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
     pub fn set_light(&mut self, light: TestLight) {

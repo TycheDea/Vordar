@@ -151,3 +151,5 @@ Run at phase boundaries; the user eyeballs, never automated:
 6. **Glow payoff** (VQ-C3/Phase 4): emissives bloom softly at dusk, no clipping halos.
 7. **Feel** (VQ-E*): cast→travel→impact beats land; hits flinch; deaths pop.
 8. **Performance** (VQ-F1): fps overlay ≥ 60 in the stress scene.
+9. **Horizon fog** (VQ-A5): in a fogged zone, look toward the horizon — sky and
+   ground converge smoothly; horizon seam gone.
