@@ -22,11 +22,16 @@ smoke overlaps, and shadow edges are free of the artifacts that scream
 
 > **Cross-type queue** (mirrored in `reworks-rendering-2026-07-16.md`):
 > **~~finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
-> finding 7~~ → rework 1 → ~~finding 8 → finding 9 → finding 10~~ → rework 2 →
+> finding 7 → rework 1 → finding 8 → finding 9 → finding 10~~ → rework 2 →
 > rework 3 → rework 4 → rework 5 → rework 6.**
 > Findings 1–10 all done 2026-07-16 (one commit each, loop-final gate
 > 340/340; finding 7's worker filed rework 7 — per-environment bake-pipeline
-> recompilation — during its bounded probe). Reworks 1–7 remain open, none
+> recompilation — during its bounded probe). Rework 1 done 2026-07-16
+> (plan-rendering-rework-1-2026-07-16.md, 4 steps; a capped 16-entry
+> point-light array rides the existing LightUniform, `shade_pbr` loops it
+> with windowed inverse-square falloff, the `PointLight` component +
+> `PointLightSyncSystem` extract nearest-16 with flicker, and the portal
+> prefab emits — loop-final gate 347/347). Reworks 2–7 remain open, none
 > planned yet.
 > Finding 1 first: findings 3, 4, 9 and rework 1 all edit shader lighting
 > code, and landing them against three divergent copies multiplies every
