@@ -24,6 +24,23 @@ pub(crate) struct PoseScratch {
     pub(crate) palette: Vec<Mat4>,
 }
 
+/// Distance beyond which a rig poses at half rate (`pose_with_lod`). Matches
+/// the server's replication AOI radius (server/vordar-server/src/net/mod.rs
+/// AOI_RADIUS) — past that edge a rig is already replication fringe, so
+/// halving its pose rate costs no fidelity even at max zoom.
+pub(crate) const LOD_POSE_DISTANCE: f32 = 40.0;
+
+/// Cached pose for a far rig that skipped a `pose_player_into` call: the
+/// palette/globals it last computed, the `dt` banked since then so the next
+/// pose stays wall-clock exact, and the frame it was last touched so
+/// `MeshRenderSyncSystem` can evict entries for despawned rigs.
+pub(crate) struct LodEntry {
+    palette:    Vec<Mat4>,
+    globals:    Vec<Mat4>,
+    pending_dt: f32,
+    last_seen:  u64,
+}
+
 /// Advance an `AnimationPlayer` by `dt`, sample its current pose (crossfading
 /// out of `prev` if a blend is in progress), and write the joint palette plus
 /// the bones' armature-space globals (pre-inverse-bind — what attachment
@@ -75,6 +92,54 @@ pub(crate) fn pose_player_into(player: &mut AnimationPlayer, skin: &CpuSkin, dt:
 
     crate::anim::global_transforms_into(&skin.skeleton, pose, &mut scratch.globals, &mut scratch.done);
     crate::anim::palette_into(&scratch.globals, &skin.skeleton.joints, &mut scratch.palette);
+}
+
+/// Distance-LOD wrapper over `pose_player_into`. `!far` drops any stale cache
+/// entry and poses every call, same as before LOD existed. `far` poses only
+/// on first sight or when `(frame + entity.id()) % 2 == 0` — half the calls,
+/// staggered across entities by id so far rigs don't all pose on the same
+/// frame — replaying the cached palette/globals on skipped frames and
+/// banking `delta` into `pending_dt` so the next pose applies the full
+/// elapsed time instead of just its own frame's slice.
+pub(crate) fn pose_with_lod(
+    lod:     &mut HashMap<Entity, LodEntry>,
+    entity:  Entity,
+    frame:   u64,
+    far:     bool,
+    player:  &mut AnimationPlayer,
+    skin:    &CpuSkin,
+    delta:   f32,
+    scratch: &mut PoseScratch,
+) {
+    if !far {
+        lod.remove(&entity);
+        pose_player_into(player, skin, delta, scratch);
+        return;
+    }
+
+    let is_new = !lod.contains_key(&entity);
+    let entry = lod.entry(entity).or_insert_with(|| LodEntry {
+        palette:    Vec::new(),
+        globals:    Vec::new(),
+        pending_dt: 0.0,
+        last_seen:  frame,
+    });
+
+    if is_new || (frame + entity.id() as u64) % 2 == 0 {
+        pose_player_into(player, skin, delta + entry.pending_dt, scratch);
+        entry.pending_dt = 0.0;
+        entry.palette.clear();
+        entry.palette.extend_from_slice(&scratch.palette);
+        entry.globals.clear();
+        entry.globals.extend_from_slice(&scratch.globals);
+    } else {
+        entry.pending_dt += delta;
+        scratch.palette.clear();
+        scratch.palette.extend_from_slice(&entry.palette);
+        scratch.globals.clear();
+        scratch.globals.extend_from_slice(&entry.globals);
+    }
+    entry.last_seen = frame;
 }
 
 /// Allocating wrapper over `pose_player_into`, kept so the unit test below
@@ -182,6 +247,10 @@ pub struct MeshRenderSyncSystem {
     items:         Vec<(usize, Visibility, MeshInstance)>,
     skinned_items: Vec<(usize, Visibility, SkinnedMeshInstance)>,
     pose_scratch:  PoseScratch,
+    /// Distance-LOD pose cache, keyed by entity; entries not touched this
+    /// frame are evicted after the entity loop.
+    lod:   HashMap<Entity, LodEntry>,
+    frame: u64,
     /// Throttles the 80%-of-cap warning to ~once per 5 s.
     warn_accum: f32,
 }
@@ -192,6 +261,8 @@ impl MeshRenderSyncSystem {
             items:         Vec::new(),
             skinned_items: Vec::new(),
             pose_scratch:  PoseScratch::default(),
+            lod:           HashMap::new(),
+            frame:         0,
             warn_accum:    0.0,
         }
     }
@@ -203,6 +274,7 @@ impl System for MeshRenderSyncSystem {
         if resources.get::<RendererState>().is_none() {
             return;
         }
+        self.frame += 1;
         let alpha = resources.get::<InterpolationAlpha>().map(|a| a.0).unwrap_or(1.0);
 
         // Take the stores out so they can borrow device/queue from RendererState
@@ -236,6 +308,7 @@ impl System for MeshRenderSyncSystem {
             store.integrate(&state.device, &state.queue, &state.material_bgl, &state.mipgen, MESH_UPLOADS_PER_FRAME);
             let cam = Frustum::from_view_proj(state.camera.build_view_projection_matrix());
             let sun = Frustum::from_view_proj(crate::shadow::fit_light_vp(state.camera.target, state.light_dir));
+            let camera_target = state.camera.target;
             for (entity, transform, prev, mesh, player) in world
                 .query::<(Entity, &Transform, Option<&PreviousTransform>, &RenderMesh, Option<&mut AnimationPlayer>)>()
                 .iter()
@@ -279,7 +352,9 @@ impl System for MeshRenderSyncSystem {
                             continue;
                         }
                         let joint_base = skinned.joints.len() as u32;
-                        pose_player_into(player, cpu_skin, delta, &mut self.pose_scratch);
+                        let far = transform.position.distance_squared(camera_target)
+                            > LOD_POSE_DISTANCE * LOD_POSE_DISTANCE;
+                        pose_with_lod(&mut self.lod, entity, self.frame, far, player, cpu_skin, delta, &mut self.pose_scratch);
                         skinned.joints.extend(self.pose_scratch.palette.iter().map(|m| m.to_cols_array_2d()));
                         // Publish the configured attachment sockets for this entity.
                         if !socket_bones.is_empty() {
@@ -304,6 +379,7 @@ impl System for MeshRenderSyncSystem {
                     }
                 }
             }
+            self.lod.retain(|_, e| e.last_seen == self.frame);
         }
 
         for entity in needs_player {
@@ -404,6 +480,89 @@ mod tests {
             assert_eq!(scratch.palette.capacity(), cap_palette, "palette buffer grew after warm-up");
             assert_eq!(scratch.cur_pose.capacity(), cap_pose, "pose buffer grew after warm-up");
         }
+    }
+
+    /// A far rig (`far = true`) poses only every other frame: on the frames
+    /// it skips, `pose_with_lod` must replay the exact previous palette
+    /// (bit-equal) and leave `player.time` untouched, while still banking
+    /// the skipped `dt` so the next pose lands on wall-clock-exact time.
+    /// The entity's first-ever call always poses (no cache yet), so the
+    /// four tracked frames below start from a zero-`dt` seed call that
+    /// creates the cache entry without advancing `player.time` — putting
+    /// all four tracked frames under pure frame-parity.
+    #[test]
+    fn pose_with_lod_skips_far_rigs_every_other_frame_and_banks_dt() {
+        let skin = stub_skin(4);
+        let mut world = hecs::World::new();
+        let far_entity = world.spawn(());
+        let mut player = AnimationPlayer { clip: "clip_a".into(), ..Default::default() };
+        let mut lod: HashMap<Entity, LodEntry> = HashMap::new();
+        let mut scratch = PoseScratch::default();
+
+        pose_with_lod(&mut lod, far_entity, 0, true, &mut player, &skin, 0.0, &mut scratch);
+        assert_eq!(player.time, 0.0, "seed call must not advance time");
+        let mut last_posed_palette = scratch.palette.clone();
+
+        let mut poses = 0;
+        for frame in 1..=4u64 {
+            let time_before = player.time;
+            pose_with_lod(&mut lod, far_entity, frame, true, &mut player, &skin, 0.016, &mut scratch);
+            if player.time != time_before {
+                poses += 1;
+                last_posed_palette = scratch.palette.clone();
+            } else {
+                assert_eq!(player.time, time_before, "skipped frame {frame} must not advance player.time");
+                assert_eq!(
+                    scratch.palette, last_posed_palette,
+                    "skipped frame {frame} must replay the previous posed palette bit-for-bit"
+                );
+            }
+        }
+
+        assert_eq!(poses, 2, "far rig must pose exactly twice across the 4 tracked frames");
+        assert!(
+            (player.time - 4.0 * 0.016).abs() < 1e-6,
+            "banked dt from skipped frames must fully replay by frame 4, got {}",
+            player.time
+        );
+    }
+
+    /// A near rig (`far = false`) poses every call and carries no LOD cache
+    /// entry at all — the LOD path must be a no-op for in-range rigs.
+    #[test]
+    fn pose_with_lod_poses_near_rig_every_frame_with_no_cache_entry() {
+        let skin = stub_skin(4);
+        let mut world = hecs::World::new();
+        let near_entity = world.spawn(());
+        let mut player = AnimationPlayer { clip: "clip_a".into(), ..Default::default() };
+        let mut lod: HashMap<Entity, LodEntry> = HashMap::new();
+        let mut scratch = PoseScratch::default();
+
+        for frame in 1..=4u64 {
+            let time_before = player.time;
+            pose_with_lod(&mut lod, near_entity, frame, false, &mut player, &skin, 0.016, &mut scratch);
+            assert_ne!(player.time, time_before, "near rig must pose every frame");
+        }
+
+        assert!((player.time - 4.0 * 0.016).abs() < 1e-6);
+        assert!(!lod.contains_key(&near_entity), "near rig must leave no lod cache entry");
+    }
+
+    /// `MeshRenderSyncSystem::run` evicts an entity's LOD entry once a frame
+    /// passes without it being touched (e.g. it despawned) — the same
+    /// `last_seen == frame` retain predicate the system runs after its
+    /// entity loop.
+    #[test]
+    fn lod_retain_evicts_rigs_not_seen_this_frame() {
+        let mut world = hecs::World::new();
+        let entity = world.spawn(());
+        let mut lod: HashMap<Entity, LodEntry> = HashMap::new();
+        lod.insert(entity, LodEntry { palette: Vec::new(), globals: Vec::new(), pending_dt: 0.0, last_seen: 5 });
+
+        let frame = 6u64; // entity absent from this frame's entity loop
+        lod.retain(|_, e| e.last_seen == frame);
+
+        assert!(!lod.contains_key(&entity), "a rig absent this frame must be evicted from the lod cache");
     }
 
     /// Two meshes: mesh 0 gets one instance of every `Visibility` variant,
