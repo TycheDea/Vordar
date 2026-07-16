@@ -463,9 +463,9 @@ impl OffscreenRenderer {
     }
 
     /// Shared frame skeleton: shadow depth pre-pass (one render pass per
-    /// cascade — `CASCADE_COUNT` == 1 today), scene pass (MSAA→resolve,
-    /// optional sky), then the ACES tonemap into the LDR output — the same
-    /// composition as the real frame.
+    /// `CASCADE_COUNT` cascade), scene pass (MSAA→resolve, optional sky),
+    /// then the ACES tonemap into the LDR output — the same composition as
+    /// the real frame.
     fn compose(
         &mut self,
         target:           &SceneTarget,

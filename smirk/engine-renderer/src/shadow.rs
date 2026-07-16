@@ -1,25 +1,26 @@
-// Shadow mapping: one fitted orthographic cascade for the sun.
-// The camera is a bounded orbit (radius 16–55) over compact zones, so a
-// single 2048² map fitted around the camera target holds up; CSM stays
-// future work. Receivers PCF-filter in the geometry shaders via the shared
-// camera bind group (bindings 2–4 — the skinned pipeline already uses the
-// default max of 4 bind groups, so shadows can't have their own).
+// Shadow mapping: three concentric texel-snapped cascades for the sun.
+// The camera is a bounded orbit (radius 16–55) over compact zones; the near
+// cascades tighten around the focus for crisp contact shadows while the
+// outer cascade preserves full-orbit coverage. Receivers PCF-filter in the
+// geometry shaders via the shared camera bind group (bindings 2–4 — the
+// skinned pipeline already uses the default max of 4 bind groups, so
+// shadows can't have their own).
 
 use glam::{Mat4, Vec3};
 use wgpu::{Device, TextureFormat};
 
 pub(crate) const SHADOW_SIZE: u32 = 2048;
-/// Half-extent of the fitted ortho volume: covers the max orbit radius (55)
-/// plus grounded-entity margin. Fixed so the texel size is stable and the
-/// origin can snap to whole texels (no orbit shimmer).
-const HALF_EXTENT: f32 = 80.0;
 const DEPTH_RANGE: f32 = 400.0;
 
-/// Shadow map layer count. 1 today (single fitted cascade); the array
-/// plumbing (texture layers, receiver light-VP array, cast dynamic-offset
-/// buffer) is sized off this constant so a future multi-cascade split only
-/// changes `fit_cascades` and this number.
-pub(crate) const CASCADE_COUNT: u32 = 1;
+/// Shadow map layer count: three concentric cascades. The array plumbing
+/// (texture layers, receiver light-VP array, cast dynamic-offset buffer) is
+/// sized off this constant.
+pub(crate) const CASCADE_COUNT: u32 = 3;
+
+/// Per-cascade half-extent, outermost last. The outer value (80) covers the
+/// max orbit radius (55) plus grounded-entity margin — today's single-
+/// cascade fit. Inner values tighten around the focus for denser texels.
+const CASCADE_HALF_EXTENTS: [f32; CASCADE_COUNT as usize] = [24.0, 48.0, 80.0];
 
 /// Stride between cascades in the cast uniform buffer. Must be a multiple of
 /// `Limits::min_uniform_buffer_offset_alignment` (256 covers every wgpu
@@ -74,10 +75,10 @@ pub(crate) fn create_shadow_sampler(device: &Device) -> wgpu::Sampler {
     })
 }
 
-/// The sun's view-projection fitted around `target`, texel-snapped so an
-/// orbiting/panning camera never makes shadow edges shimmer. Pure — unit
-/// tested. `light_dir` points TOWARD the light.
-pub(crate) fn fit_light_vp(target: Vec3, light_dir: Vec3) -> Mat4 {
+/// The sun's view-projection fitted around `target` at `half_extent`,
+/// texel-snapped so an orbiting/panning camera never makes shadow edges
+/// shimmer. Pure — unit tested. `light_dir` points TOWARD the light.
+fn fit_vp(target: Vec3, light_dir: Vec3, half_extent: f32) -> Mat4 {
     let dir = light_dir.normalize_or_zero();
     let dir = if dir == Vec3::ZERO { Vec3::Y } else { dir };
     let up = if dir.y.abs() > 0.99 { Vec3::X } else { Vec3::Y };
@@ -85,8 +86,8 @@ pub(crate) fn fit_light_vp(target: Vec3, light_dir: Vec3) -> Mat4 {
     // Build the light view around the origin first to get stable axes.
     let view = Mat4::look_at_rh(dir * (DEPTH_RANGE * 0.5), Vec3::ZERO, up);
 
-    // Snap the target to the shadow texel grid in light space.
-    let texel = (HALF_EXTENT * 2.0) / SHADOW_SIZE as f32;
+    // Snap the target to this cascade's own texel grid in light space.
+    let texel = (half_extent * 2.0) / SHADOW_SIZE as f32;
     let t_light = view.transform_point3(target);
     let snapped = Vec3::new(
         (t_light.x / texel).floor() * texel,
@@ -95,21 +96,27 @@ pub(crate) fn fit_light_vp(target: Vec3, light_dir: Vec3) -> Mat4 {
     );
 
     let proj = Mat4::orthographic_rh(
-        snapped.x - HALF_EXTENT,
-        snapped.x + HALF_EXTENT,
-        snapped.y - HALF_EXTENT,
-        snapped.y + HALF_EXTENT,
+        snapped.x - half_extent,
+        snapped.x + half_extent,
+        snapped.y - half_extent,
+        snapped.y + half_extent,
         0.0,
         DEPTH_RANGE,
     );
     proj * view
 }
 
-/// Per-cascade fitted light view-projections. `CASCADE_COUNT` == 1 today, so
-/// this is `fit_light_vp` wrapped in a single-element array; a future
-/// multi-cascade split fits each element to its own depth slice.
+/// The sun's view-projection at the outer cascade's half-extent — the
+/// conservative bound used for sun-frustum culling (mesh/sync.rs): anything
+/// outside it is outside every cascade, so per-cascade culling is unneeded.
+pub(crate) fn fit_light_vp(target: Vec3, light_dir: Vec3) -> Mat4 {
+    fit_vp(target, light_dir, CASCADE_HALF_EXTENTS[CASCADE_COUNT as usize - 1])
+}
+
+/// Per-cascade fitted light view-projections, each independently texel-
+/// snapped at its own half-extent (`CASCADE_HALF_EXTENTS`).
 pub(crate) fn fit_cascades(target: Vec3, light_dir: Vec3) -> [Mat4; CASCADE_COUNT as usize] {
-    [fit_light_vp(target, light_dir)]
+    std::array::from_fn(|i| fit_vp(target, light_dir, CASCADE_HALF_EXTENTS[i]))
 }
 
 /// Creates the dynamic-offset cast uniform buffer: `CASCADE_COUNT` slots of
@@ -210,6 +217,7 @@ impl ShadowPipelines {
                     depth_compare:       Some(wgpu::CompareFunction::Less),
                     stencil:             Default::default(),
                     // Slope-scaled bias against acne; tuned with the PCF radius.
+                    // Shared across all cascades (same pipeline for every layer).
                     bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
                 }),
                 multisample:    Default::default(),
@@ -333,7 +341,7 @@ mod tests {
         // Sub-texel target movement must not change the matrix at all —
         // that is what kills edge shimmer while the camera pans.
         let dir = Vec3::new(-1.0, 2.0, -1.0);
-        let texel = (HALF_EXTENT * 2.0) / SHADOW_SIZE as f32;
+        let texel = (CASCADE_HALF_EXTENTS[2] * 2.0) / SHADOW_SIZE as f32;
         let a = fit_light_vp(Vec3::ZERO, dir);
         let b = fit_light_vp(Vec3::new(texel * 0.2, 0.0, texel * 0.2), dir);
         assert_eq!(a.to_cols_array(), b.to_cols_array(), "sub-texel pan must snap identically");
@@ -341,5 +349,68 @@ mod tests {
         // A large move does change it.
         let c = fit_light_vp(Vec3::new(10.0, 0.0, 0.0), dir);
         assert_ne!(a.to_cols_array(), c.to_cols_array());
+    }
+
+    #[test]
+    fn near_cascade_has_denser_texels_than_far_cascade() {
+        // Same world-space offset must map to a larger NDC delta in the near
+        // cascade than in the far one — i.e. the near cascade covers fewer
+        // world units per texel (denser).
+        let target = Vec3::ZERO;
+        let dir = Vec3::new(-1.0, 2.0, -1.0);
+        let cascades = fit_cascades(target, dir);
+        let offset = Vec3::new(15.0, 0.0, 0.0);
+        let p_near = cascades[0].project_point3(target + offset);
+        let p_far = cascades[CASCADE_COUNT as usize - 1].project_point3(target + offset);
+        let near_mag = p_near.x.hypot(p_near.y);
+        let far_mag = p_far.x.hypot(p_far.y);
+        assert!(
+            near_mag > far_mag,
+            "near cascade must be denser: near_ndc={near_mag} far_ndc={far_mag}"
+        );
+    }
+
+    #[test]
+    fn every_cascade_texel_snaps_independently() {
+        let dir = Vec3::new(-1.0, 2.0, -1.0);
+        let base = fit_cascades(Vec3::ZERO, dir);
+        for (i, half_extent) in CASCADE_HALF_EXTENTS.iter().enumerate() {
+            let texel = (half_extent * 2.0) / SHADOW_SIZE as f32;
+            let sub_texel_moved = fit_cascades(Vec3::new(texel * 0.2, 0.0, texel * 0.2), dir);
+            assert_eq!(
+                base[i].to_cols_array(),
+                sub_texel_moved[i].to_cols_array(),
+                "cascade {i} must snap sub-texel target moves identically"
+            );
+
+            let large_moved = fit_cascades(Vec3::new(*half_extent * 0.5, 0.0, 0.0), dir);
+            assert_ne!(
+                base[i].to_cols_array(),
+                large_moved[i].to_cols_array(),
+                "cascade {i} must change for a large target move"
+            );
+        }
+    }
+
+    #[test]
+    fn containment_selects_tightest_cascade() {
+        let target = Vec3::ZERO;
+        let dir = Vec3::new(-1.0, 2.0, -1.0);
+        let cascades = fit_cascades(target, dir);
+
+        let near = cascades[0].project_point3(target + Vec3::new(20.0, 0.0, 0.0));
+        assert!(near.x.abs() <= 1.0 && near.y.abs() <= 1.0, "20u point must be inside cascade 0: {near:?}");
+
+        let far_point = target + Vec3::new(78.0, 0.0, 0.0);
+        let far_in_outer = cascades[CASCADE_COUNT as usize - 1].project_point3(far_point);
+        assert!(
+            far_in_outer.x.abs() <= 1.0 && far_in_outer.y.abs() <= 1.0,
+            "78u point must be inside the outer cascade: {far_in_outer:?}"
+        );
+        let far_in_near = cascades[0].project_point3(far_point);
+        assert!(
+            far_in_near.x.abs() > 1.0 || far_in_near.y.abs() > 1.0,
+            "78u point must be outside cascade 0: {far_in_near:?}"
+        );
     }
 }

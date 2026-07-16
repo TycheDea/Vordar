@@ -381,8 +381,7 @@ fn upload_gpu_buffers(
 
 /// Shadow pre-pass: fit the sun's ortho volume around the camera target
 /// (texel-snapped) and render depth-only variants of every opaque draw into
-/// each cascade's layer (`CASCADE_COUNT` == 1 today, so one iteration).
-/// Particles don't cast.
+/// each of `CASCADE_COUNT`'s layers. Particles don't cast.
 fn record_shadow_pass(
     state:        &RendererState,
     encoder:      &mut wgpu::CommandEncoder,

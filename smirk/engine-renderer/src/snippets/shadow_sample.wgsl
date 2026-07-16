@@ -6,17 +6,22 @@
 
 //#const SHADOW_TEXEL
 
-/// PCF 3×3 over the first cascade whose fitted volume contains `world_pos`;
-/// 1.0 = fully lit. Points outside every cascade are lit (the map only
-/// covers the play area).
+// Shrinks the containment test below the cascade's true NDC bound so a
+// fragment near a tighter cascade's edge falls through to the next
+// (coarser) cascade instead of PCF-sampling past its map edge (seam guard).
+const CASCADE_EDGE_MARGIN: f32 = 0.02;
+
+/// PCF 3×3 over the first (tightest) cascade whose fitted volume contains
+/// `world_pos`; 1.0 = fully lit. Points outside every cascade are lit (the
+/// map only covers the play area).
 fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     for (var c = 0u; c < CASCADE_COUNT; c++) {
         let lp  = light_vp[c] * vec4<f32>(world_pos, 1.0);
         let ndc = lp.xyz / lp.w;
-        let uv  = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-        if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 || ndc.z <= 0.0) {
+        if (abs(ndc.x) >= 1.0 - CASCADE_EDGE_MARGIN || abs(ndc.y) >= 1.0 - CASCADE_EDGE_MARGIN || ndc.z >= 1.0 || ndc.z <= 0.0) {
             continue;
         }
+        let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
         var sum = 0.0;
         for (var dy = -1; dy <= 1; dy++) {
             for (var dx = -1; dx <= 1; dx++) {
