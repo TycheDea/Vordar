@@ -44,6 +44,18 @@ fn direct_brdf(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, meta
     return (kd * albedo + specular) * NdotL;
 }
 
+// Karis/Tokuyoshi geometric specular AA: fold the shading normal's
+// screen-space variance into roughness so sub-pixel normal detail does not
+// alias the specular lobe. Zero on flat surfaces (derivatives vanish).
+fn specular_aa_roughness(N: vec3<f32>, rough: f32) -> f32 {
+    let dndu = dpdx(N);
+    let dndv = dpdy(N);
+    let variance = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));
+    let kernel   = min(2.0 * variance, 0.18);
+    let a2       = rough * rough;
+    return sqrt(clamp(a2 + kernel, 0.0, 1.0));
+}
+
 /// Shared shading: albedo already tinted and in linear space. `P` is the
 /// fragment's world position (the point-light loop's falloff origin).
 /// `shadow` attenuates the direct sun term only (1.0 = fully lit).
@@ -51,7 +63,7 @@ fn shade_pbr(
     P: vec3<f32>, N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
     metallic: f32, roughness: f32, ao: f32, emissive: vec3<f32>, shadow: f32,
 ) -> vec3<f32> {
-    let rough = clamp(roughness, 0.045, 1.0);
+    let rough = specular_aa_roughness(N, clamp(roughness, 0.045, 1.0));
 
     var direct = direct_brdf(N, V, light.direction, albedo, metallic, rough) * light.color * shadow;
 

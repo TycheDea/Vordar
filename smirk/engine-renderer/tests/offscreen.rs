@@ -282,6 +282,90 @@ fn tilted_normal_map_changes_luminance_vs_flat() {
     );
 }
 
+// ── Geometric specular AA ────────────────────────────────────────────────────
+
+/// Same ground quad as `quad_with_material` but with UV scaled by `tiles`, so
+/// a small repeating normal map cycles `tiles` times across the surface (the
+/// material sampler's Repeat address mode tiles it, see texture.rs's `make_sampler`).
+fn quad_with_tiled_normal(extent: f32, material: MaterialData, tiles: f32) -> MeshData {
+    let e = extent;
+    let v = |x: f32, z: f32, u: f32, w: f32| MeshVertex {
+        position: [x, 0.0, z],
+        normal:   [0.0, 1.0, 0.0],
+        uv:       [u * tiles, w * tiles],
+        tangent:  [1.0, 0.0, 0.0, 1.0],
+    };
+    MeshData {
+        primitives: vec![PrimitiveData {
+            vertices: vec![v(-e, -e, 0.0, 0.0), v(e, -e, 1.0, 0.0), v(e, e, 1.0, 1.0), v(-e, e, 0.0, 1.0)],
+            indices:  vec![0, 2, 1, 0, 3, 2],
+            material,
+            skin: None,
+        }],
+        skeleton: None,
+        clips:    Vec::new(),
+    }
+}
+
+/// A 2×2 tangent-space normal map checkerboarding between two tilts that are
+/// mirror images of each other (mean flat), so repeating it via UV tiling
+/// changes on-screen normal frequency without changing the surface's average
+/// orientation.
+fn checker_normal_texture() -> ImageData {
+    let tilt_pos: [u8; 4] = [170, 128, 255, 255];
+    let tilt_neg: [u8; 4] = [86, 128, 255, 255];
+    let mut pixels = Vec::with_capacity(16);
+    for row in [[tilt_pos, tilt_neg], [tilt_neg, tilt_pos]] {
+        for px in row {
+            pixels.extend_from_slice(&px);
+        }
+    }
+    ImageData { width: 2, height: 2, pixels }
+}
+
+/// Karis/Tokuyoshi geometric specular AA: a shiny normal-mapped surface must
+/// dim as the normal map's on-screen tiling density increases, because GSAA
+/// folds the shading normal's screen-space derivative into roughness —
+/// killing the shimmer a naive shader would show on fine normal-map detail.
+#[test]
+fn denser_normal_tiling_softens_specular_peak() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    // Sun only — IBL ambient would flatten the lobe-shape comparison.
+    r.set_light(TestLight {
+        direction: Vec3::new(-1.0, 2.0, -1.0),
+        color:     Vec3::new(0.3, 0.285, 0.255),
+        ambient:   0.0,
+    });
+
+    let material = || MaterialData {
+        base_color_factor: [0.5, 0.5, 0.5, 1.0],
+        roughness_factor:  0.2,
+        metallic_factor:   0.0,
+        normal_image:      Some(TextureSource::Rgba8(checker_normal_texture())),
+        ..Default::default()
+    };
+
+    let mut render = |tiles: f32| -> Vec<u8> {
+        let target = r.target(W, H);
+        r.render_mesh(&target, quad_with_tiled_normal(40.0, material(), tiles), wgpu::Color::BLACK);
+        r.read(&target)
+    };
+
+    let peak = |img: &[u8]| img.chunks_exact(4).map(|p| luminance(p)).fold(0.0f64, f64::max);
+
+    // Measured peaks (256x256, roughness 0.2, sun at 0.3x): sparse
+    // (tiles=4)=197.4 dense (tiles=64)=186.3, a 5.65% drop. The sun sits well
+    // below the other PBR tests' intensity because at full brightness this
+    // tilt's specular peak saturates to the 255 clip ceiling for both
+    // densities, masking the GSAA effect entirely.
+    let peak_sparse = peak(&render(4.0));
+    let peak_dense  = peak(&render(64.0));
+    assert!(
+        peak_dense < peak_sparse,
+        "denser normal tiling must soften the specular peak (GSAA): sparse={peak_sparse:.1} dense={peak_dense:.1}"
+    );
+}
+
 /// Khronos DamagedHelmet: a real full-PBR asset (all five maps + tangents)
 /// loads and renders with sane coverage through the mesh pipeline.
 #[test]
