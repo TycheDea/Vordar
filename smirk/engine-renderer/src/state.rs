@@ -74,6 +74,10 @@ pub(crate) struct RendererState {
     pub(crate) env_bgl:      wgpu::BindGroupLayout,
     pub(crate) sky_bgl:      wgpu::BindGroupLayout,
     pub(crate) sky_pipeline: wgpu::RenderPipeline,
+    // Shader module + bake pipelines are a pure function of the device —
+    // built once here and shared by every `Environment` load rather than
+    // recompiled per zone.
+    pub(crate) baker:        ibl::Baker,
     pub(crate) environment:  ibl::Environment,
     // BRDF LUT is a pure function of (NdotV, roughness) — baked once here
     // and shared by every `Environment` rather than rebaked per zone.
@@ -102,7 +106,7 @@ impl RendererState {
 
         // HDR scene targets + post chain: every scene pipeline
         // renders MSAA into Rgba16Float; the tonemap pass owns the swapchain.
-        let (env_bgl, sky_bgl, environment, brdf_view, sky_pipeline, hdr, gpu_timer, bloom, tonemap) =
+        let (env_bgl, sky_bgl, baker, environment, brdf_view, sky_pipeline, hdr, gpu_timer, bloom, tonemap) =
             create_hdr_and_ibl_resources(&device, &queue, &camera_bgl, format, size);
 
         let (scene_format, render_pipeline, mesh_render_pipeline) =
@@ -155,7 +159,7 @@ impl RendererState {
                 light_dir: GlamVec3::new(-1.0, 2.0, -1.0).normalize(),
                 _shadow_texture: shadow_texture,
                 light_state: LightUniform::default_sun(),
-                env_bgl, sky_bgl, sky_pipeline, environment, brdf_view,
+                env_bgl, sky_bgl, sky_pipeline, baker, environment, brdf_view,
                 texture_bgl,
                 material_bgl,
                 mipgen,
@@ -271,11 +275,12 @@ fn create_hdr_and_ibl_resources(
     camera_bgl: &wgpu::BindGroupLayout,
     format:     wgpu::TextureFormat,
     size:       winit::dpi::PhysicalSize<u32>,
-) -> (wgpu::BindGroupLayout, wgpu::BindGroupLayout, ibl::Environment, wgpu::TextureView, wgpu::RenderPipeline, post::HdrTargets, Option<gpu_timer::GpuTimer>, bloom::BloomPass, post::TonemapPass) {
+) -> (wgpu::BindGroupLayout, wgpu::BindGroupLayout, ibl::Baker, ibl::Environment, wgpu::TextureView, wgpu::RenderPipeline, post::HdrTargets, Option<gpu_timer::GpuTimer>, bloom::BloomPass, post::TonemapPass) {
     let env_bgl = ibl::create_env_bind_group_layout(device);
     let sky_bgl = sky::create_sky_bind_group_layout(device);
-    let brdf_view = ibl::bake_brdf_lut(device, queue);
-    let environment = ibl::Environment::default_gray(device, queue, &env_bgl, &sky_bgl, &brdf_view);
+    let baker = ibl::Baker::new(device);
+    let brdf_view = ibl::bake_brdf_lut(device, queue, &baker);
+    let environment = ibl::Environment::default_gray(device, queue, &baker, &env_bgl, &sky_bgl, &brdf_view);
     let sky_pipeline = sky::create_sky_pipeline(device, camera_bgl, &sky_bgl);
     let hdr = post::HdrTargets::new(device, size.width, size.height);
     let gpu_timer = gpu_timer::GpuTimer::new(device, queue);
@@ -283,7 +288,7 @@ fn create_hdr_and_ibl_resources(
     let mut tonemap = post::TonemapPass::new(device, format);
     tonemap.set_source(device, &hdr.resolve_view, &bloom.output_view);
     tonemap.set_exposure(queue, 1.0);
-    (env_bgl, sky_bgl, environment, brdf_view, sky_pipeline, hdr, gpu_timer, bloom, tonemap)
+    (env_bgl, sky_bgl, baker, environment, brdf_view, sky_pipeline, hdr, gpu_timer, bloom, tonemap)
 }
 
 fn create_scene_pipelines(

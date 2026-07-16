@@ -71,6 +71,7 @@ impl Environment {
     pub(crate) fn from_hdr(
         device:     &Device,
         queue:      &Queue,
+        baker:      &Baker,
         env_layout: &wgpu::BindGroupLayout,
         sky_layout: &wgpu::BindGroupLayout,
         brdf_view:  &wgpu::TextureView,
@@ -82,17 +83,19 @@ impl Environment {
             .pixels()
             .flat_map(|p| [p.0[0], p.0[1], p.0[2], 1.0])
             .collect();
-        Ok(Self::from_equirect_pixels(device, queue, env_layout, sky_layout, brdf_view, w, h, &pixels))
+        Ok(Self::from_equirect_pixels(device, queue, baker, env_layout, sky_layout, brdf_view, w, h, &pixels))
     }
 
     /// Bake from raw RGBA f32 equirect pixels (also the test seam: a uniform
     /// image gives a white-furnace environment). `brdf_view` is the LUT baked
     /// once at renderer init (see `bake_brdf_lut`) and shared across every
     /// `Environment` — it depends only on (NdotV, roughness), never on the
-    /// pixels baked here.
+    /// pixels baked here. `baker` is the same shared pipeline set, built once
+    /// at renderer init (see `Baker::new`).
     pub(crate) fn from_equirect_pixels(
         device:     &Device,
         queue:      &Queue,
+        baker:      &Baker,
         env_layout: &wgpu::BindGroupLayout,
         sky_layout: &wgpu::BindGroupLayout,
         brdf_view:  &wgpu::TextureView,
@@ -128,7 +131,6 @@ impl Environment {
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
 
-        let baker = Baker::new(device);
         let equirect_view = equirect.create_view(&Default::default());
 
         // 1. equirect → base cubemap.
@@ -210,21 +212,21 @@ impl Environment {
     pub(crate) fn default_gray(
         device:     &Device,
         queue:      &Queue,
+        baker:      &Baker,
         env_layout: &wgpu::BindGroupLayout,
         sky_layout: &wgpu::BindGroupLayout,
         brdf_view:  &wgpu::TextureView,
     ) -> Self {
         let v = 0.18f32;
         let pixels: Vec<f32> = (0..4 * 2).flat_map(|_| [v, v, v, 1.0]).collect();
-        Self::from_equirect_pixels(device, queue, env_layout, sky_layout, brdf_view, 4, 2, &pixels)
+        Self::from_equirect_pixels(device, queue, baker, env_layout, sky_layout, brdf_view, 4, 2, &pixels)
     }
 }
 
 /// Bakes the split-sum BRDF LUT once — a pure function of (NdotV,
 /// roughness) with no environment input (`ibl.wgsl:155-183`), so every
 /// `Environment` shares this view instead of rebaking it per zone crossing.
-pub(crate) fn bake_brdf_lut(device: &Device, queue: &Queue) -> wgpu::TextureView {
-    let baker = Baker::new(device);
+pub(crate) fn bake_brdf_lut(device: &Device, queue: &Queue, baker: &Baker) -> wgpu::TextureView {
     let brdf = device.create_texture(&wgpu::TextureDescriptor {
         label:           Some("IBL BRDF LUT"),
         size:            wgpu::Extent3d { width: BRDF_SIZE, height: BRDF_SIZE, depth_or_array_layers: 1 },
@@ -258,6 +260,20 @@ pub(crate) fn brdf_bake_count() -> u32 {
     BAKE_COUNT.with(|c| c.get())
 }
 
+#[cfg(feature = "offscreen")]
+thread_local! {
+    static BAKER_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// `Baker` constructions (shader module + pipeline compiles) performed on the
+/// calling thread so far — lets tests assert that repeated `Environment`
+/// construction (zone crossings) reuses the baker built at renderer init
+/// rather than recompiling its pipelines.
+#[cfg(feature = "offscreen")]
+pub(crate) fn baker_construction_count() -> u32 {
+    BAKER_COUNT.with(|c| c.get())
+}
+
 fn create_cube(device: &Device, label: &str, size: u32, mips: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label:           Some(label),
@@ -287,8 +303,9 @@ struct Params {
     _pad:      [f32; 2],
 }
 
-/// The four bake pipelines plus their layouts, built once per bake.
-struct Baker {
+/// The four bake pipelines plus their layouts, built once per device and
+/// shared by reference across every environment bake.
+pub(crate) struct Baker {
     src_bgl:             wgpu::BindGroupLayout, // t_src + s_src + params
     cube_bgl:            wgpu::BindGroupLayout, // t_cube
     sampler:             wgpu::Sampler,
@@ -301,7 +318,7 @@ struct Baker {
 }
 
 impl Baker {
-    fn new(device: &Device) -> Self {
+    pub(crate) fn new(device: &Device) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("ibl.wgsl"));
 
         let src_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -404,6 +421,9 @@ impl Baker {
             view_formats:    &[],
         });
         let dummy_cube = create_cube(device, "IBL Dummy Cube", 1, 1);
+
+        #[cfg(feature = "offscreen")]
+        BAKER_COUNT.with(|c| c.set(c.get() + 1));
 
         Self {
             equirect_pipeline:   make("equirect_frag"),

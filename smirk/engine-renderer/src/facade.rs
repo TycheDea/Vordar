@@ -122,7 +122,7 @@ pub fn set_environment(path: &str, resources: &mut Resources) -> bool {
     let Some(state) = resources.get_mut::<RendererState>() else { return false };
     let start = std::time::Instant::now();
     let result = ibl::Environment::from_hdr(
-        &state.device, &state.queue, &state.env_bgl, &state.sky_bgl, &state.brdf_view, path,
+        &state.device, &state.queue, &state.baker, &state.env_bgl, &state.sky_bgl, &state.brdf_view, path,
     );
     log::info!("set_environment({path}) bake took {:?}", start.elapsed());
     match result {

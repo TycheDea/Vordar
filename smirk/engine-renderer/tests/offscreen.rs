@@ -766,6 +766,26 @@ fn repeated_environment_loads_skip_redundant_brdf_bake() {
     );
 }
 
+/// The IBL `Baker` (shader module + all four bake pipelines) is a pure
+/// function of the device, never of the environment pixels, so it must
+/// compile once at renderer init and every `Environment` (zone crossing)
+/// reuses that baker rather than recompiling its pipelines.
+#[test]
+fn repeated_environment_loads_skip_redundant_baker_construction() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    let after_init = OffscreenRenderer::baker_construction_count();
+
+    for i in 0..3 {
+        let v = 0.1 + i as f32 * 0.05;
+        r.set_uniform_environment([v, v * 0.8, v * 1.1]);
+    }
+
+    assert_eq!(
+        OffscreenRenderer::baker_construction_count(), after_init,
+        "3 environment loads (zone crossings) must not reconstruct the shared Baker"
+    );
+}
+
 // ── Point lights ─────────────────────────────────────────────────────────────
 
 fn mean_luminance(pixels: &[u8]) -> f64 {

@@ -188,6 +188,15 @@ Rework 2 moves these off-frame via streaming: `load_gltf_data` and
 setup) stay synchronous but run on a small pool instead of the frame's main thread.
 The environment load baseline (rework 7 finding 7): ~24 ms per `set_uniform_environment`,
 241 ms/10 loads in the zone-change path (steps 2–3 re-measure this after the refactor).
+Rendering rework 2 finding 2 hoists `Baker::new` (shader module + all four bake
+pipelines) to compile once per device instead of once per environment load, sharing
+it the way `bake_brdf_lut`'s LUT already was. Re-measured after the hoist: ~20 ms per
+`set_uniform_environment` (187–230 ms/10 loads across three runs) — a smaller drop
+than the ~9–10 ms `Baker::new` isolation predicted (expected ~14 ms/load). The hoist
+is verified correct regardless (`repeated_environment_loads_skip_redundant_baker_construction`
+asserts zero `Baker` reconstructions across 3 reloads); the remaining ~20 ms per load
+is the cubemap/irradiance/prefilter bake work itself (216 render passes), not pipeline
+compilation.
 
 ### Snapshot path — `snapshot` (server; broadcast = full 6-tick round covering every
 conn once, comparable to the old un-staggered number; broadcast_slice = one 60 Hz

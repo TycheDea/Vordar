@@ -10,7 +10,7 @@
 // fallback adapters lack it), so harness assets must be RGBA8/procedural.
 
 use crate::camera::{self, Camera, CameraUniform, GpuPointLight, LightUniform, MAX_POINT_LIGHTS};
-use crate::ibl::Environment;
+use crate::ibl::{Baker, Environment};
 use crate::instance::SdfInstance;
 use crate::mesh::{self, MeshData};
 use crate::mesh_pipeline::{self, MeshInstance};
@@ -134,6 +134,7 @@ pub struct OffscreenRenderer {
     mesh_pipeline:  wgpu::RenderPipeline,
     sky_pipeline:   wgpu::RenderPipeline,
     tonemap:        TonemapPass,
+    baker:          Baker,
     environment:    Environment,
     brdf_view:      wgpu::TextureView,
     mipgen:         MipGenerator,
@@ -185,8 +186,9 @@ impl OffscreenRenderer {
         let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
         let env_bgl      = crate::ibl::create_env_bind_group_layout(device);
         let sky_bgl      = sky::create_sky_bind_group_layout(device);
-        let brdf_view    = crate::ibl::bake_brdf_lut(device, &gpu.queue);
-        let environment  = Environment::default_gray(device, &gpu.queue, &env_bgl, &sky_bgl, &brdf_view);
+        let baker        = Baker::new(device);
+        let brdf_view    = crate::ibl::bake_brdf_lut(device, &gpu.queue, &baker);
+        let environment  = Environment::default_gray(device, &gpu.queue, &baker, &env_bgl, &sky_bgl, &brdf_view);
         let mipgen       = MipGenerator::new(device);
 
         let sdf_pipeline =
@@ -221,6 +223,7 @@ impl OffscreenRenderer {
             mesh_pipeline,
             sky_pipeline,
             tonemap,
+            baker,
             environment,
             brdf_view,
             mipgen,
@@ -241,7 +244,7 @@ impl OffscreenRenderer {
     pub fn set_uniform_environment(&mut self, rgb: [f32; 3]) {
         let pixels: Vec<f32> = (0..4 * 2).flat_map(|_| [rgb[0], rgb[1], rgb[2], 1.0]).collect();
         self.environment = Environment::from_equirect_pixels(
-            &self.gpu.device, &self.gpu.queue, &self.env_bgl, &self.sky_bgl, &self.brdf_view, 4, 2, &pixels,
+            &self.gpu.device, &self.gpu.queue, &self.baker, &self.env_bgl, &self.sky_bgl, &self.brdf_view, 4, 2, &pixels,
         );
     }
 
@@ -250,6 +253,14 @@ impl OffscreenRenderer {
     /// baked in `new` rather than rebaking it.
     pub fn brdf_bake_count() -> u32 {
         crate::ibl::brdf_bake_count()
+    }
+
+    /// `Baker` constructions (shader + pipeline compiles) performed on the
+    /// calling thread so far — proves repeated `Environment` construction
+    /// (zone crossings) reuses the baker built in `new` rather than
+    /// recompiling its pipelines.
+    pub fn baker_construction_count() -> u32 {
+        crate::ibl::baker_construction_count()
     }
 
     /// Re-aims the camera to boresight elevation 0 (looking exactly at the
