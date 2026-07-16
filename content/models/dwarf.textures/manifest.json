@@ -1,0 +1,11 @@
+{
+  "source": "dwarf.glb",
+  "sha256": "4c29f201a011ca62a7f9681667e2cace5efb496c98317c2a776e029b53e4d6bd",
+  "images": [
+    {
+      "index": 0,
+      "slot": "base",
+      "file": "img0.dds"
+    }
+  ]
+}

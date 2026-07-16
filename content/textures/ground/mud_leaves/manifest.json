@@ -1,0 +1,23 @@
+{
+  "source": "mud_leaves",
+  "images": [
+    {
+      "slot": "diff",
+      "file": "diff_2k.dds",
+      "source": "diff_2k.jpg",
+      "sha256": "29c997d77f56e4ea16d3e998a306be0c17fddb28ab4822657c7cd8249040ffda"
+    },
+    {
+      "slot": "normal",
+      "file": "nor_gl_2k.dds",
+      "source": "nor_gl_2k.jpg",
+      "sha256": "b6ec386e00d9d2a1c3a1da6a98a67066b0dfaa88ddb779341df29700cf081bdf"
+    },
+    {
+      "slot": "mr",
+      "file": "rough_2k_mr.dds",
+      "source": "rough_2k.jpg",
+      "sha256": "9556215f5fef905c37cdf19c77aef7822f124890f8fb7dcce65d57c5eafc0ca5"
+    }
+  ]
+}

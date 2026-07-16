@@ -1,0 +1,66 @@
+{
+  "source": "statue_vroid.glb",
+  "sha256": "1c0d289441c0afc00838433c67e77246f3befda2cdb36dc15515a00f48044289",
+  "images": [
+    {
+      "index": 0,
+      "slot": "base",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "emissive",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "normal",
+      "file": "img2.dds"
+    },
+    {
+      "index": 3,
+      "slot": "base",
+      "file": "img3.dds"
+    },
+    {
+      "index": 4,
+      "slot": "base",
+      "file": "img4.dds"
+    },
+    {
+      "index": 5,
+      "slot": "base",
+      "file": "img5.dds"
+    },
+    {
+      "index": 6,
+      "slot": "normal",
+      "file": "img6.dds"
+    },
+    {
+      "index": 7,
+      "slot": "base",
+      "file": "img7.dds"
+    },
+    {
+      "index": 8,
+      "slot": "base",
+      "file": "img8.dds"
+    },
+    {
+      "index": 9,
+      "slot": "base",
+      "file": "img9.dds"
+    },
+    {
+      "index": 10,
+      "slot": "base",
+      "file": "img10.dds"
+    },
+    {
+      "index": 11,
+      "slot": "normal",
+      "file": "img11.dds"
+    }
+  ]
+}

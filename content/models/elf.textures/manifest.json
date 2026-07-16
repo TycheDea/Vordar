@@ -1,0 +1,11 @@
+{
+  "source": "elf.glb",
+  "sha256": "66b7c0d5dda9fdb6bdf8f0d9b961d63ee3b3decde0b5f1bf21a8a9b191f9eeb3",
+  "images": [
+    {
+      "index": 0,
+      "slot": "base",
+      "file": "img0.dds"
+    }
+  ]
+}

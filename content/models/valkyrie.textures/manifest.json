@@ -1,0 +1,11 @@
+{
+  "source": "valkyrie.glb",
+  "sha256": "e9ad81646c849ce9c3f542c4782fbde0a770abc85528cd245706228762203174",
+  "images": [
+    {
+      "index": 0,
+      "slot": "base",
+      "file": "img0.dds"
+    }
+  ]
+}
