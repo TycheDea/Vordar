@@ -154,6 +154,26 @@ many enemies are actively provoked, which is small in practice.
 | reconcile/pending60_statics32 | 20.7 µs | 32-static collision: ~110× pend60, replay per intent |
 | reconcile/pending240_statics32 | 81.7 µs | 32-static collision: ~142× pend240, replay per intent |
 
+### Render CPU — `render_cpu` (VQ-F1 stress figure: 40 rigs × 64 joints)
+
+| Bench | Before | After | Notes |
+|---|---|---|---|
+| joint_palette_40x64 | 105.03 µs | 105.44 µs | unchanged (noise, p = 0.23) |
+
+Rendering finding 10: `pose_player`, the per-entity posing path `MeshRenderSyncSystem`
+runs every display frame, allocated five fresh `Vec`s per skinned instance (sample,
+blend, the two buffers inside `global_transforms`, the palette) plus a `String` clone
+for an active crossfade — ~200 heap allocations/frame at this stress figure.
+`sample_pose`/`global_transforms` gained `_into` out-parameter twins and kept their
+old allocating signatures as thin wrappers (this bench calls those wrappers directly,
+which is why the number above doesn't move — the bench never exercised the per-frame
+hot path). `pose_player` was rewired into `pose_player_into`, fed by a `PoseScratch`
+owned by `MeshRenderSyncSystem` and reused across entities and frames; the prev-clip
+lookup for crossfades now borrows `player.prev`'s name instead of cloning it. Verified
+by `pose_player_into_stops_growing_scratch_buffers_after_warmup`
+(`engine-renderer`, `mesh::sync`): scratch buffer capacity is unchanged across five
+repeated calls once warmed, i.e. zero further allocations in steady state.
+
 ### Snapshot path — `snapshot` (server; broadcast = full 6-tick round covering every
 conn once, comparable to the old un-staggered number; broadcast_slice = one 60 Hz
 tick, i.e. the actual per-tick cost the sim thread pays)

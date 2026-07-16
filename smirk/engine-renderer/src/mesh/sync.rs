@@ -2,6 +2,7 @@ use super::store::{CpuSkin, MeshStore};
 use crate::mesh_pipeline::MeshInstance;
 use crate::RendererState;
 use crate::skinned_pipeline::{SkinnedMeshInstance, MAX_JOINT_MATRICES, MAX_SKINNED_INSTANCES};
+use crate::anim::LocalTransform;
 use engine_app::scheduler::{InterpolationAlpha, System};
 use engine_core::components::{AnimationPlayer, PreviousTransform, RenderMesh, Transform};
 use engine_core::traits::Resources;
@@ -10,15 +11,35 @@ use glam::Mat4;
 use hecs::Entity;
 use std::collections::HashMap;
 
+/// Scratch buffers behind `pose_player_into`, owned by `MeshRenderSyncSystem`
+/// and reused across skinned instances and frames so posing settles into zero
+/// heap allocations once warmed up.
+#[derive(Default)]
+pub(crate) struct PoseScratch {
+    cur_pose:  Vec<LocalTransform>,
+    prev_pose: Vec<LocalTransform>,
+    done:      Vec<bool>,
+    pub(crate) globals: Vec<Mat4>,
+    pub(crate) palette: Vec<Mat4>,
+}
+
 /// Advance an `AnimationPlayer` by `dt`, sample its current pose (crossfading
-/// out of `prev` if a blend is in progress), and return the joint palette plus
+/// out of `prev` if a blend is in progress), and write the joint palette plus
 /// the bones' armature-space globals (pre-inverse-bind — what attachment
-/// sockets need). Pure orchestration over `anim`'s sampling math — no GPU access.
-pub(crate) fn pose_player(player: &mut AnimationPlayer, skin: &CpuSkin, dt: f32) -> (Vec<Mat4>, Vec<Mat4>) {
+/// sockets need) into `scratch.palette` / `scratch.globals`. Pure
+/// orchestration over `anim`'s sampling math — no GPU access. `scratch`'s
+/// buffers are overwritten by the next call, so read them before calling
+/// again.
+pub(crate) fn pose_player_into(player: &mut AnimationPlayer, skin: &CpuSkin, dt: f32, scratch: &mut PoseScratch) {
     let n = skin.skeleton.joint_count();
     let clip_by_name = |name: &str| skin.clips.iter().find(|c| c.name == name);
     let Some(cur_clip) = clip_by_name(&player.clip).or_else(|| skin.clips.first()) else {
-        return (vec![Mat4::IDENTITY; n], vec![Mat4::IDENTITY; n]); // no clips: rest/bind pose
+        // no clips: rest/bind pose
+        scratch.globals.clear();
+        scratch.globals.resize(n, Mat4::IDENTITY);
+        scratch.palette.clear();
+        scratch.palette.resize(n, Mat4::IDENTITY);
+        return;
     };
 
     player.time += dt * player.speed;
@@ -27,37 +48,41 @@ pub(crate) fn pose_player(player: &mut AnimationPlayer, skin: &CpuSkin, dt: f32)
     } else {
         player.time = player.time.clamp(0.0, cur_clip.duration); // hold last frame
     }
-    let cur_pose = crate::anim::sample_pose(&skin.skeleton, cur_clip, player.time);
+    crate::anim::sample_pose_into(&skin.skeleton, cur_clip, player.time, &mut scratch.cur_pose);
 
-    let pose = if player.prev.is_some() {
+    let pose: &[LocalTransform] = if player.prev.is_some() {
         player.blend_t += dt;
         let w = (player.blend_t / player.blend_dur).clamp(0.0, 1.0);
-        let (pname, ptime) = {
-            let p = player.prev.as_ref().unwrap();
-            (p.clip.clone(), p.time)
-        };
-        let blended = match clip_by_name(&pname).or_else(|| skin.clips.first()) {
-            Some(pc) => {
-                let prev_pose = crate::anim::sample_pose(&skin.skeleton, pc, ptime);
-                crate::anim::blend_poses(&prev_pose, &cur_pose, w)
-            }
-            None => cur_pose,
-        };
+        let ptime = player.prev.as_ref().unwrap().time;
+        // Look up the outgoing clip by reference into `player.prev` — the
+        // borrow ends with this call, so the name never needs cloning.
+        let prev_clip = clip_by_name(&player.prev.as_ref().unwrap().clip).or_else(|| skin.clips.first());
         if w >= 1.0 {
             player.prev = None;
         }
-        blended
+        match prev_clip {
+            Some(pc) => {
+                crate::anim::sample_pose_into(&skin.skeleton, pc, ptime, &mut scratch.prev_pose);
+                scratch.cur_pose = crate::anim::blend_poses(&scratch.prev_pose, &scratch.cur_pose, w);
+                &scratch.cur_pose
+            }
+            None => &scratch.cur_pose,
+        }
     } else {
-        cur_pose
+        &scratch.cur_pose
     };
 
-    let globals = crate::anim::global_transforms(&skin.skeleton, &pose);
-    let palette = globals
-        .iter()
-        .zip(&skin.skeleton.joints)
-        .map(|(g, j)| *g * j.inverse_bind)
-        .collect();
-    (palette, globals)
+    crate::anim::global_transforms_into(&skin.skeleton, pose, &mut scratch.globals, &mut scratch.done);
+    crate::anim::palette_into(&scratch.globals, &skin.skeleton.joints, &mut scratch.palette);
+}
+
+/// Allocating wrapper over `pose_player_into`, kept so the unit test below
+/// gets an owned palette/globals pair without holding a `PoseScratch` itself.
+#[cfg(test)]
+pub(crate) fn pose_player(player: &mut AnimationPlayer, skin: &CpuSkin, dt: f32) -> (Vec<Mat4>, Vec<Mat4>) {
+    let mut scratch = PoseScratch::default();
+    pose_player_into(player, skin, dt, &mut scratch);
+    (scratch.palette, scratch.globals)
 }
 
 // ── Per-frame draw lists ────────────────────────────────────────────────────
@@ -106,13 +131,19 @@ pub struct MeshRenderSyncSystem {
     // Scratch, reused across frames.
     items:         Vec<(usize, MeshInstance)>,
     skinned_items: Vec<(usize, SkinnedMeshInstance)>,
+    pose_scratch:  PoseScratch,
     /// Throttles the 80%-of-cap warning to ~once per 5 s.
     warn_accum: f32,
 }
 
 impl MeshRenderSyncSystem {
     pub fn new() -> Self {
-        Self { items: Vec::new(), skinned_items: Vec::new(), warn_accum: 0.0 }
+        Self {
+            items:         Vec::new(),
+            skinned_items: Vec::new(),
+            pose_scratch:  PoseScratch::default(),
+            warn_accum:    0.0,
+        }
     }
 }
 
@@ -187,8 +218,8 @@ impl System for MeshRenderSyncSystem {
                             continue;
                         }
                         let joint_base = skinned.joints.len() as u32;
-                        let (mats, globals) = pose_player(player, cpu_skin, delta);
-                        skinned.joints.extend(mats.iter().map(|m| m.to_cols_array_2d()));
+                        pose_player_into(player, cpu_skin, delta, &mut self.pose_scratch);
+                        skinned.joints.extend(self.pose_scratch.palette.iter().map(|m| m.to_cols_array_2d()));
                         // Publish the configured attachment sockets for this entity.
                         if !socket_bones.is_empty() {
                             let entry = sockets.0.entry(entity).or_default();
@@ -199,7 +230,7 @@ impl System for MeshRenderSyncSystem {
                                     .iter()
                                     .position(|jt| jt.name == *bone)
                                 {
-                                    entry.insert(bone.clone(), model * globals[j]);
+                                    entry.insert(bone.clone(), model * self.pose_scratch.globals[j]);
                                 }
                             }
                         }
@@ -279,6 +310,47 @@ mod tests {
             let (b, _) = pose_player(&mut player, &skin, 0.25);
             let moved = a.iter().zip(&b).any(|(x, y)| !x.abs_diff_eq(*y, 1e-4));
             assert!(moved, "clip {clip} must move the skeleton as time advances");
+        }
+    }
+
+    fn stub_skin(joint_count: usize) -> CpuSkin {
+        let joints = (0..joint_count)
+            .map(|i| crate::anim::Joint {
+                parent:       if i == 0 { None } else { Some(i - 1) },
+                inverse_bind: Mat4::IDENTITY,
+                rest:         crate::anim::LocalTransform::IDENTITY,
+                name:         format!("bone{i}"),
+            })
+            .collect();
+        let skeleton = crate::anim::Skeleton { joints, root: Mat4::IDENTITY };
+        let clip = crate::anim::AnimationClip {
+            name:     "clip_a".into(),
+            duration: 1.0,
+            tracks:   vec![crate::anim::JointTracks::default(); joint_count],
+        };
+        CpuSkin { skeleton, clips: vec![clip] }
+    }
+
+    /// The whole point of `pose_player_into`: once its `PoseScratch` is
+    /// warmed by a first call, posing the same rig again must not grow any
+    /// of its buffers — the steady-state per-frame allocation count is zero.
+    #[test]
+    fn pose_player_into_stops_growing_scratch_buffers_after_warmup() {
+        let skin = stub_skin(64);
+        let mut player = AnimationPlayer { clip: "clip_a".into(), ..Default::default() };
+        let mut scratch = PoseScratch::default();
+
+        pose_player_into(&mut player, &skin, 0.016, &mut scratch); // warm-up call
+        let cap_globals = scratch.globals.capacity();
+        let cap_palette = scratch.palette.capacity();
+        let cap_pose = scratch.cur_pose.capacity();
+        assert!(cap_globals >= 64 && cap_palette >= 64 && cap_pose >= 64);
+
+        for _ in 0..5 {
+            pose_player_into(&mut player, &skin, 0.016, &mut scratch);
+            assert_eq!(scratch.globals.capacity(), cap_globals, "globals buffer grew after warm-up");
+            assert_eq!(scratch.palette.capacity(), cap_palette, "palette buffer grew after warm-up");
+            assert_eq!(scratch.cur_pose.capacity(), cap_pose, "pose buffer grew after warm-up");
         }
     }
 }

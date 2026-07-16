@@ -142,30 +142,38 @@ fn sample_quat(track: &Track<Quat>, t: f32) -> Quat {
     }
 }
 
+/// Out-parameter twin of `sample_pose`: clears and refills `out` in place,
+/// reusing its capacity across calls instead of allocating a fresh `Vec`
+/// every frame.
+pub fn sample_pose_into(skeleton: &Skeleton, clip: &AnimationClip, t: f32, out: &mut Vec<LocalTransform>) {
+    out.clear();
+    out.extend((0..skeleton.joints.len()).map(|jx| {
+        let rest = skeleton.joints[jx].rest;
+        let tracks = clip.tracks.get(jx);
+        LocalTransform {
+            translation: tracks
+                .and_then(|c| c.translation.as_ref())
+                .map(|tk| sample_vec3(tk, t))
+                .unwrap_or(rest.translation),
+            rotation: tracks
+                .and_then(|c| c.rotation.as_ref())
+                .map(|tk| sample_quat(tk, t))
+                .unwrap_or(rest.rotation),
+            scale: tracks
+                .and_then(|c| c.scale.as_ref())
+                .map(|tk| sample_vec3(tk, t))
+                .unwrap_or(rest.scale),
+        }
+    }));
+}
+
 /// Sample a clip at time `t` (already wrapped/clamped by the caller) into a
 /// full local pose — one `LocalTransform` per joint, resting where the clip is
 /// silent.
 pub fn sample_pose(skeleton: &Skeleton, clip: &AnimationClip, t: f32) -> Vec<LocalTransform> {
-    (0..skeleton.joints.len())
-        .map(|jx| {
-            let rest = skeleton.joints[jx].rest;
-            let tracks = clip.tracks.get(jx);
-            LocalTransform {
-                translation: tracks
-                    .and_then(|c| c.translation.as_ref())
-                    .map(|tk| sample_vec3(tk, t))
-                    .unwrap_or(rest.translation),
-                rotation: tracks
-                    .and_then(|c| c.rotation.as_ref())
-                    .map(|tk| sample_quat(tk, t))
-                    .unwrap_or(rest.rotation),
-                scale: tracks
-                    .and_then(|c| c.scale.as_ref())
-                    .map(|tk| sample_vec3(tk, t))
-                    .unwrap_or(rest.scale),
-            }
-        })
-        .collect()
+    let mut out = Vec::new();
+    sample_pose_into(skeleton, clip, t, &mut out);
+    out
 }
 
 /// Crossfade two poses: `w = 0` → `a`, `w = 1` → `b`. Per-joint lerp on
@@ -184,29 +192,47 @@ pub fn blend_poses(a: &[LocalTransform], b: &[LocalTransform], w: f32) -> Vec<Lo
 
 // ── Skinning ────────────────────────────────────────────────────────────────
 
+/// Out-parameter twin of `global_transforms`: fills `out` in place, using
+/// `done` as the visitation scratch `resolve_global` needs. Both buffers'
+/// capacity is reused across calls instead of allocating fresh every frame.
+pub fn global_transforms_into(skeleton: &Skeleton, pose: &[LocalTransform], out: &mut Vec<Mat4>, done: &mut Vec<bool>) {
+    let n = skeleton.joints.len();
+    out.clear();
+    out.resize(n, Mat4::IDENTITY);
+    done.clear();
+    done.resize(n, false);
+    for j in 0..n {
+        resolve_global(j, skeleton, pose, out, done);
+    }
+}
+
 /// Compose a local pose into each joint's global (armature-space) transform —
 /// the bone's posed frame *before* the inverse bind. This is what attachment
 /// sockets need: `socket_world = model · global[j]`. Tolerates joints stored
 /// in any order (parent index may exceed the child's) via memoised resolution.
 pub fn global_transforms(skeleton: &Skeleton, pose: &[LocalTransform]) -> Vec<Mat4> {
-    let n = skeleton.joints.len();
-    let mut globals = vec![Mat4::IDENTITY; n];
-    let mut done = vec![false; n];
-    for j in 0..n {
-        resolve_global(j, skeleton, pose, &mut globals, &mut done);
-    }
-    globals
+    let mut out = Vec::new();
+    let mut done = Vec::new();
+    global_transforms_into(skeleton, pose, &mut out, &mut done);
+    out
+}
+
+/// Out-parameter twin of the palette multiply: `out[j] = globals[j] *
+/// joints[j].inverse_bind`. Takes `globals` directly (rather than
+/// recomputing them like `joint_matrices`) since callers that need the
+/// palette usually already computed the globals for attachment sockets too.
+pub fn palette_into(globals: &[Mat4], joints: &[Joint], out: &mut Vec<Mat4>) {
+    out.clear();
+    out.extend(globals.iter().zip(joints).map(|(g, j)| *g * j.inverse_bind));
 }
 
 /// Compose a local pose into the joint palette uploaded to the GPU:
 /// `jointMatrix[j] = global[j] * inverseBind[j]`.
 pub fn joint_matrices(skeleton: &Skeleton, pose: &[LocalTransform]) -> Vec<Mat4> {
     let globals = global_transforms(skeleton, pose);
-    globals
-        .iter()
-        .zip(&skeleton.joints)
-        .map(|(g, j)| *g * j.inverse_bind)
-        .collect()
+    let mut out = Vec::new();
+    palette_into(&globals, &skeleton.joints, &mut out);
+    out
 }
 
 fn resolve_global(
