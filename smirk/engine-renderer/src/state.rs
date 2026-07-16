@@ -58,6 +58,10 @@ pub(crate) struct RendererState {
     pub(crate) camera_buffer:     wgpu::Buffer,
     pub(crate) light_buffer:      wgpu::Buffer,
     pub(crate) camera_bind_group: wgpu::BindGroup,
+    // Retained so `resize` can rebuild `camera_bind_group` against the
+    // SSAO target's new AO view.
+    pub(crate) camera_bgl:        wgpu::BindGroupLayout,
+    pub(crate) ao_sampler:        wgpu::Sampler,
     // ── HDR + post ──
     pub(crate) hdr:     post::HdrTargets,
     pub(crate) tonemap: post::TonemapPass,
@@ -114,7 +118,7 @@ impl RendererState {
     fn init(window: Arc<Window>, vsync: bool) -> (Self, InstancePool, Arc<Mutex<egui_winit::State>>) {
         let (surface, device, queue, config, format, size) = create_surface_and_device(&window, vsync);
 
-        let (camera, shadow_texture, shadow_cascade_views, shadow_array_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
+        let (camera, shadow_texture, shadow_cascade_views, shadow_array_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl) =
             create_camera_and_shadow_view(&device, size);
 
         let (vertex_buffer, index_buffer, texture_bgl, material_bgl, mipgen, default_tex, default_bg) =
@@ -148,6 +152,15 @@ impl RendererState {
         let (depth_prepass_pipelines, ssao_targets, ssao_pass, blur_pass) =
             create_ssao_resources(&device, &queue, &camera_bgl, &joint_bgl, size);
 
+        // The scene bind group binds SSAO's AO view, so it can only be built
+        // once the target above exists — production always binds the real
+        // (blurred) view.
+        let ao_sampler = ssao::create_ao_sampler(&device);
+        let camera_bind_group = camera::create_scene_bind_group(
+            &device, &camera_bgl, &camera_buffer, &light_buffer, &light_vp_buffer,
+            &shadow_array_view, &ssao_targets.blurred_ao_view, &ao_sampler,
+        );
+
         // ── egui ──────────────────────────────────────────────────────────────
         let (egui_ctx, egui_winit, egui_renderer) = create_egui_resources(&device, format, &window);
 
@@ -174,7 +187,7 @@ impl RendererState {
                 particle_params_buffer,
                 particle_atlas,
                 particle_instance_buffer,
-                camera, camera_buffer, light_buffer, camera_bind_group,
+                camera, camera_buffer, light_buffer, camera_bind_group, camera_bgl, ao_sampler,
                 hdr, tonemap, bloom, gpu_timer,
                 shadow_cascade_views,
                 shadow_pipelines,
@@ -223,12 +236,18 @@ impl RendererState {
             bytemuck::cast_slice(&[w as f32, h as f32, 0.6, 0.0]),
         );
         self.camera.aspect = w as f32 / h as f32;
-        let uniform = CameraUniform::from_camera(&self.camera);
+        let uniform = CameraUniform::from_camera(&self.camera, (w, h));
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
         self.ssao_targets = SsaoTargets::new(&self.device, w, h);
         self.ssao_pass.set_target(&self.device, &self.queue, &self.ssao_targets);
         self.blur_pass.set_target(&self.device, &self.ssao_targets.raw_ao_view, self.ssao_pass.params_buffer());
+        // The AO view above is a freshly created texture — rebind so the
+        // scene bind group doesn't keep the old (now stale-sized) one alive.
+        self.camera_bind_group = camera::create_scene_bind_group(
+            &self.device, &self.camera_bgl, &self.camera_buffer, &self.light_buffer, &self.light_vp_buffer,
+            &self._shadow_array_view, &self.ssao_targets.blurred_ao_view, &self.ao_sampler,
+        );
     }
 
     /// Bakes and swaps in the environment whose background HDRI decode has
@@ -304,12 +323,12 @@ fn create_surface_and_device(
 fn create_camera_and_shadow_view(
     device: &wgpu::Device,
     size:   winit::dpi::PhysicalSize<u32>,
-) -> (Camera, wgpu::Texture, Vec<wgpu::TextureView>, wgpu::TextureView, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroupLayout, wgpu::BindGroup) {
+) -> (Camera, wgpu::Texture, Vec<wgpu::TextureView>, wgpu::TextureView, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroupLayout) {
     let camera = Camera::new(size.width as f32 / size.height as f32);
     let (shadow_texture, shadow_cascade_views, shadow_array_view) = shadow::create_shadow_texture(device);
-    let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
-        camera::create_gpu_resources(device, &camera, &shadow_array_view);
-    (camera, shadow_texture, shadow_cascade_views, shadow_array_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group)
+    let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl) =
+        camera::create_scene_buffers_and_layout(device, &camera, (size.width, size.height));
+    (camera, shadow_texture, shadow_cascade_views, shadow_array_view, camera_buffer, light_buffer, light_vp_buffer, camera_bgl)
 }
 
 fn create_geometry_and_texture_resources(

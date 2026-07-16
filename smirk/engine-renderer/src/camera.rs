@@ -160,10 +160,13 @@ pub(crate) struct CameraUniform {
     up:        [f32; 4],
     /// World-space eye position — the PBR shaders' view vector origin.
     eye:       [f32; 4],
+    /// Render target size in pixels (xy only) — shade_pbr divides
+    /// `clip_pos.xy` by this to get the SSAO texture's screen UV.
+    viewport:  [f32; 4],
 }
 
 impl CameraUniform {
-    pub(crate) fn from_camera(camera: &Camera) -> Self {
+    pub(crate) fn from_camera(camera: &Camera, viewport: (u32, u32)) -> Self {
         let (right, up) = camera.basis();
         let vp = camera.build_view_projection_matrix();
         Self {
@@ -172,7 +175,17 @@ impl CameraUniform {
             right:         [right.x, right.y, right.z, 0.0],
             up:            [up.x, up.y, up.z, 0.0],
             eye:           [camera.eye.x, camera.eye.y, camera.eye.z, 1.0],
+            viewport:      [viewport.0 as f32, viewport.1 as f32, 0.0, 0.0],
         }
+    }
+
+    /// Rewrites just the viewport field of an already-uploaded camera
+    /// buffer — the offscreen harness's camera-orientation resets don't know
+    /// the eventual render target's pixel size, so `compose` corrects it
+    /// here right before every draw.
+    pub(crate) fn write_viewport(queue: &wgpu::Queue, camera_buffer: &Buffer, width: u32, height: u32) {
+        let offset = std::mem::offset_of!(CameraUniform, viewport) as wgpu::BufferAddress;
+        queue.write_buffer(camera_buffer, offset, bytemuck::cast_slice(&[width as f32, height as f32, 0.0f32, 0.0f32]));
     }
 }
 
@@ -229,17 +242,20 @@ impl LightUniform {
     }
 }
 
-/// Creates uniform buffers (camera + light + shadow light_vp), the scene
-/// bind group layout, and the bind group. Shadow resources live here
-/// (bindings 2–4) because the skinned pipeline already uses the default max
-/// of 4 bind groups.
-/// Returns (camera_buffer, light_buffer, light_vp_buffer, layout, bind_group).
-pub(crate) fn create_gpu_resources(
-    device:            &wgpu::Device,
-    camera:            &Camera,
-    shadow_array_view: &wgpu::TextureView,
-) -> (Buffer, Buffer, Buffer, BindGroupLayout, BindGroup) {
-    let cam_uniform = CameraUniform::from_camera(camera);
+/// Creates uniform buffers (camera + light + shadow light_vp) and the scene
+/// bind group layout (bindings 0–6: camera/light uniforms, shadow receiving,
+/// SSAO). Shadow resources live at 2–4 and SSAO at 5–6 because the skinned
+/// pipeline already uses the default max of 4 bind groups. Building the
+/// bind group itself is a separate step (`create_scene_bind_group`) since
+/// the AO view it binds isn't built until after the SSAO passes, which in
+/// turn need this layout to exist first.
+/// Returns (camera_buffer, light_buffer, light_vp_buffer, layout).
+pub(crate) fn create_scene_buffers_and_layout(
+    device:   &wgpu::Device,
+    camera:   &Camera,
+    viewport: (u32, u32),
+) -> (Buffer, Buffer, Buffer, BindGroupLayout) {
+    let cam_uniform = CameraUniform::from_camera(camera, viewport);
     let camera_buffer = device.create_buffer_init(&BufferInitDescriptor {
         label:    Some("Camera Uniform"),
         contents: bytemuck::cast_slice(&[cam_uniform]),
@@ -260,8 +276,6 @@ pub(crate) fn create_gpu_resources(
         contents: bytemuck::cast_slice(&identity_cascades),
         usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
     });
-
-    let shadow_sampler = crate::shadow::create_shadow_sampler(device);
 
     let uniform_entry = |binding: u32, visibility: ShaderStages| BindGroupLayoutEntry {
         binding,
@@ -293,22 +307,59 @@ pub(crate) fn create_gpu_resources(
                 ty:         BindingType::Sampler(SamplerBindingType::Comparison),
                 count:      None,
             },
+            // SSAO: real blurred target when enabled, a white 1×1 fallback
+            // otherwise (see ssao::WhiteAo).
+            BindGroupLayoutEntry {
+                binding:    5,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Texture {
+                    multisampled:   false,
+                    view_dimension: TextureViewDimension::D2,
+                    sample_type:    wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding:    6,
+                visibility: ShaderStages::FRAGMENT,
+                ty:         BindingType::Sampler(SamplerBindingType::Filtering),
+                count:      None,
+            },
         ],
     });
 
-    let bind_group = device.create_bind_group(&BindGroupDescriptor {
+    (camera_buffer, light_buffer, light_vp_buffer, layout)
+}
+
+/// (Re)builds the scene bind group against whichever AO view/sampler the
+/// caller currently wants bound — called at construction and again whenever
+/// that view's identity changes (a resize, or the offscreen harness's SSAO
+/// toggle), since a bind group keeps its bound view alive rather than
+/// tracking the field that replaced it.
+pub(crate) fn create_scene_bind_group(
+    device:            &wgpu::Device,
+    layout:            &BindGroupLayout,
+    camera_buffer:     &Buffer,
+    light_buffer:      &Buffer,
+    light_vp_buffer:   &Buffer,
+    shadow_array_view: &wgpu::TextureView,
+    ao_view:           &wgpu::TextureView,
+    ao_sampler:        &wgpu::Sampler,
+) -> BindGroup {
+    let shadow_sampler = crate::shadow::create_shadow_sampler(device);
+    device.create_bind_group(&BindGroupDescriptor {
         label:  Some("Scene Bind Group"),
-        layout: &layout,
+        layout,
         entries: &[
             BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
             BindGroupEntry { binding: 1, resource: light_buffer.as_entire_binding() },
             BindGroupEntry { binding: 2, resource: light_vp_buffer.as_entire_binding() },
             BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(shadow_array_view) },
             BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
+            BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(ao_view) },
+            BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(ao_sampler) },
         ],
-    });
-
-    (camera_buffer, light_buffer, light_vp_buffer, layout, bind_group)
+    })
 }
 
 /// Cycles the camera projection mode (Perspective → Isometric → TopDown → …) on C press.
@@ -326,7 +377,7 @@ impl System for CycleCameraSystem {
             let state = resources.get_mut::<crate::RendererState>()
                 .expect("RendererState not in resources");
             state.camera.cycle_projection();
-            let uniform = CameraUniform::from_camera(&state.camera);
+            let uniform = CameraUniform::from_camera(&state.camera, (state.config.width, state.config.height));
             state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
         }
     }

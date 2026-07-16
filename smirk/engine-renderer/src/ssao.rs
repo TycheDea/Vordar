@@ -1,8 +1,9 @@
 // Depth prepass + SSAO: a full-res single-sample depth-only pass renders
 // opaque geometry from the main camera, then a half-res pass reconstructs
 // position/normal from that depth and darkens creases where nearby geometry
-// blocks the hemisphere above a surface. AO multiplies IBL ambient only —
-// this module only produces the texture; nothing samples it yet.
+// blocks the hemisphere above a surface. shade_pbr (pbr_common.wgsl) samples
+// the blurred result to scale IBL ambient only; `WhiteAo` is the neutral
+// stand-in bound whenever SSAO is disabled.
 
 use wgpu::{BindGroupLayout, Device, TextureFormat};
 
@@ -234,6 +235,56 @@ impl SsaoTargets {
             _raw_ao:        raw_ao,
         }
     }
+}
+
+/// A 1×1 always-white AO texture — the neutral fallback the scene bind group
+/// points at whenever SSAO is disabled, so shade_pbr's `ao * ssao` term
+/// reduces to plain material AO.
+pub(crate) struct WhiteAo {
+    _texture: wgpu::Texture,
+    pub(crate) view: wgpu::TextureView,
+}
+
+impl WhiteAo {
+    pub(crate) fn new(device: &Device, queue: &wgpu::Queue) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label:           Some("SSAO White Fallback"),
+            size:            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count:    1,
+            dimension:       wgpu::TextureDimension::D2,
+            format:          TextureFormat::R8Unorm,
+            usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats:    &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture:   &texture,
+                mip_level: 0,
+                origin:    wgpu::Origin3d::ZERO,
+                aspect:    wgpu::TextureAspect::All,
+            },
+            &[255u8],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(1), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        let view = texture.create_view(&Default::default());
+        Self { _texture: texture, view }
+    }
+}
+
+/// Linear-filtering sampler for the AO texture (real or white-fallback),
+/// clamped so a screen UV rounding slightly past [0,1] at the frame edge
+/// samples the edge texel rather than wrapping.
+pub(crate) fn create_ao_sampler(device: &Device) -> wgpu::Sampler {
+    device.create_sampler(&wgpu::SamplerDescriptor {
+        label:          Some("SSAO Sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        mag_filter:     wgpu::FilterMode::Linear,
+        min_filter:     wgpu::FilterMode::Linear,
+        ..Default::default()
+    })
 }
 
 #[repr(C)]

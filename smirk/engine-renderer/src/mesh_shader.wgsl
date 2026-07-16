@@ -120,7 +120,8 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let V = normalize(camera.eye.xyz - in.world_pos);
     let shadow = shadow_factor(in.world_pos);
-    let color = shade_pbr(in.world_pos, N, V, albedo, metallic, roughness, ao, emissive, shadow);
+    let screen_uv = in.clip_pos.xy / camera.viewport.xy;
+    let color = shade_pbr(in.world_pos, N, V, albedo, metallic, roughness, ao, emissive, shadow, screen_uv);
     var rgb = apply_fog(color, in.world_pos);
     if material.mr.w > 0.5 { rgb = rgb * out_alpha; }
     return vec4<f32>(rgb, out_alpha);

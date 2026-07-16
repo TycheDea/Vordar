@@ -1,6 +1,7 @@
 // SSAO: reconstructs position/normal from the depth prepass and darkens
-// creases where nearby geometry blocks the hemisphere above a surface. AO
-// multiplies IBL ambient only — nothing samples this texture yet.
+// creases where nearby geometry blocks the hemisphere above a surface.
+// shade_pbr (pbr_common.wgsl) samples the blurred result to scale IBL
+// ambient only.
 //
 // `ssao_frag` and `blur_frag` share `@group(1) @binding(0)` for their own
 // input texture (depth vs. raw AO) — each entry point only reaches one of

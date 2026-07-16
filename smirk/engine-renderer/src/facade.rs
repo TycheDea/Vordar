@@ -55,7 +55,7 @@ pub fn update_camera(target: Option<GlamVec3>, yaw_delta: f32, pitch_delta: f32,
         .expect("RendererState not in resources");
     if let Some(t) = target { state.camera.target = t; }
     state.camera.orbit(yaw_delta, pitch_delta);
-    let uniform = CameraUniform::from_camera(&state.camera);
+    let uniform = CameraUniform::from_camera(&state.camera, (state.config.width, state.config.height));
     state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
 }
 
@@ -78,7 +78,7 @@ pub fn zoom_camera(delta: f32, resources: &mut Resources) {
         .get_mut::<RendererState>()
         .expect("RendererState not in resources");
     state.camera.zoom(delta, min_radius, max_radius);
-    let uniform = CameraUniform::from_camera(&state.camera);
+    let uniform = CameraUniform::from_camera(&state.camera, (state.config.width, state.config.height));
     state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
 }
 

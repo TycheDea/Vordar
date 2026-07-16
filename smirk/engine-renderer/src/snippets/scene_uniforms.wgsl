@@ -6,6 +6,7 @@ struct Camera {
     right:         vec4<f32>,
     up:            vec4<f32>,
     eye:           vec4<f32>, // world-space camera position
+    viewport:      vec4<f32>, // render target size in pixels (xy only)
 }
 @group(0) @binding(0)
 var<uniform> camera: Camera;
@@ -33,3 +34,8 @@ struct LightUniform {
 }
 @group(0) @binding(1)
 var<uniform> light: LightUniform;
+
+// SSAO: real blurred target when enabled, a white 1×1 fallback otherwise
+// (see engine_renderer::ssao::WhiteAo) — shade_pbr multiplies ambient by it.
+@group(0) @binding(5) var t_ssao: texture_2d<f32>;
+@group(0) @binding(6) var s_ssao: sampler;

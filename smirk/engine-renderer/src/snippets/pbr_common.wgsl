@@ -59,9 +59,12 @@ fn specular_aa_roughness(N: vec3<f32>, rough: f32) -> f32 {
 /// Shared shading: albedo already tinted and in linear space. `P` is the
 /// fragment's world position (the point-light loop's falloff origin).
 /// `shadow` attenuates the direct sun term only (1.0 = fully lit).
+/// `screen_uv` (clip-space position over the viewport) samples the SSAO
+/// texture, which scales ambient only — never direct light or emissive.
 fn shade_pbr(
     P: vec3<f32>, N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
     metallic: f32, roughness: f32, ao: f32, emissive: vec3<f32>, shadow: f32,
+    screen_uv: vec2<f32>,
 ) -> vec3<f32> {
     let rough = specular_aa_roughness(N, clamp(roughness, 0.045, 1.0));
 
@@ -88,7 +91,10 @@ fn shade_pbr(
     let pre     = textureSampleLevel(t_prefilter, s_env, R, rough * PREFILTER_MAX_MIP).rgb;
     let ab      = textureSample(t_brdf, s_env, vec2<f32>(NdotV, rough)).rg;
     let spec_ibl = pre * (f0 * ab.x + vec3<f32>(ab.y));
-    let ambient  = light.ambient * (diffuse + spec_ibl) * ao;
+    // Single mip (level 0) — textureSampleLevel skips the implicit-derivative
+    // LOD naga would otherwise compute for a texture this shape has no use for.
+    let ssao    = textureSampleLevel(t_ssao, s_ssao, screen_uv, 0.0).r;
+    let ambient  = light.ambient * (diffuse + spec_ibl) * ao * ssao;
 
     return ambient + direct + emissive;
 }

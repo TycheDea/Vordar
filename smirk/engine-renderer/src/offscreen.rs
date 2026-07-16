@@ -158,6 +158,11 @@ pub struct OffscreenRenderer {
     light_state:    LightUniform,
     light_buffer:   wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    // Retained so the scene bind group can be rebuilt against a different
+    // AO view (real vs white fallback) without recreating the layout.
+    camera_bgl:     wgpu::BindGroupLayout,
+    white_ao:       ssao::WhiteAo,
+    ao_sampler:     wgpu::Sampler,
     vertex_buffer:  wgpu::Buffer,
     index_buffer:   wgpu::Buffer,
     white_bg:       wgpu::BindGroup,
@@ -177,7 +182,12 @@ pub struct OffscreenRenderer {
     ssao_targets:            Option<SsaoTargets>,
     /// Depth prepass + SSAO + blur on/off — off (the default) keeps every
     /// pre-existing offscreen test's pass count unchanged.
-    pub draw_ssao:  bool,
+    ssao_enabled:   bool,
+    /// Set whenever `camera_bind_group`'s bound AO view might no longer
+    /// match `ssao_enabled` (a `set_ssao` toggle, or `ensure_ssao_targets`
+    /// swapping in a freshly (re)built target) — `compose` rebuilds and
+    /// clears it before recording any pass.
+    scene_bind_group_stale: bool,
 }
 
 impl OffscreenRenderer {
@@ -189,8 +199,10 @@ impl OffscreenRenderer {
 
         let camera = Camera::new(aspect);
         let (shadow_texture, shadow_cascade_views, shadow_array_view) = shadow::create_shadow_texture(device);
-        let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl, camera_bind_group) =
-            camera::create_gpu_resources(device, &camera, &shadow_array_view);
+        // Viewport is unknown until a render targets a real `SceneTarget`
+        // (aspect-only construction); `compose` corrects it before any draw.
+        let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl) =
+            camera::create_scene_buffers_and_layout(device, &camera, (0, 0));
 
         let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(device);
         let shadow_pipelines = ShadowPipelines::new(device, &joint_bgl);
@@ -237,6 +249,16 @@ impl OffscreenRenderer {
         let ssao_pass = SsaoPass::new(device, &camera_bgl, &ssao_shader);
         let blur_pass = BlurPass::new(device, &ssao_shader);
 
+        // SSAO starts disabled, so the initial bind group points at the
+        // white fallback — every pre-existing (non-SSAO) test's shading
+        // stays exactly what it was before this texture existed.
+        let white_ao = ssao::WhiteAo::new(device, &gpu.queue);
+        let ao_sampler = ssao::create_ao_sampler(device);
+        let camera_bind_group = camera::create_scene_bind_group(
+            device, &camera_bgl, &camera_buffer, &light_buffer, &light_vp_buffer,
+            &shadow_array_view, &white_ao.view, &ao_sampler,
+        );
+
         Some(Self {
             aspect,
             camera_buffer,
@@ -265,6 +287,9 @@ impl OffscreenRenderer {
             mipgen,
             light_buffer,
             camera_bind_group,
+            camera_bgl,
+            white_ao,
+            ao_sampler,
             white_bg,
             _white: white,
             draw_sky: false,
@@ -273,14 +298,17 @@ impl OffscreenRenderer {
             ssao_pass,
             blur_pass,
             ssao_targets: None,
-            draw_ssao: false,
+            ssao_enabled: false,
+            scene_bind_group_stale: false,
             gpu,
         })
     }
 
     /// Rebuilds `ssao_targets`/pipelines' bind groups if the target size
-    /// changed (or this is the first `draw_ssao` render) — `compose` calls
-    /// this before recording the depth prepass.
+    /// changed (or this is the first `ssao_enabled` render) — `compose` calls
+    /// this before recording the depth prepass. Marks the scene bind group
+    /// stale too: a freshly built target is a new AO view the bind group
+    /// doesn't point at yet.
     fn ensure_ssao_targets(&mut self, width: u32, height: u32) {
         let stale = match &self.ssao_targets {
             Some(t) => t.width != width || t.height != height,
@@ -293,16 +321,45 @@ impl OffscreenRenderer {
         self.ssao_pass.set_target(&self.gpu.device, &self.gpu.queue, &targets);
         self.blur_pass.set_target(&self.gpu.device, &targets.raw_ao_view, self.ssao_pass.params_buffer());
         self.ssao_targets = Some(targets);
+        self.scene_bind_group_stale = true;
+    }
+
+    /// Turns the depth prepass + SSAO + blur passes on/off and, in lockstep,
+    /// which AO view the scene bind group points at: the real blurred target
+    /// when on, the white fallback when off — `compose` applies the change
+    /// (rebuilding the target first if this is the first enabled render).
+    pub fn set_ssao(&mut self, enabled: bool) {
+        if enabled == self.ssao_enabled {
+            return;
+        }
+        self.ssao_enabled = enabled;
+        self.scene_bind_group_stale = true;
+    }
+
+    /// (Re)points the scene bind group's AO binding at the real blurred
+    /// target when SSAO is enabled, the white fallback otherwise.
+    fn rebuild_scene_bind_group(&mut self) {
+        let ao_view = if self.ssao_enabled {
+            &self.ssao_targets.as_ref()
+                .expect("ensure_ssao_targets runs before this in compose")
+                .blurred_ao_view
+        } else {
+            &self.white_ao.view
+        };
+        self.camera_bind_group = camera::create_scene_bind_group(
+            &self.gpu.device, &self.camera_bgl, &self.camera_buffer, &self.light_buffer,
+            &self.light_vp_buffer, &self._shadow_array_view, ao_view, &self.ao_sampler,
+        );
     }
 
     /// Read the blurred half-res AO target back to CPU memory: one byte per
     /// texel (R8Unorm), width×height = the target's dimensions halved. `None`
-    /// until a `draw_ssao = true` render has run.
+    /// until a `set_ssao(true)` render has run.
     pub fn ao_readback(&self, target: &SceneTarget) -> Option<Vec<u8>> {
         let targets = self.ssao_targets.as_ref()?;
         debug_assert_eq!(
             (targets.width, targets.height), (target.width, target.height),
-            "ao_readback called against a different-sized target than the last draw_ssao render"
+            "ao_readback called against a different-sized target than the last SSAO-enabled render"
         );
         Some(read_r8(&self.gpu, &targets.blurred_ao))
     }
@@ -342,7 +399,9 @@ impl OffscreenRenderer {
     pub fn set_camera_level(&mut self) {
         let mut camera = Camera::new(self.aspect);
         camera.orbit(0.0, -0.8); // Camera::new's default pitch is 0.8; net pitch 0.0
-        let cam_uniform = CameraUniform::from_camera(&camera);
+        // Viewport placeholder: `compose` corrects it before any draw (see
+        // `create_scene_buffers_and_layout`'s call in `new`).
+        let cam_uniform = CameraUniform::from_camera(&camera, (0, 0));
         self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
         self.camera_eye = camera.eye();
     }
@@ -354,7 +413,7 @@ impl OffscreenRenderer {
         let mut camera = Camera::new(self.aspect);
         camera.cycle_projection(); // Perspective -> Isometric
         camera.cycle_projection(); // Isometric -> TopDown
-        let cam_uniform = CameraUniform::from_camera(&camera);
+        let cam_uniform = CameraUniform::from_camera(&camera, (0, 0)); // see set_camera_level
         self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
         self.camera_eye = camera.eye();
     }
@@ -557,9 +616,16 @@ impl OffscreenRenderer {
         draw:             impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
         transparent_draw: impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
     ) {
-        if self.draw_ssao {
+        if self.ssao_enabled {
             self.ensure_ssao_targets(target.width, target.height);
         }
+        if self.scene_bind_group_stale {
+            self.rebuild_scene_bind_group();
+            self.scene_bind_group_stale = false;
+        }
+        // The camera-orientation resets (`set_camera_level`/`set_camera_top_down`)
+        // and construction don't know the eventual target's pixel size.
+        CameraUniform::write_viewport(&self.gpu.queue, &self.camera_buffer, target.width, target.height);
         let bloom = crate::bloom::BloomPass::new(
             &self.gpu.device, &target.resolve_view, target.width, target.height,
         );
@@ -586,7 +652,7 @@ impl OffscreenRenderer {
             });
             shadow_draw(&mut pass, self, shadow::cast_offset(cascade as u32));
         }
-        if self.draw_ssao {
+        if self.ssao_enabled {
             let targets = self.ssao_targets.as_ref().expect("ensure_ssao_targets just ran");
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

@@ -1179,7 +1179,7 @@ fn ao_tile_mean(ao: &[u8], ao_w: u32, x: Range<u32>, y: Range<u32>) -> f64 {
 fn ssao_darkens_box_ground_contact_crease() {
     let Some(mut r) = renderer_or_skip() else { return };
     const SIZE: u32 = 512;
-    r.draw_ssao = true;
+    r.set_ssao(true);
     r.set_camera_top_down();
     r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
 
@@ -1205,7 +1205,7 @@ fn ssao_darkens_box_ground_contact_crease() {
 
     let target = r.target(SIZE, SIZE);
     r.render_sdf(&target, &[ground, box_on_ground], wgpu::Color::BLACK);
-    let ao = r.ao_readback(&target).expect("draw_ssao = true must produce an AO readback");
+    let ao = r.ao_readback(&target).expect("set_ssao(true) must produce an AO readback");
 
     // TopDown is orthographic with ortho_half_height=20 and aspect=1, so
     // world x/z map linearly: half-res px = ao_w/2 + world*(ao_w/40).
@@ -1225,5 +1225,78 @@ fn ssao_darkens_box_ground_contact_crease() {
     assert!(
         crease < open * 0.9,
         "crease must read clearly darker than open ground: crease={crease:.1} open={open:.1}"
+    );
+}
+
+/// Mean luminance (`luminance`) over a pixel-space rectangle of a tonemapped
+/// RGBA8 frame (`width`-wide, row-major, 4 bytes/pixel).
+fn luminance_tile_mean(pixels: &[u8], width: u32, x: Range<u32>, y: Range<u32>) -> f64 {
+    let mut sum = 0.0;
+    let mut count = 0u64;
+    for row in y {
+        for col in x.clone() {
+            let i = ((row * width + col) * 4) as usize;
+            sum += luminance(&pixels[i..i + 4]);
+            count += 1;
+        }
+    }
+    assert!(count > 0, "empty tile");
+    sum / count as f64
+}
+
+/// Same box-on-ground/top-down scene as `ssao_darkens_box_ground_contact_crease`,
+/// through the real tonemapped output rather than the raw AO readback: proves
+/// `shade_pbr` actually consumes the AO texture to darken ambient (not just
+/// that the AO pass produces one). SSAO on must read clearly darker at the
+/// contact crease than SSAO off, while open ground far from the box — where
+/// SSAO ≈ 1 either way — stays within noise.
+#[test]
+fn ssao_darkens_final_image_crease_vs_open_ground() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    const SIZE: u32 = 512;
+    r.set_camera_top_down();
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+
+    let ground = SdfInstance {
+        model: Mat4::from_scale_rotation_translation(
+            Vec3::new(60.0, 1.0, 60.0), glam::Quat::IDENTITY, Vec3::new(0.0, -0.5, 0.0),
+        ).to_cols_array_2d(),
+        color: [1.0, 1.0, 1.0], shape_type: 0, shape_params: [0.0; 4],
+    };
+    let box_on_ground = SdfInstance {
+        model: Mat4::from_scale_rotation_translation(
+            Vec3::new(6.0, 1.0, 6.0), glam::Quat::IDENTITY, Vec3::new(0.0, 0.5, 0.0),
+        ).to_cols_array_2d(),
+        color: [1.0, 1.0, 1.0], shape_type: 0, shape_params: [0.0; 4],
+    };
+
+    // Same TopDown linear world->screen mapping as
+    // ssao_darkens_box_ground_contact_crease, at full (not half-res) scale.
+    let scale = SIZE as f64 / 40.0;
+    let center = SIZE as f64 / 2.0;
+    let px = |world: f64| (center + world * scale).round() as u32;
+
+    r.set_ssao(false);
+    let target = r.target(SIZE, SIZE);
+    r.render_sdf(&target, &[ground, box_on_ground], wgpu::Color::BLACK);
+    let off = r.read(&target);
+
+    r.set_ssao(true);
+    let target = r.target(SIZE, SIZE);
+    r.render_sdf(&target, &[ground, box_on_ground], wgpu::Color::BLACK);
+    let on = r.read(&target);
+
+    let crease_off = luminance_tile_mean(&off, SIZE, px(3.05)..px(3.55), px(-2.0)..px(2.0));
+    let crease_on  = luminance_tile_mean(&on,  SIZE, px(3.05)..px(3.55), px(-2.0)..px(2.0));
+    let open_off = luminance_tile_mean(&off, SIZE, px(-19.0)..px(-15.0), px(-2.0)..px(2.0));
+    let open_on  = luminance_tile_mean(&on,  SIZE, px(-19.0)..px(-15.0), px(-2.0)..px(2.0));
+
+    assert!(
+        crease_on < crease_off * 0.95,
+        "SSAO must darken the contact crease in the final image: off={crease_off:.1} on={crease_on:.1}"
+    );
+    assert!(
+        (open_on - open_off).abs() < 0.05 * open_off,
+        "open ground far from any occluder must stay within noise: off={open_off:.1} on={open_on:.1}"
     );
 }
