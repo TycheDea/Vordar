@@ -70,7 +70,10 @@ pub(crate) fn create_skinned_pipeline(
     joint_bgl:      &BindGroupLayout,
     env_bgl:        &BindGroupLayout,
 ) -> RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("skinned_mesh_shader.wgsl"));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label:  Some("skinned_mesh_shader.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/skinned_mesh_shader.wgsl")).into()),
+    });
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label:              Some("Skinned Pipeline Layout"),

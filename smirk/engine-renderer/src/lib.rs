@@ -26,6 +26,26 @@ pub(crate) mod state;
 pub mod texture;
 pub mod ui_layers;
 
+// Guards build.rs's shader preprocessing: each geometry shader must still
+// parse as valid WGSL after snippet/const resolution, and the shadow texel
+// constant must come from shadow::SHADOW_SIZE via build.rs rather than a
+// hardcoded copy (checked by absence of the raw "2048" literal).
+#[cfg(test)]
+mod generated_shader_tests {
+    #[test]
+    fn geometry_shaders_parse_and_carry_no_hardcoded_shadow_size() {
+        let generated = [
+            include_str!(concat!(env!("OUT_DIR"), "/shader.wgsl")),
+            include_str!(concat!(env!("OUT_DIR"), "/mesh_shader.wgsl")),
+            include_str!(concat!(env!("OUT_DIR"), "/skinned_mesh_shader.wgsl")),
+        ];
+        for src in generated {
+            wgpu::naga::front::wgsl::parse_str(src).expect("generated shader must parse as valid WGSL");
+            assert!(!src.contains("2048"), "shadow texel must be derived, not a hardcoded 2048 copy");
+        }
+    }
+}
+
 pub use dev_overlay::DevOverlaySystem;
 pub use facade::{alloc_render_slot, alloc_shape_group_slots, camera_movement_axes, camera_yaw, clear_texture, create_checker_texture, free_render_slot, load_texture, register_procedural_mesh, screen_to_ground, set_camera_target, set_environment, set_exposure, set_fog, set_light, set_texture, unproject_to_ground, update_camera, zoom_camera, CameraConfig, TextureHandle};
 pub use instance_sync::RenderSyncSystem;

@@ -113,7 +113,10 @@ pub(crate) fn create_pipeline(
     texture_bind_group_layout: &BindGroupLayout,
     env_bind_group_layout:     &BindGroupLayout,
 ) -> RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label:  Some("shader.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/shader.wgsl")).into()),
+    });
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label:             Some("Render Pipeline Layout"),

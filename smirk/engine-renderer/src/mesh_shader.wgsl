@@ -2,51 +2,9 @@
 // metallic-roughness, emissive and AO. Same camera/light uniforms as the
 // other geometry passes so mixed scenes light consistently.
 
-struct Camera {
-    view_proj:     mat4x4<f32>,
-    inv_view_proj: mat4x4<f32>,
-    right:         vec4<f32>,
-    up:            vec4<f32>,
-    eye:           vec4<f32>, // world-space camera position
-}
-@group(0) @binding(0)
-var<uniform> camera: Camera;
+//#include "snippets/scene_uniforms.wgsl"
 
-struct LightUniform {
-    direction: vec3<f32>, // world-space, normalised, pointing TOWARD light
-    _pad:      f32,
-    color:     vec3<f32>,
-    ambient:   f32,
-    fog_color:   vec3<f32>,
-    fog_density: f32,
-}
-@group(0) @binding(1)
-var<uniform> light: LightUniform;
-
-// Shadow receiving — shared scene group.
-@group(0) @binding(2) var<uniform> light_vp: mat4x4<f32>;
-@group(0) @binding(3) var t_shadow: texture_depth_2d;
-@group(0) @binding(4) var s_shadow: sampler_comparison;
-
-/// PCF 3×3 over the fitted sun map; 1.0 = fully lit. Points outside the
-/// fitted volume are lit (the map only covers the play area).
-fn shadow_factor(world_pos: vec3<f32>) -> f32 {
-    let lp  = light_vp * vec4<f32>(world_pos, 1.0);
-    let ndc = lp.xyz / lp.w;
-    let uv  = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 || ndc.z <= 0.0) {
-        return 1.0;
-    }
-    let texel = 1.0 / 2048.0;
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy++) {
-        for (var dx = -1; dx <= 1; dx++) {
-            let offset = vec2<f32>(f32(dx), f32(dy)) * texel;
-            sum += textureSampleCompareLevel(t_shadow, s_shadow, uv + offset, ndc.z);
-        }
-    }
-    return sum / 9.0;
-}
+//#include "snippets/shadow_sample.wgsl"
 
 // ── Material (group 1) ───────────────────────────────────────────────────────
 
@@ -72,7 +30,7 @@ var<uniform> material: MaterialUniform;
 @group(2) @binding(2) var t_brdf:       texture_2d<f32>;
 @group(2) @binding(3) var s_env:        sampler;
 
-const PREFILTER_MAX_MIP: f32 = 4.0; // PREFILTER_MIPS - 1
+//#const PREFILTER_MAX_MIP
 
 struct VertexOutput {
     @builtin(position) clip_pos:  vec4<f32>,
@@ -116,66 +74,7 @@ fn vtx_main(
     return out;
 }
 
-// ── Cook-Torrance GGX ────────────────────────────────────────────────────────
-
-const PI: f32 = 3.14159265;
-
-fn d_ggx(NdotH: f32, rough: f32) -> f32 {
-    let a  = rough * rough;
-    let a2 = a * a;
-    let d  = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (PI * d * d);
-}
-
-fn g_smith(NdotV: f32, NdotL: f32, rough: f32) -> f32 {
-    let r  = rough + 1.0;
-    let k  = r * r / 8.0;
-    let gv = NdotV / (NdotV * (1.0 - k) + k);
-    let gl = NdotL / (NdotL * (1.0 - k) + k);
-    return gv * gl;
-}
-
-fn f_schlick(VdotH: f32, f0: vec3<f32>) -> vec3<f32> {
-    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VdotH, 5.0);
-}
-
-/// Shared shading: albedo already tinted and in linear space. `shadow`
-/// attenuates the direct sun term only (1.0 = fully lit).
-fn shade_pbr(
-    N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
-    metallic: f32, roughness: f32, ao: f32, emissive: vec3<f32>, shadow: f32,
-) -> vec3<f32> {
-    let L = light.direction;
-    let H = normalize(V + L);
-    let NdotL = max(dot(N, L), 0.0);
-    let NdotV = max(dot(N, V), 1e-4);
-    let NdotH = max(dot(N, H), 0.0);
-    let VdotH = max(dot(V, H), 0.0);
-
-    let rough = clamp(roughness, 0.045, 1.0);
-    let f0    = mix(vec3<f32>(0.04), albedo, metallic);
-
-    let d = d_ggx(NdotH, rough);
-    let g = g_smith(NdotV, NdotL, rough);
-    let f = f_schlick(VdotH, f0);
-
-    let specular = d * g * f / max(4.0 * NdotV * NdotL, 1e-4);
-    let kd       = (vec3<f32>(1.0) - f) * (1.0 - metallic);
-
-    let direct  = (kd * albedo + specular) * NdotL * light.color * shadow;
-
-    // IBL ambient: diffuse irradiance + prefiltered specular with the
-    // split-sum BRDF. light.ambient scales it (the day/night seam).
-    let irr     = textureSample(t_irradiance, s_env, N).rgb;
-    let diffuse = irr * albedo * (1.0 - metallic);
-    let R       = reflect(-V, N);
-    let pre     = textureSampleLevel(t_prefilter, s_env, R, rough * PREFILTER_MAX_MIP).rgb;
-    let ab      = textureSample(t_brdf, s_env, vec2<f32>(NdotV, rough)).rg;
-    let spec_ibl = pre * (f0 * ab.x + vec3<f32>(ab.y));
-    let ambient  = light.ambient * (diffuse + spec_ibl) * ao;
-
-    return ambient + direct + emissive;
-}
+//#include "snippets/pbr_common.wgsl"
 
 @fragment
 fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -216,4 +115,3 @@ fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
     let t = 1.0 - exp(-light.fog_density * dist);
     return mix(color, light.fog_color, t);
 }
-
