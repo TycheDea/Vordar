@@ -200,7 +200,12 @@ pub(crate) struct LightUniform {
     pub(crate) fog_color:   [f32; 3],
     pub(crate) fog_density: f32,
     pub(crate) point_count: u32,
-    pub(crate) _pad2:       [u32; 3],
+    // Height fog: density is attenuated above fog_height by
+    // exp(-fog_height_falloff * max(y - fog_height, 0)); 0/0 reproduces
+    // pure distance fog.
+    pub(crate) fog_height:         f32,
+    pub(crate) fog_height_falloff: f32,
+    pub(crate) _pad2:              u32,
     pub(crate) points:      [GpuPointLight; MAX_POINT_LIGHTS as usize],
 }
 
@@ -215,7 +220,9 @@ impl LightUniform {
             fog_color:   [0.30, 0.26, 0.28], // dusk haze
             fog_density: 0.0,                // zones opt in via set_fog
             point_count: 0,
-            _pad2:       [0; 3],
+            fog_height:         0.0,
+            fog_height_falloff: 0.0, // zones opt in via set_fog_height
+            _pad2:              0,
             points:      [GpuPointLight { position: [0.0; 3], radius: 0.0, color: [0.0; 3], intensity: 0.0 };
                 MAX_POINT_LIGHTS as usize],
         }

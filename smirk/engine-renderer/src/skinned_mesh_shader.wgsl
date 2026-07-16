@@ -5,6 +5,8 @@
 
 //#include "snippets/scene_uniforms.wgsl"
 
+//#include "snippets/fog.wgsl"
+
 //#include "snippets/shadow_sample.wgsl"
 
 @group(1) @binding(0) var t_albedo:   texture_2d<f32>;
@@ -134,10 +136,4 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var rgb = apply_fog(color, in.world_pos);
     if material.mr.w > 0.5 { rgb = rgb * out_alpha; }
     return vec4<f32>(rgb, out_alpha);
-}
-/// Exponential distance fog; density 0 disables.
-fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
-    let dist = length(camera.eye.xyz - world_pos);
-    let t = 1.0 - exp(-light.fog_density * dist);
-    return mix(color, light.fog_color, t);
 }

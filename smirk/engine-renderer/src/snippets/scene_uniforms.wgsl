@@ -26,9 +26,9 @@ struct LightUniform {
     fog_color:   vec3<f32>,
     fog_density: f32,
     point_count: u32,
-    _pad0:       u32,
-    _pad1:       u32,
-    _pad2:       u32,
+    fog_height:         f32,
+    fog_height_falloff: f32,
+    _pad1:              u32,
     points:      array<PointLight, MAX_POINT_LIGHTS>,
 }
 @group(0) @binding(1)

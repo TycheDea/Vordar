@@ -1,5 +1,7 @@
 //#include "snippets/scene_uniforms.wgsl"
 
+//#include "snippets/fog.wgsl"
+
 //#include "snippets/shadow_sample.wgsl"
 
 // ── Texture (group 1) ─────────────────────────────────────────────────────────
@@ -112,12 +114,6 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo   = min(base, vec3<f32>(1.0));
     let color = shade_pbr(in.world_pos, N, V, albedo, 0.0, 0.85, 1.0, vec3<f32>(0.0), shadow) + emissive;
     return vec4<f32>(apply_fog(color, in.world_pos), 1.0);
-}
-/// Exponential distance fog; density 0 disables.
-fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {
-    let dist = length(camera.eye.xyz - world_pos);
-    let t = 1.0 - exp(-light.fog_density * dist);
-    return mix(color, light.fog_color, t);
 }
 
 //#include "snippets/pbr_common.wgsl"

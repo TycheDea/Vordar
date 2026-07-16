@@ -921,6 +921,48 @@ fn sky_fog_blends_toward_horizon_and_stays_bit_stable_at_zero_density() {
     );
 }
 
+// ── Fog height ───────────────────────────────────────────────────────────────
+
+/// Fog density is attenuated above a configured `fog_height`: the same
+/// ground quad, same eye distance, renders through far more fog when the
+/// fog height sits high above it (no height attenuation) than when the fog
+/// height sits far below it (heavily attenuated) — height is the only
+/// variable. `set_fog(_, 0.0)` + `set_fog_height(0.0, 0.0)` must still
+/// reproduce today's unfogged render bit-for-bit.
+#[test]
+fn height_fog_attenuates_above_configured_fog_height() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    let fog_color = Vec3::new(1.0, 0.0, 0.0);
+
+    let target = r.target(W, H);
+    r.render_mesh(&target, ground_quad(40.0, 0.9, 0.0), wgpu::Color::BLACK);
+    let no_fog = r.read(&target);
+
+    r.set_fog(fog_color, 0.05);
+    r.set_fog_height(100.0, 0.15); // quad (y=0) far below fog height -> no attenuation
+    let target = r.target(W, H);
+    r.render_mesh(&target, ground_quad(40.0, 0.9, 0.0), wgpu::Color::BLACK);
+    let below = r.read(&target);
+
+    r.set_fog_height(-100.0, 0.15); // quad far above fog height -> heavily attenuated
+    let target = r.target(W, H);
+    r.render_mesh(&target, ground_quad(40.0, 0.9, 0.0), wgpu::Color::BLACK);
+    let above = r.read(&target);
+
+    let (below_r, above_r) = (channel_mean(&below, 0), channel_mean(&above, 0));
+    assert!(
+        below_r > above_r + 10.0,
+        "quad below fog height must fog toward red much more: below={below_r:.1} above={above_r:.1}"
+    );
+
+    r.set_fog(fog_color, 0.0);
+    r.set_fog_height(0.0, 0.0);
+    let target = r.target(W, H);
+    r.render_mesh(&target, ground_quad(40.0, 0.9, 0.0), wgpu::Color::BLACK);
+    let zeroed = r.read(&target);
+    assert_eq!(zeroed, no_fog, "density 0 + falloff 0 must reproduce the unfogged render exactly");
+}
+
 /// The BRDF LUT depends only on (NdotV, roughness), never on environment
 /// data, so it must bake once at renderer init and every `Environment`
 /// (zone crossing) shares that view rather than rebaking it.

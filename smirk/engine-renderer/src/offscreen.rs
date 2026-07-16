@@ -298,6 +298,14 @@ impl OffscreenRenderer {
         self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
     }
 
+    /// Attenuates fog density above `height` by `exp(-falloff * max(y - height, 0))`;
+    /// 0/0 reproduces pure distance fog.
+    pub fn set_fog_height(&mut self, height: f32, falloff: f32) {
+        self.light_state.fog_height = height;
+        self.light_state.fog_height_falloff = falloff;
+        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
+    }
+
     pub fn set_light(&mut self, light: TestLight) {
         self.light_dir = light.direction.normalize();
         self.light_state.direction = self.light_dir.to_array();

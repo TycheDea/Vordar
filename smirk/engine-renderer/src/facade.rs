@@ -203,6 +203,15 @@ pub fn set_fog(color: GlamVec3, density: f32, resources: &mut Resources) {
     state.queue.write_buffer(&state.light_buffer, 0, bytemuck::cast_slice(&[state.light_state]));
 }
 
+/// Attenuates fog density above `height` by `exp(-falloff * max(y - height, 0))`;
+/// 0/0 reproduces pure distance fog.
+pub fn set_fog_height(height: f32, falloff: f32, resources: &mut Resources) {
+    let Some(state) = resources.get_mut::<RendererState>() else { return };
+    state.light_state.fog_height         = height;
+    state.light_state.fog_height_falloff = falloff;
+    state.queue.write_buffer(&state.light_buffer, 0, bytemuck::cast_slice(&[state.light_state]));
+}
+
 /// Create a procedural checkerboard texture without any asset files.
 /// Useful for testing the texture pipeline immediately.
 pub fn create_checker_texture(

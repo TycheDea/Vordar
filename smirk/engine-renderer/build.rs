@@ -14,7 +14,7 @@ use std::path::Path;
 
 const PREPROCESSED_SHADERS: [&str; 4] =
     ["shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl", "sky.wgsl"];
-const SNIPPETS: [&str; 3] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl"];
+const SNIPPETS: [&str; 4] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl", "fog.wgsl"];
 
 fn main() {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR set by cargo");
