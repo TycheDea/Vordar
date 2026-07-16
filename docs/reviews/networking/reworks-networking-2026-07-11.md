@@ -26,6 +26,10 @@ retroactively from the deferred remainders of implemented findings 7 and 8.
 > 7 done 2026-07-16 (plan-networking-rework-7-2026-07-14.md, 4 steps; online-play
 > diagram updated with shared-rule collision contract; with-statics reconcile
 > benchmarks recorded in BASELINE.md).
+> 11 done 2026-07-16 (plan-networking-rework-11-2026-07-16.md, 3 steps; the
+> playback cursor now clamps at `latest_state_tick + EXTRAP_CAP_TICKS` and
+> resyncs forward-only — a sustained stall is a terminal capped hold with
+> graded forward-only recovery, no periodic backward pop).
 > 8 first because two entries depend on it: 10 is blocked on its `NetServer`
 > shutdown path, and 1's schema changes (accounts table, cooldown columns) need
 > its `user_version` migration runner. 10 right after 8 while the shutdown work
