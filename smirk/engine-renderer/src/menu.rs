@@ -69,10 +69,6 @@ pub struct MenuState {
     pub open:          bool,
     pub screen:        MenuScreen,
     pub selected:      usize,
-    was_escape:        bool,
-    was_up:            bool,
-    was_down:          bool,
-    was_enter:         bool,
     pub draft:         SettingsDraft,
     /// Set by keyboard navigation; drained into `MenuAction::Quit` by
     /// `RenderSystem` so `apply_menu_actions` stays the single exit site.
@@ -85,10 +81,6 @@ impl MenuState {
             open:           false,
             screen:         MenuScreen::Main,
             selected:       0,
-            was_escape:     false,
-            was_up:         false,
-            was_down:       false,
-            was_enter:      false,
             draft:          SettingsDraft::from_config(cfg),
             quit_requested: false,
         }
@@ -286,10 +278,10 @@ impl System for MenuSystem {
             Some(k) => k,
             None => return,
         };
-        let escape = kb.is_pressed(KeyCode::Escape);
-        let up     = kb.is_pressed(KeyCode::KeyW) || kb.is_pressed(KeyCode::ArrowUp);
-        let down   = kb.is_pressed(KeyCode::KeyS) || kb.is_pressed(KeyCode::ArrowDown);
-        let enter  = kb.is_pressed(KeyCode::Enter) || kb.is_pressed(KeyCode::NumpadEnter);
+        let escape = kb.just_pressed(KeyCode::Escape);
+        let up     = kb.just_pressed(KeyCode::KeyW) || kb.just_pressed(KeyCode::ArrowUp);
+        let down   = kb.just_pressed(KeyCode::KeyS) || kb.just_pressed(KeyCode::ArrowDown);
+        let enter  = kb.just_pressed(KeyCode::Enter) || kb.just_pressed(KeyCode::NumpadEnter);
 
         let menu = match resources.get_mut::<MenuState>() {
             Some(m) => m,
@@ -297,7 +289,7 @@ impl System for MenuSystem {
         };
 
         // Escape: toggle open / back to main / close
-        if escape && !menu.was_escape {
+        if escape {
             if menu.open {
                 match menu.screen {
                     MenuScreen::Settings => {
@@ -312,7 +304,6 @@ impl System for MenuSystem {
                 menu.selected = 0;
             }
         }
-        menu.was_escape = escape;
 
         if !menu.open { return; }
 
@@ -321,16 +312,14 @@ impl System for MenuSystem {
             MenuScreen::Settings => 2, // Save, Back
         };
 
-        if up && !menu.was_up && menu.selected > 0 {
+        if up && menu.selected > 0 {
             menu.selected -= 1;
         }
-        if down && !menu.was_down {
+        if down {
             menu.selected = (menu.selected + 1).min(item_count - 1);
         }
-        menu.was_up   = up;
-        menu.was_down = down;
 
-        if enter && !menu.was_enter {
+        if enter {
             match (&menu.screen, menu.selected) {
                 (MenuScreen::Main, 0) => { menu.open = false; }                                // Resume
                 (MenuScreen::Main, 1) => {
@@ -347,6 +336,68 @@ impl System for MenuSystem {
                 }
             }
         }
-        menu.was_enter = enter;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine_app::input::InputEdgeFlushSystem;
+    use engine_app::scheduler::{Phase, Scheduler, SystemOrder};
+
+    #[test]
+    fn fast_escape_tap_opens_menu() {
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(KeyboardState::new());
+        resources.insert(MenuState::default());
+
+        let mut sched = Scheduler::new();
+        sched.add(MenuSystem, Phase::PostUpdate, SystemOrder::First);
+        sched.add(InputEdgeFlushSystem, Phase::PostUpdate, SystemOrder::Last);
+        sched.build();
+
+        // Fast tap: both press and release land before any step observes
+        // them — the drop scenario the latch-based toggle missed.
+        resources.get_mut::<KeyboardState>().unwrap().press(KeyCode::Escape);
+        resources.get_mut::<KeyboardState>().unwrap().release(KeyCode::Escape);
+
+        sched.run_tick(&mut world, &mut resources, 1.5 / 60.0); // one fixed step
+
+        assert!(
+            resources.get::<MenuState>().unwrap().open,
+            "fast escape tap must open the menu"
+        );
+    }
+
+    #[test]
+    fn held_down_key_moves_selection_once_across_catch_up_steps() {
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(KeyboardState::new());
+        resources.insert(MenuState::default());
+        resources.get_mut::<MenuState>().unwrap().open = true;
+
+        let mut sched = Scheduler::new();
+        sched.add(MenuSystem, Phase::PostUpdate, SystemOrder::First);
+        sched.add(InputEdgeFlushSystem, Phase::PostUpdate, SystemOrder::Last);
+        sched.build();
+
+        // Held, not tapped: no release — a 3-step catch-up frame must still
+        // move the selection once, not once per step.
+        resources.get_mut::<KeyboardState>().unwrap().press(KeyCode::ArrowDown);
+
+        sched.run_tick(&mut world, &mut resources, 3.5 / 60.0); // 3 fixed steps
+        assert_eq!(
+            resources.get::<MenuState>().unwrap().selected, 1,
+            "held key must move selection exactly once across a catch-up frame"
+        );
+
+        // A later tick with no new input must not move the selection further.
+        sched.run_tick(&mut world, &mut resources, 1.5 / 60.0);
+        assert_eq!(
+            resources.get::<MenuState>().unwrap().selected, 1,
+            "no new input must leave selection unchanged"
+        );
     }
 }
