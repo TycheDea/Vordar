@@ -43,7 +43,6 @@ pub(crate) struct GpuMesh {
     /// Union of primitive bounds in mesh-local space, inflated for skinned
     /// meshes (see `SKINNED_AABB_INFLATE`) since animation can pose vertices
     /// outside the bind-pose box.
-    #[allow(dead_code)]
     pub(crate) local_aabb: Aabb,
 }
 

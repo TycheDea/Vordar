@@ -431,7 +431,7 @@ fn record_shadow_pass(
         if !list.instances.is_empty() {
             pass.set_pipeline(&state.shadow_pipelines.mesh);
             pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
-            for &(mesh_idx, first, count) in &list.ranges {
+            for &(mesh_idx, first, count) in &list.shadow_ranges {
                 if first as usize >= MAX_MESH_INSTANCES { break; }
                 let count = count.min(MAX_MESH_INSTANCES as u32 - first);
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
@@ -859,6 +859,7 @@ mod tests {
                 MeshInstance { model: translated(-10.0), tint: [1.0; 4] },
             ],
             ranges: vec![(mesh0, 0, 1), (mesh1, 1, 1)],
+            shadow_ranges: vec![],
         };
         let skinned_list = SkinnedDrawList {
             instances: vec![SkinnedMeshInstance {
@@ -906,6 +907,7 @@ mod tests {
         let mesh_list = MeshDrawList {
             instances: vec![MeshInstance { model: translated(0.0), tint: [1.0; 4] }],
             ranges:    vec![(mesh0, 0, 1), (mesh0, MAX_MESH_INSTANCES as u32, 1)],
+            shadow_ranges: vec![],
         };
 
         let eye = Vec3::new(0.0, 0.0, 10.0);

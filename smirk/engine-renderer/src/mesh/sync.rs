@@ -1,4 +1,5 @@
 use super::store::{CpuSkin, MeshStore, MESH_UPLOADS_PER_FRAME};
+use crate::culling::{classify, Frustum, Visibility};
 use crate::mesh_pipeline::MeshInstance;
 use crate::RendererState;
 use crate::skinned_pipeline::{SkinnedMeshInstance, MAX_JOINT_MATRICES, MAX_SKINNED_INSTANCES};
@@ -88,11 +89,59 @@ pub(crate) fn pose_player(player: &mut AnimationPlayer, skin: &CpuSkin, dt: f32)
 // ── Per-frame draw lists ────────────────────────────────────────────────────
 
 /// Built by MeshRenderSyncSystem each display frame, consumed by RenderSystem.
-/// `ranges` are (mesh index, first instance, instance count) into `instances`.
+/// `ranges` are (mesh index, first instance, instance count) into `instances`,
+/// covering the camera-frustum-visible instances; `shadow_ranges` covers the
+/// sun-volume-visible ones, which is a different subset of the same buffer.
 #[derive(Default)]
 pub struct MeshDrawList {
-    pub(crate) instances: Vec<MeshInstance>,
-    pub(crate) ranges:    Vec<(usize, u32, u32)>,
+    pub(crate) instances:     Vec<MeshInstance>,
+    pub(crate) ranges:        Vec<(usize, u32, u32)>,
+    pub(crate) shadow_ranges: Vec<(usize, u32, u32)>,
+}
+
+/// Sorts `items` by `(mesh_idx, visibility)` — the `Visibility` `Ord` puts
+/// `Both` before `CamOnly` before `ShadowOnly` — then packs each mesh's group
+/// into one contiguous run of `instances` and emits: a camera range over the
+/// `Both`+`CamOnly` prefix, a shadow range over the `Both` prefix, and a
+/// shadow range over the `ShadowOnly` suffix, each skipped when empty. Both
+/// range lists stay ascending by `first`. Drains `items` for reuse next frame.
+pub(crate) fn pack_visible<T: Copy>(
+    items:         &mut Vec<(usize, Visibility, T)>,
+    instances:     &mut Vec<T>,
+    ranges:        &mut Vec<(usize, u32, u32)>,
+    shadow_ranges: &mut Vec<(usize, u32, u32)>,
+) {
+    items.sort_by_key(|(idx, vis, _)| (*idx, *vis));
+
+    let mut i = 0;
+    while i < items.len() {
+        let mesh_idx = items[i].0;
+        let mut j = i;
+        let mut both = 0u32;
+        let mut cam_only = 0u32;
+        let mut shadow_only = 0u32;
+        let first = instances.len() as u32;
+        while j < items.len() && items[j].0 == mesh_idx {
+            match items[j].1 {
+                Visibility::Both => both += 1,
+                Visibility::CamOnly => cam_only += 1,
+                Visibility::ShadowOnly => shadow_only += 1,
+            }
+            instances.push(items[j].2);
+            j += 1;
+        }
+        if both + cam_only > 0 {
+            ranges.push((mesh_idx, first, both + cam_only));
+        }
+        if both > 0 {
+            shadow_ranges.push((mesh_idx, first, both));
+        }
+        if shadow_only > 0 {
+            shadow_ranges.push((mesh_idx, first + both + cam_only, shadow_only));
+        }
+        i = j;
+    }
+    items.clear();
 }
 
 /// The skinned counterpart: each instance additionally names a `joint_base`
@@ -129,7 +178,7 @@ pub struct SocketTransforms(pub HashMap<Entity, HashMap<String, Mat4>>);
 /// is lerped against PreviousTransform exactly like RenderSyncSystem.
 pub struct MeshRenderSyncSystem {
     // Scratch, reused across frames.
-    items:         Vec<(usize, MeshInstance)>,
+    items:         Vec<(usize, Visibility, MeshInstance)>,
     skinned_items: Vec<(usize, SkinnedMeshInstance)>,
     pose_scratch:  PoseScratch,
     /// Throttles the 80%-of-cap warning to ~once per 5 s.
@@ -168,6 +217,7 @@ impl System for MeshRenderSyncSystem {
         sockets.0.clear();
         list.instances.clear();
         list.ranges.clear();
+        list.shadow_ranges.clear();
         skinned.instances.clear();
         skinned.joints.clear();
         skinned.ranges.clear();
@@ -176,10 +226,14 @@ impl System for MeshRenderSyncSystem {
 
         // Skinned entities lacking a player: attach a default after the query.
         let mut needs_player: Vec<Entity> = Vec::new();
+        // Total static-mesh entities considered this frame (drawn or culled) — the dev-overlay denominator.
+        let mut total_statics: u32 = 0;
 
         {
             let state = resources.get::<RendererState>().expect("checked above");
             store.integrate(&state.device, &state.queue, &state.material_bgl, &state.mipgen, MESH_UPLOADS_PER_FRAME);
+            let cam = Frustum::from_view_proj(state.camera.build_view_projection_matrix());
+            let sun = Frustum::from_view_proj(crate::shadow::fit_light_vp(state.camera.target, state.light_dir));
             for (entity, transform, prev, mesh, player) in world
                 .query::<(Entity, &Transform, Option<&PreviousTransform>, &RenderMesh, Option<&mut AnimationPlayer>)>()
                 .iter()
@@ -198,10 +252,15 @@ impl System for MeshRenderSyncSystem {
 
                 match store.meshes[idx].skin.as_ref() {
                     // Static mesh — no skeleton to pose.
-                    None => self.items.push((idx, MeshInstance {
-                        model: model.to_cols_array_2d(),
-                        tint,
-                    })),
+                    None => {
+                        total_statics += 1;
+                        let world_aabb = store.meshes[idx].local_aabb.transformed(&model);
+                        let Some(vis) = classify(&world_aabb, &cam, &sun) else { continue };
+                        self.items.push((idx, vis, MeshInstance {
+                            model: model.to_cols_array_2d(),
+                            tint,
+                        }));
+                    }
                     // Skinned mesh — needs an AnimationPlayer to pose.
                     Some(cpu_skin) => {
                         let Some(player) = player else {
@@ -247,16 +306,9 @@ impl System for MeshRenderSyncSystem {
             let _ = world.insert_one(entity, AnimationPlayer::default());
         }
 
-        // Group by mesh so each mesh draws as one instanced call.
-        self.items.sort_by_key(|(idx, _)| *idx);
-        for (idx, inst) in self.items.drain(..) {
-            let first = list.instances.len() as u32;
-            match list.ranges.last_mut() {
-                Some((last_idx, _, count)) if *last_idx == idx => *count += 1,
-                _ => list.ranges.push((idx, first, 1)),
-            }
-            list.instances.push(inst);
-        }
+        // Group by mesh so each mesh draws as one instanced call, split into
+        // the camera-visible range and the shadow-visible range.
+        pack_visible(&mut self.items, &mut list.instances, &mut list.ranges, &mut list.shadow_ranges);
         self.skinned_items.sort_by_key(|(idx, _)| *idx);
         for (idx, inst) in self.skinned_items.drain(..) {
             let first = skinned.instances.len() as u32;
@@ -274,6 +326,8 @@ impl System for MeshRenderSyncSystem {
             stats.set("skinned", format!("{skinned_count}/{MAX_SKINNED_INSTANCES}"));
             stats.set("streaming", format!("{} pending", store.pending_count()));
             stats.set("tex mem (assets)", format!("{} MB", store.texture_memory_bytes() / (1024 * 1024)));
+            let camera_visible: u32 = list.ranges.iter().map(|&(_, _, count)| count).sum();
+            stats.set("statics drawn", format!("{camera_visible}/{total_statics}"));
         }
         self.warn_accum += delta;
         if skinned_count * 10 > MAX_SKINNED_INSTANCES * 8 && self.warn_accum >= 5.0 {
@@ -352,5 +406,73 @@ mod tests {
             assert_eq!(scratch.palette.capacity(), cap_palette, "palette buffer grew after warm-up");
             assert_eq!(scratch.cur_pose.capacity(), cap_pose, "pose buffer grew after warm-up");
         }
+    }
+
+    /// Two meshes: mesh 0 gets one instance of every `Visibility` variant,
+    /// mesh 1 gets only a `ShadowOnly` instance. Sentinel `u32` payloads let
+    /// the assertions read off the exact packed order and range math.
+    #[test]
+    fn pack_visible_orders_by_mesh_then_visibility_and_splits_camera_shadow_ranges() {
+        let mut items: Vec<(usize, Visibility, u32)> = vec![
+            (0, Visibility::ShadowOnly, 102),
+            (0, Visibility::Both, 100),
+            (0, Visibility::CamOnly, 101),
+            (1, Visibility::ShadowOnly, 200),
+        ];
+        let mut instances: Vec<u32> = Vec::new();
+        let mut ranges = Vec::new();
+        let mut shadow_ranges = Vec::new();
+
+        pack_visible(&mut items, &mut instances, &mut ranges, &mut shadow_ranges);
+
+        assert!(items.is_empty(), "items must be drained for reuse next frame");
+        assert_eq!(instances, vec![100, 101, 102, 200], "Both, then CamOnly, then ShadowOnly, per mesh group");
+        assert_eq!(ranges, vec![(0, 0, 2)], "camera range covers only the Both+CamOnly prefix of mesh 0");
+        assert_eq!(
+            shadow_ranges,
+            vec![(0, 0, 1), (0, 2, 1), (1, 3, 1)],
+            "shadow ranges: mesh 0's Both prefix, mesh 0's ShadowOnly suffix, then mesh 1's ShadowOnly-only run"
+        );
+        assert!(
+            !ranges.iter().any(|&(idx, _, _)| idx == 1),
+            "mesh 1 has no camera-visible instances, so it must be absent from the camera ranges"
+        );
+    }
+
+    /// A real perspective camera and its fitted shadow volume disagree on a
+    /// point 30 units behind the eye but still close to the target: culled
+    /// from the camera frustum, still inside the shadow volume's fitted
+    /// ortho box. A point far off both axes lands in neither.
+    #[test]
+    fn classify_combines_real_camera_and_shadow_frustum() {
+        let camera = crate::camera::Camera::new(16.0 / 9.0);
+        let cam_frustum = Frustum::from_view_proj(camera.build_view_projection_matrix());
+        let sun_frustum = Frustum::from_view_proj(crate::shadow::fit_light_vp(
+            camera.target,
+            glam::Vec3::new(-1.0, 2.0, -1.0),
+        ));
+
+        let eye_dir = (camera.eye() - camera.target).normalize();
+        let behind_eye = camera.eye() + eye_dir * 30.0;
+        let near_target = crate::culling::Aabb {
+            min: behind_eye - glam::Vec3::splat(0.5),
+            max: behind_eye + glam::Vec3::splat(0.5),
+        };
+        assert_eq!(
+            classify(&near_target, &cam_frustum, &sun_frustum),
+            Some(Visibility::ShadowOnly),
+            "behind the eye but within the shadow volume's fitted box must classify ShadowOnly"
+        );
+
+        let far_away = camera.target + glam::Vec3::new(300.0, 0.0, 0.0);
+        let outside = crate::culling::Aabb {
+            min: far_away - glam::Vec3::splat(0.5),
+            max: far_away + glam::Vec3::splat(0.5),
+        };
+        assert_eq!(
+            classify(&outside, &cam_frustum, &sun_frustum),
+            None,
+            "far outside both volumes must classify None"
+        );
     }
 }
