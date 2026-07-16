@@ -3,8 +3,10 @@
 // Three stages, split so the parse is testable without a GPU device:
 //   CPU parse: load_gltf_data(path) -> MeshData   (gltf_import: parse, node
 //        transforms baked into vertices, per-primitive base-color material)
-//   GPU upload: MeshStore::get_or_load uploads MeshData into vertex/index
-//        buffers and a bind group per primitive (store: device/queue work)
+//   GPU upload: MeshStore::get_or_request enqueues a background decode on
+//        miss; integrate uploads completed loads into vertex/index buffers
+//        and a bind group per primitive under a per-frame budget (store:
+//        device/queue work)
 //   Per-frame: MeshRenderSyncSystem collects drawable entities into draw lists,
 //        sampling animation poses (sync: the drawable-collection system).
 //

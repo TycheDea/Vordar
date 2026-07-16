@@ -207,6 +207,19 @@ transitions between render passes made it legal, and the full offscreen suite (f
 reflection, sky) stayed green. Re-measured: ~6.5-7.3 ms per `set_uniform_environment`
 (three runs), down from ~20 ms — the per-submit overhead was indeed the dominant cost.
 
+Rendering rework 2 finding 5: `MeshStore` streamed the same way — `get_or_request` spawns
+a detached decode thread on a path miss and returns `None` immediately (nothing to draw
+until upload), and `MeshRenderSyncSystem` drains completed decodes via `integrate` under
+a `MESH_UPLOADS_PER_FRAME = 1` budget. `statue_streams_and_uploads_within_budget`
+(`engine-renderer`, `mesh::store`) times the single `integrate` call that performs the
+statue's upload once its background decode has landed: 24.15 ms, 26.18 ms, 25.15 ms,
+27.57 ms across four runs (debug build). This exceeds the ~10 ms residual-cost estimate,
+but the fix still lands as designed: the ~540 ms decode (finding 4's HDRI number is the
+same order of magnitude for a comparable embedded-texture asset) no longer blocks the
+frame, only the upload does. Rework 4's BC-compressed textures (4-6x smaller uploads) is
+the identified reducer for the remaining ~25 ms; no per-texture upload chunking is
+warranted for this pass.
+
 Rendering rework 2 finding 4: `set_uniform_environment`'s bake (~6.5-7.3 ms above) skips
 the real HDR decode — zone crossings call `Environment::from_hdr` on the 5 MB, 2048×1024
 `evening_road_01_puresky_2k.hdr`, which also runs `image::open`/`into_rgb32f` and an

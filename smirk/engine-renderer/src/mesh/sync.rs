@@ -1,4 +1,4 @@
-use super::store::{CpuSkin, MeshStore};
+use super::store::{CpuSkin, MeshStore, MESH_UPLOADS_PER_FRAME};
 use crate::mesh_pipeline::MeshInstance;
 use crate::RendererState;
 use crate::skinned_pipeline::{SkinnedMeshInstance, MAX_JOINT_MATRICES, MAX_SKINNED_INSTANCES};
@@ -179,14 +179,12 @@ impl System for MeshRenderSyncSystem {
 
         {
             let state = resources.get::<RendererState>().expect("checked above");
+            store.integrate(&state.device, &state.queue, &state.material_bgl, &state.mipgen, MESH_UPLOADS_PER_FRAME);
             for (entity, transform, prev, mesh, player) in world
                 .query::<(Entity, &Transform, Option<&PreviousTransform>, &RenderMesh, Option<&mut AnimationPlayer>)>()
                 .iter()
             {
-                let Some(idx) = store.get_or_load(
-                    &state.device, &state.queue, &state.material_bgl, &state.mipgen, &mesh.asset,
-                )
-                else { continue };
+                let Some(idx) = store.get_or_request(&mesh.asset) else { continue };
                 let render_pos = match prev {
                     Some(p) => p.position.lerp(transform.position, alpha),
                     None    => transform.position,
@@ -274,6 +272,7 @@ impl System for MeshRenderSyncSystem {
         let skinned_count = skinned.instances.len();
         if let Some(stats) = resources.get_mut::<engine_app::dev_stats::DevStats>() {
             stats.set("skinned", format!("{skinned_count}/{MAX_SKINNED_INSTANCES}"));
+            stats.set("streaming", format!("{} pending", store.pending_count()));
         }
         self.warn_accum += delta;
         if skinned_count * 10 > MAX_SKINNED_INSTANCES * 8 && self.warn_accum >= 5.0 {
