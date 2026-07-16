@@ -176,6 +176,24 @@ pub fn register_procedural_mesh(key: &str, data: mesh::MeshData, resources: &mut
     ok
 }
 
+/// Enqueue a background job producing procedural mesh data (e.g. the zone
+/// ground) under a synthetic asset key; entities can reference it via
+/// `RenderMesh { asset: key }` right away — `MeshStore::integrate` uploads
+/// the result once the job completes. A key already known in any state is a
+/// no-op (procedural data is deterministic per key). Returns false headless
+/// (no `MeshStore` — renderer init never ran).
+pub fn request_procedural_mesh(
+    key: &str,
+    job: impl FnOnce() -> Result<mesh::MeshData, String> + Send + 'static,
+    resources: &mut Resources,
+) -> bool {
+    let Some(store) = resources.get_mut::<MeshStore>() else {
+        return false;
+    };
+    store.request_job(key, job);
+    true
+}
+
 /// Distance fog for the current zone: linear-space color, exponential
 /// density per world unit (0.0 disables).
 pub fn set_fog(color: GlamVec3, density: f32, resources: &mut Resources) {

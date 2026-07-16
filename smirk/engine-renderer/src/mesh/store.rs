@@ -201,6 +201,29 @@ impl MeshStore {
         idx
     }
 
+    /// Enqueue a background job producing `MeshData` under `key`; a no-op
+    /// when the key already exists in any state (Loaded/Pending/Failed) —
+    /// ground data is deterministic per key, so zone re-entry costs nothing.
+    /// Uploading, budgeting, and failure logging all ride the same
+    /// `integrate` path as `get_or_request`'s streamed glTF loads.
+    pub(crate) fn request_job(
+        &mut self,
+        key:  &str,
+        job:  impl FnOnce() -> Result<MeshData, String> + Send + 'static,
+    ) {
+        if self.by_path.contains_key(key) {
+            return;
+        }
+        self.by_path.insert(key.to_owned(), MeshEntry::Pending);
+        let tx = self.results_tx.clone();
+        let owned = key.to_owned();
+        std::thread::spawn(move || {
+            let result = job();
+            // App shutdown may have dropped the receiver; nothing to do.
+            let _ = tx.send((owned, result));
+        });
+    }
+
     /// Look up a loaded mesh by path. A miss marks the path `Pending` and
     /// spawns a detached thread decoding it in the background; `Pending` and
     /// `Failed` both resolve to `None` — the caller renders nothing for the
@@ -417,6 +440,48 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(store.meshes.len(), 2);
+    }
+
+    /// A background job's key is deterministic per zone, so a second
+    /// `request_job` call on the same key (zone re-entry) must not re-run
+    /// the job — only the first call's closure ever executes.
+    #[test]
+    fn request_job_runs_once_per_key() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — MeshStore::request_job test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+        let mut store = MeshStore::default();
+
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let key = "zone-ground:test";
+
+        for _ in 0..2 {
+            let calls = calls.clone();
+            store.request_job(key, move || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(triangle_mesh_data())
+            });
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let idx = loop {
+            store.integrate(&gpu.device, &gpu.queue, &layout, &mipgen, 1);
+            if let Some(idx) = store.get_or_request(key) {
+                break idx;
+            }
+            assert!(std::time::Instant::now() < deadline, "job did not complete within 5s");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst), 1,
+            "second request_job call on the same key must be a no-op"
+        );
+        assert_eq!(store.meshes.len(), 1);
+        assert_eq!(store.get_or_request(key), Some(idx));
     }
 
     /// Content-gated: streams the real statue asset (11 MB, embedded

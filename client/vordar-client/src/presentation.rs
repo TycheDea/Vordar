@@ -84,21 +84,20 @@ impl System for ZoneDressingSystem {
         // the dev slab (shape_type 7 readable pattern) stays.
         let mut mesh_ground = false;
         if let Some(g) = &visuals.ground {
-            match crate::ground::load_ground_material(&g.texture_dir) {
-                Ok(material) => {
-                    let data = crate::ground::generate_ground(g.size, g.tile, material);
-                    let key = format!("zone-ground:{zone}");
-                    if engine_renderer::register_procedural_mesh(&key, data, resources) {
-                        world.spawn((
-                            Transform::default(),
-                            RenderMesh { asset: key, tint: Vec3::ONE },
-                            ZoneDressing,
-                            HudHidden,
-                        ));
-                        mesh_ground = true;
-                    }
-                }
-                Err(e) => log::error!("zone '{zone}' ground material: {e}"),
+            let dir = g.texture_dir.clone();
+            let (size, tile) = (g.size, g.tile);
+            let key = format!("zone-ground:{zone}");
+            let job = move || {
+                Ok(crate::ground::generate_ground(size, tile, crate::ground::load_ground_material(&dir)?))
+            };
+            if engine_renderer::request_procedural_mesh(&key, job, resources) {
+                world.spawn((
+                    Transform::default(),
+                    RenderMesh { asset: key, tint: Vec3::ONE },
+                    ZoneDressing,
+                    HudHidden,
+                ));
+                mesh_ground = true;
             }
         }
         if !mesh_ground {
