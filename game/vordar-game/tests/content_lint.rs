@@ -206,3 +206,43 @@ fn race_models_expose_sockets() {
         }
     }
 }
+
+/// Portal prefab emits light through data-driven spawn pipeline: RON round-trips
+/// to a live PointLight component via ComponentRegistry + PrefabLibrary.
+#[test]
+fn portal_prefab_emits_light() {
+    use engine_core::prefab::{ComponentRegistry, PrefabLibrary, register_core_components, spawn_prefab};
+    use engine_core::traits::{Resources, SpawnContext};
+    use engine_core::components::PointLight;
+    use glam::Vec3;
+
+    let root = repo_root();
+
+    // Build registry + library with portal.ron
+    let mut registry = ComponentRegistry::new();
+    register_core_components(&mut registry);
+    let mut library = PrefabLibrary::new();
+
+    // Reuse the prefab_dirs convention from ability_vfx_beats_exist
+    let prefab_dirs = ["content/prefabs", "content/chapters/chapter01/prefabs", "content/chapters/chapter02/prefabs"];
+    for dir in &prefab_dirs {
+        library.load_dir(root.join(dir).to_str().unwrap());
+    }
+
+    // Build world + resources + spawn context
+    let mut world = hecs::World::new();
+    let mut resources = Resources::new();
+    resources.insert(registry);
+    resources.insert(library);
+    let mut ctx = SpawnContext { world: &mut world, resources: &mut resources };
+
+    // Spawn portal and assert PointLight properties
+    let entity = spawn_prefab("portal", Vec3::ZERO, &mut ctx)
+        .expect("portal prefab must exist and spawn successfully");
+
+    let light = ctx.world.get::<&PointLight>(entity)
+        .expect("portal entity must have a PointLight component");
+
+    assert!(light.radius > 0.0, "portal PointLight must have positive radius");
+    assert!(light.color.z > light.color.x, "portal PointLight must have cool hue (blue > red)");
+}
