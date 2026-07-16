@@ -153,3 +153,7 @@ Run at phase boundaries; the user eyeballs, never automated:
 8. **Performance** (VQ-F1): fps overlay ≥ 60 in the stress scene.
 9. **Horizon fog** (VQ-A5): in a fogged zone, look toward the horizon — sky and
    ground converge smoothly; horizon seam gone.
+10. **Accent light** (VQ-A1/A5): stand a character beside a portal at dusk —
+   the gate's cyan light spills onto the ground, both pillars, and the
+   character, fading smoothly with distance (no hard edge at the light
+   radius); the gate itself still blooms.
