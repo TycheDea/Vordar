@@ -245,7 +245,20 @@ fn read_material(
     images: &[gltf::image::Data],
     path:   &str,
 ) -> MaterialData {
+    // Preprocessed DDS sidecars live in `<asset stem>.textures/img<N>.dds`,
+    // one per glTF image index (see scripts/asset-pipeline).
+    let sidecar_dir = std::path::Path::new(path).with_extension("textures");
     let fetch = |index: usize, slot: &str| -> Option<TextureSource> {
+        let sidecar = sidecar_dir.join(format!("img{index}.dds"));
+        if sidecar.exists() {
+            match std::fs::read(&sidecar)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| crate::texture::parse_dds(&bytes))
+            {
+                Ok(compressed) => return Some(TextureSource::Compressed(compressed)),
+                Err(e) => log::warn!("{}: {e}, falling back to embedded {slot} image", sidecar.display()),
+            }
+        }
         let img = images.get(index)?;
         let converted = to_rgba8(img);
         if converted.is_none() {
@@ -345,6 +358,30 @@ mod tests {
         // No TANGENT accessor in the file — generated from UVs. This
         // triangle's UVs map u to +X, so the tangent points along +X.
         assert_eq!(p.vertices[0].tangent, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn base_color_prefers_sidecar_dds_over_embedded_png() {
+        let path = std::env::temp_dir().join("vordar_mesh_test_textured.glb");
+        crate::mesh::test_glb::write_textured_glb(&path);
+        let sidecar_dir = path.with_extension("textures");
+        std::fs::create_dir_all(&sidecar_dir).unwrap();
+        std::fs::write(
+            sidecar_dir.join("img0.dds"),
+            include_bytes!("../../tests/data/red8x8_bc7_srgb.dds"),
+        )
+        .unwrap();
+
+        let data = load_gltf_data(path.to_str().unwrap()).unwrap();
+        let source = data.primitives[0]
+            .material
+            .base_color_image
+            .as_ref()
+            .expect("textured glb has a base-color texture");
+        let TextureSource::Compressed(c) = source else {
+            panic!("sidecar DDS must win the slot over the embedded PNG")
+        };
+        assert_eq!(c.format, wgpu::TextureFormat::Bc7RgbaUnormSrgb);
     }
 
     #[test]
@@ -464,6 +501,16 @@ mod tests {
             data.primitives.iter().all(|p| p.skin.is_some()),
             "all primitives carry skin bindings"
         );
+        // DDS sidecars (scripts/asset-pipeline) must win every base-color slot.
+        if std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/models/human.textures")).exists() {
+            for p in &data.primitives {
+                let source = p.material.base_color_image.as_ref().expect("human primitive has a base-color texture");
+                assert!(
+                    matches!(source, TextureSource::Compressed(_)),
+                    "base-color slot must prefer the sidecar DDS over the embedded image"
+                );
+            }
+        }
         // Locomotion, the per-ability attack clips, hit react, and death
         // (the Mixamo clip library merged by mixamo_to_glb.py).
         let names: Vec<&str> = data.clips.iter().map(|c| c.name.as_str()).collect();
