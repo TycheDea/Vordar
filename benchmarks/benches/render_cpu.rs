@@ -13,6 +13,7 @@ use engine_renderer::anim::{
     global_transforms, sample_pose, AnimationClip, Interp, Joint, JointTracks, LocalTransform,
     Skeleton, Track,
 };
+use engine_renderer::culling::{Aabb, Frustum, classify, Visibility};
 use glam::{Mat4, Quat, Vec3};
 use std::hint::black_box;
 use vordar_client::vfx::{fill_draw_list, ParticleSim};
@@ -91,5 +92,59 @@ fn particle_fill(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, joint_palette, particle_fill);
+fn frustum_classify(c: &mut Criterion) {
+    // Build perspective frustum (default orbit geometry): eye ≈ (24.0, 22.7, 24.0)
+    let eye = Vec3::new(24.0, 22.7, 24.0);
+    let perspective_vp = Mat4::perspective_rh(45f32.to_radians(), 16.0 / 9.0, 0.1, 200.0)
+        * Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+    let camera_frustum = Frustum::from_view_proj(perspective_vp);
+
+    // Build orthographic frustum (shadow light): sun_dir = (-1, 2, -1).normalized()
+    let sun_dir = Vec3::new(-1.0, 2.0, -1.0).normalize();
+    let ortho_vp = Mat4::orthographic_rh(-80.0, 80.0, -80.0, 80.0, 0.0, 400.0)
+        * Mat4::look_at_rh(sun_dir * 200.0, Vec3::ZERO, Vec3::Y);
+    let shadow_frustum = Frustum::from_view_proj(ortho_vp);
+
+    // 552 unit AABBs scattered deterministically over ±80-unit square
+    // (40 rigs + 512 statics, index-hash positions)
+    let aabbs: Vec<(Aabb, Mat4)> = (0..552)
+        .map(|i: u32| {
+            // Deterministic hash-based position: use index to spread across ±80 square
+            let hash = (i.wrapping_mul(73856093) ^ (i.wrapping_mul(19349663))) as f32;
+            let normalized_hash = (hash.abs() % 1.0) * 2.0 - 1.0; // [-1, 1]
+            let x = normalized_hash * 80.0;
+            let hash2 = (i.wrapping_mul(83492791)).wrapping_add(i << 16) as f32;
+            let normalized_hash2 = (hash2.abs() % 1.0) * 2.0 - 1.0;
+            let z = normalized_hash2 * 80.0;
+            let y = 0.0;
+
+            let local_aabb = Aabb { min: Vec3::splat(-0.5), max: Vec3::splat(0.5) };
+            let transform = Mat4::from_translation(Vec3::new(x, y, z));
+            (local_aabb, transform)
+        })
+        .collect();
+
+    c.bench_function("frustum_classify_552", |b| {
+        b.iter(|| {
+            let mut both_count = 0;
+            let mut cam_count = 0;
+            let mut shadow_count = 0;
+
+            for (local_aabb, transform) in black_box(&aabbs) {
+                let world_aabb = local_aabb.transformed(transform);
+                if let Some(vis) = classify(&world_aabb, &camera_frustum, &shadow_frustum) {
+                    match vis {
+                        Visibility::Both => both_count += 1,
+                        Visibility::CamOnly => cam_count += 1,
+                        Visibility::ShadowOnly => shadow_count += 1,
+                    }
+                }
+            }
+
+            black_box((both_count, cam_count, shadow_count))
+        })
+    });
+}
+
+criterion_group!(benches, joint_palette, particle_fill, frustum_classify);
 criterion_main!(benches);

@@ -159,6 +159,7 @@ many enemies are actively provoked, which is small in practice.
 | Bench | Before | After | Notes |
 |---|---|---|---|
 | joint_palette_40x64 | 105.03 µs | 105.44 µs | unchanged (noise, p = 0.23) |
+| frustum_classify_552 | — | 12.36 µs | per-frame cull cost at 40 rigs + 512 statics (rendering rework 5) |
 
 Rendering finding 10: `pose_player`, the per-entity posing path `MeshRenderSyncSystem`
 runs every display frame, allocated five fresh `Vec`s per skinned instance (sample,
