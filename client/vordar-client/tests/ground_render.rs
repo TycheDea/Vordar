@@ -2,6 +2,7 @@
 // visible texture variation — not a flat slab. Skips without a GPU adapter
 // or the ground texture set.
 
+use engine_renderer::mesh::TextureSource;
 use engine_renderer::offscreen::OffscreenRenderer;
 use vordar_client::ground::{generate_ground, load_ground_material};
 
@@ -12,12 +13,24 @@ fn zone_ground_renders_with_texture_variation() {
         eprintln!("SKIP: ground texture set missing");
         return;
     }
+
+    let material = load_ground_material(dir).expect("texture set loads");
+    // mud_leaves ships a .dds sidecar for every map slot: the finder must
+    // prefer it over the JPG source. Needs no GPU, so it's checked whether
+    // or not the render below runs.
+    let base_color_compressed = matches!(material.base_color_image, Some(TextureSource::Compressed(_)));
+    let normal_compressed = matches!(material.normal_image, Some(TextureSource::Compressed(_)));
+    let mr_compressed = matches!(material.metallic_roughness_image, Some(TextureSource::Compressed(_)));
+
     let Some(mut r) = OffscreenRenderer::new(1.0) else {
         eprintln!("SKIP: no GPU adapter");
         return;
     };
+    if !r.gpu.device.features().contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
+        eprintln!("SKIP: adapter lacks TEXTURE_COMPRESSION_BC");
+        return;
+    }
 
-    let material = load_ground_material(dir).expect("texture set loads");
     let data = generate_ground(400.0, 7.0, material);
     let target = r.target(256, 256);
     r.render_mesh(&target, data, wgpu::Color::BLACK);
@@ -39,4 +52,8 @@ fn zone_ground_renders_with_texture_variation() {
         "textured ground must vary (VQ-A2): stddev {:.2}, mean {mean:.2}",
         variance.sqrt()
     );
+
+    assert!(base_color_compressed, "diff_2k.dds exists in mud_leaves — base color should load Compressed");
+    assert!(normal_compressed, "nor_gl_2k.dds exists in mud_leaves — normal should load Compressed");
+    assert!(mr_compressed, "rough_2k_mr.dds exists in mud_leaves — metallic-roughness should load Compressed");
 }

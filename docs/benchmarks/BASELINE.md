@@ -180,7 +180,7 @@ repeated calls once warmed, i.e. zero further allocations in steady state.
 |---|---|---|---|
 | statue_vroid (11 MB, embedded textures) upload | 122.11 ms | 24–28 ms | decode off-thread (step 1); upload cost residual, BC compression targeted (rework 4) |
 | human (9 MB, skinned + clips) upload | 101.63 ms | 24–28 ms | same streaming path as statue |
-| zone_ground (3× 2k JPG decode + mesh gen) | 246.27 ms | 6.5–7.3 ms | decode off-thread (step 1); mesh gen on background thread, GPU submission at draw |
+| zone_ground (3× 2k JPG decode + mesh gen) | 246.27 ms | 6.5–7.3 ms | decode off-thread (step 1); mesh gen on background thread, GPU submission at draw; BC sidecars (rework 4): `decode_and_generate` now 13.9–14.6 ms (3 file reads + header parses, no JPG decode, -92.8% vs. the still-JPG-decoding run) |
 | environment bake (per load, synchronous) | ~24 ms → ~20 ms | 6.8–7.3 ms | Baker hoist (step 2, pipeline compile once); single submit (step 3) collects 42 render passes |
 | HDRI decode (zone-change path) | 577.9–597.4 ms | 540.7–543.0 ms | off-thread (step 4); frame pays only bake cost at arrival |
 

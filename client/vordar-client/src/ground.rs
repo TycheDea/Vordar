@@ -7,6 +7,7 @@
 
 use engine_renderer::mesh::{load_image_rgba, ImageData, MaterialData, MeshData, PrimitiveData, TextureSource};
 use engine_renderer::tangent::generate_tangents;
+use engine_renderer::texture::load_dds_image;
 use engine_renderer::MeshVertex;
 
 /// The walkable surface height: flush with every unit's hitbox bottom
@@ -117,7 +118,18 @@ pub fn generate_ground(size: f32, tile: f32, material: MaterialData) -> MeshData
 /// Load a Poly Haven-style texture set from `dir`: `*_diff_*` (sRGB albedo),
 /// `*_nor_gl_*` (linear normal), `*_rough_*` (gray roughness → combined MR).
 pub fn load_ground_material(dir: &str) -> Result<MaterialData, String> {
-    let find = |tag: &str| -> Result<String, String> {
+    // Directory entry whose name contains `tag` and ends `.dds` — the baked
+    // sidecar for that map slot, if the bake produced one.
+    let find_dds = |tag: &str| -> Option<String> {
+        std::fs::read_dir(dir).ok()?.flatten().find_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (name.contains(tag) && name.ends_with(".dds"))
+                .then(|| entry.path().to_string_lossy().into_owned())
+        })
+    };
+    // Directory entry whose name contains `tag` and is not a `.dds` — the
+    // original JPG source for that map slot.
+    let find_src = |tag: &str| -> Result<String, String> {
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{dir}: {e}"))?.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.contains(tag) && !name.ends_with(".dds") {
@@ -127,22 +139,32 @@ pub fn load_ground_material(dir: &str) -> Result<MaterialData, String> {
         Err(format!("{dir}: no *{tag}* map"))
     };
 
-    let albedo = load_image_rgba(&find("diff")?)?;
-    let normal = load_image_rgba(&find("nor_gl")?)?;
-    let rough  = load_image_rgba(&find("rough")?)?;
-
-    // glTF MR convention: g = roughness, b = metallic (0 — grounds aren't metal).
-    let mr_pixels: Vec<u8> = rough
-        .pixels
-        .chunks_exact(4)
-        .flat_map(|p| [0, p[0], 0, 255])
-        .collect();
-    let mr = ImageData { width: rough.width, height: rough.height, pixels: mr_pixels };
+    let base_color_image = match find_dds("diff") {
+        Some(path) => TextureSource::Compressed(load_dds_image(&path)?),
+        None => TextureSource::Rgba8(load_image_rgba(&find_src("diff")?)?),
+    };
+    let normal_image = match find_dds("nor_gl") {
+        Some(path) => TextureSource::Compressed(load_dds_image(&path)?),
+        None => TextureSource::Rgba8(load_image_rgba(&find_src("nor_gl")?)?),
+    };
+    let metallic_roughness_image = match find_dds("mr") {
+        Some(path) => TextureSource::Compressed(load_dds_image(&path)?),
+        None => {
+            let rough = load_image_rgba(&find_src("rough")?)?;
+            // glTF MR convention: g = roughness, b = metallic (0 — grounds aren't metal).
+            let mr_pixels: Vec<u8> = rough
+                .pixels
+                .chunks_exact(4)
+                .flat_map(|p| [0, p[0], 0, 255])
+                .collect();
+            TextureSource::Rgba8(ImageData { width: rough.width, height: rough.height, pixels: mr_pixels })
+        }
+    };
 
     Ok(MaterialData {
-        base_color_image:         Some(TextureSource::Rgba8(albedo)),
-        normal_image:             Some(TextureSource::Rgba8(normal)),
-        metallic_roughness_image: Some(TextureSource::Rgba8(mr)),
+        base_color_image:         Some(base_color_image),
+        normal_image:             Some(normal_image),
+        metallic_roughness_image: Some(metallic_roughness_image),
         metallic_factor:          1.0, // texture already encodes 0
         roughness_factor:         1.0,
         ..Default::default()
