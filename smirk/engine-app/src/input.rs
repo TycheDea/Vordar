@@ -55,7 +55,10 @@ impl KeyboardState {
         }
     }
 
-    pub(crate) fn release(&mut self, key: KeyCode) {
+    /// Public for the same cross-crate headless reason as `press`: tests
+    /// outside this crate need to simulate a release to drive edge-consumer
+    /// systems through a real press+release pair.
+    pub fn release(&mut self, key: KeyCode) {
         self.pressed.remove(&key);
         self.just_released.insert(key);
     }

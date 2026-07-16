@@ -278,30 +278,22 @@ pub(crate) fn create_gpu_resources(
 
 /// Cycles the camera projection mode (Perspective → Isometric → TopDown → …) on C press.
 /// Register in Phase::PostUpdate, SystemOrder::First so it runs before CameraFollowSystem.
-pub struct CycleCameraSystem {
-    was_pressed: bool,
-}
-
-impl CycleCameraSystem {
-    pub fn new() -> Self { Self { was_pressed: false } }
-}
+pub struct CycleCameraSystem;
 
 impl System for CycleCameraSystem {
     fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
         let pressed = resources
             .get::<engine_app::input::KeyboardState>()
-            .map(|kb| kb.is_pressed(winit::keyboard::KeyCode::KeyC))
+            .map(|kb| kb.just_pressed(winit::keyboard::KeyCode::KeyC))
             .unwrap_or(false);
 
-        if pressed && !self.was_pressed {
+        if pressed {
             let state = resources.get_mut::<crate::RendererState>()
                 .expect("RendererState not in resources");
             state.camera.cycle_projection();
             let uniform = CameraUniform::from_camera(&state.camera);
             state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
         }
-
-        self.was_pressed = pressed;
     }
 }
 

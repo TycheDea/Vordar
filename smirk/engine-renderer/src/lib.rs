@@ -57,9 +57,9 @@ impl Plugin for RenderPlugin {
             // Keyboard navigation for the pause menu.
             .add_system(MenuSystem,                Phase::PostUpdate,   SystemOrder::First)
             // C key cycles Perspective → Isometric → TopDown.
-            .add_system(CycleCameraSystem::new(),  Phase::PostUpdate,   SystemOrder::First)
+            .add_system(CycleCameraSystem,          Phase::PostUpdate,   SystemOrder::First)
             // F3 toggles the dev stats overlay.
-            .add_system(DevOverlaySystem::new(),   Phase::PostUpdate,   SystemOrder::First)
+            .add_system(DevOverlaySystem,           Phase::PostUpdate,   SystemOrder::First)
             // Attach slots to slotless renderables, then sync transforms to the GPU pool.
             .add_system(RenderSlotAttachSystem,    Phase::RenderSync,   SystemOrder::First)
             .add_system(RenderSyncSystem,          Phase::RenderSync,   SystemOrder::Default)
