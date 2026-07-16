@@ -225,6 +225,76 @@ pub(crate) fn write_textured_glb(path: &std::path::Path) {
     std::fs::write(path, glb).unwrap();
 }
 
+/// Same layout as `write_textured_glb`, but the embedded base-color image is
+/// garbage bytes instead of a valid PNG — the seam for testing that a
+/// sidecar DDS skips decoding it entirely, and that a corrupt embedded image
+/// with no sidecar is a per-slot `None` rather than a whole-asset error.
+pub(crate) fn write_corrupt_textured_glb(path: &std::path::Path) {
+    fn push(bin: &mut Vec<u8>, data: &[u8]) -> (usize, usize) {
+        while bin.len() % 4 != 0 { bin.push(0); }
+        let off = bin.len();
+        bin.extend_from_slice(data);
+        (off, data.len())
+    }
+    fn f32s(v: &[f32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+    fn u16s(v: &[u16]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+
+    let mut bin = Vec::new();
+    let (pos_off, pos_len) = push(&mut bin, &f32s(&[0.0, 0.0, 0.0,  1.0, 0.0, 0.0,  0.0, 1.0, 0.0]));
+    let (nrm_off, nrm_len) = push(&mut bin, &f32s(&[0.0, 0.0, 1.0,  0.0, 0.0, 1.0,  0.0, 0.0, 1.0]));
+    let (uv_off,  uv_len)  = push(&mut bin, &f32s(&[0.0, 0.0,  1.0, 0.0,  0.0, 1.0]));
+    let (idx_off, idx_len) = push(&mut bin, &u16s(&[0, 1, 2]));
+
+    let png_bytes = b"not a real png".to_vec();
+    let (img_off, img_len) = push(&mut bin, &png_bytes);
+
+    let json = format!(r#"{{
+        "asset": {{"version": "2.0"}},
+        "scene": 0,
+        "scenes": [{{"nodes": [0]}}],
+        "nodes": [{{"mesh": 0}}],
+        "meshes": [{{"primitives": [{{
+            "attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}},
+            "indices": 3, "material": 0
+        }}]}}],
+        "materials": [{{"pbrMetallicRoughness": {{"baseColorTexture": {{"index": 0}}}}}}],
+        "textures": [{{"source": 0}}],
+        "images": [{{"mimeType": "image/png", "bufferView": 4}}],
+        "buffers": [{{"byteLength": {bin_len}}}],
+        "bufferViews": [
+            {{"buffer": 0, "byteOffset": {pos_off}, "byteLength": {pos_len}}},
+            {{"buffer": 0, "byteOffset": {nrm_off}, "byteLength": {nrm_len}}},
+            {{"buffer": 0, "byteOffset": {uv_off},  "byteLength": {uv_len}}},
+            {{"buffer": 0, "byteOffset": {idx_off}, "byteLength": {idx_len}}},
+            {{"buffer": 0, "byteOffset": {img_off}, "byteLength": {img_len}}}
+        ],
+        "accessors": [
+            {{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 0.0]}},
+            {{"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"}},
+            {{"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"}},
+            {{"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"}}
+        ]
+    }}"#, bin_len = bin.len());
+
+    let mut json_bytes = json.into_bytes();
+    while json_bytes.len() % 4 != 0 { json_bytes.push(b' '); }
+    while bin.len() % 4 != 0 { bin.push(0); }
+
+    let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
+    let mut glb = Vec::with_capacity(total);
+    glb.extend_from_slice(&0x46546C67u32.to_le_bytes()); // magic "glTF"
+    glb.extend_from_slice(&2u32.to_le_bytes());
+    glb.extend_from_slice(&(total as u32).to_le_bytes());
+    glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+    glb.extend_from_slice(&0x4E4F534Au32.to_le_bytes()); // "JSON"
+    glb.extend_from_slice(&json_bytes);
+    glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
+    glb.extend_from_slice(&0x004E4942u32.to_le_bytes()); // "BIN\0"
+    glb.extend_from_slice(&bin);
+    std::fs::write(path, glb).unwrap();
+}
+
 /// Build a minimal single-triangle GLB with BLEND alpha mode and red semi-transparent baseColorFactor.
 pub(crate) fn write_blend_glb(path: &std::path::Path) {
     let mut bin: Vec<u8> = Vec::new();

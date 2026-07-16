@@ -108,8 +108,11 @@ pub struct MeshData {
 /// are baked into the vertices (static meshes only — skinning comes later),
 /// so one MeshData draws with a single model matrix per instance.
 pub fn load_gltf_data(path: &str) -> Result<MeshData, String> {
-    let (doc, buffers, images) =
-        gltf::import(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut gltf = gltf::Gltf::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let blob = gltf.blob.take();
+    let buffers = gltf::import_buffers(&gltf.document, std::path::Path::new(path).parent(), blob)
+        .map_err(|e| format!("{path}: {e}"))?;
+    let doc = &gltf.document;
     let scene = doc
         .default_scene()
         .or_else(|| doc.scenes().next())
@@ -117,16 +120,16 @@ pub fn load_gltf_data(path: &str) -> Result<MeshData, String> {
 
     let mut primitives = Vec::new();
     for node in scene.nodes() {
-        visit_node(&node, Mat4::IDENTITY, &buffers, &images, path, &mut primitives);
+        visit_node(&node, Mat4::IDENTITY, &buffers, doc, path, &mut primitives);
     }
     if primitives.is_empty() {
         return Err(format!("{path}: no triangle primitives in scene"));
     }
 
     // Skeleton + animations (absent for static meshes → None / empty).
-    let (skeleton, clips) = match extract_skeleton(&doc, &buffers, path) {
+    let (skeleton, clips) = match extract_skeleton(doc, &buffers, path) {
         Some((skel, node_to_joint)) => {
-            let clips = extract_clips(&doc, &buffers, &node_to_joint, skel.joint_count());
+            let clips = extract_clips(doc, &buffers, &node_to_joint, skel.joint_count());
             (Some(skel), clips)
         }
         None => (None, Vec::new()),
@@ -141,7 +144,7 @@ fn visit_node(
     node:       &gltf::Node,
     parent:     Mat4,
     buffers:    &[gltf::buffer::Data],
-    images:     &[gltf::image::Data],
+    doc:        &gltf::Document,
     path:       &str,
     out:        &mut Vec<PrimitiveData>,
 ) {
@@ -227,27 +230,31 @@ fn visit_node(
                 None
             };
 
-            let material = read_material(&prim.material(), images, path);
+            let material = read_material(&prim.material(), doc, buffers, path);
 
             out.push(PrimitiveData { vertices, indices, material, skin });
         }
     }
 
     for child in node.children() {
-        visit_node(&child, global, buffers, images, path, out);
+        visit_node(&child, global, buffers, doc, path, out);
     }
 }
 
 /// Read the whole glTF metallic-roughness material of a primitive: every
 /// texture slot plus the scalar/vector factors.
 fn read_material(
-    mat:    &gltf::Material,
-    images: &[gltf::image::Data],
-    path:   &str,
+    mat:     &gltf::Material,
+    doc:     &gltf::Document,
+    buffers: &[gltf::buffer::Data],
+    path:    &str,
 ) -> MaterialData {
     // Preprocessed DDS sidecars live in `<asset stem>.textures/img<N>.dds`,
     // one per glTF image index (see scripts/asset-pipeline).
     let sidecar_dir = std::path::Path::new(path).with_extension("textures");
+    let asset_dir = std::path::Path::new(path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     let fetch = |index: usize, slot: &str| -> Option<TextureSource> {
         let sidecar = sidecar_dir.join(format!("img{index}.dds"));
         if sidecar.exists() {
@@ -259,12 +266,43 @@ fn read_material(
                 Err(e) => log::warn!("{}: {e}, falling back to embedded {slot} image", sidecar.display()),
             }
         }
-        let img = images.get(index)?;
-        let converted = to_rgba8(img);
-        if converted.is_none() {
-            log::warn!("{path}: unsupported {slot} image format {:?}", img.format);
+        // Sidecar missed (or failed): decode the embedded/loose image bytes,
+        // fetched lazily so a sidecar hit never pays for this.
+        let image = doc.images().nth(index)?;
+        let bytes: std::borrow::Cow<[u8]> = match image.source() {
+            gltf::image::Source::View { view, .. } => {
+                let buf = &buffers[view.buffer().index()];
+                let start = view.offset();
+                std::borrow::Cow::Borrowed(&buf[start..start + view.length()])
+            }
+            gltf::image::Source::Uri { uri, .. } => {
+                if uri.starts_with("data:") {
+                    log::warn!("{path}: data-URI {slot} image not supported, skipping");
+                    return None;
+                }
+                match std::fs::read(asset_dir.join(uri)) {
+                    Ok(bytes) => std::borrow::Cow::Owned(bytes),
+                    Err(e) => {
+                        log::warn!("{path}: failed to read {slot} image {uri:?}: {e}");
+                        return None;
+                    }
+                }
+            }
+        };
+        match image::load_from_memory(&bytes) {
+            Ok(decoded) => {
+                let rgba = decoded.into_rgba8();
+                Some(TextureSource::Rgba8(ImageData {
+                    width:  rgba.width(),
+                    height: rgba.height(),
+                    pixels: rgba.into_raw(),
+                }))
+            }
+            Err(e) => {
+                log::warn!("{path}: unsupported {slot} image format: {e}");
+                None
+            }
         }
-        converted.map(TextureSource::Rgba8)
     };
 
     let pbr = mat.pbr_metallic_roughness();
@@ -295,26 +333,6 @@ fn read_material(
             .occlusion_texture()
             .and_then(|i| fetch(i.texture().source().index(), "occlusion")),
     }
-}
-
-/// Convert a decoded glTF image to tightly-packed RGBA8. 16-bit and float
-/// formats are not supported (None).
-fn to_rgba8(img: &gltf::image::Data) -> Option<ImageData> {
-    use gltf::image::Format;
-    let pixels = match img.format {
-        Format::R8G8B8A8 => img.pixels.clone(),
-        Format::R8G8B8 => img.pixels.chunks_exact(3)
-            .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect(),
-        Format::R8 => img.pixels.iter()
-            .flat_map(|&g| [g, g, g, 255])
-            .collect(),
-        Format::R8G8 => img.pixels.chunks_exact(2)
-            .flat_map(|c| [c[0], c[0], c[0], c[1]])
-            .collect(),
-        _ => return None,
-    };
-    Some(ImageData { width: img.width, height: img.height, pixels })
 }
 
 /// Decode a PNG/JPG from disk into tightly-packed RGBA8 — the seam for
@@ -382,6 +400,39 @@ mod tests {
             panic!("sidecar DDS must win the slot over the embedded PNG")
         };
         assert_eq!(c.format, wgpu::TextureFormat::Bc7RgbaUnormSrgb);
+    }
+
+    #[test]
+    fn sidecar_skips_decode_of_corrupt_embedded_image() {
+        let path = std::env::temp_dir().join("vordar_mesh_test_corrupt_textured.glb");
+        crate::mesh::test_glb::write_corrupt_textured_glb(&path);
+        let sidecar_dir = path.with_extension("textures");
+        std::fs::create_dir_all(&sidecar_dir).unwrap();
+        std::fs::write(
+            sidecar_dir.join("img0.dds"),
+            include_bytes!("../../tests/data/red8x8_bc7_srgb.dds"),
+        )
+        .unwrap();
+
+        // Sidecar wins the slot; the corrupt embedded PNG must never be decoded.
+        let data = load_gltf_data(path.to_str().unwrap())
+            .expect("sidecar hit must skip decoding the corrupt embedded image");
+        let source = data.primitives[0]
+            .material
+            .base_color_image
+            .as_ref()
+            .expect("textured glb has a base-color texture");
+        assert!(matches!(source, TextureSource::Compressed(_)));
+
+        // Without the sidecar, the corrupt embedded image is a per-slot None,
+        // not a whole-asset Err (matches fetch's unsupported-format contract).
+        std::fs::remove_dir_all(&sidecar_dir).unwrap();
+        let data = load_gltf_data(path.to_str().unwrap())
+            .expect("a corrupt embedded image must not fail the whole asset");
+        assert!(
+            data.primitives[0].material.base_color_image.is_none(),
+            "corrupt embedded image with no sidecar must decode to None"
+        );
     }
 
     #[test]
