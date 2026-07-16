@@ -6,7 +6,7 @@
 // Frames go through the real chain: MSAA HDR → resolve → ACES tonemap.
 
 use engine_renderer::instance::SdfInstance;
-use engine_renderer::mesh::{load_gltf_data, MaterialData, MeshData, PrimitiveData};
+use engine_renderer::mesh::{load_gltf_data, ImageData, MaterialData, MeshData, PrimitiveData};
 use engine_renderer::offscreen::{
     create_mipped_rgba8, read_texture_mip, HeadlessGpu, OffscreenRenderer, TestLight,
 };
@@ -314,6 +314,102 @@ fn mip_chain_downsamples_checkerboard_to_gray() {
             "mip1 of a 1px checkerboard is mid-gray, got {px:?}"
         );
     }
+}
+
+/// A quad perpendicular to the camera's view axis, centered on the target
+/// and sized to exactly fill the frustum at the default orbit's distance (34
+/// units — the same constant `damaged_helmet_renders` frames the helmet
+/// against). `right`/`up` are built the same way `Mat4::look_at_rh` derives
+/// its camera-space x/y axes, so the quad projects to an axis-aligned
+/// rectangle with no outer silhouette inside the frame: every background-
+/// colored pixel in a render comes from the material's own alpha cutout,
+/// never from geometry.
+fn camera_filling_quad(material: MaterialData) -> MeshData {
+    let radius = 34.0f32;
+    let angle: f32 = std::f32::consts::FRAC_PI_4;
+    let pitch = 0.8f32;
+    let eye = Vec3::new(
+        radius * angle.cos() * pitch.cos(),
+        radius * pitch.sin(),
+        radius * angle.sin() * pitch.cos(),
+    );
+    let forward = (-eye).normalize(); // target is the origin
+    let right = forward.cross(Vec3::Y).normalize();
+    let up = right.cross(forward);
+    let normal = -forward;
+
+    let fovy = 45.0_f32.to_radians();
+    let half = radius * (fovy / 2.0).tan() * 1.02; // 2% past the exact frustum edge
+
+    let vert = |u: f32, v: f32| MeshVertex {
+        position: (right * (u * 2.0 - 1.0) * half + up * (v * 2.0 - 1.0) * half).to_array(),
+        normal:   normal.to_array(),
+        uv:       [u, v],
+        tangent:  [1.0, 0.0, 0.0, 1.0],
+    };
+    MeshData {
+        primitives: vec![PrimitiveData {
+            vertices: vec![vert(0.0, 0.0), vert(1.0, 0.0), vert(1.0, 1.0), vert(0.0, 1.0)],
+            indices:  vec![0, 2, 1, 0, 3, 2],
+            material,
+            skin: None,
+        }],
+        skeleton: None,
+        clips:    Vec::new(),
+    }
+}
+
+/// 64² RGBA8: opaque white with an alpha ramp along the UV diagonal
+/// (u - v), crossing the material's 0.5 cutoff exactly on the u==v line —
+/// a masked edge that isn't aligned to the pixel or texel grid.
+fn diagonal_alpha_texture(size: u32) -> ImageData {
+    let mut pixels = Vec::with_capacity((size * size * 4) as usize);
+    for y in 0..size {
+        for x in 0..size {
+            let u = (x as f32 + 0.5) / size as f32;
+            let v = (y as f32 + 0.5) / size as f32;
+            let a = ((u - v) + 0.5).clamp(0.0, 1.0);
+            pixels.extend_from_slice(&[255, 255, 255, (a * 255.0) as u8]);
+        }
+    }
+    ImageData { width: size, height: size, pixels }
+}
+
+fn masked_billboard() -> MeshData {
+    camera_filling_quad(MaterialData {
+        alpha_cutoff:      0.5,
+        metallic_factor:   0.0,
+        roughness_factor:  1.0,
+        base_color_image:  Some(diagonal_alpha_texture(64)),
+        ..Default::default()
+    })
+}
+
+/// Masked cutout edges are per-fragment discard today, which is a binary
+/// keep/kill regardless of MSAA sample count: unlike a geometric silhouette
+/// (`msaa_produces_intermediate_edge_pixels`), the boundary along the
+/// texture's alpha ramp must also resolve to intermediate pixel values, not
+/// a hard step between the lit body and the black background.
+#[test]
+fn masked_cutout_edge_has_intermediate_resolved_pixels() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_uniform_environment([1.0, 1.0, 1.0]);
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+
+    let target = r.target(W, H);
+    r.render_mesh(&target, masked_billboard(), wgpu::Color::BLACK);
+    let pixels = r.read(&target);
+
+    let body_peak = pixels.chunks_exact(4).map(|p| p[0]).max().unwrap();
+    assert!(body_peak > 60, "cutout body must be visible, peak {body_peak}");
+    let intermediates = pixels
+        .chunks_exact(4)
+        .filter(|p| p[0] > 12 && p[0] < body_peak - 12)
+        .count();
+    assert!(
+        intermediates > 50,
+        "alpha-to-coverage must leave intermediate pixels along the diagonal cutout edge, found {intermediates}"
+    );
 }
 
 // ── HDR / tonemap / MSAA / IBL ───────────────────────────────────────────────

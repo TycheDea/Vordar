@@ -88,10 +88,18 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let emissive  = textureSample(t_emissive, s_mat, in.uv).rgb * material.emissive.rgb;
 
     // Alpha cutoff (glTF MASK; BLEND approximated as MASK) — mr.z of 0 means
-    // opaque. Placed after all textureSample calls to keep them in trivially
-    // uniform control flow.
-    if albedo_s.a * material.base_color.a < material.mr.z {
-        discard;
+    // opaque, no cutout. fwidth() must run before any discard so a fragment
+    // quad's derivative stays defined; a cutout material sharpens alpha to a
+    // per-sample coverage value instead of a binary keep/discard, letting
+    // alpha-to-coverage anti-alias the cutout edge. A texel with no raw
+    // alpha still discards outright — zero coverage has nothing to blend.
+    let alpha_test = albedo_s.a * material.base_color.a;
+    var out_alpha = 1.0;
+    if material.mr.z > 0.0 {
+        out_alpha = saturate((alpha_test - material.mr.z) / max(fwidth(alpha_test), 1e-4) + 0.5);
+        if alpha_test <= 0.0 {
+            discard;
+        }
     }
 
     // Normal mapping — tangent w = 0 means "no tangent basis" (degenerate UVs).
@@ -107,7 +115,7 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let V = normalize(camera.eye.xyz - in.world_pos);
     let shadow = shadow_factor(in.world_pos);
     let color = shade_pbr(N, V, albedo, metallic, roughness, ao, emissive, shadow);
-    return vec4<f32>(apply_fog(color, in.world_pos), 1.0);
+    return vec4<f32>(apply_fog(color, in.world_pos), out_alpha);
 }
 /// Exponential distance fog; density 0 disables.
 fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>) -> vec3<f32> {

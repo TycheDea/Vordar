@@ -126,7 +126,11 @@ pub(crate) fn create_skinned_pipeline(
             stencil:             Default::default(),
             bias:                Default::default(),
         }),
-        multisample: wgpu::MultisampleState { count: crate::post::SCENE_SAMPLES, ..Default::default() },
+        multisample: wgpu::MultisampleState {
+            count: crate::post::SCENE_SAMPLES,
+            alpha_to_coverage_enabled: true,
+            ..Default::default()
+        },
         fragment: Some(wgpu::FragmentState {
             module:      &shader,
             entry_point: Some("frag_main"),
