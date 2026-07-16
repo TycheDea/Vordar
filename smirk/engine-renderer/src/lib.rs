@@ -21,6 +21,7 @@ pub mod particle_pipeline;
 pub(crate) mod post;
 pub(crate) mod shadow;
 pub(crate) mod sky;
+pub(crate) mod ssao;
 pub mod tangent;
 pub mod sdf_pipeline;
 pub(crate) mod skinned_pipeline;
@@ -40,6 +41,8 @@ mod generated_shader_tests {
             include_str!(concat!(env!("OUT_DIR"), "/shader.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/mesh_shader.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/skinned_mesh_shader.wgsl")),
+            include_str!(concat!(env!("OUT_DIR"), "/depth_prepass.wgsl")),
+            include_str!(concat!(env!("OUT_DIR"), "/ssao.wgsl")),
         ];
         for src in generated {
             wgpu::naga::front::wgsl::parse_str(src).expect("generated shader must parse as valid WGSL");

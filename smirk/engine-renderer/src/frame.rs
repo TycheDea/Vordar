@@ -277,6 +277,14 @@ impl System for RenderSystem {
             self.transparent_draws.clear();
         }
 
+        if state.ssao_enabled {
+            record_depth_prepass(
+                state, &mut encoder, &self.sdf_runs,
+                mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
+            );
+            record_ssao(state, &mut encoder);
+        }
+
         record_main_pass(
             state, &mut encoder, &self.sdf_runs, sample_gpu,
             mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
@@ -463,6 +471,85 @@ fn record_shadow_pass(
             }
         }
     }
+}
+
+/// Depth-only prepass — opaque SDF/mesh/skinned geometry from the main
+/// camera's viewpoint into `state.ssao_targets`' full-res depth, the same
+/// visibility set `record_main_pass` draws (`list.ranges`, not the shadow
+/// pass's light-frustum `shadow_ranges`). Feeds `record_ssao`.
+fn record_depth_prepass(
+    state:        &RendererState,
+    encoder:      &mut wgpu::CommandEncoder,
+    sdf_runs:     &[(u32, u32)],
+    mesh_list:    Option<&MeshDrawList>,
+    skinned_list: Option<&SkinnedDrawList>,
+    mesh_store:   Option<&MeshStore>,
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("Depth Prepass"),
+        color_attachments: &[],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &state.ssao_targets.prepass_depth_view,
+            depth_ops: Some(wgpu::Operations {
+                load:  wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        timestamp_writes: None,
+        ..Default::default()
+    });
+
+    pass.set_pipeline(&state.depth_prepass_pipelines.sdf);
+    pass.set_bind_group(0, &state.camera_bind_group, &[]);
+    pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
+    pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
+    pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+    for &(first, count) in sdf_runs {
+        pass.draw_indexed(0..INDICES.len() as u32, 0, first..first + count);
+    }
+
+    if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
+        if !list.instances.is_empty() {
+            pass.set_pipeline(&state.depth_prepass_pipelines.mesh);
+            pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
+            for &(mesh_idx, first, count) in &list.ranges {
+                if first as usize >= MAX_MESH_INSTANCES { break; }
+                let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    if prim.blend { continue; }
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+        }
+    }
+
+    if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
+        if !list.instances.is_empty() {
+            pass.set_pipeline(&state.depth_prepass_pipelines.skinned);
+            pass.set_bind_group(1, &state.joint_bind_group, &[]);
+            pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
+            for &(mesh_idx, first, count) in &list.ranges {
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    if prim.blend { continue; }
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+        }
+    }
+}
+
+/// Hemisphere-kernel occlusion (half-res) from the depth prepass, then a box
+/// blur — both into `state.ssao_targets`.
+fn record_ssao(state: &RendererState, encoder: &mut wgpu::CommandEncoder) {
+    state.ssao_pass.encode(encoder, &state.camera_bind_group, &state.ssao_targets.raw_ao_view);
+    state.blur_pass.encode(encoder, &state.ssao_targets.blurred_ao_view);
 }
 
 /// Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the

@@ -1,5 +1,6 @@
 // Preprocesses the three geometry shaders (shader.wgsl, mesh_shader.wgsl,
-// skinned_mesh_shader.wgsl) and the sky shader (sky.wgsl):
+// skinned_mesh_shader.wgsl), the sky shader (sky.wgsl), and the depth
+// prepass/SSAO shaders (depth_prepass.wgsl, ssao.wgsl):
 // `//#include "snippets/x.wgsl"` lines splice in the shared PBR/shadow/uniform
 // snippets, `//#const NAME` markers become `const NAME: f32 = ...;`
 // declarations whose values are read straight out of shadow.rs / ibl.rs so
@@ -12,8 +13,10 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-const PREPROCESSED_SHADERS: [&str; 4] =
-    ["shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl", "sky.wgsl"];
+const PREPROCESSED_SHADERS: [&str; 6] = [
+    "shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl", "sky.wgsl",
+    "depth_prepass.wgsl", "ssao.wgsl",
+];
 const SNIPPETS: [&str; 4] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl", "fog.wgsl"];
 
 fn main() {

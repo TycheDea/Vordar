@@ -21,6 +21,7 @@ use crate::sdf_pipeline::{self, INDICES};
 use crate::shadow::{self, ShadowPipelines};
 use crate::skinned_pipeline;
 use crate::sky;
+use crate::ssao::{self, BlurPass, DepthPrepassPipelines, SsaoPass, SsaoTargets};
 use crate::texture;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -168,6 +169,15 @@ pub struct OffscreenRenderer {
     /// so `render_mesh` can sort blend primitives back-to-front without a
     /// GPU readback.
     camera_eye:     Vec3,
+    depth_prepass_pipelines: DepthPrepassPipelines,
+    ssao_pass:               SsaoPass,
+    blur_pass:               BlurPass,
+    /// Built lazily against the first `SceneTarget` size `compose` sees;
+    /// rebuilt if a later target's size differs.
+    ssao_targets:            Option<SsaoTargets>,
+    /// Depth prepass + SSAO + blur on/off — off (the default) keeps every
+    /// pre-existing offscreen test's pass count unchanged.
+    pub draw_ssao:  bool,
 }
 
 impl OffscreenRenderer {
@@ -222,6 +232,11 @@ impl OffscreenRenderer {
         let vertex_buffer = sdf_pipeline::create_vertex_buffer(device);
         let index_buffer  = sdf_pipeline::create_index_buffer(device);
 
+        let depth_prepass_pipelines = DepthPrepassPipelines::new(device, &camera_bgl, &joint_bgl);
+        let ssao_shader = ssao::create_shader(device);
+        let ssao_pass = SsaoPass::new(device, &camera_bgl, &ssao_shader);
+        let blur_pass = BlurPass::new(device, &ssao_shader);
+
         Some(Self {
             aspect,
             camera_buffer,
@@ -254,8 +269,42 @@ impl OffscreenRenderer {
             _white: white,
             draw_sky: false,
             camera_eye: camera.eye(),
+            depth_prepass_pipelines,
+            ssao_pass,
+            blur_pass,
+            ssao_targets: None,
+            draw_ssao: false,
             gpu,
         })
+    }
+
+    /// Rebuilds `ssao_targets`/pipelines' bind groups if the target size
+    /// changed (or this is the first `draw_ssao` render) — `compose` calls
+    /// this before recording the depth prepass.
+    fn ensure_ssao_targets(&mut self, width: u32, height: u32) {
+        let stale = match &self.ssao_targets {
+            Some(t) => t.width != width || t.height != height,
+            None => true,
+        };
+        if !stale {
+            return;
+        }
+        let targets = SsaoTargets::new(&self.gpu.device, width, height);
+        self.ssao_pass.set_target(&self.gpu.device, &self.gpu.queue, &targets);
+        self.blur_pass.set_target(&self.gpu.device, &targets.raw_ao_view, self.ssao_pass.params_buffer());
+        self.ssao_targets = Some(targets);
+    }
+
+    /// Read the blurred half-res AO target back to CPU memory: one byte per
+    /// texel (R8Unorm), width×height = the target's dimensions halved. `None`
+    /// until a `draw_ssao = true` render has run.
+    pub fn ao_readback(&self, target: &SceneTarget) -> Option<Vec<u8>> {
+        let targets = self.ssao_targets.as_ref()?;
+        debug_assert_eq!(
+            (targets.width, targets.height), (target.width, target.height),
+            "ao_readback called against a different-sized target than the last draw_ssao render"
+        );
+        Some(read_r8(&self.gpu, &targets.blurred_ao))
     }
 
     pub fn target(&self, width: u32, height: u32) -> SceneTarget {
@@ -293,6 +342,18 @@ impl OffscreenRenderer {
     pub fn set_camera_level(&mut self) {
         let mut camera = Camera::new(self.aspect);
         camera.orbit(0.0, -0.8); // Camera::new's default pitch is 0.8; net pitch 0.0
+        let cam_uniform = CameraUniform::from_camera(&camera);
+        self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
+        self.camera_eye = camera.eye();
+    }
+
+    /// Re-aims the camera straight down (TopDown projection, orthographic):
+    /// world x/z maps linearly to screen space with no perspective distortion,
+    /// so AO tests can place tiles by world position without projection math.
+    pub fn set_camera_top_down(&mut self) {
+        let mut camera = Camera::new(self.aspect);
+        camera.cycle_projection(); // Perspective -> Isometric
+        camera.cycle_projection(); // Isometric -> TopDown
         let cam_uniform = CameraUniform::from_camera(&camera);
         self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
         self.camera_eye = camera.eye();
@@ -371,6 +432,16 @@ impl OffscreenRenderer {
             },
             |pass, this| {
                 if !instances.is_empty() {
+                    pass.set_pipeline(&this.depth_prepass_pipelines.sdf);
+                    pass.set_bind_group(0, &this.camera_bind_group, &[]);
+                    pass.set_vertex_buffer(0, this.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                    pass.set_index_buffer(this.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..instances.len() as u32);
+                }
+            },
+            |pass, this| {
+                if !instances.is_empty() {
                     pass.set_pipeline(&this.sdf_pipeline);
                     pass.set_bind_group(0, &this.camera_bind_group, &[]);
                     pass.set_bind_group(1, &this.white_bg, &[]);
@@ -434,6 +505,17 @@ impl OffscreenRenderer {
                 }
             },
             |pass, this| {
+                pass.set_pipeline(&this.depth_prepass_pipelines.mesh);
+                pass.set_bind_group(0, &this.camera_bind_group, &[]);
+                pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                for &i in &opaque {
+                    let prim = &gpu_mesh.primitives[i];
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                }
+            },
+            |pass, this| {
                 pass.set_pipeline(&this.mesh_pipeline);
                 pass.set_bind_group(0, &this.camera_bind_group, &[]);
                 pass.set_bind_group(2, &this.environment.bind_group, &[]);
@@ -471,9 +553,13 @@ impl OffscreenRenderer {
         target:           &SceneTarget,
         clear:            wgpu::Color,
         shadow_draw:      impl Fn(&mut wgpu::RenderPass<'_>, &Self, wgpu::DynamicOffset),
+        depth_draw:       impl Fn(&mut wgpu::RenderPass<'_>, &Self),
         draw:             impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
         transparent_draw: impl FnOnce(&mut wgpu::RenderPass<'_>, &Self),
     ) {
+        if self.draw_ssao {
+            self.ensure_ssao_targets(target.width, target.height);
+        }
         let bloom = crate::bloom::BloomPass::new(
             &self.gpu.device, &target.resolve_view, target.width, target.height,
         );
@@ -499,6 +585,27 @@ impl OffscreenRenderer {
                 ..Default::default()
             });
             shadow_draw(&mut pass, self, shadow::cast_offset(cascade as u32));
+        }
+        if self.draw_ssao {
+            let targets = self.ssao_targets.as_ref().expect("ensure_ssao_targets just ran");
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Offscreen Depth Prepass"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &targets.prepass_depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load:  wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                depth_draw(&mut pass, self);
+            }
+            self.ssao_pass.encode(&mut encoder, &self.camera_bind_group, &targets.raw_ao_view);
+            self.blur_pass.encode(&mut encoder, &targets.blurred_ao_view);
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -605,6 +712,61 @@ pub fn read_texture_mip(gpu: &HeadlessGpu, texture: &wgpu::Texture, mip: u32) ->
     for row in 0..height {
         let start = (row * padded) as usize;
         pixels.extend_from_slice(&mapped[start..start + unpadded as usize]);
+    }
+    drop(mapped);
+    readback.unmap();
+    pixels
+}
+
+/// Read a mip-0, single-channel (R8) texture back to CPU memory, rows
+/// unpadded (row-major) — `read_texture_mip` assumes 4 bytes/pixel, which an
+/// R8Unorm target (the SSAO textures) doesn't have.
+fn read_r8(gpu: &HeadlessGpu, texture: &wgpu::Texture) -> Vec<u8> {
+    const ROW_ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let width  = texture.width();
+    let height = texture.height();
+    let padded = width.div_ceil(ROW_ALIGN) * ROW_ALIGN;
+
+    let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label:              Some("R8 Readback Buffer"),
+        size:               (padded * height) as u64,
+        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("R8 Readback Encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset:         0,
+                bytes_per_row:  Some(padded),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+    gpu.queue.submit(std::iter::once(encoder.finish()));
+
+    let slice = readback.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |r| r.expect("readback map failed"));
+    gpu.device
+        .poll(wgpu::PollType::Wait { submission_index: None, timeout: None })
+        .expect("device poll failed");
+
+    let mapped = slice.get_mapped_range();
+    let mut pixels = Vec::with_capacity((width * height) as usize);
+    for row in 0..height {
+        let start = (row * padded) as usize;
+        pixels.extend_from_slice(&mapped[start..start + width as usize]);
     }
     drop(mapped);
     readback.unmap();

@@ -18,6 +18,7 @@ use crate::post;
 use crate::sdf_pipeline;
 use crate::shadow;
 use crate::skinned_pipeline;
+use crate::ssao::{self, BlurPass, DepthPrepassPipelines, SsaoPass, SsaoTargets};
 use crate::sky;
 use crate::texture::{self, ColorTexture};
 use crate::ParticleDrawList;
@@ -71,6 +72,12 @@ pub(crate) struct RendererState {
     pub(crate) light_dir:            GlamVec3,
     _shadow_texture:    wgpu::Texture,
     _shadow_array_view: wgpu::TextureView,
+    // ── depth prepass + SSAO ──
+    pub(crate) depth_prepass_pipelines: DepthPrepassPipelines,
+    pub(crate) ssao_targets:            SsaoTargets,
+    pub(crate) ssao_pass:               SsaoPass,
+    pub(crate) blur_pass:               BlurPass,
+    pub(crate) ssao_enabled:            bool,
     // CPU copy of the full light uniform so set_light / set_fog can update
     // their halves independently.
     pub(crate) light_state: LightUniform,
@@ -136,6 +143,11 @@ impl RendererState {
         let (instance_buffer, mesh_instance_buffer, skinned_instance_buffer, particle_instance_buffer, joint_buffer, joint_bind_group) =
             create_instance_buffers(&device, &joint_bgl);
 
+        // Depth prepass + SSAO: full-res single-sample depth from the main
+        // camera, then half-res hemisphere-kernel occlusion + blur.
+        let (depth_prepass_pipelines, ssao_targets, ssao_pass, blur_pass) =
+            create_ssao_resources(&device, &queue, &camera_bgl, &joint_bgl, size);
+
         // ── egui ──────────────────────────────────────────────────────────────
         let (egui_ctx, egui_winit, egui_renderer) = create_egui_resources(&device, format, &window);
 
@@ -172,6 +184,8 @@ impl RendererState {
                 light_dir: GlamVec3::new(-1.0, 2.0, -1.0).normalize(),
                 _shadow_texture: shadow_texture,
                 _shadow_array_view: shadow_array_view,
+                depth_prepass_pipelines, ssao_targets, ssao_pass, blur_pass,
+                ssao_enabled: true,
                 light_state: LightUniform::default_sun(),
                 env_bgl, sky_bgl, sky_pipeline, baker, environment, brdf_view,
                 pending_env:      None,
@@ -211,6 +225,10 @@ impl RendererState {
         self.camera.aspect = w as f32 / h as f32;
         let uniform = CameraUniform::from_camera(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
+
+        self.ssao_targets = SsaoTargets::new(&self.device, w, h);
+        self.ssao_pass.set_target(&self.device, &self.queue, &self.ssao_targets);
+        self.blur_pass.set_target(&self.device, &self.ssao_targets.raw_ao_view, self.ssao_pass.params_buffer());
     }
 
     /// Bakes and swaps in the environment whose background HDRI decode has
@@ -412,6 +430,23 @@ fn create_shadow_pass_resources(
         }],
     });
     (shadow_pipelines, shadow_bind_group)
+}
+
+fn create_ssao_resources(
+    device:     &wgpu::Device,
+    queue:      &wgpu::Queue,
+    camera_bgl: &wgpu::BindGroupLayout,
+    joint_bgl:  &wgpu::BindGroupLayout,
+    size:       winit::dpi::PhysicalSize<u32>,
+) -> (DepthPrepassPipelines, SsaoTargets, SsaoPass, BlurPass) {
+    let depth_prepass_pipelines = DepthPrepassPipelines::new(device, camera_bgl, joint_bgl);
+    let ssao_targets = SsaoTargets::new(device, size.width, size.height);
+    let shader = ssao::create_shader(device);
+    let mut ssao_pass = SsaoPass::new(device, camera_bgl, &shader);
+    ssao_pass.set_target(device, queue, &ssao_targets);
+    let mut blur_pass = BlurPass::new(device, &shader);
+    blur_pass.set_target(device, &ssao_targets.raw_ao_view, ssao_pass.params_buffer());
+    (depth_prepass_pipelines, ssao_targets, ssao_pass, blur_pass)
 }
 
 fn create_instance_buffers(

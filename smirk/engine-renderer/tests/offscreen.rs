@@ -10,6 +10,7 @@ use engine_renderer::mesh::{load_gltf_data, AlphaMode, ImageData, MaterialData, 
 use engine_renderer::offscreen::{
     create_mipped_rgba8, read_texture_mip, HeadlessGpu, OffscreenRenderer, TestLight, TestPointLight,
 };
+use std::ops::Range;
 use engine_renderer::texture::parse_dds;
 use engine_renderer::MeshVertex;
 use glam::{Mat4, Vec3};
@@ -1148,5 +1149,81 @@ fn point_light_brightens_falls_off_and_carries_color() {
     assert!(
         b_mean > r_mean,
         "cyan light's blue channel must exceed its red channel: r={r_mean:.2} b={b_mean:.2}"
+    );
+}
+
+// ── SSAO ─────────────────────────────────────────────────────────────────────
+
+/// Mean AO byte (0..255, R8Unorm) over a pixel-space rectangle of the
+/// half-res AO readback (`ao` is `ao_w`-wide, row-major, one byte/texel).
+fn ao_tile_mean(ao: &[u8], ao_w: u32, x: Range<u32>, y: Range<u32>) -> f64 {
+    let mut sum = 0u64;
+    let mut count = 0u64;
+    for row in y {
+        for col in x.clone() {
+            sum += ao[(row * ao_w + col) as usize] as u64;
+            count += 1;
+        }
+    }
+    assert!(count > 0, "empty tile");
+    sum as f64 / count as f64
+}
+
+/// A box (SDF cube) sitting on a large ground quad, viewed straight down
+/// (TopDown: world x/z maps linearly to screen, no perspective math needed
+/// to place tiles) with the sun off and uniform env ambient: the AO texture
+/// must read clearly darker right where the box's wall meets the ground
+/// than on open ground far from the box — the depth prepass + SSAO + blur
+/// pipeline producing a real, direction-correct occlusion signal end to end.
+#[test]
+fn ssao_darkens_box_ground_contact_crease() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    const SIZE: u32 = 512;
+    r.draw_ssao = true;
+    r.set_camera_top_down();
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+
+    // Ground: a 60×60 slab, top surface at y=0. Box: 6×1×6, resting on the
+    // ground (base at y=0), footprint x/z in [-3,3]. Kept short (comparable
+    // to SSAO_RADIUS): in this top-down view the box's own height is a
+    // camera-space depth gap, and a box much taller than the radius pushes
+    // the occluded-sample range check toward zero (`ssao.wgsl`'s
+    // `range_check`) — a real limitation of range-checked SSAO, not
+    // something to route around by disabling the check.
+    let ground = SdfInstance {
+        model: Mat4::from_scale_rotation_translation(
+            Vec3::new(60.0, 1.0, 60.0), glam::Quat::IDENTITY, Vec3::new(0.0, -0.5, 0.0),
+        ).to_cols_array_2d(),
+        color: [1.0, 1.0, 1.0], shape_type: 0, shape_params: [0.0; 4],
+    };
+    let box_on_ground = SdfInstance {
+        model: Mat4::from_scale_rotation_translation(
+            Vec3::new(6.0, 1.0, 6.0), glam::Quat::IDENTITY, Vec3::new(0.0, 0.5, 0.0),
+        ).to_cols_array_2d(),
+        color: [1.0, 1.0, 1.0], shape_type: 0, shape_params: [0.0; 4],
+    };
+
+    let target = r.target(SIZE, SIZE);
+    r.render_sdf(&target, &[ground, box_on_ground], wgpu::Color::BLACK);
+    let ao = r.ao_readback(&target).expect("draw_ssao = true must produce an AO readback");
+
+    // TopDown is orthographic with ortho_half_height=20 and aspect=1, so
+    // world x/z map linearly: half-res px = ao_w/2 + world*(ao_w/40).
+    let ao_w = SIZE / 2;
+    let scale = ao_w as f64 / 40.0;
+    let center = ao_w as f64 / 2.0;
+    let px = |world: f64| (center + world * scale).round() as u32;
+
+    // Crease: hugging the box's +X wall (world x in [3.05,3.55], just past
+    // the footprint edge at x=3) — occlusion falls off with distance from
+    // the wall, so the tile stays within the near-field band the kernel
+    // radius actually reaches strongly.
+    let crease = ao_tile_mean(&ao, ao_w, px(3.05)..px(3.55), px(-2.0)..px(2.0));
+    // Open ground: far along -X, well outside any occluder's reach.
+    let open = ao_tile_mean(&ao, ao_w, px(-19.0)..px(-15.0), px(-2.0)..px(2.0));
+
+    assert!(
+        crease < open * 0.9,
+        "crease must read clearly darker than open ground: crease={crease:.1} open={open:.1}"
     );
 }
