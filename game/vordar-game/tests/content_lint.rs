@@ -246,3 +246,161 @@ fn portal_prefab_emits_light() {
     assert!(light.radius > 0.0, "portal PointLight must have positive radius");
     assert!(light.color.z > light.color.x, "portal PointLight must have cool hue (blue > red)");
 }
+
+/// VQ-C5: character material maps within dimension cap (2048²).
+#[test]
+fn character_maps_within_dimension_cap() {
+    const MAX_DIM: u32 = 2048;
+
+    for (id, _model, data) in race_models() {
+        for (prim_idx, prim) in data.primitives.iter().enumerate() {
+            let mat = &prim.material;
+
+            let slots = [
+                ("base_color", &mat.base_color_image),
+                ("normal", &mat.normal_image),
+                ("metallic_roughness", &mat.metallic_roughness_image),
+                ("emissive", &mat.emissive_image),
+                ("occlusion", &mat.occlusion_image),
+            ];
+
+            for (slot_name, image) in &slots {
+                if let Some(img) = image {
+                    assert!(
+                        img.width <= MAX_DIM && img.height <= MAX_DIM,
+                        "VQ-C5: race '{}' primitive {} slot '{}' exceeds 2048² ({}×{})",
+                        id, prim_idx, slot_name, img.width, img.height
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// VQ-C5: zone ground maps within dimension cap (4096²).
+#[test]
+fn ground_sets_within_dimension_cap() {
+    use engine_renderer::mesh::load_image_rgba;
+
+    const MAX_DIM: u32 = 4096;
+    let root = repo_root();
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+
+    for zone in &def.zones {
+        if let Some(g) = &zone.visuals.ground {
+            let dir = root.join(&g.texture_dir);
+
+            for tag in ["diff", "nor_gl", "rough"] {
+                let path = std::fs::read_dir(&dir)
+                    .unwrap_or_else(|e| panic!("zone '{}': ground dir {dir:?}: {e}", zone.name))
+                    .flatten()
+                    .find(|f| f.file_name().to_string_lossy().contains(tag))
+                    .unwrap_or_else(|| panic!("zone '{}': ground set lacks a *{tag}* map", zone.name))
+                    .path();
+
+                let img = load_image_rgba(path.to_str().unwrap())
+                    .unwrap_or_else(|e| panic!("zone '{}': failed to load {tag} map: {e}", zone.name));
+
+                assert!(
+                    img.width <= MAX_DIM && img.height <= MAX_DIM,
+                    "VQ-C5: zone '{}' ground {tag} map exceeds 4096² ({}×{})",
+                    zone.name, img.width, img.height
+                );
+            }
+        }
+    }
+}
+
+/// VQ-C5: total texture memory budget ≤ 1 GB (including mip chain overhead).
+#[test]
+fn total_texture_memory_within_budget() {
+    use engine_renderer::mesh::load_image_rgba;
+
+    const BUDGET_BYTES: u64 = 1_073_741_824; // 1 GB
+    let root = repo_root();
+
+    let mut total_bytes: u64 = 0;
+
+    // (a) Race model image slots
+    for (_id, _model, data) in race_models() {
+        for prim in &data.primitives {
+            let mat = &prim.material;
+            let slots = [
+                &mat.base_color_image,
+                &mat.normal_image,
+                &mat.metallic_roughness_image,
+                &mat.emissive_image,
+                &mat.occlusion_image,
+            ];
+
+            for image in slots {
+                if let Some(img) = image {
+                    // Estimate: RGBA8 + mip chain: w × h × 4 × 4/3
+                    let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
+                    total_bytes += bytes;
+                }
+            }
+        }
+    }
+
+    // (b) Zone prop image slots and (c) zone ground sets
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+
+    for zone in &def.zones {
+        // (c) Ground sets: diff/nor_gl/rough maps
+        if let Some(g) = &zone.visuals.ground {
+            let dir = root.join(&g.texture_dir);
+
+            for tag in ["diff", "nor_gl", "rough"] {
+                if let Some(path) = std::fs::read_dir(&dir)
+                    .ok()
+                    .and_then(|mut entries| entries.find_map(|f| {
+                        let f = f.ok()?;
+                        let name = f.file_name();
+                        let name_str = name.to_string_lossy();
+                        if name_str.contains(tag) {
+                            Some(f.path())
+                        } else {
+                            None
+                        }
+                    })) {
+                    if let Ok(img) = load_image_rgba(path.to_str().unwrap()) {
+                        let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
+                        total_bytes += bytes;
+                    }
+                }
+            }
+        }
+
+        // (b) Prop image slots
+        for prop in &zone.visuals.props {
+            let path = root.join(&prop.model);
+            if let Ok(data) = load_gltf_data(path.to_str().unwrap()) {
+                for prim in &data.primitives {
+                    let mat = &prim.material;
+                    let slots = [
+                        &mat.base_color_image,
+                        &mat.normal_image,
+                        &mat.metallic_roughness_image,
+                        &mat.emissive_image,
+                        &mat.occlusion_image,
+                    ];
+
+                    for image in slots {
+                        if let Some(img) = image {
+                            let bytes = (img.width as u64) * (img.height as u64) * 4 * 4 / 3;
+                            total_bytes += bytes;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let total_mb = total_bytes as f64 / (1024.0 * 1024.0);
+    assert!(
+        total_bytes <= BUDGET_BYTES,
+        "VQ-C5: total texture memory {:.1} MB exceeds 1 GB budget",
+        total_mb
+    );
+}
