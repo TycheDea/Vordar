@@ -22,15 +22,19 @@ fn main() {
 
     let shadow_size = extract_u32_const(&src_dir.join("shadow.rs"), "SHADOW_SIZE");
     let prefilter_mips = extract_u32_const(&src_dir.join("ibl.rs"), "PREFILTER_MIPS");
+    let max_point_lights = extract_u32_const(&src_dir.join("camera.rs"), "MAX_POINT_LIGHTS");
 
     let mut consts: HashMap<&str, f64> = HashMap::new();
     consts.insert("SHADOW_TEXEL", 1.0 / shadow_size as f64);
     consts.insert("PREFILTER_MAX_MIP", (prefilter_mips - 1) as f64);
 
+    let mut u32_consts: HashMap<&str, u32> = HashMap::new();
+    u32_consts.insert("MAX_POINT_LIGHTS", max_point_lights);
+
     for name in PREPROCESSED_SHADERS {
         let path = src_dir.join(name);
         let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let resolved = resolve(&text, src_dir, &consts);
+        let resolved = resolve(&text, src_dir, &consts, &u32_consts);
         fs::write(Path::new(&out_dir).join(name), resolved).unwrap_or_else(|e| panic!("write {name}: {e}"));
         println!("cargo:rerun-if-changed={}", path.display());
     }
@@ -39,6 +43,7 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=src/shadow.rs");
     println!("cargo:rerun-if-changed=src/ibl.rs");
+    println!("cargo:rerun-if-changed=src/camera.rs");
     println!("cargo:rerun-if-changed=build.rs");
 }
 
@@ -60,8 +65,9 @@ fn extract_u32_const(path: &Path, name: &str) -> u32 {
 }
 
 /// Resolves `//#include "snippets/x.wgsl"` and `//#const NAME` lines against
-/// `src_dir` and `consts`.
-fn resolve(text: &str, src_dir: &Path, consts: &HashMap<&str, f64>) -> String {
+/// `src_dir`, `consts` (f32 emission), and `u32_consts` (u32 emission,
+/// checked first).
+fn resolve(text: &str, src_dir: &Path, consts: &HashMap<&str, f64>, u32_consts: &HashMap<&str, u32>) -> String {
     let mut out = String::with_capacity(text.len());
     for line in text.lines() {
         let trimmed = line.trim();
@@ -73,15 +79,19 @@ fn resolve(text: &str, src_dir: &Path, consts: &HashMap<&str, f64>) -> String {
             let snippet = fs::read_to_string(&snippet_path)
                 .unwrap_or_else(|e| panic!("read {}: {e}", snippet_path.display()));
             // Recurse so a snippet's own `//#const` markers resolve too.
-            let resolved_snippet = resolve(&snippet, src_dir, consts);
+            let resolved_snippet = resolve(&snippet, src_dir, consts, u32_consts);
             out.push_str(resolved_snippet.trim_end());
             out.push('\n');
         } else if let Some(name) = trimmed.strip_prefix("//#const ") {
             let name = name.trim();
-            let value = consts
-                .get(name)
-                .unwrap_or_else(|| panic!("no injected value for const `{name}`"));
-            out.push_str(&format!("const {name}: f32 = {value:?};\n"));
+            if let Some(value) = u32_consts.get(name) {
+                out.push_str(&format!("const {name}: u32 = {value}u;\n"));
+            } else {
+                let value = consts
+                    .get(name)
+                    .unwrap_or_else(|| panic!("no injected value for const `{name}`"));
+                out.push_str(&format!("const {name}: f32 = {value:?};\n"));
+            }
         } else {
             out.push_str(line);
             out.push('\n');

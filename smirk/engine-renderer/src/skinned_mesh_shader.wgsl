@@ -126,7 +126,7 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let V = normalize(camera.eye.xyz - in.world_pos);
     let shadow = shadow_factor(in.world_pos);
-    let color = shade_pbr(N, V, albedo, metallic, roughness, ao, emissive, shadow);
+    let color = shade_pbr(in.world_pos, N, V, albedo, metallic, roughness, ao, emissive, shadow);
     return vec4<f32>(apply_fog(color, in.world_pos), out_alpha);
 }
 /// Exponential distance fog; density 0 disables.

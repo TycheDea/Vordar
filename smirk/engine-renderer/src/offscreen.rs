@@ -9,7 +9,7 @@
 // Device requirements are deliberately minimal (no TEXTURE_COMPRESSION_BC —
 // fallback adapters lack it), so harness assets must be RGBA8/procedural.
 
-use crate::camera::{self, Camera, CameraUniform, LightUniform};
+use crate::camera::{self, Camera, CameraUniform, GpuPointLight, LightUniform, MAX_POINT_LIGHTS};
 use crate::ibl::Environment;
 use crate::instance::SdfInstance;
 use crate::mesh::{self, MeshData};
@@ -110,6 +110,16 @@ pub struct TestLight {
     pub ambient:   f32,
 }
 
+/// Point light override for tests. `radius` is the distance at which
+/// windowed inverse-square falloff reaches zero.
+#[derive(Clone, Copy)]
+pub struct TestPointLight {
+    pub position:  Vec3,
+    pub color:     Vec3,
+    pub intensity: f32,
+    pub radius:    f32,
+}
+
 /// The full offscreen scene renderer: real pipeline factories, a swappable
 /// IBL environment, and the ACES tonemap — the same frame composition as
 /// RendererState, minus the window.
@@ -133,6 +143,10 @@ pub struct OffscreenRenderer {
     light_vp_buffer:   wgpu::Buffer,
     light_dir:         Vec3,
     _shadow_texture:   wgpu::Texture,
+    // CPU copy of the full light uniform so set_light / set_fog /
+    // set_point_lights can update their fields independently (the
+    // RendererState pattern, state.rs:70-72).
+    light_state:    LightUniform,
     light_buffer:   wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     vertex_buffer:  wgpu::Buffer,
@@ -199,6 +213,7 @@ impl OffscreenRenderer {
             light_vp_buffer,
             light_dir: Vec3::new(-1.0, 2.0, -1.0).normalize(),
             _shadow_texture: shadow_texture,
+            light_state: LightUniform::default_sun(),
             material_bgl,
             env_bgl,
             sky_bgl,
@@ -248,28 +263,37 @@ impl OffscreenRenderer {
         self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
     }
 
-    /// Overrides distance-fog color/density, keeping direction/color/ambient
-    /// at their `default_sun` values (`light_dir` stays whatever `set_light`
-    /// last set).
+    /// Overrides distance-fog color/density only; direction/color/ambient/
+    /// point lights stay whatever they last were (`default_sun` if `set_light`
+    /// was never called).
     pub fn set_fog(&mut self, color: Vec3, density: f32) {
-        let mut uniform = LightUniform::default_sun();
-        uniform.direction = self.light_dir.to_array();
-        uniform.fog_color = color.to_array();
-        uniform.fog_density = density;
-        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[uniform]));
+        self.light_state.fog_color = color.to_array();
+        self.light_state.fog_density = density;
+        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
     }
 
     pub fn set_light(&mut self, light: TestLight) {
         self.light_dir = light.direction.normalize();
-        let uniform = LightUniform {
-            direction:   self.light_dir.to_array(),
-            _pad:        0.0,
-            color:       light.color.to_array(),
-            ambient:     light.ambient,
-            fog_color:   [0.0; 3],
-            fog_density: 0.0, // fog assertions belong to dedicated tests
-        };
-        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[uniform]));
+        self.light_state.direction = self.light_dir.to_array();
+        self.light_state.color     = light.color.to_array();
+        self.light_state.ambient   = light.ambient;
+        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
+    }
+
+    /// Sets up to `MAX_POINT_LIGHTS` point lights (extras truncated), leaving
+    /// the sun/fog fields untouched.
+    pub fn set_point_lights(&mut self, lights: &[TestPointLight]) {
+        let count = lights.len().min(MAX_POINT_LIGHTS as usize);
+        for (slot, light) in self.light_state.points.iter_mut().zip(lights.iter()) {
+            *slot = GpuPointLight {
+                position:  light.position.to_array(),
+                radius:    light.radius,
+                color:     light.color.to_array(),
+                intensity: light.intensity,
+            };
+        }
+        self.light_state.point_count = count as u32;
+        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
     }
 
     pub fn set_exposure(&mut self, exposure: f32) {

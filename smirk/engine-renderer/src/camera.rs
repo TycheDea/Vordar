@@ -176,6 +176,19 @@ impl CameraUniform {
     }
 }
 
+/// Cap on point lights carried per frame — mirrored into WGSL's `LightUniform`
+/// array length by build.rs so the two sides can never drift apart.
+pub(crate) const MAX_POINT_LIGHTS: u32 = 16;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct GpuPointLight {
+    pub(crate) position:  [f32; 3],
+    pub(crate) radius:    f32, // distance at which falloff reaches zero
+    pub(crate) color:     [f32; 3],
+    pub(crate) intensity: f32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct LightUniform {
@@ -186,6 +199,9 @@ pub(crate) struct LightUniform {
     // Distance fog: linear-space color, exponential density.
     pub(crate) fog_color:   [f32; 3],
     pub(crate) fog_density: f32,
+    pub(crate) point_count: u32,
+    pub(crate) _pad2:       [u32; 3],
+    pub(crate) points:      [GpuPointLight; MAX_POINT_LIGHTS as usize],
 }
 
 impl LightUniform {
@@ -198,6 +214,10 @@ impl LightUniform {
             ambient:     1.0,
             fog_color:   [0.30, 0.26, 0.28], // dusk haze
             fog_density: 0.0,                // zones opt in via set_fog
+            point_count: 0,
+            _pad2:       [0; 3],
+            points:      [GpuPointLight { position: [0.0; 3], radius: 0.0, color: [0.0; 3], intensity: 0.0 };
+                MAX_POINT_LIGHTS as usize],
         }
     }
 }

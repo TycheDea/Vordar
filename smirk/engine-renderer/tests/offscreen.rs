@@ -8,7 +8,7 @@
 use engine_renderer::instance::SdfInstance;
 use engine_renderer::mesh::{load_gltf_data, ImageData, MaterialData, MeshData, PrimitiveData};
 use engine_renderer::offscreen::{
-    create_mipped_rgba8, read_texture_mip, HeadlessGpu, OffscreenRenderer, TestLight,
+    create_mipped_rgba8, read_texture_mip, HeadlessGpu, OffscreenRenderer, TestLight, TestPointLight,
 };
 use engine_renderer::MeshVertex;
 use glam::{Mat4, Vec3};
@@ -763,5 +763,70 @@ fn repeated_environment_loads_skip_redundant_brdf_bake() {
     assert_eq!(
         OffscreenRenderer::brdf_bake_count(), after_init,
         "5 environment loads (zone crossings) must not rebake the shared BRDF LUT"
+    );
+}
+
+// ── Point lights ─────────────────────────────────────────────────────────────
+
+fn mean_luminance(pixels: &[u8]) -> f64 {
+    pixels.chunks_exact(4).map(luminance).sum::<f64>() / (pixels.len() / 4) as f64
+}
+
+/// A point light brightens an otherwise-unlit ground plane, falls off
+/// monotonically as it moves farther from the surface, has no effect once its
+/// own position sits outside its radius, and carries its color through.
+#[test]
+fn point_light_brightens_falls_off_and_carries_color() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 0.0 });
+
+    let mut render = |lights: &[TestPointLight]| -> Vec<u8> {
+        r.set_point_lights(lights);
+        let target = r.target(W, H);
+        r.render_mesh(&target, ground_quad(20.0, 0.9, 0.0), wgpu::Color::BLACK);
+        r.read(&target)
+    };
+
+    let cyan = Vec3::new(0.2, 0.8, 1.0);
+    let light_at = |height: f32| TestPointLight {
+        position:  Vec3::new(0.0, height, 0.0),
+        color:     cyan,
+        intensity: 30.0,
+        radius:    30.0,
+    };
+
+    let unlit_mean = mean_luminance(&render(&[]));
+
+    let lit_2 = render(&[light_at(2.0)]);
+    let lit_2_mean = mean_luminance(&lit_2);
+    // ACES tonemap compresses the raw ratio; measured ~4-8x at these
+    // parameters, well above the 4x floor.
+    assert!(
+        lit_2_mean >= unlit_mean * 4.0,
+        "point light must brighten the ground clearly: unlit={unlit_mean:.2} lit={lit_2_mean:.2}"
+    );
+
+    let lit_6_mean = mean_luminance(&render(&[light_at(6.0)]));
+    let lit_12_mean = mean_luminance(&render(&[light_at(12.0)]));
+    assert!(
+        lit_2_mean > lit_6_mean && lit_6_mean > lit_12_mean,
+        "luminance must fall off monotonically with distance: h2={lit_2_mean:.2} h6={lit_6_mean:.2} h12={lit_12_mean:.2}"
+    );
+
+    let out_of_radius_mean = mean_luminance(&render(&[TestPointLight {
+        position:  Vec3::new(0.0, 2.0, 0.0),
+        color:     cyan,
+        intensity: 30.0,
+        radius:    1.0,
+    }]));
+    assert!(
+        (out_of_radius_mean - unlit_mean).abs() < 1.0,
+        "a light outside its own radius must reproduce the unlit image: unlit={unlit_mean:.2} got={out_of_radius_mean:.2}"
+    );
+
+    let (r_mean, b_mean) = (channel_mean(&lit_2, 0), channel_mean(&lit_2, 2));
+    assert!(
+        b_mean > r_mean,
+        "cyan light's blue channel must exceed its red channel: r={r_mean:.2} b={b_mean:.2}"
     );
 }

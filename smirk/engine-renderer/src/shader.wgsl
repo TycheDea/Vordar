@@ -110,7 +110,7 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // past 1 to glow (portals, projectiles, telegraph accents).
     let emissive = max(base - vec3<f32>(1.0), vec3<f32>(0.0));
     let albedo   = min(base, vec3<f32>(1.0));
-    let color = shade_pbr(N, V, albedo, 0.0, 0.85, 1.0, vec3<f32>(0.0), shadow) + emissive;
+    let color = shade_pbr(in.world_pos, N, V, albedo, 0.0, 0.85, 1.0, vec3<f32>(0.0), shadow) + emissive;
     return vec4<f32>(apply_fog(color, in.world_pos), 1.0);
 }
 /// Exponential distance fog; density 0 disables.
