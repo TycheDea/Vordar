@@ -133,11 +133,20 @@ impl Environment {
 
         let equirect_view = equirect.create_view(&Default::default());
 
+        // Every face of every stage records into one encoder — one queue
+        // submit per environment load instead of 42. wgpu inserts usage
+        // transitions between render passes, so the cubemap the equirect
+        // passes write is legal to sample in the irradiance/prefilter passes
+        // recorded into the same encoder afterward.
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("IBL Bake Encoder"),
+        });
+
         // 1. equirect → base cubemap.
         let cubemap = create_cube(device, "IBL Cubemap", ENV_SIZE, 1);
         for face in 0..6 {
             baker.bake_face(
-                device, queue, &baker.equirect_pipeline,
+                device, &mut encoder, &baker.equirect_pipeline,
                 Some(&equirect_view), None,
                 &cubemap, face, 0, 0.0,
             );
@@ -148,7 +157,7 @@ impl Environment {
         let irradiance = create_cube(device, "IBL Irradiance", IRRADIANCE_SIZE, 1);
         for face in 0..6 {
             baker.bake_face(
-                device, queue, &baker.irradiance_pipeline,
+                device, &mut encoder, &baker.irradiance_pipeline,
                 None, Some(&base_cube_view),
                 &irradiance, face, 0, 0.0,
             );
@@ -160,12 +169,14 @@ impl Environment {
             let roughness = mip as f32 / (PREFILTER_MIPS - 1) as f32;
             for face in 0..6 {
                 baker.bake_face(
-                    device, queue, &baker.prefilter_pipeline,
+                    device, &mut encoder, &baker.prefilter_pipeline,
                     None, Some(&base_cube_view),
                     &prefilter, face, mip, roughness,
                 );
             }
         }
+
+        queue.submit(std::iter::once(encoder.finish()));
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label:          Some("Environment Sampler"),
@@ -479,8 +490,8 @@ impl Baker {
     #[allow(clippy::too_many_arguments)]
     fn bake_face(
         &self,
-        device: &Device,
-        queue:  &Queue,
+        device:   &Device,
+        encoder:  &mut wgpu::CommandEncoder,
         pipeline: &wgpu::RenderPipeline,
         src_2d:   Option<&wgpu::TextureView>,
         src_cube: Option<&wgpu::TextureView>,
@@ -499,47 +510,44 @@ impl Baker {
             array_layer_count: Some(1),
             ..Default::default()
         });
-        self.run(device, queue, pipeline, &src_bg, &cube_bg, &target);
+        self.record(encoder, pipeline, &src_bg, &cube_bg, &target);
     }
 
     fn bake_2d(&self, device: &Device, queue: &Queue, pipeline: &wgpu::RenderPipeline, dst: &wgpu::Texture) {
         let (src_bg, cube_bg) = self.bind_groups(device, None, None, 0, 0.0);
         let target = dst.create_view(&Default::default());
-        self.run(device, queue, pipeline, &src_bg, &cube_bg, &target);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("IBL Bake Encoder"),
+        });
+        self.record(&mut encoder, pipeline, &src_bg, &cube_bg, &target);
+        queue.submit(std::iter::once(encoder.finish()));
     }
 
-    fn run(
+    fn record(
         &self,
-        device: &Device,
-        queue:  &Queue,
+        encoder: &mut wgpu::CommandEncoder,
         pipeline: &wgpu::RenderPipeline,
         src_bg:  &wgpu::BindGroup,
         cube_bg: &wgpu::BindGroup,
         target:  &wgpu::TextureView,
     ) {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("IBL Bake Encoder"),
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("IBL Bake Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view:           target,
+                resolve_target: None,
+                depth_slice:    None,
+                ops: wgpu::Operations {
+                    load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
         });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("IBL Bake Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view:           target,
-                    resolve_target: None,
-                    depth_slice:    None,
-                    ops: wgpu::Operations {
-                        load:  wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, src_bg, &[]);
-            pass.set_bind_group(1, cube_bg, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        queue.submit(std::iter::once(encoder.finish()));
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, src_bg, &[]);
+        pass.set_bind_group(1, cube_bg, &[]);
+        pass.draw(0..3, 0..1);
     }
 }

@@ -198,6 +198,15 @@ asserts zero `Baker` reconstructions across 3 reloads); the remaining ~20 ms per
 is the cubemap/irradiance/prefilter bake work itself (216 render passes), not pipeline
 compilation.
 
+Rendering rework 2 finding 3 threads one `CommandEncoder` through all 42 bake passes
+(6 equirect + 6 irradiance + 30 prefilter faces) per environment load, replacing the
+per-face encoder/submit round trip with a single `queue.submit` at the end — the
+same-encoder write-then-sample ordering (equirect passes write the base cubemap,
+irradiance/prefilter passes sample it) needed no fallback: wgpu's automatic usage
+transitions between render passes made it legal, and the full offscreen suite (furnace,
+reflection, sky) stayed green. Re-measured: ~6.5-7.3 ms per `set_uniform_environment`
+(three runs), down from ~20 ms — the per-submit overhead was indeed the dominant cost.
+
 ### Snapshot path — `snapshot` (server; broadcast = full 6-tick round covering every
 conn once, comparable to the old un-staggered number; broadcast_slice = one 60 Hz
 tick, i.e. the actual per-tick cost the sim thread pays)
