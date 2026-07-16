@@ -31,6 +31,8 @@ pub(crate) struct RenderSystem {
     /// Sorted back-to-front blend draws for this frame's transparent pass,
     /// rebuilt each frame by `collect_transparent_draws`.
     transparent_draws: Vec<TransparentDraw>,
+    /// Contiguous runs of in-use SDF slots for this frame, collected after dirty-range scan.
+    sdf_runs: Vec<(u32, u32)>,
 }
 
 /// Sample the GPU frame time once every N frames while the overlay is open
@@ -47,6 +49,7 @@ impl RenderSystem {
             frame_index: 0,
             last_gpu: None,
             transparent_draws: Vec::new(),
+            sdf_runs: Vec::new(),
         }
     }
 
@@ -154,7 +157,13 @@ impl System for RenderSystem {
         crate::menu_actions::apply_menu_actions(std::mem::take(&mut self.pending_menu), resources);
 
         // ── Collect dirty ranges ──────────────────────────────────────────────
-        let slot_count = self.collect_dirty_ranges(resources);
+        let _slot_count = self.collect_dirty_ranges(resources);
+
+        // ── Collect SDF in-use runs ───────────────────────────────────────────
+        {
+            let pool = resources.get::<InstancePool>().expect("InstancePool not in resources");
+            pool.used_runs(&mut self.sdf_runs);
+        }
 
         // ── Snapshot lightweight state for egui draw (before mut borrow) ─────
         self.frame_index += 1;
@@ -255,7 +264,7 @@ impl System for RenderSystem {
         );
 
         record_shadow_pass(
-            state, &mut encoder, slot_count, sample_gpu,
+            state, &mut encoder, &self.sdf_runs, sample_gpu,
             mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
         );
 
@@ -269,7 +278,7 @@ impl System for RenderSystem {
         }
 
         record_main_pass(
-            state, &mut encoder, slot_count, sample_gpu,
+            state, &mut encoder, &self.sdf_runs, sample_gpu,
             mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
             &self.transparent_draws,
         );
@@ -376,7 +385,7 @@ fn upload_gpu_buffers(
 fn record_shadow_pass(
     state:        &RendererState,
     encoder:      &mut wgpu::CommandEncoder,
-    slot_count:   usize,
+    sdf_runs:     &[(u32, u32)],
     sample_gpu:   bool,
     mesh_list:    Option<&MeshDrawList>,
     skinned_list: Option<&SkinnedDrawList>,
@@ -413,7 +422,9 @@ fn record_shadow_pass(
     pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
     pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
     pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
+    for &(first, count) in sdf_runs {
+        pass.draw_indexed(0..INDICES.len() as u32, 0, first..first + count);
+    }
 
     // Static meshes.
     if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
@@ -458,7 +469,7 @@ fn record_shadow_pass(
 fn record_main_pass(
     state:              &RendererState,
     encoder:            &mut wgpu::CommandEncoder,
-    slot_count:         usize,
+    sdf_runs:           &[(u32, u32)],
     sample_gpu:         bool,
     mesh_list:          Option<&MeshDrawList>,
     skinned_list:       Option<&SkinnedDrawList>,
@@ -499,7 +510,9 @@ fn record_main_pass(
     pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
     pass.set_vertex_buffer(1, state.instance_buffer.slice(..));
     pass.set_index_buffer(state.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-    pass.draw_indexed(0..INDICES.len() as u32, 0, 0..slot_count as u32);
+    for &(first, count) in sdf_runs {
+        pass.draw_indexed(0..INDICES.len() as u32, 0, first..first + count);
+    }
 
     // Mesh pass — same render pass and camera bind group, real geometry.
     // Ranges are sorted by first-instance, so overflow past the buffer
