@@ -388,4 +388,166 @@ mod tests {
             assert!(step >= -1e-6, "tick {t}: position stepped backward by {step:.4} during the stall");
         }
     }
+
+    /// A stall short enough that the resumed target is within `RESYNC_TICKS`
+    /// of the held cursor must resume by slewing through the dry-recovery
+    /// spliced sample — never a backward step, never a pop. Same
+    /// deterministic harness as `extrapolation_bridges_lost_snapshots_then_caps`.
+    /// A remote entity moves +X at 6 u/s; samples at server ticks 6, 12, 30
+    /// arrive on time, then nothing arrives until the terminal capped hold is
+    /// long since reached, and regular arrivals resume every 6 ticks from
+    /// tick 80 through tick 116.
+    #[test]
+    fn capped_hold_resumes_by_slew_after_short_stall() {
+        const SPEED: f32 = 6.0;
+        const DELIVERIES: [u64; 10] = [6, 12, 30, 80, 86, 92, 98, 104, 110, 116];
+        const TOTAL_TICKS: usize = 120;
+
+        let pos_at = |tick: u64| Vec3::new(tick as f32 / 60.0 * SPEED, 0.0, 0.0);
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+
+        let remote = world.spawn((Transform::new(Vec3::ZERO), NetBuffer::seeded(0, Vec3::ZERO)));
+        let mut entities = HashMap::new();
+        entities.insert(1u32, remote);
+
+        let mut state =
+            NetClientState::new(None, "127.0.0.1:9".parse().unwrap(), "unit-test".into(), [0u8; 32], false, Duration::ZERO);
+        state.entities = entities;
+        resources.insert(state);
+
+        let mut render_sys = NetInterpolateSystem;
+        let mut positions: Vec<Vec3> = Vec::with_capacity(TOTAL_TICKS);
+        for client_tick in 0u64..TOTAL_TICKS as u64 {
+            if DELIVERIES.contains(&client_tick) {
+                apply_states(
+                    &mut world,
+                    &mut resources,
+                    client_tick,
+                    0,
+                    vec![EntityPos { id: 1, pos: WirePos(pos_at(client_tick)), hp: None }],
+                );
+            }
+            render_sys.run(&mut world, &mut resources, DT);
+            positions.push(world.get::<&Transform>(remote).unwrap().position);
+        }
+
+        let nominal_step = SPEED * DT;
+
+        // No backward step anywhere, including across the stall and its resume.
+        for t in 1..TOTAL_TICKS {
+            let step = (positions[t] - positions[t - 1]).x;
+            assert!(step >= -1e-6, "tick {t}: position stepped backward by {step:.4}");
+        }
+
+        // The hold was reached and is bit-identical right up to the resume.
+        assert!(
+            positions[77] == positions[78] && positions[78] == positions[79],
+            "capped hold must be bit-identical before resume, got {:?}",
+            &positions[77..80]
+        );
+        assert!(
+            (positions[79].x - 4.5).abs() < 1e-3,
+            "held position before resume: got {:.4}, expected 4.5",
+            positions[79].x
+        );
+
+        // The resume is smooth, never a pop: every step in the resumed window
+        // stays within [0.5, 1.5] x nominal (measured: exactly 1.1x, the slew
+        // ceiling, for the whole window).
+        for t in 81..=119usize {
+            let step = (positions[t] - positions[t - 1]).x;
+            assert!(
+                step >= 0.5 * nominal_step && step <= 1.5 * nominal_step,
+                "tick {t}: resume step {step:.4} outside [{:.4},{:.4}]",
+                0.5 * nominal_step,
+                1.5 * nominal_step
+            );
+        }
+    }
+
+    /// A stall long enough that the resumed target diverges past
+    /// `RESYNC_TICKS` must give up slewing and hard-snap the cursor forward
+    /// once, then track in-band — never a backward step. Same deterministic
+    /// harness as `extrapolation_bridges_lost_snapshots_then_caps`. A remote
+    /// entity moves +X at 6 u/s; samples at server ticks 6, 12, 30 arrive on
+    /// time, then nothing arrives until a reconnect-scale stall resumes at
+    /// tick 100 with regular arrivals every 6 ticks through tick 118.
+    #[test]
+    fn reconnect_scale_stall_snaps_forward_never_backward() {
+        const SPEED: f32 = 6.0;
+        const DELIVERIES: [u64; 7] = [6, 12, 30, 100, 106, 112, 118];
+        const TOTAL_TICKS: usize = 120;
+
+        let pos_at = |tick: u64| Vec3::new(tick as f32 / 60.0 * SPEED, 0.0, 0.0);
+
+        let mut world = World::new();
+        let mut resources = Resources::new();
+
+        let remote = world.spawn((Transform::new(Vec3::ZERO), NetBuffer::seeded(0, Vec3::ZERO)));
+        let mut entities = HashMap::new();
+        entities.insert(1u32, remote);
+
+        let mut state =
+            NetClientState::new(None, "127.0.0.1:9".parse().unwrap(), "unit-test".into(), [0u8; 32], false, Duration::ZERO);
+        state.entities = entities;
+        resources.insert(state);
+
+        let mut render_sys = NetInterpolateSystem;
+        let mut positions: Vec<Vec3> = Vec::with_capacity(TOTAL_TICKS);
+        for client_tick in 0u64..TOTAL_TICKS as u64 {
+            if DELIVERIES.contains(&client_tick) {
+                apply_states(
+                    &mut world,
+                    &mut resources,
+                    client_tick,
+                    0,
+                    vec![EntityPos { id: 1, pos: WirePos(pos_at(client_tick)), hp: None }],
+                );
+            }
+            render_sys.run(&mut world, &mut resources, DT);
+            positions.push(world.get::<&Transform>(remote).unwrap().position);
+        }
+
+        let nominal_step = SPEED * DT;
+
+        // No backward step anywhere, including across the stall and its snap.
+        for t in 1..TOTAL_TICKS {
+            let step = (positions[t] - positions[t - 1]).x;
+            assert!(step >= -1e-6, "tick {t}: position stepped backward by {step:.4}");
+        }
+
+        // Held bit-identical right up to the resume.
+        assert!(
+            positions[97] == positions[98] && positions[98] == positions[99],
+            "capped hold must be bit-identical before resume, got {:?}",
+            &positions[97..100]
+        );
+        assert!(
+            (positions[99].x - 4.5).abs() < 1e-3,
+            "held position before resume: got {:.4}, expected 4.5",
+            positions[99].x
+        );
+
+        // The snap is a single forward jump, far past a normal step.
+        let snap_step = (positions[100] - positions[99]).x;
+        assert!(
+            snap_step > 2.0 * nominal_step,
+            "resume must snap forward: step {snap_step:.4}, bound {:.4}",
+            2.0 * nominal_step
+        );
+
+        // In-band tracking after the snap (measured: 0.09-0.11, i.e. within
+        // [0.5, 1.5] x nominal).
+        for t in 102..=119usize {
+            let step = (positions[t] - positions[t - 1]).x;
+            assert!(
+                step >= 0.5 * nominal_step && step <= 1.5 * nominal_step,
+                "tick {t}: post-snap step {step:.4} outside [{:.4},{:.4}]",
+                0.5 * nominal_step,
+                1.5 * nominal_step
+            );
+        }
+    }
 }
