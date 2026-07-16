@@ -374,6 +374,7 @@ impl OffscreenRenderer {
         let bloom = crate::bloom::BloomPass::new(
             &self.gpu.device, &target.resolve_view, target.width, target.height,
         );
+        bloom.set_exposure(&self.gpu.queue, self.tonemap.exposure());
         self.tonemap.set_source(&self.gpu.device, &target.resolve_view, &bloom.output_view);
         let light_vp = shadow::fit_light_vp(Vec3::ZERO, self.light_dir);
         self.gpu.queue.write_buffer(

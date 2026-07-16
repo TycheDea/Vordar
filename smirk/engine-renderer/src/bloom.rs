@@ -6,10 +6,10 @@
 use crate::gpu_timer::{GpuPass, GpuTimer};
 use crate::post::HDR_FORMAT;
 use wgpu::util::DeviceExt;
-use wgpu::Device;
+use wgpu::{Device, Queue};
 
 pub(crate) const BLOOM_LEVELS: u32 = 6;
-const THRESHOLD: f32 = 1.0; // HDR emissive > 1.0 blooms
+const THRESHOLD: f32 = 1.0; // display-referred: raw HDR * exposure > 1.0 blooms
 const KNEE: f32 = 0.5;
 
 pub(crate) struct BloomPass {
@@ -21,6 +21,9 @@ pub(crate) struct BloomPass {
     stages: Vec<(wgpu::BindGroup, wgpu::TextureView)>,
     /// Mip 0 of the chain — what the tonemap pass composites.
     pub(crate) output_view: wgpu::TextureView,
+    /// Prefilter's params buffer (COPY_DST) — `set_exposure` rewrites its
+    /// spare slot without rebuilding the bind group.
+    prefilter_params: wgpu::Buffer,
     _chain: wgpu::Texture,
 }
 
@@ -134,15 +137,14 @@ impl BloomPass {
             })
         };
 
-        let params_buffer = |a: f32, b: f32| {
+        let params_buffer = |a: f32, b: f32, c: f32, usage: wgpu::BufferUsages| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label:    Some("Bloom Params"),
-                contents: bytemuck::cast_slice(&[a, b, 0.0, 0.0]),
-                usage:    wgpu::BufferUsages::UNIFORM,
+                contents: bytemuck::cast_slice(&[a, b, c, 0.0]),
+                usage,
             })
         };
-        let bind = |src: &wgpu::TextureView, a: f32, b: f32| {
-            let params = params_buffer(a, b);
+        let bind = |src: &wgpu::TextureView, params: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label:   Some("Bloom Stage BG"),
                 layout:  &bgl,
@@ -155,19 +157,26 @@ impl BloomPass {
         };
 
         let mut stages = Vec::new();
-        // Prefilter: HDR resolve → mip 0.
-        stages.push((bind(hdr_resolve, THRESHOLD, KNEE), mip_view(0)));
+        // Prefilter: HDR resolve → mip 0. Exposure starts neutral;
+        // set_exposure rewrites it later without touching this bind group.
+        let prefilter_params = params_buffer(
+            THRESHOLD, KNEE, 1.0,
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        );
+        stages.push((bind(hdr_resolve, &prefilter_params), mip_view(0)));
         // Down chain: mip i-1 → mip i.
         for i in 1..levels {
             let sw = (cw >> (i - 1)).max(1) as f32;
             let sh = (ch >> (i - 1)).max(1) as f32;
-            stages.push((bind(&mip_view(i - 1), 0.5 / sw, 0.5 / sh), mip_view(i)));
+            let params = params_buffer(0.5 / sw, 0.5 / sh, 0.0, wgpu::BufferUsages::UNIFORM);
+            stages.push((bind(&mip_view(i - 1), &params), mip_view(i)));
         }
         // Up chain: mip i → mip i-1 (additive).
         for i in (1..levels).rev() {
             let sw = (cw >> i).max(1) as f32;
             let sh = (ch >> i).max(1) as f32;
-            stages.push((bind(&mip_view(i), 0.5 / sw, 0.5 / sh), mip_view(i - 1)));
+            let params = params_buffer(0.5 / sw, 0.5 / sh, 0.0, wgpu::BufferUsages::UNIFORM);
+            stages.push((bind(&mip_view(i), &params), mip_view(i - 1)));
         }
 
         Self {
@@ -176,8 +185,17 @@ impl BloomPass {
             up,
             stages,
             output_view: mip_view(0),
+            prefilter_params,
             _chain: chain,
         }
+    }
+
+    /// Rewrite the prefilter's exposure multiplier — the same value the
+    /// tonemap pass applies to the HDR resolve (tonemap.wgsl composites
+    /// `hdr * exposure + bloom`), so the threshold sees display-referred
+    /// brightness instead of raw scene values.
+    pub(crate) fn set_exposure(&self, queue: &Queue, exposure: f32) {
+        queue.write_buffer(&self.prefilter_params, 8, bytemuck::cast_slice(&[exposure]));
     }
 
     /// Record the full bloom chain. Call between the main-pass resolve and

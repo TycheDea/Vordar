@@ -142,6 +142,7 @@ pub fn set_environment(path: &str, resources: &mut Resources) -> bool {
 pub fn set_exposure(exposure: f32, resources: &mut Resources) {
     let Some(state) = resources.get_mut::<RendererState>() else { return };
     state.tonemap.set_exposure(&state.queue, exposure);
+    state.bloom.set_exposure(&state.queue, exposure);
 }
 
 /// Override the directional light. dir is the world-space vector pointing TOWARD the light

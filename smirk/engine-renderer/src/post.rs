@@ -200,6 +200,12 @@ impl TonemapPass {
         self.upload_params(queue);
     }
 
+    /// Current exposure — BloomPass::set_exposure needs it to reapply on a
+    /// resize, which rebuilds the bloom chain with a neutral default.
+    pub(crate) fn exposure(&self) -> f32 {
+        self.exposure
+    }
+
     #[cfg(feature = "offscreen")]
     pub(crate) fn set_bloom_intensity(&mut self, queue: &Queue, intensity: f32) {
         self.bloom_intensity = intensity;

@@ -41,6 +41,8 @@ fn aces(x: vec3<f32>) -> vec3<f32> {
 @fragment
 fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let hdr   = textureSample(t_hdr, s_hdr, in.uv).rgb;
+    // Bloom is already display-referred (bloom.wgsl's prefilter applies
+    // exposure before thresholding) — only hdr needs it here.
     let bloom = textureSample(t_bloom, s_hdr, in.uv).rgb * post.bloom;
-    return vec4<f32>(aces((hdr + bloom) * post.exposure), 1.0);
+    return vec4<f32>(aces(hdr * post.exposure + bloom), 1.0);
 }

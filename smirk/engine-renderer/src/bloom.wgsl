@@ -6,11 +6,12 @@
 @group(0) @binding(1) var s_src: sampler;
 
 struct Params {
-    // x = threshold, y = knee (prefilter); x = source texel w, y = texel h
-    // (down/up passes).
+    // x = threshold, y = knee, z = exposure (prefilter — the spare slot
+    // BloomPass::set_exposure rewrites); x = source texel w, y = texel h,
+    // z unused (down/up passes).
     a: f32,
     b: f32,
-    _pad0: f32,
+    c: f32,
     _pad1: f32,
 }
 @group(0) @binding(2) var<uniform> params: Params;
@@ -34,14 +35,16 @@ fn vtx_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 
 @fragment
 fn prefilter_frag(in: VertexOutput) -> @location(0) vec4<f32> {
-    let c = textureSampleLevel(t_src, s_src, in.uv, 0.0).rgb;
+    // Display-referred: threshold sees hdr * exposure, the same value the
+    // tonemap composites as `hdr * post.exposure + bloom`.
+    let color = textureSampleLevel(t_src, s_src, in.uv, 0.0).rgb * params.c;
     let threshold = params.a;
     let knee      = max(params.b, 1e-4);
-    let brightness = max(c.r, max(c.g, c.b));
+    let brightness = max(color.r, max(color.g, color.b));
     var soft = clamp(brightness - threshold + knee, 0.0, 2.0 * knee);
     soft = soft * soft / (4.0 * knee);
     let contribution = max(soft, brightness - threshold) / max(brightness, 1e-4);
-    return vec4<f32>(c * max(contribution, 0.0), 1.0);
+    return vec4<f32>(color * max(contribution, 0.0), 1.0);
 }
 
 // ── dual-filter downsample (5 taps) ──────────────────────────────────────────

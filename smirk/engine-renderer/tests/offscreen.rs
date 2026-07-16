@@ -552,6 +552,60 @@ fn bloom_spreads_hdr_energy_beyond_the_emitter() {
     assert!(halo > 300, "bloom must spread beyond the emitter: halo={halo}px");
 }
 
+/// VQ-C3's "HDR emissive > 1.0 blooms" must hold in display-referred space:
+/// a 1.5-raw emissive displays at 0.75 under half exposure (below the 1.0
+/// threshold) and must not bloom, even though its raw value is still > 1.0.
+/// At exposure 1.0 the same raw value displays unchanged and still blooms.
+#[test]
+fn bloom_threshold_is_display_referred_after_exposure() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 0.0 });
+
+    let scene = || {
+        quad_with_material(3.0, MaterialData {
+            base_color_factor: [0.0, 0.0, 0.0, 1.0],
+            emissive_factor:   [1.0, 1.0, 1.0],
+            emissive_strength: 1.5, // raw > 1.0, but *0.5 exposure displays at 0.75
+            ..Default::default()
+        })
+    };
+    let halo_count = |with: &[u8], without: &[u8]| {
+        with.chunks_exact(4).zip(without.chunks_exact(4))
+            .filter(|(a, b)| a[1] > 6 && b[1] <= 2)
+            .count()
+    };
+
+    r.set_exposure(0.5);
+    r.set_bloom_intensity(0.5);
+    let target_on = r.target(W, H);
+    r.render_mesh(&target_on, scene(), wgpu::Color::BLACK);
+    let with_bloom = r.read(&target_on);
+    r.set_bloom_intensity(0.0);
+    let target_off = r.target(W, H);
+    r.render_mesh(&target_off, scene(), wgpu::Color::BLACK);
+    let without_bloom = r.read(&target_off);
+    let halo_half_exposure = halo_count(&with_bloom, &without_bloom);
+    assert_eq!(
+        halo_half_exposure, 0,
+        "1.5-raw emissive displays at 0.75 under 0.5 exposure — must not bloom, halo={halo_half_exposure}px"
+    );
+
+    r.set_exposure(1.0);
+    r.set_bloom_intensity(0.5);
+    let target_on = r.target(W, H);
+    r.render_mesh(&target_on, scene(), wgpu::Color::BLACK);
+    let with_bloom = r.read(&target_on);
+    r.set_bloom_intensity(0.0);
+    let target_off = r.target(W, H);
+    r.render_mesh(&target_off, scene(), wgpu::Color::BLACK);
+    let without_bloom = r.read(&target_off);
+    let halo_full_exposure = halo_count(&with_bloom, &without_bloom);
+    assert!(
+        halo_full_exposure > 0,
+        "1.5-raw emissive at exposure 1.0 must still bloom as before, halo={halo_full_exposure}px"
+    );
+}
+
 // ── Shadows ──────────────────────────────────────────────────────────────────
 
 /// A cube floating above a ground slab under a 45° sun casts a dark

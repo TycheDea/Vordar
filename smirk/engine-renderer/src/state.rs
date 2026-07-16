@@ -177,6 +177,7 @@ impl RendererState {
         self.surface.configure(&self.device, &self.config);
         self.hdr = post::HdrTargets::new(&self.device, w, h);
         self.bloom = bloom::BloomPass::new(&self.device, &self.hdr.resolve_view, w, h);
+        self.bloom.set_exposure(&self.queue, self.tonemap.exposure());
         self.tonemap.set_source(&self.device, &self.hdr.resolve_view, &self.bloom.output_view);
         // The particle pass samples the (re-created) scene depth.
         self.particle_fx_bind_group = create_particle_fx_bind_group(
