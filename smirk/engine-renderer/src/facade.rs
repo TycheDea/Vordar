@@ -202,11 +202,13 @@ pub fn create_checker_texture(
     TextureHandle(idx)
 }
 
-/// Load a BC7 DDS texture from `path`. Returns a handle to use with `set_texture`.
-/// Logs a warning and returns `None` if the file is missing or invalid.
-pub fn load_texture(path: &str, resources: &mut Resources) -> Option<TextureHandle> {
+/// Load a BC7 DDS texture from `path`. `srgb` picks Bc7RgbaUnormSrgb (for
+/// sRGB-encoded images like color/albedo, the default) vs Bc7RgbaUnorm (for
+/// linear data). Returns a handle to use with `set_texture`. Logs a warning
+/// and returns `None` if the file is missing or invalid.
+pub fn load_texture(path: &str, srgb: bool, resources: &mut Resources) -> Option<TextureHandle> {
     let state = resources.get_mut::<RendererState>().expect("RendererState not in resources");
-    match texture::load_dds(&state.device, &state.queue, path) {
+    match texture::load_dds(&state.device, &state.queue, path, srgb) {
         Ok(tex) => {
             let bg  = texture::create_bind_group(&state.device, &state.texture_bgl, &tex);
             let idx = state.texture_store.len();

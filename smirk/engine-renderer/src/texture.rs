@@ -35,9 +35,10 @@ fn make_sampler(device: &Device) -> Sampler {
 }
 
 /// Load a BC7-encoded DDS file directly as a GPU texture, uploading every
-/// baked mip level the file carries.
+/// baked mip level the file carries. `srgb` picks Bc7RgbaUnormSrgb (for
+/// sRGB-encoded images, e.g. albedo) vs Bc7RgbaUnorm (for linear data).
 /// Returns Err if the file cannot be read or parsed.
-pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTexture, String> {
+pub fn load_dds(device: &Device, queue: &Queue, path: &str, srgb: bool) -> Result<ColorTexture, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Cannot read {path}: {e}"))?;
     let mut cursor = std::io::Cursor::new(bytes);
     let dds = ddsfile::Dds::read(&mut cursor).map_err(|e| format!("DDS parse error: {e}"))?;
@@ -52,7 +53,7 @@ pub fn load_dds(device: &Device, queue: &Queue, path: &str) -> Result<ColorTextu
         mip_level_count: mips,
         sample_count:    1,
         dimension:       TextureDimension::D2,
-        format:          TextureFormat::Bc7RgbaUnorm,
+        format:          dds_format(srgb),
         usage:           TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
         view_formats:    &[],
     });
@@ -288,4 +289,25 @@ pub(crate) fn create_bind_group(
             BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&tex.sampler)  },
         ],
     })
+}
+
+/// Pick BC7 format based on color-space intent. sRGB-encoded data (color/albedo)
+/// uses Bc7RgbaUnormSrgb; linear data uses Bc7RgbaUnorm.
+pub fn dds_format(srgb: bool) -> TextureFormat {
+    if srgb { TextureFormat::Bc7RgbaUnormSrgb } else { TextureFormat::Bc7RgbaUnorm }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dds_format_srgb_true_returns_srgb() {
+        assert_eq!(dds_format(true), TextureFormat::Bc7RgbaUnormSrgb);
+    }
+
+    #[test]
+    fn dds_format_srgb_false_returns_unorm() {
+        assert_eq!(dds_format(false), TextureFormat::Bc7RgbaUnorm);
+    }
 }
