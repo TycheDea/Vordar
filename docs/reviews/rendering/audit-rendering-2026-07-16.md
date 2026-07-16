@@ -22,8 +22,8 @@ smoke overlaps, and shadow edges are free of the artifacts that scream
 
 > **Cross-type queue** (mirrored in `reworks-rendering-2026-07-16.md`):
 > **~~finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
-> finding 7 → rework 1 → finding 8 → finding 9 → finding 10 → rework 2~~ →
-> rework 3 → rework 4 → rework 5 → rework 6.**
+> finding 7 → rework 1 → finding 8 → finding 9 → finding 10 → rework 2 →
+> rework 3~~ → rework 4 → rework 5 → rework 6.**
 > Findings 1–10 all done 2026-07-16 (one commit each, loop-final gate
 > 340/340; finding 7's worker filed rework 7 — per-environment bake-pipeline
 > recompilation — during its bounded probe, absorbed by rework 2 steps 2–3).
@@ -33,8 +33,11 @@ smoke overlaps, and shadow edges are free of the artifacts that scream
 > `PointLightSyncSystem` extract nearest-16 with flicker, and the portal
 > prefab emits — loop-final gate 347/347). Rework 2 done 2026-07-16
 > (plan-rendering-rework-2-2026-07-16.md, 7 steps; asset streaming and
-> environment-load optimization; rework 7 absorbed). Reworks 3–6 remain open,
-> none planned yet.
+> environment-load optimization; rework 7 absorbed). Rework 3 done 2026-07-16
+> (plan-rendering-rework-3-2026-07-16.md, 4 steps; sorted per-primitive
+> blending for order-independent transparency — intersecting transparents and
+> particle-vs-glass ordering remain approximate; loop-final gate 360/360).
+> Reworks 4–6 remain open, none planned yet.
 > Finding 1 first: findings 3, 4, 9 and rework 1 all edit shader lighting
 > code, and landing them against three divergent copies multiplies every
 > diff by three. Finding 2 second: it is the measurement instrument findings

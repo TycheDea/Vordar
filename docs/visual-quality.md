@@ -133,7 +133,9 @@ explicitly out of scope.
 ## Future work (out of scope, tracked)
 
 Cascaded shadow maps, SSAO, TAA, GPU particles, LOD, frustum culling, KTX2/Basis
-transcoding, enemy/NPC creature pipeline.
+transcoding, enemy/NPC creature pipeline, order-independent transparency (sorted
+per-primitive blending shipped; intersecting transparents and particle-vs-glass
+ordering remain approximate).
 
 ## Appendix — manual feel-checklist (sandbox)
 
