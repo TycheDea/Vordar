@@ -42,10 +42,13 @@ impl KeyboardState {
 
     /// Public so headless tests in other crates can drive a real held key
     /// through the normal `KeyboardState` → movement-system path instead of
-    /// reimplementing input handling.
+    /// reimplementing input handling. Only records an edge when the key
+    /// transitions from up→down; a press while the key is already down (an OS
+    /// key repeat) records no edge.
     pub fn press(&mut self, key: KeyCode) {
-        self.pressed.insert(key);
-        self.just_pressed.insert(key);
+        if self.pressed.insert(key) {
+            self.just_pressed.insert(key);
+        }
     }
 
     pub(crate) fn release(&mut self, key: KeyCode) {
@@ -111,8 +114,9 @@ impl MouseState {
     }
 
     pub(crate) fn press(&mut self, button: MouseButton) {
-        self.pressed.insert(button);
-        self.just_pressed.insert(button);
+        if self.pressed.insert(button) {
+            self.just_pressed.insert(button);
+        }
     }
 
     pub(crate) fn release(&mut self, button: MouseButton) {
@@ -200,5 +204,55 @@ mod tests {
 
         assert!(!resources.get::<KeyboardState>().unwrap().just_pressed(KeyCode::KeyQ));
         assert!(!resources.get::<MouseState>().unwrap().just_pressed(MouseButton::Left));
+    }
+
+    #[test]
+    fn repeat_press_while_held_does_not_refire_edge() {
+        let mut kb = KeyboardState::new();
+        // First press: key transitions up→down, edge fires
+        kb.press(KeyCode::KeyQ);
+        assert!(kb.just_pressed(KeyCode::KeyQ), "first press must fire edge");
+        assert!(kb.is_pressed(KeyCode::KeyQ), "key must be in pressed state");
+
+        kb.drain_edges();
+        assert!(!kb.just_pressed(KeyCode::KeyQ), "edge drained");
+
+        // OS repeat: key is still held, press called again (simulating key repeat)
+        // This should NOT re-fire the edge, because the key is already down
+        kb.press(KeyCode::KeyQ);
+        assert!(!kb.just_pressed(KeyCode::KeyQ), "repeat press while held must not refire edge");
+
+        // Genuine re-press after release must still fire the edge
+        kb.release(KeyCode::KeyQ);
+        kb.drain_edges();
+        assert!(!kb.is_pressed(KeyCode::KeyQ), "key must be released");
+
+        kb.press(KeyCode::KeyQ);
+        assert!(kb.just_pressed(KeyCode::KeyQ), "genuine re-press after release must fire edge");
+    }
+
+    #[test]
+    fn mouse_repeat_press_while_held_does_not_refire_edge() {
+        let mut mouse = MouseState::new();
+        // First press: button transitions up→down, edge fires
+        mouse.press(MouseButton::Left);
+        assert!(mouse.just_pressed(MouseButton::Left), "first press must fire edge");
+        assert!(mouse.is_pressed(MouseButton::Left), "button must be in pressed state");
+
+        mouse.drain_edges();
+        assert!(!mouse.just_pressed(MouseButton::Left), "edge drained");
+
+        // OS repeat: button is still held, press called again (simulating repeat)
+        // This should NOT re-fire the edge, because the button is already down
+        mouse.press(MouseButton::Left);
+        assert!(!mouse.just_pressed(MouseButton::Left), "repeat press while held must not refire edge");
+
+        // Genuine re-press after release must still fire the edge
+        mouse.release(MouseButton::Left);
+        mouse.drain_edges();
+        assert!(!mouse.is_pressed(MouseButton::Left), "button must be released");
+
+        mouse.press(MouseButton::Left);
+        assert!(mouse.just_pressed(MouseButton::Left), "genuine re-press after release must fire edge");
     }
 }
