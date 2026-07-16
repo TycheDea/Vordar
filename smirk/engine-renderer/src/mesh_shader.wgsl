@@ -10,7 +10,7 @@
 
 @group(1) @binding(0) var t_albedo:   texture_2d<f32>; // sRGB
 @group(1) @binding(1) var s_mat:      sampler;
-@group(1) @binding(2) var t_normal:   texture_2d<f32>; // linear, tangent-space
+@group(1) @binding(2) var t_normal:   texture_2d<f32>; // linear, tangent-space, z reconstructed from xy — BC5 (RG-only) and RGBA8 sample identically
 @group(1) @binding(3) var t_mr:       texture_2d<f32>; // linear: g=roughness, b=metallic
 @group(1) @binding(4) var t_emissive: texture_2d<f32>; // sRGB
 @group(1) @binding(5) var t_ao:       texture_2d<f32>; // linear: r=occlusion
@@ -111,8 +111,9 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (abs(in.tangent.w) > 0.5) {
         let T  = normalize(in.tangent.xyz - Nv * dot(in.tangent.xyz, Nv));
         let B  = cross(Nv, T) * in.tangent.w;
-        let nm = textureSample(t_normal, s_mat, in.uv).xyz * 2.0 - 1.0;
-        N = normalize(T * nm.x + B * nm.y + Nv * nm.z);
+        let nm_xy = textureSample(t_normal, s_mat, in.uv).xy * 2.0 - 1.0;
+        let nm_z  = sqrt(max(1.0 - dot(nm_xy, nm_xy), 0.0));
+        N = normalize(T * nm_xy.x + B * nm_xy.y + Nv * nm_z);
     }
 
     let V = normalize(camera.eye.xyz - in.world_pos);

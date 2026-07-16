@@ -246,6 +246,42 @@ fn metallic_changes_response_vs_dielectric() {
     );
 }
 
+/// A 1×1 RGBA8 texture usable as a uniform tangent-space normal map fixture.
+fn solid_normal_texture(rgb: [u8; 3]) -> ImageData {
+    ImageData { width: 1, height: 1, pixels: vec![rgb[0], rgb[1], rgb[2], 255] }
+}
+
+/// z-reconstruction (`z = sqrt(1 - x² - y²)`) must still let a tangent-space
+/// normal map perturb N: a uniformly tilted map changes N·L versus a flat
+/// one, so mean luminance under the default sun must differ by a clear
+/// margin. RGBA8 only — proves the rewritten TBN path (shared by the future
+/// BC5 path) still lights correctly.
+#[test]
+fn tilted_normal_map_changes_luminance_vs_flat() {
+    let Some(mut r) = renderer_or_skip() else { return };
+
+    let material = |normal_rgb: [u8; 3]| MaterialData {
+        base_color_factor: [0.5, 0.5, 0.5, 1.0],
+        roughness_factor:  0.6,
+        metallic_factor:   0.0,
+        normal_image:      Some(TextureSource::Rgba8(solid_normal_texture(normal_rgb))),
+        ..Default::default()
+    };
+
+    let target_flat = r.target(W, H);
+    r.render_mesh(&target_flat, quad_with_material(40.0, material([128, 128, 255])), wgpu::Color::BLACK);
+    let flat_mean = mean_luminance(&r.read(&target_flat));
+
+    let target_tilted = r.target(W, H);
+    r.render_mesh(&target_tilted, quad_with_material(40.0, material([200, 128, 235])), wgpu::Color::BLACK);
+    let tilted_mean = mean_luminance(&r.read(&target_tilted));
+
+    assert!(
+        (flat_mean - tilted_mean).abs() > flat_mean * 0.05,
+        "tilted normal map must change N·L and mean luminance: flat={flat_mean:.2} tilted={tilted_mean:.2}"
+    );
+}
+
 /// Khronos DamagedHelmet: a real full-PBR asset (all five maps + tangents)
 /// loads and renders with sane coverage through the mesh pipeline.
 #[test]
