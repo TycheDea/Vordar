@@ -68,3 +68,7 @@ harness = false
 [[bench]]
 name    = "render_cpu"
 harness = false
+
+[[bench]]
+name    = "asset_load"
+harness = false

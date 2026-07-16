@@ -174,6 +174,21 @@ by `pose_player_into_stops_growing_scratch_buffers_after_warmup`
 (`engine-renderer`, `mesh::sync`): scratch buffer capacity is unchanged across five
 repeated calls once warmed, i.e. zero further allocations in steady state.
 
+### Asset streaming — `asset_load` (rendering rework 2)
+
+| Bench | Before |
+|---|---|
+| first_sight/statue_vroid (11 MB, embedded textures) | 122.11 ms |
+| first_sight/human (9 MB, skinned + clips) | 101.63 ms |
+| zone_ground/decode_and_generate (3× 2k JPG decode + mesh gen) | 246.27 ms |
+
+These are the synchronous costs blocking the frame during zone entry and dressing.
+Rework 2 moves these off-frame via streaming: `load_gltf_data` and
+`load_ground_material` become async tasks, uploads (`upload_mesh`, indirect GPU
+setup) stay synchronous but run on a small pool instead of the frame's main thread.
+The environment load baseline (rework 7 finding 7): ~24 ms per `set_uniform_environment`,
+241 ms/10 loads in the zone-change path (steps 2–3 re-measure this after the refactor).
+
 ### Snapshot path — `snapshot` (server; broadcast = full 6-tick round covering every
 conn once, comparable to the old un-staggered number; broadcast_slice = one 60 Hz
 tick, i.e. the actual per-tick cost the sim thread pays)
