@@ -1,5 +1,5 @@
 //! RenderSystem — the per-frame graph: shadow → main (SDF/mesh/skinned/
-//! sky) → particles → bloom/tonemap → egui → present.
+//! sky/transparent) → particles → bloom/tonemap → egui → present.
 
 use crate::dev_overlay;
 use crate::gpu_timer::{GpuPass, GpuPassTimings};
@@ -28,6 +28,9 @@ pub(crate) struct RenderSystem {
     /// GPU frame timing (dev overlay): sampled sparsely, last value cached.
     frame_index: u64,
     last_gpu: Option<GpuPassTimings>,
+    /// Sorted back-to-front blend draws for this frame's transparent pass,
+    /// rebuilt each frame by `collect_transparent_draws`.
+    transparent_draws: Vec<TransparentDraw>,
 }
 
 /// Sample the GPU frame time once every N frames while the overlay is open
@@ -43,6 +46,7 @@ impl RenderSystem {
             particle_warn: 0,
             frame_index: 0,
             last_gpu: None,
+            transparent_draws: Vec::new(),
         }
     }
 
@@ -255,9 +259,19 @@ impl System for RenderSystem {
             mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
         );
 
+        if let Some(store) = mesh_store.as_ref() {
+            collect_transparent_draws(
+                store, mesh_list.as_ref(), skinned_list.as_ref(),
+                state.camera.eye(), &mut self.transparent_draws,
+            );
+        } else {
+            self.transparent_draws.clear();
+        }
+
         record_main_pass(
             state, &mut encoder, slot_count, sample_gpu,
             mesh_list.as_ref(), skinned_list.as_ref(), mesh_store.as_ref(),
+            &self.transparent_draws,
         );
 
         record_particle_pass(state, &mut encoder, sample_gpu, particle_list.as_ref(), particle_count);
@@ -411,6 +425,7 @@ fn record_shadow_pass(
                 let count = count.min(MAX_MESH_INSTANCES as u32 - first);
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                 for prim in &gpu_mesh.primitives {
+                    if prim.blend { continue; }
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..prim.index_count, 0, first..first + count);
@@ -428,6 +443,7 @@ fn record_shadow_pass(
             for &(mesh_idx, first, count) in &list.ranges {
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                 for prim in &gpu_mesh.primitives {
+                    if prim.blend { continue; }
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..prim.index_count, 0, first..first + count);
@@ -440,13 +456,14 @@ fn record_shadow_pass(
 /// Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the
 /// particle pass, which resolves at its end.
 fn record_main_pass(
-    state:        &RendererState,
-    encoder:      &mut wgpu::CommandEncoder,
-    slot_count:   usize,
-    sample_gpu:   bool,
-    mesh_list:    Option<&MeshDrawList>,
-    skinned_list: Option<&SkinnedDrawList>,
-    mesh_store:   Option<&MeshStore>,
+    state:              &RendererState,
+    encoder:            &mut wgpu::CommandEncoder,
+    slot_count:         usize,
+    sample_gpu:         bool,
+    mesh_list:          Option<&MeshDrawList>,
+    skinned_list:       Option<&SkinnedDrawList>,
+    mesh_store:         Option<&MeshStore>,
+    transparent_draws:  &[TransparentDraw],
 ) {
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("Main Pass"),
@@ -497,6 +514,7 @@ fn record_main_pass(
                 let count = count.min(MAX_MESH_INSTANCES as u32 - first);
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                 for prim in &gpu_mesh.primitives {
+                    if prim.blend { continue; }
                     pass.set_bind_group(1, &prim.material_bind_group, &[]);
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -519,6 +537,7 @@ fn record_main_pass(
             for &(mesh_idx, first, count) in &list.ranges {
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                 for prim in &gpu_mesh.primitives {
+                    if prim.blend { continue; }
                     pass.set_bind_group(1, &prim.material_bind_group, &[]);
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -534,6 +553,95 @@ fn record_main_pass(
     pass.set_bind_group(0, &state.camera_bind_group, &[]);
     pass.set_bind_group(1, &state.environment.sky_bind_group, &[]);
     pass.draw(0..3, 0..1);
+
+    // Transparent pass — the sorted back-to-front sequence `collect_transparent_draws`
+    // built, spanning both static and skinned instances through their premultiplied
+    // pipelines, drawn last so the sky and every opaque draw are already resolved.
+    if let Some(store) = mesh_store {
+        let mut current_skinned: Option<bool> = None;
+        for draw in transparent_draws {
+            if current_skinned != Some(draw.skinned) {
+                current_skinned = Some(draw.skinned);
+                if draw.skinned {
+                    pass.set_pipeline(&state.skinned_transparent_pipeline);
+                    pass.set_bind_group(0, &state.camera_bind_group, &[]);
+                    pass.set_bind_group(2, &state.joint_bind_group, &[]);
+                    pass.set_bind_group(3, &state.environment.bind_group, &[]);
+                    pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
+                } else {
+                    pass.set_pipeline(&state.mesh_transparent_pipeline);
+                    pass.set_bind_group(0, &state.camera_bind_group, &[]);
+                    pass.set_bind_group(2, &state.environment.bind_group, &[]);
+                    pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
+                }
+            }
+            let Some(gpu_mesh) = store.meshes.get(draw.mesh_idx) else { continue };
+            let Some(prim) = gpu_mesh.primitives.get(draw.prim_idx) else { continue };
+            pass.set_bind_group(1, &prim.material_bind_group, &[]);
+            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..prim.index_count, 0, draw.instance..draw.instance + 1);
+        }
+    }
+}
+
+/// One transparent-primitive instance queued for the sorted replay after the
+/// sky draw: which primitive, which instance slot, and its eye-distance for
+/// back-to-front ordering.
+pub(crate) struct TransparentDraw {
+    skinned:  bool,
+    mesh_idx: usize,
+    prim_idx: usize,
+    instance: u32,
+    depth_sq: f32,
+}
+
+/// Gather every `blend` primitive instance from the static and skinned draw
+/// lists into `out`, sorted back-to-front by squared distance from `eye` —
+/// the single sequence `record_main_pass` replays after the sky. Applies the
+/// same `first >= MAX_MESH_INSTANCES` clamp as the opaque static loop;
+/// skinned ranges need no extra cap since sync already enforces
+/// `MAX_SKINNED_INSTANCES`.
+fn collect_transparent_draws(
+    store:        &MeshStore,
+    mesh_list:    Option<&MeshDrawList>,
+    skinned_list: Option<&SkinnedDrawList>,
+    eye:          glam::Vec3,
+    out:          &mut Vec<TransparentDraw>,
+) {
+    out.clear();
+
+    if let Some(list) = mesh_list {
+        for &(mesh_idx, first, count) in &list.ranges {
+            if first as usize >= MAX_MESH_INSTANCES { break; }
+            let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+            let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+            for (prim_idx, prim) in gpu_mesh.primitives.iter().enumerate() {
+                if !prim.blend { continue; }
+                for instance in first..first + count {
+                    let model = glam::Mat4::from_cols_array_2d(&list.instances[instance as usize].model);
+                    let depth_sq = eye.distance_squared(model.transform_point3(prim.centroid));
+                    out.push(TransparentDraw { skinned: false, mesh_idx, prim_idx, instance, depth_sq });
+                }
+            }
+        }
+    }
+
+    if let Some(list) = skinned_list {
+        for &(mesh_idx, first, count) in &list.ranges {
+            let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+            for (prim_idx, prim) in gpu_mesh.primitives.iter().enumerate() {
+                if !prim.blend { continue; }
+                for instance in first..first + count {
+                    let model = glam::Mat4::from_cols_array_2d(&list.instances[instance as usize].model);
+                    let depth_sq = eye.distance_squared(model.transform_point3(prim.centroid));
+                    out.push(TransparentDraw { skinned: true, mesh_idx, prim_idx, instance, depth_sq });
+                }
+            }
+        }
+    }
+
+    out.sort_by(|a, b| b.depth_sq.total_cmp(&a.depth_sq));
 }
 
 /// Particle pass: depth read-only so the shader can sample the scene depth
@@ -637,4 +745,160 @@ fn restore_mesh_resources(
     if let Some(s) = skinned   { resources.insert(s); }
     if let Some(s) = store     { resources.insert(s); }
     if let Some(p) = particles { resources.insert(p); }
+}
+
+#[cfg(all(test, feature = "offscreen"))]
+mod tests {
+    use super::*;
+    use crate::anim::{AnimationClip, Joint, JointTracks, LocalTransform, Skeleton};
+    use crate::mesh::{AlphaMode, MaterialData, MeshData, PrimitiveData};
+    use crate::mesh_pipeline::{self, MeshInstance, MeshVertex};
+    use crate::mipgen::MipGenerator;
+    use crate::offscreen::HeadlessGpu;
+    use crate::skinned_pipeline::SkinnedMeshInstance;
+    use glam::{Mat4, Vec3};
+
+    fn tri_vertex(x: f32, y: f32) -> MeshVertex {
+        MeshVertex {
+            position: [x, y, 0.0],
+            normal:   [0.0, 0.0, 1.0],
+            uv:       [x, y],
+            tangent:  [1.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    fn triangle_primitive(blend: bool) -> PrimitiveData {
+        PrimitiveData {
+            vertices: vec![tri_vertex(0.0, 0.0), tri_vertex(1.0, 0.0), tri_vertex(0.0, 1.0)],
+            indices:  vec![0, 1, 2],
+            material: MaterialData {
+                alpha_mode: if blend { AlphaMode::Blend } else { AlphaMode::Opaque },
+                ..Default::default()
+            },
+            skin: None,
+        }
+    }
+
+    /// The `stub_skin` construction pattern from sync.rs:315-331, inlined —
+    /// this module needs only the `Skeleton` half (`MeshData::skeleton`),
+    /// not the `CpuSkin` sync.rs builds around it.
+    fn stub_skeleton(joint_count: usize) -> Skeleton {
+        let joints = (0..joint_count)
+            .map(|i| Joint {
+                parent:       if i == 0 { None } else { Some(i - 1) },
+                inverse_bind: Mat4::IDENTITY,
+                rest:         LocalTransform::IDENTITY,
+                name:         format!("bone{i}"),
+            })
+            .collect();
+        Skeleton { joints, root: Mat4::IDENTITY }
+    }
+
+    fn translated(z: f32) -> [[f32; 4]; 4] {
+        Mat4::from_translation(Vec3::new(0.0, 0.0, z)).to_cols_array_2d()
+    }
+
+    #[test]
+    fn collector_skips_opaque_and_sorts_back_to_front_across_static_and_skinned() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — collect_transparent_draws test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+        let mut store = MeshStore::default();
+
+        // mesh0: opaque prim0 + blend prim1 ("glass+solid").
+        let mesh0 = store.register(
+            &gpu.device, &gpu.queue, &layout, &mipgen, "glass+solid",
+            MeshData {
+                primitives: vec![triangle_primitive(false), triangle_primitive(true)],
+                skeleton:   None,
+                clips:      vec![],
+            },
+        );
+        // mesh1: one blend prim ("glass2").
+        let mesh1 = store.register(
+            &gpu.device, &gpu.queue, &layout, &mipgen, "glass2",
+            MeshData {
+                primitives: vec![triangle_primitive(true)],
+                skeleton:   None,
+                clips:      vec![],
+            },
+        );
+        // mesh2: skinned, one blend prim, 1-joint stub skeleton.
+        let mesh2 = store.register(
+            &gpu.device, &gpu.queue, &layout, &mipgen, "skinned-glass",
+            MeshData {
+                primitives: vec![triangle_primitive(true)],
+                skeleton:   Some(stub_skeleton(1)),
+                clips:      vec![AnimationClip {
+                    name:     "clip_a".into(),
+                    duration: 1.0,
+                    tracks:   vec![JointTracks::default(); 1],
+                }],
+            },
+        );
+
+        let mesh_list = MeshDrawList {
+            instances: vec![
+                MeshInstance { model: translated(0.0), tint: [1.0; 4] },
+                MeshInstance { model: translated(-10.0), tint: [1.0; 4] },
+            ],
+            ranges: vec![(mesh0, 0, 1), (mesh1, 1, 1)],
+        };
+        let skinned_list = SkinnedDrawList {
+            instances: vec![SkinnedMeshInstance {
+                model:      translated(-5.0),
+                tint:       [1.0; 4],
+                joint_base: 0,
+                _pad:       [0; 3],
+            }],
+            joints: vec![],
+            ranges: vec![(mesh2, 0, 1)],
+        };
+
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let mut out = Vec::new();
+        collect_transparent_draws(&store, Some(&mesh_list), Some(&skinned_list), eye, &mut out);
+
+        assert_eq!(out.len(), 3, "opaque prim0 must never appear");
+        assert!(
+            !out.iter().any(|d| d.mesh_idx == mesh0 && d.prim_idx == 0),
+            "opaque primitive leaked into transparent draws"
+        );
+
+        // Descending depth: z=-10 (mesh1) first, z=-5 skinned (mesh2) second, z=0 (mesh0) last.
+        assert_eq!((out[0].mesh_idx, out[0].prim_idx, out[0].instance, out[0].skinned), (mesh1, 0, 1, false));
+        assert_eq!((out[1].mesh_idx, out[1].prim_idx, out[1].instance, out[1].skinned), (mesh2, 0, 0, true));
+        assert_eq!((out[2].mesh_idx, out[2].prim_idx, out[2].instance, out[2].skinned), (mesh0, 1, 0, false));
+        assert!(out[0].depth_sq > out[1].depth_sq, "mesh1 must sort before the skinned instance");
+        assert!(out[1].depth_sq > out[2].depth_sq, "the skinned instance must sort before mesh0");
+    }
+
+    #[test]
+    fn collector_breaks_on_mesh_range_past_instance_cap() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — collect_transparent_draws cap test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+        let mut store = MeshStore::default();
+        let mesh0 = store.register(
+            &gpu.device, &gpu.queue, &layout, &mipgen, "glass-only",
+            MeshData { primitives: vec![triangle_primitive(true)], skeleton: None, clips: vec![] },
+        );
+
+        let mesh_list = MeshDrawList {
+            instances: vec![MeshInstance { model: translated(0.0), tint: [1.0; 4] }],
+            ranges:    vec![(mesh0, 0, 1), (mesh0, MAX_MESH_INSTANCES as u32, 1)],
+        };
+
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let mut out = Vec::new();
+        collect_transparent_draws(&store, Some(&mesh_list), None, eye, &mut out);
+
+        assert_eq!(out.len(), 1, "the range starting at MAX_MESH_INSTANCES must contribute nothing");
+    }
 }

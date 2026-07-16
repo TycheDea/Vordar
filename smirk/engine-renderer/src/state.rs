@@ -36,11 +36,13 @@ pub(crate) struct RendererState {
     pub(crate) index_buffer:      wgpu::Buffer,
     pub(crate) instance_buffer:   wgpu::Buffer,
     // ── meshes ──
-    pub(crate) mesh_pipeline:        wgpu::RenderPipeline,
-    pub(crate) mesh_instance_buffer: wgpu::Buffer,
+    pub(crate) mesh_pipeline:             wgpu::RenderPipeline,
+    pub(crate) mesh_transparent_pipeline: wgpu::RenderPipeline,
+    pub(crate) mesh_instance_buffer:      wgpu::Buffer,
     // ── skinned meshes ──
-    pub(crate) skinned_pipeline:        wgpu::RenderPipeline,
-    pub(crate) skinned_instance_buffer: wgpu::Buffer,
+    pub(crate) skinned_pipeline:             wgpu::RenderPipeline,
+    pub(crate) skinned_transparent_pipeline: wgpu::RenderPipeline,
+    pub(crate) skinned_instance_buffer:      wgpu::Buffer,
     pub(crate) joint_buffer:            wgpu::Buffer,
     pub(crate) joint_bind_group:        wgpu::BindGroup,
     // ── particles ──
@@ -114,10 +116,10 @@ impl RendererState {
         let (env_bgl, sky_bgl, baker, environment, brdf_view, sky_pipeline, hdr, gpu_timer, bloom, tonemap) =
             create_hdr_and_ibl_resources(&device, &queue, &camera_bgl, format, size);
 
-        let (scene_format, render_pipeline, mesh_render_pipeline) =
+        let (scene_format, render_pipeline, mesh_render_pipeline, mesh_transparent_pipeline) =
             create_scene_pipelines(&device, &camera_bgl, &texture_bgl, &material_bgl, &env_bgl);
 
-        let (joint_bgl, skinned_render_pipeline) =
+        let (joint_bgl, skinned_render_pipeline, skinned_transparent_pipeline) =
             create_skinned_pipeline_resources(&device, scene_format, &camera_bgl, &material_bgl, &env_bgl);
 
         // Particle pass resources: atlas + soft-fade depth + params.
@@ -143,8 +145,10 @@ impl RendererState {
                 pipeline: render_pipeline,
                 vertex_buffer, index_buffer, instance_buffer,
                 mesh_pipeline: mesh_render_pipeline,
+                mesh_transparent_pipeline,
                 mesh_instance_buffer,
                 skinned_pipeline: skinned_render_pipeline,
+                skinned_transparent_pipeline,
                 skinned_instance_buffer,
                 joint_buffer,
                 joint_bind_group,
@@ -327,13 +331,15 @@ fn create_scene_pipelines(
     texture_bgl:  &wgpu::BindGroupLayout,
     material_bgl: &wgpu::BindGroupLayout,
     env_bgl:      &wgpu::BindGroupLayout,
-) -> (wgpu::TextureFormat, wgpu::RenderPipeline, wgpu::RenderPipeline) {
+) -> (wgpu::TextureFormat, wgpu::RenderPipeline, wgpu::RenderPipeline, wgpu::RenderPipeline) {
     let scene_format = post::HDR_FORMAT;
     let render_pipeline =
         sdf_pipeline::create_pipeline(device, scene_format, camera_bgl, texture_bgl, env_bgl);
     let mesh_render_pipeline =
         mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl, false);
-    (scene_format, render_pipeline, mesh_render_pipeline)
+    let mesh_transparent_pipeline =
+        mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl, true);
+    (scene_format, render_pipeline, mesh_render_pipeline, mesh_transparent_pipeline)
 }
 
 fn create_skinned_pipeline_resources(
@@ -342,12 +348,15 @@ fn create_skinned_pipeline_resources(
     camera_bgl:   &wgpu::BindGroupLayout,
     material_bgl: &wgpu::BindGroupLayout,
     env_bgl:      &wgpu::BindGroupLayout,
-) -> (wgpu::BindGroupLayout, wgpu::RenderPipeline) {
+) -> (wgpu::BindGroupLayout, wgpu::RenderPipeline, wgpu::RenderPipeline) {
     let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(device);
     let skinned_render_pipeline = skinned_pipeline::create_skinned_pipeline(
-        device, scene_format, camera_bgl, material_bgl, &joint_bgl, env_bgl,
+        device, scene_format, camera_bgl, material_bgl, &joint_bgl, env_bgl, false,
     );
-    (joint_bgl, skinned_render_pipeline)
+    let skinned_transparent_pipeline = skinned_pipeline::create_skinned_pipeline(
+        device, scene_format, camera_bgl, material_bgl, &joint_bgl, env_bgl, true,
+    );
+    (joint_bgl, skinned_render_pipeline, skinned_transparent_pipeline)
 }
 
 fn create_particle_resources(

@@ -69,6 +69,7 @@ pub(crate) fn create_skinned_pipeline(
     material_bgl:   &BindGroupLayout,
     joint_bgl:      &BindGroupLayout,
     env_bgl:        &BindGroupLayout,
+    transparent:    bool,
 ) -> RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label:  Some("skinned_mesh_shader.wgsl"),
@@ -109,8 +110,27 @@ pub(crate) fn create_skinned_pipeline(
         attributes:   &instance_attributes,
     };
 
+    // Shader outputs premultiplied rgb for BLEND fragments (particle_pipeline.rs's premultiplied BlendState).
+    let premultiplied = wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation:  wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation:  wgpu::BlendOperation::Add,
+        },
+    };
+    let (label, depth_write_enabled, alpha_to_coverage_enabled, blend) = if transparent {
+        ("Skinned Pipeline (transparent)", false, false, premultiplied)
+    } else {
+        ("Skinned Pipeline", true, true, wgpu::BlendState::REPLACE)
+    };
+
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label:  Some("Skinned Pipeline"),
+        label:  Some(label),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module:      &shader,
@@ -121,14 +141,14 @@ pub(crate) fn create_skinned_pipeline(
         primitive: Default::default(),
         depth_stencil: Some(wgpu::DepthStencilState {
             format:              TextureFormat::Depth32Float,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(depth_write_enabled),
             depth_compare:       Some(wgpu::CompareFunction::Less),
             stencil:             Default::default(),
             bias:                Default::default(),
         }),
         multisample: wgpu::MultisampleState {
             count: crate::post::SCENE_SAMPLES,
-            alpha_to_coverage_enabled: true,
+            alpha_to_coverage_enabled,
             ..Default::default()
         },
         fragment: Some(wgpu::FragmentState {
@@ -136,7 +156,7 @@ pub(crate) fn create_skinned_pipeline(
             entry_point: Some("frag_main"),
             targets:     &[Some(wgpu::ColorTargetState {
                 format:     surface_format,
-                blend:      Some(wgpu::BlendState::REPLACE),
+                blend:      Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
