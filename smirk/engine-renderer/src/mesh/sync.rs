@@ -148,9 +148,10 @@ pub(crate) fn pack_visible<T: Copy>(
 /// offset into the flat `joints` palette (one contiguous block per instance).
 #[derive(Default)]
 pub struct SkinnedDrawList {
-    pub(crate) instances: Vec<SkinnedMeshInstance>,
-    pub(crate) joints:    Vec<[[f32; 4]; 4]>,
-    pub(crate) ranges:    Vec<(usize, u32, u32)>,
+    pub(crate) instances:     Vec<SkinnedMeshInstance>,
+    pub(crate) joints:        Vec<[[f32; 4]; 4]>,
+    pub(crate) ranges:        Vec<(usize, u32, u32)>,
+    pub(crate) shadow_ranges: Vec<(usize, u32, u32)>,
 }
 
 /// Bone names published as attachment sockets each frame. Game code narrows or
@@ -179,7 +180,7 @@ pub struct SocketTransforms(pub HashMap<Entity, HashMap<String, Mat4>>);
 pub struct MeshRenderSyncSystem {
     // Scratch, reused across frames.
     items:         Vec<(usize, Visibility, MeshInstance)>,
-    skinned_items: Vec<(usize, SkinnedMeshInstance)>,
+    skinned_items: Vec<(usize, Visibility, SkinnedMeshInstance)>,
     pose_scratch:  PoseScratch,
     /// Throttles the 80%-of-cap warning to ~once per 5 s.
     warn_accum: f32,
@@ -221,6 +222,7 @@ impl System for MeshRenderSyncSystem {
         skinned.instances.clear();
         skinned.joints.clear();
         skinned.ranges.clear();
+        skinned.shadow_ranges.clear();
         self.items.clear();
         self.skinned_items.clear();
 
@@ -263,6 +265,8 @@ impl System for MeshRenderSyncSystem {
                     }
                     // Skinned mesh — needs an AnimationPlayer to pose.
                     Some(cpu_skin) => {
+                        let world = store.meshes[idx].local_aabb.transformed(&model);
+                        let Some(vis) = classify(&world, &cam, &sun) else { continue };
                         let Some(player) = player else {
                             needs_player.push(entity); // render next frame, once attached
                             continue;
@@ -291,7 +295,7 @@ impl System for MeshRenderSyncSystem {
                                 }
                             }
                         }
-                        self.skinned_items.push((idx, SkinnedMeshInstance {
+                        self.skinned_items.push((idx, vis, SkinnedMeshInstance {
                             model: model.to_cols_array_2d(),
                             tint,
                             joint_base,
@@ -309,15 +313,7 @@ impl System for MeshRenderSyncSystem {
         // Group by mesh so each mesh draws as one instanced call, split into
         // the camera-visible range and the shadow-visible range.
         pack_visible(&mut self.items, &mut list.instances, &mut list.ranges, &mut list.shadow_ranges);
-        self.skinned_items.sort_by_key(|(idx, _)| *idx);
-        for (idx, inst) in self.skinned_items.drain(..) {
-            let first = skinned.instances.len() as u32;
-            match skinned.ranges.last_mut() {
-                Some((last_idx, _, count)) if *last_idx == idx => *count += 1,
-                _ => skinned.ranges.push((idx, first, 1)),
-            }
-            skinned.instances.push(inst);
-        }
+        pack_visible(&mut self.skinned_items, &mut skinned.instances, &mut skinned.ranges, &mut skinned.shadow_ranges);
 
         // Cap guardrails: meter in the dev overlay, throttled warning past
         // 80% — the seam that flags the future enemy influx early.
@@ -328,6 +324,8 @@ impl System for MeshRenderSyncSystem {
             stats.set("tex mem (assets)", format!("{} MB", store.texture_memory_bytes() / (1024 * 1024)));
             let camera_visible: u32 = list.ranges.iter().map(|&(_, _, count)| count).sum();
             stats.set("statics drawn", format!("{camera_visible}/{total_statics}"));
+            let skinned_camera_visible: u32 = skinned.ranges.iter().map(|&(_, _, count)| count).sum();
+            stats.set("skinned drawn", format!("{skinned_camera_visible}/{skinned_count}"));
         }
         self.warn_accum += delta;
         if skinned_count * 10 > MAX_SKINNED_INSTANCES * 8 && self.warn_accum >= 5.0 {
@@ -436,6 +434,42 @@ mod tests {
         assert!(
             !ranges.iter().any(|&(idx, _, _)| idx == 1),
             "mesh 1 has no camera-visible instances, so it must be absent from the camera ranges"
+        );
+    }
+
+    /// The skinned counterpart of `pack_visible_orders_by_mesh_then_visibility_...`:
+    /// joints are appended to the palette at pose time, before packing, so
+    /// `joint_base` must ride along with its instance through the
+    /// Both/CamOnly/ShadowOnly reorder — if packing and joint upload ever
+    /// desynced, this is the corruption that would put one rig's pose on
+    /// another's mesh.
+    #[test]
+    fn pack_visible_preserves_joint_base_across_reordering() {
+        fn skinned(joint_base: u32) -> SkinnedMeshInstance {
+            SkinnedMeshInstance { model: Mat4::IDENTITY.to_cols_array_2d(), tint: [1.0; 4], joint_base, _pad: [0; 3] }
+        }
+        let mut items: Vec<(usize, Visibility, SkinnedMeshInstance)> = vec![
+            (0, Visibility::ShadowOnly, skinned(30)),
+            (0, Visibility::Both, skinned(10)),
+            (0, Visibility::CamOnly, skinned(20)),
+        ];
+        let mut instances = Vec::new();
+        let mut ranges = Vec::new();
+        let mut shadow_ranges = Vec::new();
+
+        pack_visible(&mut items, &mut instances, &mut ranges, &mut shadow_ranges);
+
+        let packed_bases: Vec<u32> = instances.iter().map(|i| i.joint_base).collect();
+        assert_eq!(
+            packed_bases,
+            vec![10, 20, 30],
+            "joint_base must travel with its instance through the Both/CamOnly/ShadowOnly reorder"
+        );
+        assert_eq!(ranges, vec![(0, 0, 2)], "camera range covers the Both+CamOnly prefix");
+        assert_eq!(
+            shadow_ranges,
+            vec![(0, 0, 1), (0, 2, 1)],
+            "shadow ranges: the Both prefix, then the ShadowOnly suffix"
         );
     }
 

@@ -451,7 +451,7 @@ fn record_shadow_pass(
             pass.set_pipeline(&state.shadow_pipelines.skinned);
             pass.set_bind_group(1, &state.joint_bind_group, &[]);
             pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
-            for &(mesh_idx, first, count) in &list.ranges {
+            for &(mesh_idx, first, count) in &list.shadow_ranges {
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                 for prim in &gpu_mesh.primitives {
                     if prim.blend { continue; }
@@ -870,6 +870,7 @@ mod tests {
             }],
             joints: vec![],
             ranges: vec![(mesh2, 0, 1)],
+            shadow_ranges: vec![],
         };
 
         let eye = Vec3::new(0.0, 0.0, 10.0);
