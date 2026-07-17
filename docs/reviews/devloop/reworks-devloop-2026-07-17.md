@@ -33,7 +33,16 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-17.md`):
 > packages conventions the fixes establish.
 
 Rework 2 was filed 2026-07-17 during finding 8's implementation and is not in
-the queue above; it is unblocked and orderable on its own.
+the queue above. Its plan ran to completion 2026-07-17
+(`plan-devloop-rework-2-2026-07-17.md`, 8 steps) but its Ideal is NOT reached,
+so it is not struck: the mechanisms landed and are idle-green (403/403), and
+`rend_kills_camped_enemy` holds 5/5 at 3x load, but the proof bar ("the suite
+stays green at 3x CPU oversubscription") failed — 9/20 combined runs green,
+with two client-prediction tests violating SNAP_DISTANCE reproducibly and
+`scheduled_aoe`'s 0.9 precondition reading healthy while its race still loses.
+Rework 3 (filed 2026-07-17 by that proof step) carries the open failures and
+their attribution; rework 2 reopens or closes on rework 3's evidence. Rework 3
+is likewise not in the queue above and is orderable on its own.
 
 ### 1. (user-decides) A queue-runner convention: one launch decision per report instead of one prompt per rework
 
