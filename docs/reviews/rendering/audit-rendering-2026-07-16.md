@@ -23,7 +23,7 @@ smoke overlaps, and shadow edges are free of the artifacts that scream
 > **Cross-type queue** (mirrored in `reworks-rendering-2026-07-16.md`):
 > **~~finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
 > finding 7 → rework 1 → finding 8 → finding 9 → finding 10 → rework 2 →
-> rework 3 → rework 4 → rework 5~~ → rework 6.**
+> rework 3 → rework 4 → rework 5 → rework 6~~.**
 > Findings 1–10 all done 2026-07-16 (one commit each, loop-final gate
 > 340/340; finding 7's worker filed rework 7 — per-environment bake-pipeline
 > recompilation — during its bounded probe, absorbed by rework 2 steps 2–3).
@@ -47,8 +47,12 @@ smoke overlaps, and shadow edges are free of the artifacts that scream
 > 377/377). Rework 5 done 2026-07-16 (plan-rendering-rework-5-2026-07-16.md,
 > 7 steps; SDF used-run draws, upload-time AABBs, camera + sun-volume culled
 > draw lists over one instance buffer, half-rate pose LOD beyond 40 u,
-> `frustum_classify_552` baseline — loop-final gate 393/393). Rework 6 remains
-> open, not planned yet.
+> `frustum_classify_552` baseline — loop-final gate 393/393). Rework 6 done
+> 2026-07-17 (plan-rendering-rework-6-2026-07-16.md, 7 steps; height fog in a
+> shared fog snippet, geometric specular AA in the PBR core, three concentric
+> texel-snapped shadow cascades, depth-prepass SSAO multiplying the IBL
+> ambient — TAA deliberately deferred in favor of GSAA; loop-final gate
+> 400/400). Every rework in this report is closed.
 > Finding 1 first: findings 3, 4, 9 and rework 1 all edit shader lighting
 > code, and landing them against three divergent copies multiplies every
 > diff by three. Finding 2 second: it is the measurement instrument findings

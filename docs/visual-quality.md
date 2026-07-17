@@ -132,10 +132,10 @@ explicitly out of scope.
 
 ## Future work (out of scope, tracked)
 
-Cascaded shadow maps, SSAO, TAA, GPU particles, mesh-geometry LOD, KTX2/Basis
-transcoding, enemy/NPC creature pipeline, order-independent transparency (sorted
-per-primitive blending shipped; intersecting transparents and particle-vs-glass
-ordering remain approximate).
+TAA (deliberately deferred in favor of geometric specular AA), GPU particles,
+mesh-geometry LOD, KTX2/Basis transcoding, enemy/NPC creature pipeline,
+order-independent transparency (sorted per-primitive blending shipped;
+intersecting transparents and particle-vs-glass ordering remain approximate).
 
 ## Appendix — manual feel-checklist (sandbox)
 
@@ -159,3 +159,12 @@ Run at phase boundaries; the user eyeballs, never automated:
    the gate's cyan light spills onto the ground, both pillars, and the
    character, fading smoothly with distance (no hard edge at the light
    radius); the gate itself still blooms.
+11. **Height fog** (VQ-A1/A5): at dusk, low ground/hollows read hazier than
+   rooftops and ridgelines; density 0 zones look exactly as before.
+12. **Contact shadows** (VQ-D3): stand a character on flat ground — the shadow
+   at the feet is crisp, not the soft blur the old single cascade gave;
+   distant props still cast.
+13. **Grounding AO** (VQ-A2): props and characters darken into corners and floor
+   contact instead of floating on flat ambient.
+14. **Specular calm** (VQ-A2): pan the camera across a shiny normal-mapped
+   surface — highlights stay stable, no crawling sparkle.
