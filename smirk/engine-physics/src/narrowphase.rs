@@ -6,7 +6,7 @@
 //   - Lost overlap → emit CollisionEnded
 //
 // Shape dispatch:
-//   Aabb   vs Aabb   — parry3d Aabb wrapper
+//   Aabb   vs Aabb   — six-axis min/max overlap test
 //   Sphere vs Sphere — distance² < (r_a + r_b)²
 //   Mixed  pair      — exact closest-point-on-AABB sphere test
 

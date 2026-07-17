@@ -12,6 +12,3 @@ engine-app  = { path = "../engine-app", default-features = false }
 glam        = { workspace = true }
 hecs        = { workspace = true }
 log         = { workspace = true }
-
-# parry3d used directly in narrowphase.rs for Aabb collision queries
-parry3d = { version = "0.26", features = ["dim3", "f32"] }
