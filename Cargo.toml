@@ -31,7 +31,6 @@ serde   = { version = "1", features = ["derive"] }
 ron     = "0.12"
 log     = "0.4"
 winit   = "0.30"
-slotmap = "1.1.1"
 egui    = "0.34"   # engine-renderer draws with it; the game registers UiLayers callbacks
 
 # Networking (engine-net, protocol, server, client)
