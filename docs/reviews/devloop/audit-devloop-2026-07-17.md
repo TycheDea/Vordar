@@ -357,9 +357,18 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-17.md`):
 - **Suggestion:** run the discriminating experiment before changing
   anything: one worker-scale session with the LSP plugin disabled, one with
   RustRover closed, comparing Edit averages against the 5.05s baseline.
-- **Path:** (1) two measurement sessions; (2) adopt whichever configuration
-  drops Edit below ~1s for loops, or record the number as harness-intrinsic
-  in this report's successor; proof: next campaign's Edit average.
+- **DECIDED 2026-07-17: fold the measurement into the next real loop.** The
+  user declined the two dedicated sessions — they spend tokens (the binding
+  axis) to buy wall (the deprioritized one). Instead `rust-analyzer-lsp` was
+  disabled in `~/.claude/settings.json` on 2026-07-17, so the next loop's
+  telemetry discriminates the plugin at zero extra cost: Edit drops toward
+  ~1s ⇒ the plugin was the cause and it stays off; Edit stays ~5.05s ⇒ the
+  plugin is exonerated, leaving the RustRover file-sync and harness-intrinsic
+  hypotheses, which the successor report tests only if the wall axis has by
+  then started to bind.
+- **Path:** (1) ~~two measurement sessions~~ plugin disabled 2026-07-17;
+  (2) read the next loop's Edit average against the 5.05s baseline and adopt
+  or exonerate per the decision above; proof: next campaign's Edit average.
 
 ## Carried forward from previous report
 
