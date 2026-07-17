@@ -150,10 +150,10 @@ pub fn draw(ctx: &egui::Context, resources: &engine_core::traits::Resources) {
             };
 
             painter.circle_filled(disc_center, DISC_RADIUS, Color32::from_black_alpha(160));
-            painter.circle_stroke(disc_center, DISC_RADIUS, Stroke::new(1.5, Color32::from_gray(120)));
+            painter.circle_stroke(disc_center, DISC_RADIUS, Stroke::new(1.5_f32, Color32::from_gray(120)));
 
             // Range midline ring — quiet distance cue.
-            painter.circle_stroke(disc_center, DISC_RADIUS * 0.5, Stroke::new(0.5, Color32::from_gray(60)));
+            painter.circle_stroke(disc_center, DISC_RADIUS * 0.5, Stroke::new(0.5_f32, Color32::from_gray(60)));
 
             for dot in &hud.dots {
                 let (px, dist) = project(dot.pos);
@@ -179,7 +179,7 @@ pub fn draw(ctx: &egui::Context, resources: &engine_core::traits::Resources) {
                         Pos2::new(px.x - r, px.y),
                     ],
                     Color32::from_rgb(80, 240, 255),
-                    Stroke::new(1.0, Color32::WHITE),
+                    Stroke::new(1.0_f32, Color32::WHITE),
                 ));
             }
 
@@ -189,7 +189,7 @@ pub fn draw(ctx: &egui::Context, resources: &engine_core::traits::Resources) {
             let facing = Vec2::new(-hud.heading.cos(), -hud.heading.sin()) * 14.0;
             painter.line_segment(
                 [disc_center, disc_center + facing],
-                Stroke::new(2.0, Color32::from_gray(220)),
+                Stroke::new(2.0_f32, Color32::from_gray(220)),
             );
 
             // North tick.
@@ -198,7 +198,7 @@ pub fn draw(ctx: &egui::Context, resources: &engine_core::traits::Resources) {
                     Pos2::new(disc_center.x, disc_center.y - DISC_RADIUS),
                     Pos2::new(disc_center.x, disc_center.y - DISC_RADIUS + 6.0),
                 ],
-                Stroke::new(2.0, Color32::from_gray(200)),
+                Stroke::new(2.0_f32, Color32::from_gray(200)),
             );
 
             // Zone label.

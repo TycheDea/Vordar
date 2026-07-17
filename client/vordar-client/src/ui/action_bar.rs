@@ -103,7 +103,7 @@ pub fn draw(ctx: &egui::Context, resources: &Resources) {
 
                 painter.rect_filled(r, 4.0, Color32::from_black_alpha(160));
                 let border = if slot.enabled { Color32::from_gray(140) } else { Color32::from_gray(60) };
-                painter.rect_stroke(r, 4.0, Stroke::new(1.5, border), egui::StrokeKind::Inside);
+                painter.rect_stroke(r, 4.0, Stroke::new(1.5_f32, border), egui::StrokeKind::Inside);
 
                 if !slot.enabled {
                     continue;

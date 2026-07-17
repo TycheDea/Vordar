@@ -44,6 +44,59 @@ Cross-type queue (mirrored verbatim from `audit-rust-tooling-2026-07-17.md`):
 > and 12 (a toolchain bump shifts codegen, so re-baselining before it would be
 > wasted). 12 is last because findings 2, 3, 7, 9, and 10 each move numbers.
 
+### 13. Toolchain bump to 1.97.1 (landed by finding 7) trips 6 new `float_literal_f32_fallback` errors in vordar-client under `-D warnings`
+
+- **Evidence:** finding 7's Path step 1 moved the active toolchain from
+  rustc 1.94.0 to 1.97.1. A bounded check (`git stash` the finding-7 diff,
+  `cargo clippy -p vordar-client --all-targets -- -D warnings`) reproduces
+  the same 6 errors with zero finding-7 changes applied, so this is a
+  toolchain-only regression, unrelated to the rusqlite/criterion bump.
+  `rustc`'s new `float_literal_f32_fallback` future-incompatible lint now
+  fires (deny under `-D warnings`) at: `client/vordar-client/src/ui/action_bar.rs:106`
+  (`Stroke::new(1.5, border)`) and `client/vordar-client/src/ui/minimap.rs:153,156,182,192,201`
+  (`Stroke::new(1.5, ...)`, `Stroke::new(0.5, ...)`, `Stroke::new(1.0, ...)`,
+  `Stroke::new(2.0, ...)` ×2) — each passes an untyped float literal where
+  `Stroke::new` wants `f32` and infers `f64` first.
+- **Ideal:** `cargo clippy --workspace --all-targets -- -D warnings` exits 0
+  on the current toolchain.
+- **Gap:** six call sites still rely on the pre-1.97 fallback-to-f32
+  behavior that rustc is phasing out; the gate now denies them.
+- **Suggestion:** suffix each literal with `_f32` (e.g. `1.5_f32`) at the
+  six sites — mechanical, no behavior change, matches rustc's own
+  suggestion in the diagnostic.
+- **Path:** (1) edit the 6 literals in action_bar.rs and minimap.rs to
+  `_f32` suffixes; (2) `cargo clippy --workspace --all-targets -- -D
+  warnings` exits 0; (3) `cargo test -p vordar-client` (or the relevant
+  nextest scope) still green.
+
+### 14. `cargo clippy -p vordar-benches --all-targets -- -D warnings` fails on pre-existing dead code in engine-renderer
+
+- **Evidence:** discovered while checking finding 7's "full gate" proof.
+  `cargo clippy -p vordar-benches --all-targets -- -D warnings` fails with
+  4 `dead_code` errors in `smirk/engine-renderer/src/camera.rs:186`
+  (`write_viewport` never used) and `smirk/engine-renderer/src/ssao.rs:177-186,243,249`
+  (`SsaoTargets` fields `width`/`height`/`blurred_ao` never read, `WhiteAo`
+  never constructed, `WhiteAo::new` never used). A bounded check
+  (`git stash` every finding-7 change, rerun the same command) reproduces
+  the identical 4 errors, so this predates finding 7 and the rustc 1.97.1
+  bump — it is a pre-existing gap in how vordar-benches pulls in
+  engine-renderer, not a regression from either.
+- **Ideal:** `cargo clippy -p vordar-benches --all-targets -- -D warnings`
+  exits 0.
+- **Gap:** these engine-renderer items are apparently only reachable
+  through a feature/config combination vordar-benches doesn't enable
+  (likely a vordar-client-only code path); no one has run this exact
+  scoped-clippy command as a gate before.
+- **Suggestion:** determine why `write_viewport`/`SsaoTargets`
+  fields/`WhiteAo` are unreachable under vordar-benches' feature set —
+  either gate them behind the right `cfg`/feature so they compile out
+  cleanly, or confirm they are genuinely dead and remove them.
+- **Path:** (1) `cargo clippy -p vordar-benches --all-targets -- -D
+  warnings` to reproduce; (2) trace each item's reachability against
+  engine-renderer's feature flags vs. what vordar-client enables that
+  vordar-benches doesn't; (3) fix (cfg-gate or delete); (4) rerun the
+  same clippy command plus `cargo check --workspace --all-targets` green.
+
 ## Carried forward from previous report
 
 None — first rust-tooling audit.
