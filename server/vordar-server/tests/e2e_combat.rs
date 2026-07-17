@@ -64,14 +64,26 @@ fn scheduled_aoe() {
     // late — the stamp-based rewind must still count them as before T.
     let tick0 = b.latest_state_tick;
     let wall0 = Instant::now();
+    // Per-iteration (wall_ms, ms_to_T, sent, tokens) so a miss-assert
+    // failure can be attributed to bot-cadence starvation (sends stalled
+    // on move_tokens or wall pacing) vs. an actual server rewind defect —
+    // the trace is the only way to tell those apart post hoc.
+    let mut trace: Vec<(u64, i64, bool, u32)> = Vec::new();
+    let mut sends_pre_t: u32 = 0;
     loop {
         let now = b.client.server_now_micros().unwrap();
         if now >= resolve_at + 400_000 {
             break;
         }
+        let seq_before = b.seq;
         if now + 800_000 >= resolve_at {
             b.send_move(glam::Vec2::new(1.0, 0.0));
         }
+        let sent = b.seq != seq_before;
+        if sent && now <= resolve_at {
+            sends_pre_t += 1;
+        }
+        trace.push((wall0.elapsed().as_millis() as u64, (now as i64 - resolve_at as i64) / 1000, sent, b.move_tokens));
         a.pump();
         b.pump();
         std::thread::sleep(Duration::from_millis(16));
@@ -87,11 +99,15 @@ fn scheduled_aoe() {
     let sim_rate = (b.latest_state_tick - tick0) as f32 / (wall0.elapsed().as_secs_f32() * TICK_HZ);
 
     a.wait_for("second hit result", Duration::from_secs(4), |bot| bot.hit_results.contains_key(&mech2));
+    let hit = a.hit_results[&mech2].contains(&b_id);
+    eprintln!("scheduled_aoe dodge: sends_pre_t={sends_pre_t} sim_rate={sim_rate:.2}");
     if sim_rate >= DODGE_SIM_RATE_MIN {
-        assert!(
-            !a.hit_results[&mech2].contains(&b_id),
-            "B stepped out before T — the rewound test must miss it"
-        );
+        if hit {
+            for (wall_ms, ms_to_t, sent, tokens) in &trace {
+                eprintln!("  wall_ms={wall_ms} ms_to_T={ms_to_t} sent={sent} tokens={tokens}");
+            }
+        }
+        assert!(!hit, "B stepped out before T — the rewound test must miss it");
     } else {
         eprintln!(
             "scheduled_aoe: sim ran at {:.0}% of wall rate through the dodge window — wall-contract miss assert skipped",
