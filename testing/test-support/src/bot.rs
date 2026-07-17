@@ -11,6 +11,11 @@ use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, 
 /// a genuine hang.
 pub const WALL_BACKSTOP_FACTOR: u32 = 8;
 
+/// Cap on `Bot::move_tokens`. Must stay below the server's `INTENT_QUEUE_CAP`
+/// (16, `server/vordar-server/src/net/receive.rs`) so a full-bucket burst can
+/// never overflow the queue and drop intents.
+pub const MOVE_TOKEN_CAP: u32 = 12;
+
 /// A wait budget expressed in sim ticks (observed through `Bot::latest_state_tick`,
 /// which advances once per fixed server sim step at `TICK_HZ`), backstopped
 /// by a wall-clock deadline at `WALL_BACKSTOP_FACTOR` times the budget. Lets
@@ -161,6 +166,9 @@ pub struct Bot {
     /// stale/reordered copy must be dropped before any field is read (ack
     /// included).
     pub latest_state_tick: u64,
+    /// `send_move` credit, funded by observed sim-tick advance in `pump`'s
+    /// Snapshot arm — see `MOVE_TOKEN_CAP`.
+    pub move_tokens: u32,
 }
 
 impl Bot {
@@ -190,6 +198,7 @@ impl Bot {
             disconnected: false,
             denied: None,
             latest_state_tick: 0,
+            move_tokens: 0,
         }
     }
 
@@ -343,7 +352,19 @@ impl Bot {
                         if tick <= self.latest_state_tick {
                             continue;
                         }
+                        // The server's tick counter is an epoch, not a delta:
+                        // a prev of 0 means this is the first snapshot, so
+                        // seed a full bucket rather than crediting a huge
+                        // one-off delta. Otherwise credit the tick delta
+                        // (not a flat 1) so a lost snapshot datagram still
+                        // funds the ticks it covered.
+                        let prev = self.latest_state_tick;
                         self.latest_state_tick = tick;
+                        self.move_tokens = if prev == 0 {
+                            MOVE_TOKEN_CAP
+                        } else {
+                            (self.move_tokens + (tick - prev) as u32).min(MOVE_TOKEN_CAP)
+                        };
                         self.last_ack = last_processed_seq;
                         if self.snapshot_ticks.last() != Some(&tick) {
                             self.snapshot_ticks.push(tick);
@@ -412,7 +433,15 @@ impl Bot {
     }
 
     pub fn send_move(&mut self, dir: glam::Vec2) {
+        // A suppressed send — even a stop intent — is safe because the
+        // server stands still on an empty queue (receive.rs's drain_intents);
+        // over-sending, which pins the queue full and delays every command
+        // including stop, is the only hazard.
+        if self.move_tokens == 0 {
+            return;
+        }
         if let Some(t_server_micros) = self.client.server_now_micros() {
+            self.move_tokens -= 1;
             self.seq += 1;
             // Last-3 redundancy: mirrors NetSendInputSystem's ring buffer —
             // this tick's entry plus the two previous, sent via datagram.
