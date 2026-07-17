@@ -362,6 +362,21 @@ names.
   sensitive-set x10 at `-Load 3.0` green on `scheduled_aoe`, closing rework 2
   on the recorded evidence in this file's intro paragraph.
 
+**ATTRIBUTED 2026-07-17 (Case C):** Stress suite at `-Load 3.0` ran 30 total runs
+(6 batches of 5) with the established 5-test sensitive set. No `scheduled_aoe`
+dodge-assert failure (the "B stepped out before T — the rewound test must miss
+it" assertion at `e2e_combat.rs:110`) was captured. The precondition
+(`sim_rate >= DODGE_SIM_RATE_MIN = 0.9`) remains justified by the physics
+bound: >= 41 pre-T sends required for a miss (see Plan Design decisions). The
+suspected bot-cadence starvation mechanism was not observed within the test's
+historical reproduction rate envelope (~1/10 to ~1/20). Other test failures
+occurred during the run (backstop timeouts and sim budget exhausted errors in
+both `scheduled_aoe` and `rend_kills_camped_enemy`), but these are distinct
+from the target dodge-assert failure and are not chased per the finding's Path
+gate. No attribution is possible without the specific captured failure. Per
+finding 2's Path case C, proceeding to step 3 on the physics justification
+alone.
+
 ## Carried forward from previous report
 
 None — `reworks-devloop-2026-07-15.md`'s single rework (parallel execution)
