@@ -34,15 +34,23 @@ rework-scale suspects and cleared them:
 
 Cross-type queue (mirrored verbatim from `audit-rust-tooling-2026-07-17.md`):
 
-> **finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
+> **~~finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
 > finding 7 (user-decides — ask at loop launch) → finding 8 → finding 9 →
-> finding 10 → finding 11 (docs-only, micro) → finding 12.**
+> finding 10 → finding 11 (docs-only, micro) → finding 12~~.**
 >
 > Finding 1 goes first because it is the infrastructure every later diff is
 > verified against. 2–3 shrink the tree before anything recompiles it
 > repeatedly. 7 precedes 9 (edition work should run on the newest toolchain)
 > and 12 (a toolchain bump shifts codegen, so re-baselining before it would be
 > wasted). 12 is last because findings 2, 3, 7, 9, and 10 each move numbers.
+>
+> Findings 1–12 done 2026-07-18 (one commit each; finding 7 also fixed a
+> direct rustc-1.97.1-caused clippy regression it introduced; finding 10
+> measured dev-profile dep opt-level and reverted — see
+> `audit-rust-tooling-2026-07-17.md`'s Measured note; finding 12 also fixed
+> a pre-existing, unrelated bench-registry break; loop-final gate 408/408).
+> Findings 13 and 14 below were filed during finding 7's proof pass — not
+> in this queue, not yet planned/positioned.
 
 ### 13. Toolchain bump to 1.97.1 (landed by finding 7) trips 6 new `float_literal_f32_fallback` errors in vordar-client under `-D warnings`
 
