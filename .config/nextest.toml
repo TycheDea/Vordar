@@ -27,9 +27,32 @@
 # re-billed 10 damage per cycle until its 100 HP were gone. Fixed in the test
 # by removing the station-keeping entirely (close to 3.0, then stand and let
 # the charger arrive), which also cut it from 3.68s to ~3.3s mean. Verified
-# 5/5 green idle and 5/5 under 20-way CPU oversubscription. Deep starvation
-# (3x oversubscription) still time-starves the server sim itself and fails
-# every bot control law equally; see docs/reviews/devloop/reworks-*.
+# 5/5 green idle and 5/5 under 20-way CPU oversubscription.
+#
+# MEASURED (2026-07-17, fixes-finding-8 proof pass): bot verdicts in scope
+# (rend_kills_camped_enemy, kicked_connection_reconnects_and_relogs_in,
+# scheduled_aoe) now gate on replicated sim ticks via SimDeadline
+# (Snapshot.tick-paced, testing/test-support/src/bot.rs), send_move is
+# sim-paced, wall clocks only backstop at 8x (WALL_BACKSTOP_FACTOR), and
+# scheduled_aoe's dodge assert carries a 0.9 sim-rate precondition. Measured
+# directly: scheduled_aoe's own sim-rate calc read 1.01 and 0.99
+# (idle-equivalent) run alone at `stress-suite.ps1 -Load 3.0` (60 spinners on
+# this 20-logical-core machine) — this harness does NOT reproduce the ~1/6
+# sim rate the original ad-hoc rig measured when a test runs alone. Run
+# combined (the 5-test sensitive set, 4 batches of 5 runs; the full 403-test
+# suite, 1 run) at the same -Load 3.0, the result was not clean green: 9/20
+# combined-set runs were fully green, and the full-suite run had 2 failures.
+# rend_kills_camped_enemy and kicked_connection_reconnects_and_relogs_in held
+# in every run they reached; scheduled_aoe failed twice more (once "sim
+# budget exhausted", once its dodge assert firing despite a passing sim-rate
+# precondition); two tests outside finding 8's scope —
+# onslaught_dash_replay_never_snaps_at_150ms_rtt and
+# predicted_wall_hug_never_snaps_at_150ms_rtt, which drive their client
+# systems from an older fixed-DT hand-rolled loop, not SimDeadline — failed
+# reproducibly with real SNAP_DISTANCE violations. The suite is NOT proven
+# green at 3x CPU oversubscription; see rework 3,
+# docs/reviews/devloop/reworks-devloop-2026-07-17.md, for the open failures
+# and next steps. Exclusive scheduling is retained pending that evidence.
 
 [test-groups]
 realtime = { max-threads = 4 }

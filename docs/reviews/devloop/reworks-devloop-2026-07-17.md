@@ -142,6 +142,72 @@ landed (see below); this is the rework-scale remainder.
   mechanism proves out; proof: the suite stays green at 3x CPU
   oversubscription, where every control law measured today fails ~1 in 5.
 
+### 3. Two client-prediction e2e tests fail their SNAP_DISTANCE guarantee under real 3x CPU oversubscription
+
+Filed 2026-07-17 by the finding-worker landing fixes finding 8 (the
+3x-oversubscription proof). The Path expected "25/25 green" from the
+sensitive-set combined run; measurement instead found a reproducible real
+failure, distinct from every failure mode finding 8's mechanisms (sim-tick
+budgets, 8x wall backstop, scheduled_aoe's 0.9 sim-rate precondition) were
+built to tolerate.
+
+- **Evidence:** `powershell scripts/stress-suite.ps1 -Load 3.0` (60 spinners
+  on this 20-logical-core machine) run against the sensitive-set filter 4x5
+  and against the full workspace suite 1x403 reproducibly fails
+  `net::e2e::onslaught_dash_replay_never_snaps_at_150ms_rtt` and
+  `net::e2e::predicted_wall_hug_never_snaps_at_150ms_rtt`
+  (`client/vordar-client/src/net/e2e.rs:288` and `:437`) with their own stated
+  assertion, not a budget or backstop message: "reconciliation snapped 6.00
+  units mid-dash" (observed 3x, always exactly the full leap distance — i.e.
+  zero incremental correction landed before the snap) and "reconciliation
+  snapped 1.44-1.94 units walking into the wall" (observed 3x). Combined-set
+  batches: 4/5 green, 5/5 green, 0/5 green, 0/5 green (20 runs, 9 green);
+  full-suite run: 356/358 attempted passed, these 2 failed. `scheduled_aoe`
+  also failed twice more in this same evidence gathering, once as "sim budget
+  exhausted waiting for A gets MechanicScheduled" (`testing/test-support/src/bot.rs:65`)
+  and twice as its dodge-window miss assert firing *despite* the 0.9 sim-rate
+  precondition reading pass (`server/vordar-server/tests/e2e_combat.rs:91`) —
+  a second, separate signal that the precondition's own sim-rate measurement
+  can read healthy while the underlying race still loses. Both failing
+  prediction tests drive their client-side systems in a hand-rolled loop
+  (`client/vordar-client/src/net/e2e.rs:280-286`, `:427-434`) that advances a
+  local `elapsed` counter by a fixed `DT = 1/60.0` per iteration and bounds
+  the loop only with a wall-clock deadline (`Instant::now() < dash_deadline`)
+  — under real CPU contention each `sleep(16ms)` can take far longer than
+  16ms in wall time while `elapsed` still advances by the fixed step, so the
+  loop's real duration balloons past what the local prediction assumes while
+  the real server (and the injected 150ms latency) keep moving on actual wall
+  time; this is a plausible mechanism for a snap this large but is not
+  confirmed — no root-cause tracing was done, per the execution-tier scope
+  that filed this finding instead of chasing it.
+- **Ideal:** every test in the sensitive/full-suite gate is green at 3x CPU
+  oversubscription, or it fails with a message that unambiguously means "this
+  is a genuine game-logic bug" — never leaves an open question of whether the
+  test's own driving loop (rather than the production reconciliation code) is
+  what falls over under load.
+- **Gap:** unknown whether `PredictedStaticCollisionSystem` / leap-aware
+  replay genuinely violates SNAP_DISTANCE under real client-side stalls, or
+  whether these two tests' fixed-DT hand-rolled loops (a different, older
+  pattern than the `Bot`/`SimDeadline` mechanism finding 8 built) are
+  themselves the thing that falls over under load — same root shape as rework
+  2 above (a wall-clock-paced driver racing a sim that CPU load can starve),
+  but in test-local ECS-loop code, not `test-support`.
+- **Suggestion:** /plan-rework. Root-cause first: reproduce
+  `onslaught_dash_replay_never_snaps_at_150ms_rtt` under load with
+  instrumentation on `max_recv_jump`'s growth curve (does it climb gradually
+  then jump, or arrive as one shot) to tell "test loop lost track of real
+  time" from "production code doesn't reconcile incrementally under load".
+  If the loop is at fault, replace the fixed-DT/wall-deadline pattern with
+  real elapsed-time-driven stepping (or borrow `SimDeadline`'s sim-vs-wall
+  split) the same way rework 2 fixed the server-bot side. If production code
+  is at fault, that is a real correctness bug in the prediction/reconciliation
+  path and belongs in a networking or rendering finding, not a test fix.
+- **Path:** (1) reproduce with `RUST_LOG` and a temporary jump-curve trace
+  under `stress-suite.ps1 -Load 3.0`, run until captured (observed rate here:
+  roughly 1 in 4-5 of the two tests' individual attempts); (2) attribute per
+  the Suggestion; (3) fix at the attributed layer; (4) proof: sensitive-set
+  x10 and one full-suite run green at `-Load 3.0` on this machine.
+
 ## Carried forward from previous report
 
 None — `reworks-devloop-2026-07-15.md`'s single rework (parallel execution)
