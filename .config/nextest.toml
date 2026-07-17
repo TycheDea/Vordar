@@ -53,11 +53,12 @@
 # held 404/404. The suite IS proven green at 3x CPU oversubscription for the
 # two prediction tests; see rework 3,
 # docs/reviews/devloop/reworks-devloop-2026-07-17.md, struck on this
-# evidence. scheduled_aoe's residual flake (1/10 sensitive-set runs, dodge
-# assert at server/vordar-server/tests/e2e_combat.rs:91) is a distinct,
-# tracked exception — see rework 2 in the same file, which stays open on
-# that evidence. Exclusive scheduling is retained: it is what let this proof
-# reach clean green.
+# evidence. scheduled_aoe's dodge assert now carries a second precondition,
+# DODGE_PRE_T_SENDS_MIN (server/vordar-server/tests/e2e_combat.rs:104),
+# alongside sim_rate; sensitive-set x10 at -Load 3.0 held it green in all 10
+# runs, closing rework 2 (docs/reviews/devloop/reworks-devloop-2026-07-17.md,
+# plan-devloop-rework-5-2026-07-17.md finding 4). Exclusive scheduling is
+# retained: it is what let this proof reach clean green.
 
 [test-groups]
 realtime = { max-threads = 4 }

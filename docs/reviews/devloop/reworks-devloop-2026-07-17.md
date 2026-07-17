@@ -34,21 +34,20 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-17.md`):
 
 Rework 2 was filed 2026-07-17 during finding 8's implementation and is not in
 the queue above. Its plan ran to completion 2026-07-17
-(`plan-devloop-rework-2-2026-07-17.md`, 8 steps) but its Ideal is NOT reached,
-so it is not struck: the mechanisms landed and are idle-green (404/404), and
-`rend_kills_camped_enemy` holds 5/5 at 3x load, but the proof bar ("the suite
-stays green at 3x CPU oversubscription") is still not met: `scheduled_aoe`
-failed 1/10 sensitive-set runs at -Load 3.0
-(`plan-devloop-rework-3-2026-07-17.md` finding 5's proof), its dodge assert
-firing at `server/vordar-server/tests/e2e_combat.rs:91`. Rework 3 (filed
+(`plan-devloop-rework-2-2026-07-17.md`, 8 steps); its Ideal is now reached and
+it is STRUCK 2026-07-17, closed by rework 5
+(`plan-devloop-rework-5-2026-07-17.md`, finding 4): `scheduled_aoe`'s dodge
+assert gained a bot-cadence precondition
+(`server/vordar-server/tests/e2e_combat.rs:104`) alongside `sim_rate`, and
+sensitive-set x10 at -Load 3.0 held it green in all 10 runs — see the
+close-out note on finding 5 below for the full record. Rework 3 (filed
 2026-07-17 by the finding-8 proof step, carrying the two client-prediction
 SNAP_DISTANCE failures) is STRUCK 2026-07-17: neither
 `onslaught_dash_replay_never_snaps_at_150ms_rtt` nor
 `predicted_wall_hug_never_snaps_at_150ms_rtt` reproduced a snap across
 rework 3's own 20-run attribution pass or finding 5's 10-run sensitive-set
 proof plus a clean 404/404 full-suite run at -Load 3.0 — see rework 3's
-section below for the full record. Rework 2 stays open on `scheduled_aoe`
-alone.
+section below for the full record.
 
 ### 1. (user-decides) A queue-runner convention: one launch decision per report instead of one prompt per rework
 
@@ -375,6 +374,26 @@ CONFIRMED**: the bot's 16ms-sleep dodge loop cannot maintain cadence under 3x CP
 oversubscription, collapsing the send queue. Per finding 2's Path case A routing,
 proceeding to step 3: implement the pre-T send counter as a second precondition
 alongside `sim_rate` to gate the miss assert and prevent false red.
+
+CLOSED 2026-07-17 (`plan-devloop-rework-5-2026-07-17.md`, finding 4): the
+proof bar from this finding's own Path step 4 — "sensitive-set x10 at
+-Load 3.0 green on `scheduled_aoe`" — is met, closing rework 2 (see the intro
+paragraph above). Sensitive-set x10 at -Load 3.0 (60 spinners,
+20-logical-core machine, `--no-fail-fast` so each run actually reached
+`scheduled_aoe` regardless of an earlier failure in the same invocation —
+nextest's default fail-fast otherwise cancelled 4/10 runs before
+`scheduled_aoe` got to execute) held `scheduled_aoe` green in all 10 runs. A
+focused x10 rerun of `scheduled_aoe` alone with `--success-output final`
+recorded the branch split: 0/10 took the assert branch, 10/10 took the skip
+branch (`sends_pre_t` 19-24 against the 45 minimum, `sim_rate` 0.95-1.01 —
+both preconditions read healthy every run). Skips dominate completely at
+this load; recorded as evidence for the catch-up follow-up named in the
+plan's Design decisions, not implemented here. `rend_kills_camped_enemy`
+failed 3/10 on its own pre-existing "the bot must survive the fight" assert
+(`server/vordar-server/tests/e2e_combat.rs:216`) — unrelated to this rework
+and outside its fix, recorded per the Path, not chased. An idle full gate
+afterward (`cargo nextest run --workspace` + `cargo test --doc --workspace`)
+held 404/404 with doc-tests clean.
 
 ## Carried forward from previous report
 
