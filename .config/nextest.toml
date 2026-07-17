@@ -48,3 +48,7 @@ test-group = 'realtime'
 [[profile.default.overrides]]
 filter = 'package(vordar-client) and kind(lib)'
 test-group = 'realtime'
+
+[[profile.default.overrides]]
+filter = 'package(test-support) and kind(test)'
+test-group = 'realtime'

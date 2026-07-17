@@ -3,13 +3,73 @@ use glam::{Vec2, Vec3};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION};
+use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg, PROTOCOL_VERSION, TICK_HZ};
+
+/// Wall-backstop multiplier for `SimDeadline`: must exceed the worst sim
+/// slowdown the suite is expected to survive. Measured ~6x sim slowdown at
+/// 3x CPU oversubscription (2026-07-17); 8x leaves headroom without masking
+/// a genuine hang.
+pub const WALL_BACKSTOP_FACTOR: u32 = 8;
+
+/// A wait budget expressed in sim ticks (observed through `Bot::latest_state_tick`,
+/// which advances once per fixed server sim step at `TICK_HZ`), backstopped
+/// by a wall-clock deadline at `WALL_BACKSTOP_FACTOR` times the budget. Lets
+/// a wait survive CPU starvation that slows the sim without silently
+/// shrinking every deadline in wall terms, while still catching a genuine
+/// hang or a sim that never progresses at all.
+pub struct SimDeadline {
+    anchor: Option<u64>,
+    budget_ticks: u64,
+    wall_deadline: Instant,
+}
+
+impl SimDeadline {
+    pub fn new(budget: Duration) -> Self {
+        Self {
+            anchor: None,
+            budget_ticks: (budget.as_secs_f32() * TICK_HZ) as u64,
+            wall_deadline: Instant::now() + budget * WALL_BACKSTOP_FACTOR,
+        }
+    }
+
+    /// Anchors on the bot's first nonzero tick — a bot's counter reads 0
+    /// until its first snapshot, and each zone server mints its own tick
+    /// epoch, so anchoring at construction would either never expire (0
+    /// forever) or expire instantly (foreign epoch). A deadline that spans a
+    /// reconnect to a different server keeps its anchor from the old epoch;
+    /// `saturating_sub` then holds the sim check inert (never expiring) once
+    /// the fresh bot's ticks read below that stale anchor, so only the wall
+    /// backstop can fire for a reconnect-spanning wait.
+    fn sim_expired(&mut self, bot: &Bot) -> bool {
+        if self.anchor.is_none() && bot.latest_state_tick > 0 {
+            self.anchor = Some(bot.latest_state_tick);
+        }
+        self.anchor.is_some_and(|anchor| bot.latest_state_tick.saturating_sub(anchor) > self.budget_ticks)
+    }
+
+    fn wall_expired(&self) -> bool {
+        Instant::now() >= self.wall_deadline
+    }
+
+    /// Panics with a distinct message for each budget: "sim budget
+    /// exhausted" marks a behavioral failure (the sim ran, the condition
+    /// never held); "wall backstop exceeded" marks a hang or a sim that
+    /// never progressed.
+    pub fn check(&mut self, bot: &Bot, what: &str) {
+        if self.sim_expired(bot) {
+            panic!("sim budget exhausted waiting for {what}");
+        }
+        if self.wall_expired() {
+            panic!("wall backstop exceeded waiting for {what}");
+        }
+    }
+}
 
 /// Steer toward `portal` (spawn points sit on a ring, so a straight east
 /// walk can miss the 2-unit radius) until the server redirects us.
 pub fn walk_into_portal(bot: &mut Bot, portal: Vec3, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
+    let mut deadline = SimDeadline::new(timeout);
+    loop {
         bot.pump();
         if bot.redirect.is_some() {
             return;
@@ -21,9 +81,9 @@ pub fn walk_into_portal(bot: &mut Bot, portal: Vec3, timeout: Duration) {
                 bot.send_move(dir.normalize());
             }
         }
+        deadline.check(bot, "the portal");
         std::thread::sleep(Duration::from_millis(16));
     }
-    panic!("timed out walking into the portal");
 }
 
 /// Distinct auto-names: a login for a name that is already online takes over
@@ -323,28 +383,28 @@ impl Bot {
     }
 
     pub fn wait_for(&mut self, what: &str, timeout: Duration, mut done: impl FnMut(&Bot) -> bool) {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
+        let mut deadline = SimDeadline::new(timeout);
+        loop {
             self.pump();
             if done(self) { return; }
+            deadline.check(self, what);
             std::thread::sleep(Duration::from_millis(10));
         }
-        panic!("timed out waiting for {what}");
     }
 
-    /// Walk in `dir` until `arrived` or panic after `timeout`.
+    /// Walk in `dir` until `arrived` or panic after the sim/wall budget.
     pub fn walk_until(&mut self, what: &str, dir: glam::Vec2, timeout: Duration, mut arrived: impl FnMut(&Bot) -> bool) {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
+        let mut deadline = SimDeadline::new(timeout);
+        loop {
             self.send_move(dir);
             self.pump();
             if arrived(self) {
                 self.send_move(glam::Vec2::ZERO);
                 return;
             }
+            deadline.check(self, what);
             std::thread::sleep(Duration::from_millis(16));
         }
-        panic!("timed out walking until {what}");
     }
 
     pub fn own_pos(&self) -> Option<glam::Vec3> {
@@ -378,11 +438,17 @@ impl Bot {
     }
 }
 
-/// Pump for `dur` so in-flight intents/snapshots settle before reading state.
+/// Pump until `dur`-worth of sim ticks elapsed (same anchor rule as
+/// `SimDeadline`) so in-flight intents/snapshots settle before reading
+/// state. Returns — never panics — at the wall backstop too: settling is
+/// best-effort bookkeeping, not a behavioral assertion.
 pub fn settle(bot: &mut Bot, dur: Duration) {
-    let until = Instant::now() + dur;
-    while Instant::now() < until {
+    let mut deadline = SimDeadline::new(dur);
+    loop {
         bot.pump();
+        if deadline.sim_expired(bot) || deadline.wall_expired() {
+            return;
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
 }
