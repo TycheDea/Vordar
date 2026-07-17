@@ -19,6 +19,7 @@ use engine_core::traits::{DespawnQueue, Resources, SpawnContext};
 use engine_core::World;
 use engine_net::NetClient;
 use glam::{Vec2, Vec3};
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use test_support::{name_token, percentile, spawn_server, spawn_server_with, workspace_root, Bot};
@@ -48,6 +49,126 @@ fn insert_game_prefabs(resources: &mut Resources) {
     prefabs.load_dir("content/prefabs");
     resources.insert(registry);
     resources.insert(prefabs);
+}
+
+/// One `run_input` iteration's full context, for the two 150 ms-RTT
+/// prediction tests below. Kept in a bounded ring (`TraceRing`) so a
+/// failing run can attribute itself against the known snap mechanisms
+/// (cast refused, suppression hole, burst-drop) without a rerun, instead
+/// of the single `max_recv_jump` float those tests previously reported.
+#[derive(Clone)]
+struct TraceEntry {
+    wall_ms: u64,
+    /// Sim time elapsed since the dash/hold loop started; `None` outside
+    /// that loop (Welcome wait, entity-spawn wait, the single cast tick).
+    elapsed: Option<f32>,
+    position: Vec3,
+    position_before: Vec3,
+    jump_signed_x: f32,
+    jump_mag: f32,
+    pending_len: usize,
+    pending_leap_count: usize,
+    has_leap_impulse: bool,
+    latest_state_tick: u64,
+    seq: u32,
+    acked: i64,
+    telegraph_count: usize,
+}
+
+impl TraceEntry {
+    fn describe(&self) -> String {
+        format!(
+            "wall_ms={} elapsed={:?} position={:?} position_before={:?} jump_signed_x={:.3} \
+             jump_mag={:.3} pending_len={} pending_leap_count={} has_leap_impulse={} \
+             latest_state_tick={} seq={} acked={} telegraph_count={}",
+            self.wall_ms,
+            self.elapsed,
+            self.position,
+            self.position_before,
+            self.jump_signed_x,
+            self.jump_mag,
+            self.pending_len,
+            self.pending_leap_count,
+            self.has_leap_impulse,
+            self.latest_state_tick,
+            self.seq,
+            self.acked,
+            self.telegraph_count
+        )
+    }
+}
+
+/// A single-`NetReceiveSystem::run` jump whose magnitude exceeded
+/// `SNAP_DISTANCE`, with the trailing 1.5 s of ring history attached.
+struct SnapEvent {
+    wall_ms: u64,
+    jump_signed_x: f32,
+    jump_mag: f32,
+    position_before: Vec3,
+    trailing: Vec<TraceEntry>,
+}
+
+impl SnapEvent {
+    fn describe(&self) -> String {
+        format!(
+            "snap wall_ms={} jump_signed_x={:.3} jump_mag={:.3} position_before={:?}",
+            self.wall_ms, self.jump_signed_x, self.jump_mag, self.position_before
+        )
+    }
+}
+
+const TRACE_RING_CAP: usize = 600;
+const SNAP_TRAILING_WINDOW: Duration = Duration::from_millis(1500);
+
+struct TraceRing {
+    start: Instant,
+    ring: VecDeque<TraceEntry>,
+    snaps: Vec<SnapEvent>,
+}
+
+impl TraceRing {
+    fn new() -> Self {
+        TraceRing { start: Instant::now(), ring: VecDeque::new(), snaps: Vec::new() }
+    }
+
+    fn record(&mut self, entry: TraceEntry) {
+        if entry.jump_mag > SNAP_DISTANCE {
+            let cutoff = entry.wall_ms.saturating_sub(SNAP_TRAILING_WINDOW.as_millis() as u64);
+            let trailing: Vec<TraceEntry> = self.ring.iter().filter(|e| e.wall_ms >= cutoff).cloned().collect();
+            self.snaps.push(SnapEvent {
+                wall_ms: entry.wall_ms,
+                jump_signed_x: entry.jump_signed_x,
+                jump_mag: entry.jump_mag,
+                position_before: entry.position_before,
+                trailing,
+            });
+        }
+        self.ring.push_back(entry);
+        if self.ring.len() > TRACE_RING_CAP {
+            self.ring.pop_front();
+        }
+    }
+
+    /// nextest captures and prints stderr for failed tests, so dumping here
+    /// attributes a failure without a rerun.
+    fn dump(&self) {
+        eprintln!(
+            "=== TraceRing dump: {} snap event(s), {} ring entries (last {} shown) ===",
+            self.snaps.len(),
+            self.ring.len(),
+            self.ring.len().min(200)
+        );
+        for (i, snap) in self.snaps.iter().enumerate() {
+            eprintln!("--- snap event {i}: {} ---", snap.describe());
+            for entry in &snap.trailing {
+                eprintln!("    {}", entry.describe());
+            }
+        }
+        eprintln!("--- last {} ring entries ---", self.ring.len().min(200));
+        for entry in self.ring.iter().skip(self.ring.len().saturating_sub(200)) {
+            eprintln!("{}", entry.describe());
+        }
+    }
 }
 
 /// Exercises the reconnect path end to end — this drives a real server, a
@@ -201,10 +322,15 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     let mut move_sys = MovementSystem;
     let mut correction_sys = NetCorrectionSystem;
     let mut max_recv_jump = 0.0f32;
+    let mut trace = TraceRing::new();
 
     // Input-phase half of one tick (NetReceiveSystem, NetSendInputSystem)
-    // — watches every NetReceiveSystem call for a snap-sized position jump.
-    let mut run_input = |world: &mut World, resources: &mut Resources| {
+    // — watches every NetReceiveSystem call for a snap-sized position jump,
+    // recording this iteration's full context in `trace` for attribution
+    // if the closing assert below fires. `elapsed` is Some only while the
+    // dash loop below is driving (None during Welcome/entity-spawn waits
+    // and the single cast tick).
+    let mut run_input = |world: &mut World, resources: &mut Resources, elapsed: Option<f32>| {
         resources.get_mut::<EventBus>().unwrap().clear();
         let before = own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position));
         recv.run(world, resources, DT);
@@ -212,7 +338,33 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
             if let Some(after) =
                 own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
             {
-                max_recv_jump = max_recv_jump.max((after - before).length());
+                let jump = after - before;
+                max_recv_jump = max_recv_jump.max(jump.length());
+
+                let state = resources.get::<NetClientState>().unwrap();
+                let pending_len = state.pending.len();
+                let pending_leap_count = state.pending.iter().filter(|p| p.leap.is_some()).count();
+                let latest_state_tick = state.latest_state_tick;
+                let seq = state.seq;
+                let has_leap_impulse = own_entity(resources)
+                    .map(|e| world.get::<&vordar_game::combat::LeapImpulse>(e).is_ok())
+                    .unwrap_or(false);
+                let telegraph_count = world.query::<&crate::telegraph::TelegraphVisual>().iter().count();
+                trace.record(TraceEntry {
+                    wall_ms: trace.start.elapsed().as_millis() as u64,
+                    elapsed,
+                    position: after,
+                    position_before: before,
+                    jump_signed_x: jump.x,
+                    jump_mag: jump.length(),
+                    pending_len,
+                    pending_leap_count,
+                    has_leap_impulse,
+                    latest_state_tick,
+                    seq,
+                    acked: seq as i64 - pending_len as i64,
+                    telegraph_count,
+                });
             }
         }
         send.run(world, resources, DT);
@@ -229,7 +381,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     // Welcome + clock sync.
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        run_input(&mut world, &mut resources);
+        run_input(&mut world, &mut resources, None);
         run_update(&mut world, &mut resources);
         let ready = {
             let state = resources.get::<NetClientState>().unwrap();
@@ -249,7 +401,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     // this client (Welcome alone doesn't spawn it), so pump until it exists.
     let entity_deadline = Instant::now() + Duration::from_secs(8);
     while own_entity(&resources).is_none() {
-        run_input(&mut world, &mut resources);
+        run_input(&mut world, &mut resources, None);
         run_update(&mut world, &mut resources);
         assert!(Instant::now() < entity_deadline, "predicted entity never appeared after Welcome");
         std::thread::sleep(Duration::from_millis(16));
@@ -268,7 +420,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     // AbilityCastSystem itself needs a renderer (mouse-cursor ground
     // projection) this headless test has none of — then Update phase, so
     // the dash begins immediately this same tick like the real system.
-    run_input(&mut world, &mut resources);
+    run_input(&mut world, &mut resources, None);
     assert!(resources.get_mut::<NetClientState>().unwrap().send_cast_intent("onslaught".into(), cast_target));
     start_predicted_leap(&mut world, &mut resources, entity, velocity, cast_secs);
     run_update(&mut world, &mut resources);
@@ -280,11 +432,14 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     while elapsed < cast_secs + 1.0 {
         assert!(Instant::now() < dash_deadline, "test loop stalled mid-dash");
         std::thread::sleep(Duration::from_millis(16));
-        run_input(&mut world, &mut resources);
+        run_input(&mut world, &mut resources, Some(elapsed));
         run_update(&mut world, &mut resources);
         elapsed += DT;
     }
 
+    if max_recv_jump >= SNAP_DISTANCE {
+        trace.dump();
+    }
     assert!(
         max_recv_jump < SNAP_DISTANCE,
         "reconciliation snapped {max_recv_jump:.2} units mid-dash — leap-aware replay must keep \
@@ -368,8 +523,12 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
     let mut correction_sys = NetCorrectionSystem;
     let mut static_collision_sys = PredictedStaticCollisionSystem;
     let mut max_recv_jump = 0.0f32;
+    let mut trace = TraceRing::new();
 
-    let mut run_input = |world: &mut World, resources: &mut Resources| {
+    // `elapsed` is Some only while the hold loop below is driving (None
+    // during Welcome/entity-spawn waits) — see the dash test above for the
+    // full rationale behind this instrumentation.
+    let mut run_input = |world: &mut World, resources: &mut Resources, elapsed: Option<f32>| {
         resources.get_mut::<EventBus>().unwrap().clear();
         let before = own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position));
         recv.run(world, resources, DT);
@@ -377,7 +536,33 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
             if let Some(after) =
                 own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
             {
-                max_recv_jump = max_recv_jump.max((after - before).length());
+                let jump = after - before;
+                max_recv_jump = max_recv_jump.max(jump.length());
+
+                let state = resources.get::<NetClientState>().unwrap();
+                let pending_len = state.pending.len();
+                let pending_leap_count = state.pending.iter().filter(|p| p.leap.is_some()).count();
+                let latest_state_tick = state.latest_state_tick;
+                let seq = state.seq;
+                let has_leap_impulse = own_entity(resources)
+                    .map(|e| world.get::<&vordar_game::combat::LeapImpulse>(e).is_ok())
+                    .unwrap_or(false);
+                let telegraph_count = world.query::<&crate::telegraph::TelegraphVisual>().iter().count();
+                trace.record(TraceEntry {
+                    wall_ms: trace.start.elapsed().as_millis() as u64,
+                    elapsed,
+                    position: after,
+                    position_before: before,
+                    jump_signed_x: jump.x,
+                    jump_mag: jump.length(),
+                    pending_len,
+                    pending_leap_count,
+                    has_leap_impulse,
+                    latest_state_tick,
+                    seq,
+                    acked: seq as i64 - pending_len as i64,
+                    telegraph_count,
+                });
             }
         }
         send.run(world, resources, DT);
@@ -393,7 +578,7 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
     // Welcome + clock sync.
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        run_input(&mut world, &mut resources);
+        run_input(&mut world, &mut resources, None);
         run_update(&mut world, &mut resources);
         let ready = {
             let state = resources.get::<NetClientState>().unwrap();
@@ -408,7 +593,7 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
 
     let entity_deadline = Instant::now() + Duration::from_secs(8);
     while own_entity(&resources).is_none() {
-        run_input(&mut world, &mut resources);
+        run_input(&mut world, &mut resources, None);
         run_update(&mut world, &mut resources);
         assert!(Instant::now() < entity_deadline, "predicted entity never appeared after Welcome");
         std::thread::sleep(Duration::from_millis(16));
@@ -429,11 +614,14 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
     while elapsed < 2.0 {
         assert!(Instant::now() < hold_deadline, "test loop stalled mid wall-hug");
         std::thread::sleep(Duration::from_millis(16));
-        run_input(&mut world, &mut resources);
+        run_input(&mut world, &mut resources, Some(elapsed));
         run_update(&mut world, &mut resources);
         elapsed += DT;
     }
 
+    if max_recv_jump >= SNAP_DISTANCE {
+        trace.dump();
+    }
     assert!(
         max_recv_jump < SNAP_DISTANCE,
         "reconciliation snapped {max_recv_jump:.2} units walking into the wall — \

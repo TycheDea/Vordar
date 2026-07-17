@@ -217,6 +217,28 @@ built to tolerate.
   the Suggestion; (3) fix at the attributed layer; (4) proof: sensitive-set
   x10 and one full-suite run green at `-Load 3.0` on this machine.
 
+ATTRIBUTED 2026-07-17: `onslaught_dash_replay_never_snaps_at_150ms_rtt` and
+`predicted_wall_hug_never_snaps_at_150ms_rtt` gained a test-local `TraceRing`
+(`client/vordar-client/src/net/e2e.rs`) that records per-iteration context
+(wall time, sim `elapsed`, position, signed/magnitude recv jump, pending
+queue depth and leap-tagged count, `latest_state_tick`, seq/acked, telegraph
+count) and dumps it on any snap-sized jump. 4 batches x 5 runs (20 total) of
+`stress-suite.ps1 -Load 3.0` against both prediction tests plus
+`scheduled_aoe`, `rend_kills_camped_enemy`, and
+`kicked_connection_reconnects_and_relogs_in` reproduced **no snap** in
+either prediction test — `max_recv_jump` never reached `SNAP_DISTANCE`, so
+the ring's dump path never fired and none of the three candidate mechanisms
+(A: cast refused, B: suppression hole, C: burst-drop) has any trace data to
+attribute against this run. One unrelated failure was captured (batch 1, run
+4/5): `scheduled_aoe` panicked at `server/vordar-server/tests/e2e_combat.rs:91`
+("B stepped out before T — the rewound test must miss it") — the same
+wall-contract miss already tracked elsewhere in this report, not a
+prediction-test snap. Per the Path's own fallback for a 20-run miss, steps
+2-4 remain justified as written (mechanism B's suppression-hole guard is
+deterministic regardless of reproduction; the A/C guards make this report's
+stated premises explicit) and the plan proceeds without a further fix from
+this step.
+
 ## Carried forward from previous report
 
 None — `reworks-devloop-2026-07-15.md`'s single rework (parallel execution)
