@@ -100,19 +100,23 @@ impl TraceEntry {
 
 /// A single-`NetReceiveSystem::run` jump whose magnitude exceeded
 /// `SNAP_DISTANCE`, with the trailing 1.5 s of ring history attached.
+/// `degraded` is `WireHealth::degraded` evaluated at the moment the jump
+/// was observed — whether the wire itself was mid-starvation, not an
+/// assumed idle cadence.
 struct SnapEvent {
     wall_ms: u64,
     jump_signed_x: f32,
     jump_mag: f32,
     position_before: Vec3,
+    degraded: bool,
     trailing: Vec<TraceEntry>,
 }
 
 impl SnapEvent {
     fn describe(&self) -> String {
         format!(
-            "snap wall_ms={} jump_signed_x={:.3} jump_mag={:.3} position_before={:?}",
-            self.wall_ms, self.jump_signed_x, self.jump_mag, self.position_before
+            "snap wall_ms={} jump_signed_x={:.3} jump_mag={:.3} position_before={:?} degraded={}",
+            self.wall_ms, self.jump_signed_x, self.jump_mag, self.position_before, self.degraded
         )
     }
 }
@@ -131,7 +135,7 @@ impl TraceRing {
         TraceRing { start: Instant::now(), ring: VecDeque::new(), snaps: Vec::new() }
     }
 
-    fn record(&mut self, entry: TraceEntry) {
+    fn record(&mut self, entry: TraceEntry, degraded: bool) {
         if entry.jump_mag > SNAP_DISTANCE {
             let cutoff = entry.wall_ms.saturating_sub(SNAP_TRAILING_WINDOW.as_millis() as u64);
             let trailing: Vec<TraceEntry> = self.ring.iter().filter(|e| e.wall_ms >= cutoff).cloned().collect();
@@ -140,6 +144,7 @@ impl TraceRing {
                 jump_signed_x: entry.jump_signed_x,
                 jump_mag: entry.jump_mag,
                 position_before: entry.position_before,
+                degraded,
                 trailing,
             });
         }
@@ -168,6 +173,89 @@ impl TraceRing {
         for entry in self.ring.iter().skip(self.ring.len().saturating_sub(200)) {
             eprintln!("{}", entry.describe());
         }
+    }
+}
+
+/// Mirrors the server's intent arrival deadline (`validate_intent`,
+/// `server/vordar-server/src/net/receive.rs`): `max(rtt, MAX_REWIND_MICROS)
+/// + ARRIVAL_MARGIN_MICROS`. Both `WireHealth` tests below run at rtt <=
+/// MAX_REWIND_MICROS (200 ms), so the floor is 200 ms + 100 ms = 300 ms — a
+/// gap this long in any tracked signal is long enough for the server to
+/// already be rejecting stale intents on its own.
+const DEGRADED_GAP: Duration = Duration::from_millis(300);
+
+/// How long a degradation mark keeps classifying subsequent snaps as
+/// degraded-context — covers the reconciliation replay right after a
+/// starvation episode ends, not just the episode itself.
+const DEGRADED_LOOKBACK: Duration = Duration::from_secs(1);
+
+/// Measures whether the wire a `run_input` loop is driving is currently
+/// healthy or mid-starvation, from three real signals instead of an assumed
+/// idle cadence: the test thread's own iteration cadence (own-thread
+/// stalls, not just network ones), snapshot arrival
+/// (`NetClientState.latest_state_tick` advancing), and ack advance (acked =
+/// seq - pending.len() advancing). A gap past `DEGRADED_GAP` in any of the
+/// three is a starvation episode long enough for the two designed-recovery
+/// mechanisms (intent burst-drop, ack-prune losing replay history) to
+/// engage — behavior the never-snap contract must not cover.
+struct WireHealth {
+    last_iter_end: Instant,
+    last_snapshot: Instant,
+    last_ack_advance: Instant,
+    last_tick_seen: u64,
+    last_acked_seen: i64,
+    marks: VecDeque<Instant>,
+    total_marks: u64,
+}
+
+impl WireHealth {
+    fn new() -> Self {
+        let now = Instant::now();
+        WireHealth {
+            last_iter_end: now,
+            last_snapshot: now,
+            last_ack_advance: now,
+            last_tick_seen: 0,
+            last_acked_seen: 0,
+            marks: VecDeque::new(),
+            total_marks: 0,
+        }
+    }
+
+    /// Called once per loop iteration (right after `NetReceiveSystem::run`)
+    /// with this iteration's wall time and the state it just observed.
+    /// Advances whichever signal moved, and records a degradation mark if
+    /// any of the three stalled past `DEGRADED_GAP`.
+    fn update(&mut self, now: Instant, latest_state_tick: u64, acked: i64) {
+        let mut stalled = now.duration_since(self.last_iter_end) > DEGRADED_GAP;
+        self.last_iter_end = now;
+
+        if latest_state_tick > self.last_tick_seen {
+            self.last_tick_seen = latest_state_tick;
+            self.last_snapshot = now;
+        } else if now.duration_since(self.last_snapshot) > DEGRADED_GAP {
+            stalled = true;
+        }
+
+        if acked > self.last_acked_seen {
+            self.last_acked_seen = acked;
+            self.last_ack_advance = now;
+        } else if now.duration_since(self.last_ack_advance) > DEGRADED_GAP {
+            stalled = true;
+        }
+
+        if stalled {
+            self.marks.push_back(now);
+            self.total_marks += 1;
+        }
+        while self.marks.front().is_some_and(|&m| now.duration_since(m) > DEGRADED_LOOKBACK) {
+            self.marks.pop_front();
+        }
+    }
+
+    /// Whether a degradation mark fell within `DEGRADED_LOOKBACK` of `now`.
+    fn degraded(&self, now: Instant) -> bool {
+        self.marks.back().is_some_and(|&m| now.duration_since(m) <= DEGRADED_LOOKBACK)
     }
 }
 
@@ -321,7 +409,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     let mut leap_sys = vordar_game::combat::leap::LeapSystem;
     let mut move_sys = MovementSystem;
     let mut correction_sys = NetCorrectionSystem;
-    let mut max_recv_jump = 0.0f32;
+    let mut wire_health = WireHealth::new();
     let mut trace = TraceRing::new();
 
     // Input-phase half of one tick (NetReceiveSystem, NetSendInputSystem)
@@ -329,42 +417,53 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     // recording this iteration's full context in `trace` for attribution
     // if the closing assert below fires. `elapsed` is Some only while the
     // dash loop below is driving (None during Welcome/entity-spawn waits
-    // and the single cast tick).
+    // and the single cast tick). `wire_health` is updated every iteration,
+    // whether or not the predicted entity exists yet, so its cadence
+    // tracking matches the real wire from the start of the connection.
     let mut run_input = |world: &mut World, resources: &mut Resources, elapsed: Option<f32>| {
         resources.get_mut::<EventBus>().unwrap().clear();
         let before = own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position));
         recv.run(world, resources, DT);
+
+        let now = Instant::now();
+        let (latest_state_tick, seq, pending_len) = {
+            let state = resources.get::<NetClientState>().unwrap();
+            (state.latest_state_tick, state.seq, state.pending.len())
+        };
+        let acked = seq as i64 - pending_len as i64;
+        wire_health.update(now, latest_state_tick, acked);
+
         if let Some(before) = before {
             if let Some(after) =
                 own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
             {
                 let jump = after - before;
-                max_recv_jump = max_recv_jump.max(jump.length());
+                let degraded = wire_health.degraded(now);
 
                 let state = resources.get::<NetClientState>().unwrap();
-                let pending_len = state.pending.len();
                 let pending_leap_count = state.pending.iter().filter(|p| p.leap.is_some()).count();
-                let latest_state_tick = state.latest_state_tick;
-                let seq = state.seq;
                 let has_leap_impulse = own_entity(resources)
                     .map(|e| world.get::<&vordar_game::combat::LeapImpulse>(e).is_ok())
                     .unwrap_or(false);
                 let telegraph_count = world.query::<&crate::telegraph::TelegraphVisual>().iter().count();
-                trace.record(TraceEntry {
-                    wall_ms: trace.start.elapsed().as_millis() as u64,
-                    elapsed,
-                    position: after,
-                    position_before: before,
-                    jump_signed_x: jump.x,
-                    jump_mag: jump.length(),
-                    pending_len,
-                    pending_leap_count,
-                    has_leap_impulse,
-                    latest_state_tick,
-                    seq,
-                    acked: seq as i64 - pending_len as i64,
-                    telegraph_count,
-                });
+                trace.record(
+                    TraceEntry {
+                        wall_ms: trace.start.elapsed().as_millis() as u64,
+                        elapsed,
+                        position: after,
+                        position_before: before,
+                        jump_signed_x: jump.x,
+                        jump_mag: jump.length(),
+                        pending_len,
+                        pending_leap_count,
+                        has_leap_impulse,
+                        latest_state_tick,
+                        seq,
+                        acked,
+                        telegraph_count,
+                    },
+                    degraded,
+                );
             }
         }
         send.run(world, resources, DT);
@@ -469,14 +568,23 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     }
     eprintln!("onslaught cast accepted by the server — evaluating the strict never-snap assert");
 
-    if max_recv_jump >= SNAP_DISTANCE {
+    let healthy_violation = trace.snaps.iter().any(|s| !s.degraded);
+    if healthy_violation {
         trace.dump();
     }
     assert!(
-        max_recv_jump < SNAP_DISTANCE,
-        "reconciliation snapped {max_recv_jump:.2} units mid-dash — leap-aware replay must keep \
-         corrections under SNAP_DISTANCE ({SNAP_DISTANCE})"
+        !healthy_violation,
+        "reconciliation snapped under a measured-healthy wire mid-dash — leap-aware replay must \
+         keep corrections under SNAP_DISTANCE ({SNAP_DISTANCE}) whenever the wire itself wasn't starved"
     );
+    eprintln!(
+        "{} snap event(s), all degraded-context, {} degradation mark(s) recorded this run",
+        trace.snaps.len(),
+        wire_health.total_marks
+    );
+    for (i, snap) in trace.snaps.iter().enumerate() {
+        eprintln!("  degraded snap {i}: {}", snap.describe());
+    }
 }
 
 /// Server-side, test-local: waits for the first `Player` entity (the
@@ -554,47 +662,57 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
     let mut move_sys = MovementSystem;
     let mut correction_sys = NetCorrectionSystem;
     let mut static_collision_sys = PredictedStaticCollisionSystem;
-    let mut max_recv_jump = 0.0f32;
+    let mut wire_health = WireHealth::new();
     let mut trace = TraceRing::new();
 
     // `elapsed` is Some only while the hold loop below is driving (None
     // during Welcome/entity-spawn waits) — see the dash test above for the
-    // full rationale behind this instrumentation.
+    // full rationale behind this instrumentation. `wire_health` is updated
+    // every iteration, whether or not the predicted entity exists yet.
     let mut run_input = |world: &mut World, resources: &mut Resources, elapsed: Option<f32>| {
         resources.get_mut::<EventBus>().unwrap().clear();
         let before = own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position));
         recv.run(world, resources, DT);
+
+        let now = Instant::now();
+        let (latest_state_tick, seq, pending_len) = {
+            let state = resources.get::<NetClientState>().unwrap();
+            (state.latest_state_tick, state.seq, state.pending.len())
+        };
+        let acked = seq as i64 - pending_len as i64;
+        wire_health.update(now, latest_state_tick, acked);
+
         if let Some(before) = before {
             if let Some(after) =
                 own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
             {
                 let jump = after - before;
-                max_recv_jump = max_recv_jump.max(jump.length());
+                let degraded = wire_health.degraded(now);
 
                 let state = resources.get::<NetClientState>().unwrap();
-                let pending_len = state.pending.len();
                 let pending_leap_count = state.pending.iter().filter(|p| p.leap.is_some()).count();
-                let latest_state_tick = state.latest_state_tick;
-                let seq = state.seq;
                 let has_leap_impulse = own_entity(resources)
                     .map(|e| world.get::<&vordar_game::combat::LeapImpulse>(e).is_ok())
                     .unwrap_or(false);
                 let telegraph_count = world.query::<&crate::telegraph::TelegraphVisual>().iter().count();
-                trace.record(TraceEntry {
-                    wall_ms: trace.start.elapsed().as_millis() as u64,
-                    elapsed,
-                    position: after,
-                    position_before: before,
-                    jump_signed_x: jump.x,
-                    jump_mag: jump.length(),
-                    pending_len,
-                    pending_leap_count,
-                    has_leap_impulse,
-                    latest_state_tick,
-                    seq,
-                    acked: seq as i64 - pending_len as i64,
-                    telegraph_count,
-                });
+                trace.record(
+                    TraceEntry {
+                        wall_ms: trace.start.elapsed().as_millis() as u64,
+                        elapsed,
+                        position: after,
+                        position_before: before,
+                        jump_signed_x: jump.x,
+                        jump_mag: jump.length(),
+                        pending_len,
+                        pending_leap_count,
+                        has_leap_impulse,
+                        latest_state_tick,
+                        seq,
+                        acked,
+                        telegraph_count,
+                    },
+                    degraded,
+                );
             }
         }
         send.run(world, resources, DT);
@@ -651,14 +769,24 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
         elapsed += DT;
     }
 
-    if max_recv_jump >= SNAP_DISTANCE {
+    let healthy_violation = trace.snaps.iter().any(|s| !s.degraded);
+    if healthy_violation {
         trace.dump();
     }
     assert!(
-        max_recv_jump < SNAP_DISTANCE,
-        "reconciliation snapped {max_recv_jump:.2} units walking into the wall — \
-         PredictedStaticCollisionSystem must keep local prediction wall-clamped like the replay"
+        !healthy_violation,
+        "reconciliation snapped under a measured-healthy wire walking into the wall — \
+         PredictedStaticCollisionSystem must keep local prediction wall-clamped like the replay \
+         whenever the wire itself wasn't starved"
     );
+    eprintln!(
+        "{} snap event(s), all degraded-context, {} degradation mark(s) recorded this run",
+        trace.snaps.len(),
+        wire_health.total_marks
+    );
+    for (i, snap) in trace.snaps.iter().enumerate() {
+        eprintln!("  degraded snap {i}: {}", snap.describe());
+    }
 
     // Equilibrium penetration is SLOP + v*dt/CORRECTION_PERCENT ≈ 0.135
     // (motion::separation) past the wall's near face minus the walker's own

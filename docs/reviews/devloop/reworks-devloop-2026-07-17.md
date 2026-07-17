@@ -239,6 +239,50 @@ deterministic regardless of reproduction; the A/C guards make this report's
 stated premises explicit) and the plan proceeds without a further fix from
 this step.
 
+### 4. Finding 4's own step-2 calibration mechanism (predicate/const threshold tweak) can't produce a healthy-context snap in either prediction e2e test
+
+- **Evidence:** `client/vordar-client/src/net/prediction.rs:19` (`SNAP_DISTANCE`)
+  and `:91-102` (`classify_error`'s call site in `reconcile_own`):
+  `Correction::Trust` is checked before `Correction::Snap`
+  (`classify_error`, `:148-156`), so any reconciliation error under
+  `TRUST_DISTANCE` (0.3, `:15`) never reaches the Snap branch regardless of
+  `SNAP_DISTANCE`'s value; `reconcile_own` only writes `transform.position`
+  on that Snap branch — `Trust`/`Smooth` never touch it within a single
+  `NetReceiveSystem::run` call. Measured directly: lowering the
+  `TraceRing::record` predicate's threshold to `0.01` (reverted) produced 0
+  recorded snap events across a full `onslaught_dash_replay_never_snaps_at_150ms_rtt`
+  run; lowering the actual `SNAP_DISTANCE` const to `0.01` (reverted) also
+  produced 0 events — in both cases because this test's deterministic
+  fixed-latency conditions (no jitter, no loss) keep the real reconciliation
+  error under `TRUST_DISTANCE` for the whole run.
+- **Ideal:** finding 4's step-2 calibration proves "the healthy path retains
+  teeth" — that a genuine healthy-context snap-sized jump fails the
+  never-snap assert — using a mechanism that actually produces such a jump
+  against this codebase's real reconciliation mechanics.
+- **Gap:** the literal instruction ("lower SNAP_DISTANCE's use in the event
+  predicate to 0.01") assumes ordinary sub-SNAP_DISTANCE jumps occur during
+  idle play; they don't — `transform.position` is binary (untouched, or
+  snapped) within `recv.run()`, so no intermediate signal exists to
+  threshold against with either lever.
+- **Suggestion:** use a direct, local-only position perturbation instead:
+  offset the predicted entity's `Transform.position` once (outside
+  `recv.run()`), then let the next real snapshot's `reconcile_own` see the
+  genuine, un-self-correcting divergence from the server's untouched
+  authoritative position. Do this in `predicted_wall_hug_never_snaps_at_150ms_rtt`,
+  not the dash test — the dash's `LeapImpulse` velocity is solved to reach
+  an absolute world-space target regardless of start position
+  (`leap_velocity(origin, target, cast_secs)`), so a start-position
+  perturbation there converges back to the same landing point and never
+  manifests as a reconciliation error.
+- **Path:** already executed as part of finding 4's implementation
+  (2026-07-17): perturbed `predicted_wall_hug_never_snaps_at_150ms_rtt`'s
+  entity by `Vec3::new(5.0, 0.0, 0.0)` right after entity-spawn, confirmed
+  the test FAILED with the healthy-context message and a dumped
+  `SnapEvent { degraded: false, jump_mag: 5.0, ... }`, then reverted the
+  perturbation before landing the real fix. No further action needed — this
+  is a record of the calibration mechanism actually used, for any future
+  rework touching these tests' teeth-check.
+
 ## Carried forward from previous report
 
 None — `reworks-devloop-2026-07-15.md`'s single rework (parallel execution)
