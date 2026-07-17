@@ -72,14 +72,13 @@ pub fn compute_damage(
             dmg = (dmg as f32 * a.crit_mult).round() as i32;
         }
     }
-    if damage_type != DamageType::True {
-        if let Some(d) = defender {
+    if damage_type != DamageType::True
+        && let Some(d) = defender {
             if let Some(affinity) = d.affinity {
                 dmg = (dmg as f32 * type_multiplier(damage_type, affinity)).round() as i32;
             }
             dmg -= d.defense;
         }
-    }
     dmg.max(1)
 }
 

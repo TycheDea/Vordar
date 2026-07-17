@@ -95,13 +95,12 @@ fn bench_churn(c: &mut Criterion) {
                     // Timed: the despawn side, mirroring DespawnFlushSystem.
                     let t = Instant::now();
                     for entity in bolts {
-                        if let Ok(occupant) = world.get::<&CellOccupant>(entity) {
-                            if let Some(grid) = resources.get_mut::<SpatialGrid>() {
+                        if let Ok(occupant) = world.get::<&CellOccupant>(entity)
+                            && let Some(grid) = resources.get_mut::<SpatialGrid>() {
                                 for cell in &occupant.cells {
                                     grid.remove(*cell, entity);
                                 }
                             }
-                        }
                         world.despawn(entity).ok();
                     }
                     total += t.elapsed();

@@ -433,8 +433,8 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
         let acked = seq as i64 - pending_len as i64;
         wire_health.update(now, latest_state_tick, acked);
 
-        if let Some(before) = before {
-            if let Some(after) =
+        if let Some(before) = before
+            && let Some(after) =
                 own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
             {
                 let jump = after - before;
@@ -465,7 +465,6 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
                     degraded,
                 );
             }
-        }
         send.run(world, resources, DT);
     };
     // Update-phase half (PlayerMovementSystem, LeapSystem, MovementSystem,
@@ -682,8 +681,8 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
         let acked = seq as i64 - pending_len as i64;
         wire_health.update(now, latest_state_tick, acked);
 
-        if let Some(before) = before {
-            if let Some(after) =
+        if let Some(before) = before
+            && let Some(after) =
                 own_entity(resources).and_then(|e| world.get::<&Transform>(e).ok().map(|t| t.position))
             {
                 let jump = after - before;
@@ -714,7 +713,6 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
                     degraded,
                 );
             }
-        }
         send.run(world, resources, DT);
     };
     let mut run_update = |world: &mut World, resources: &mut Resources| {

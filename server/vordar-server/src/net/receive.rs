@@ -557,11 +557,10 @@ impl System for XpCarrySystem {
         let dying: Vec<Entity> = resources.expect::<DespawnQueue>().0.iter().map(|(e, _)| *e).collect();
         let state = resources.expect_mut::<NetServerState>();
         for entity in dying {
-            if let Some(pc) = state.conns.values_mut().find(|pc| pc.entity == entity) {
-                if let Ok(xp) = world.get::<&Xp>(entity) {
+            if let Some(pc) = state.conns.values_mut().find(|pc| pc.entity == entity)
+                && let Ok(xp) = world.get::<&Xp>(entity) {
                     pc.carried_xp = xp.0;
                 }
-            }
         }
     }
 }

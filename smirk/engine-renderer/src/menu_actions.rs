@@ -20,11 +20,10 @@ pub(crate) fn apply_menu_actions(actions: Vec<MenuAction>, resources: &mut Resou
     }
 
     // Apply latest draft (from egui widget mutations)
-    if let Some(d) = latest_draft {
-        if let Some(m) = resources.get_mut::<MenuState>() {
+    if let Some(d) = latest_draft
+        && let Some(m) = resources.get_mut::<MenuState>() {
             m.draft = d;
         }
-    }
 
     for action in other_actions {
         match action {
@@ -46,13 +45,12 @@ pub(crate) fn apply_menu_actions(actions: Vec<MenuAction>, resources: &mut Resou
                     if let Some(w) = resources.get::<Arc<Window>>() {
                         w.set_title(&new_cfg.title);
                         // Only request size change when windowed — fullscreen modes ignore it.
-                        if matches!(new_cfg.mode, WindowMode::Windowed) {
-                            if let Resolution::Fixed(ww, wh) = new_cfg.resolution {
+                        if matches!(new_cfg.mode, WindowMode::Windowed)
+                            && let Resolution::Fixed(ww, wh) = new_cfg.resolution {
                                 let _ = w.request_inner_size(
                                     winit::dpi::PhysicalSize::new(ww, wh),
                                 );
                             }
-                        }
                         let fullscreen = resolve_fullscreen(&new_cfg.mode, &new_cfg.resolution, w.current_monitor());
                         w.set_fullscreen(fullscreen);
                     }

@@ -211,13 +211,12 @@ impl System for WeaponAttachSystem {
                 t.scale = Vec3::ONE;
             }
         }
-        if !orphans.is_empty() {
-            if let Some(queue) = resources.get_mut::<DespawnQueue>() {
+        if !orphans.is_empty()
+            && let Some(queue) = resources.get_mut::<DespawnQueue>() {
                 for entity in orphans {
                     queue.push(entity, None);
                 }
             }
-        }
     }
 }
 

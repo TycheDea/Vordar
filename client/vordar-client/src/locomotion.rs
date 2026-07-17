@@ -156,14 +156,14 @@ pub fn trigger_attack_clip(world: &World, entity: Entity, clip: Option<&str>, se
         ),
         Err(_) => return,
     };
-    if let Ok(mut ctrl) = world.get::<&mut AnimController>(entity) {
+    match world.get::<&mut AnimController>(entity) { Ok(mut ctrl) => {
         if ctrl.dead {
             return;
         }
         ctrl.oneshot = latch;
-    } else {
+    } _ => {
         return;
-    }
+    }}
     if let Ok(mut player) = world.get::<&mut AnimationPlayer>(entity) {
         player.transition_to(&attack, false, ATTACK_BLEND);
     }

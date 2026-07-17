@@ -200,11 +200,10 @@ fn rend_kills_camped_enemy() {
             }
         }
         bot.pump();
-        if let Some(&hp) = bot.last_hp.get(&grunt_id) {
-            if hp_seen.last() != Some(&hp) {
+        if let Some(&hp) = bot.last_hp.get(&grunt_id)
+            && hp_seen.last() != Some(&hp) {
                 hp_seen.push(hp);
             }
-        }
         std::thread::sleep(Duration::from_millis(16));
     }
     // The death message may ride the tick after the AOI-leave snapshot.

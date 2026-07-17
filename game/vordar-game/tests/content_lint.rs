@@ -524,10 +524,9 @@ fn material_textures_have_fresh_sidecars() {
                 check_gltf_sidecars(&root.join(&prop.model));
             }
         }
-        if let Some(g) = &zone.visuals.ground {
-            if checked_ground.insert(g.texture_dir.clone()) {
+        if let Some(g) = &zone.visuals.ground
+            && checked_ground.insert(g.texture_dir.clone()) {
                 check_ground_sidecars(&root.join(&g.texture_dir));
             }
-        }
     }
 }

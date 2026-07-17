@@ -109,14 +109,13 @@ impl System for HitReactSystem {
             if let (Ok(clips), Ok(mut ctrl)) = (
                 world.get::<&LocomotionClips>(hit.entity),
                 world.get::<&mut AnimController>(hit.entity),
-            ) {
-                if !ctrl.dead && ctrl.oneshot <= 0.0 && !clips.hit.is_empty() {
+            )
+                && !ctrl.dead && ctrl.oneshot <= 0.0 && !clips.hit.is_empty() {
                     ctrl.oneshot = HIT_LATCH;
                     if let Ok(mut player) = world.get::<&mut AnimationPlayer>(hit.entity) {
                         player.transition_to(&clips.hit, false, HIT_BLEND);
                     }
                 }
-            }
             let color = entity_color(hit.class.as_deref(), hit.shape_color, resources);
             let count = (hit.damage as usize).clamp(IMPACT_MIN, IMPACT_MAX);
             if let Some(sim) = resources.get_mut::<ParticleSim>() {

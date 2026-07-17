@@ -58,9 +58,9 @@ impl ApplicationHandler for App {
         // If a subsystem consumes an input event, skip game handling for that event.
         let ui_consumed = {
             let window = self.window.clone();
-            if let (Some(w), Some(proc)) = (window, self.resources.get_mut::<WinitEventProcessor>()) {
+            match (window, self.resources.get_mut::<WinitEventProcessor>()) { (Some(w), Some(proc)) => {
                 proc.process(&w, &event)
-            } else { false }
+            } _ => { false }}
         };
         let is_game_input = matches!(event,
             WindowEvent::KeyboardInput { .. } | WindowEvent::MouseInput { .. }
@@ -74,22 +74,20 @@ impl ApplicationHandler for App {
                 if let (Some(path), Some(cfg)) = (
                     &self.config_path,
                     self.resources.get::<WindowConfig>().cloned(),
-                ) {
-                    if let Err(e) = save_window_config(std::path::Path::new(path), &cfg) {
+                )
+                    && let Err(e) = save_window_config(std::path::Path::new(path), &cfg) {
                         log::warn!("failed to persist config to {path}: {e}");
                     }
-                }
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if let Some(kb) = self.resources.get_mut::<KeyboardState>() {
+                if let PhysicalKey::Code(code) = event.physical_key
+                    && let Some(kb) = self.resources.get_mut::<KeyboardState>() {
                         match event.state {
                             ElementState::Pressed  => kb.press(code),
                             ElementState::Released => kb.release(code),
                         }
                     }
-                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if let Some(mouse) = self.resources.get_mut::<MouseState>() {
@@ -131,8 +129,8 @@ impl ApplicationHandler for App {
                 let config_changed = self.config_watcher.as_ref()
                     .map(|(_, rx)| rx.try_iter().any(|r| r.is_ok()))
                     .unwrap_or(false);
-                if config_changed {
-                    if let Some(path) = &self.config_path.clone() {
+                if config_changed
+                    && let Some(path) = &self.config_path.clone() {
                         if let Some(new_cfg) = reload_config(std::path::Path::new(path)) {
                             if let Some(w) = &self.window {
                                 w.set_title(&new_cfg.title);
@@ -147,7 +145,6 @@ impl ApplicationHandler for App {
                             log::warn!("hot-reload parse error for {path}");
                         }
                     }
-                }
 
                 let now   = Instant::now();
                 let delta = now.duration_since(self.last_tick).as_secs_f32().min(0.1);
@@ -172,9 +169,8 @@ impl ApplicationHandler for App {
 
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
         // The WaitUntil deadline fired: drive the next frame's redraw.
-        if let StartCause::ResumeTimeReached { .. } = cause {
-            if let Some(w) = &self.window { w.request_redraw(); }
-        }
+        if let StartCause::ResumeTimeReached { .. } = cause
+            && let Some(w) = &self.window { w.request_redraw(); }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

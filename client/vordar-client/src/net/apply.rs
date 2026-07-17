@@ -89,11 +89,10 @@ pub(super) fn apply_aoi_delta(world: &mut World, resources: &mut Resources, tick
                 // Seed replicated health (v8) so the hit-react watcher starts
                 // from the server's value, not the prefab's. `None` (v12)
                 // means the entity has no Health component — nothing to seed.
-                if let Some(hp) = enter.hp {
-                    if let Ok(mut health) = world.get::<&mut Health>(entity) {
+                if let Some(hp) = enter.hp
+                    && let Ok(mut health) = world.get::<&mut Health>(entity) {
                         health.current = hp;
                     }
-                }
                 known.insert(enter.id, entity);
             }
             Err(e) => log::error!("replicated spawn '{prefab_name}' failed: {e}"),
@@ -179,20 +178,18 @@ pub(super) fn apply_states(
             // the entity actually is instead of popping straight to the new
             // sample. `NetBuffer::push` skips it if that tick wouldn't keep
             // the ring strictly increasing.
-            if let Some(cursor) = cursor {
-                if buffer.samples.back().is_some_and(|&(back_tick, _)| (back_tick as f64) < cursor) {
+            if let Some(cursor) = cursor
+                && buffer.samples.back().is_some_and(|&(back_tick, _)| (back_tick as f64) < cursor) {
                     buffer.push(cursor.floor() as u64, transform.position);
                 }
-            }
             buffer.push(tick, state.pos.0);
         }
     }
 
-    if let Some((own, server_pos)) = own_state {
-        if let Some(&entity) = known.get(&own) {
+    if let Some((own, server_pos)) = own_state
+        && let Some(&entity) = known.get(&own) {
             reconcile_own(world, resources, entity, server_pos, last_processed_seq);
         }
-    }
 
     resources.expect_mut::<NetClientState>().entities = known;
 }

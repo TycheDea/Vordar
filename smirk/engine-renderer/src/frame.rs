@@ -117,11 +117,10 @@ impl RenderSystem {
         if let Some(ref lines) = dev_lines {
             dev_overlay::draw_dev_overlay(&egui_ctx, lines);
         }
-        if let Some(m) = menu_snap.as_ref() {
-            if m.open {
+        if let Some(m) = menu_snap.as_ref()
+            && m.open {
                 draw_menu(&egui_ctx, m, monitor_fps, &mut menu_actions);
             }
-        }
         // Game UI layers (minimap, action bar, ...). Taken out so the
         // callbacks can read Resources while the registry is borrowed.
         let mut layers = resources.get_mut::<UiLayers>()
@@ -172,8 +171,8 @@ impl System for RenderSystem {
             .map(|s| s.open)
             .unwrap_or(false);
         // Publish last frame's per-pass GPU times before the lines snapshot below.
-        if overlay_open {
-            if let (Some(t), Some(stats)) =
+        if overlay_open
+            && let (Some(t), Some(stats)) =
                 (self.last_gpu, resources.get_mut::<engine_app::dev_stats::DevStats>())
             {
                 stats.set("gpu shadow",        format!("{:.2} ms", t.shadow));
@@ -182,7 +181,6 @@ impl System for RenderSystem {
                 stats.set("gpu bloom+tonemap", format!("{:.2} ms", t.bloom_tonemap));
                 stats.set("gpu egui",          format!("{:.2} ms", t.egui));
             }
-        }
         let sample_gpu = overlay_open && self.frame_index.is_multiple_of(GPU_TIMING_INTERVAL);
 
         // ── Egui frame: engine UI + game-registered UiLayers ─────────────────
@@ -317,17 +315,15 @@ impl System for RenderSystem {
                 state.egui_renderer.free_texture(id);
             }
         }
-        if sample_gpu {
-            if let Some(timer) = state.gpu_timer.as_ref() {
+        if sample_gpu
+            && let Some(timer) = state.gpu_timer.as_ref() {
                 timer.resolve(&mut encoder);
             }
-        }
         state.queue.submit(std::iter::once(encoder.finish()));
-        if sample_gpu {
-            if let Some(timer) = state.gpu_timer.as_ref() {
+        if sample_gpu
+            && let Some(timer) = state.gpu_timer.as_ref() {
                 self.last_gpu = timer.read_blocking(&state.device).or(self.last_gpu);
             }
-        }
         surface_texture.present();
 
         restore_mesh_resources(resources, mesh_list, skinned_list, mesh_store, particle_list);
@@ -435,8 +431,8 @@ fn record_shadow_pass(
         }
 
         // Static meshes.
-        if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
-            if !list.instances.is_empty() {
+        if let (Some(list), Some(store)) = (mesh_list, mesh_store)
+            && !list.instances.is_empty() {
                 pass.set_pipeline(&state.shadow_pipelines.mesh);
                 pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
                 for &(mesh_idx, first, count) in &list.shadow_ranges {
@@ -451,11 +447,10 @@ fn record_shadow_pass(
                     }
                 }
             }
-        }
 
         // Skinned meshes (re-binds the shared joint palette).
-        if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
-            if !list.instances.is_empty() {
+        if let (Some(list), Some(store)) = (skinned_list, mesh_store)
+            && !list.instances.is_empty() {
                 pass.set_pipeline(&state.shadow_pipelines.skinned);
                 pass.set_bind_group(1, &state.joint_bind_group, &[]);
                 pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
@@ -469,7 +464,6 @@ fn record_shadow_pass(
                     }
                 }
             }
-        }
     }
 }
 
@@ -509,8 +503,8 @@ fn record_depth_prepass(
         pass.draw_indexed(0..INDICES.len() as u32, 0, first..first + count);
     }
 
-    if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
-        if !list.instances.is_empty() {
+    if let (Some(list), Some(store)) = (mesh_list, mesh_store)
+        && !list.instances.is_empty() {
             pass.set_pipeline(&state.depth_prepass_pipelines.mesh);
             pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
             for &(mesh_idx, first, count) in &list.ranges {
@@ -525,10 +519,9 @@ fn record_depth_prepass(
                 }
             }
         }
-    }
 
-    if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
-        if !list.instances.is_empty() {
+    if let (Some(list), Some(store)) = (skinned_list, mesh_store)
+        && !list.instances.is_empty() {
             pass.set_pipeline(&state.depth_prepass_pipelines.skinned);
             pass.set_bind_group(1, &state.joint_bind_group, &[]);
             pass.set_vertex_buffer(1, state.skinned_instance_buffer.slice(..));
@@ -542,7 +535,6 @@ fn record_depth_prepass(
                 }
             }
         }
-    }
 }
 
 /// Hemisphere-kernel occlusion (half-res) from the depth prepass, then a box
@@ -606,8 +598,8 @@ fn record_main_pass(
     // Mesh pass — same render pass and camera bind group, real geometry.
     // Ranges are sorted by first-instance, so overflow past the buffer
     // cap ends the loop rather than wrapping.
-    if let (Some(list), Some(store)) = (mesh_list, mesh_store) {
-        if !list.instances.is_empty() {
+    if let (Some(list), Some(store)) = (mesh_list, mesh_store)
+        && !list.instances.is_empty() {
             pass.set_pipeline(&state.mesh_pipeline);
             pass.set_bind_group(2, &state.environment.bind_group, &[]);
             pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
@@ -624,13 +616,12 @@ fn record_main_pass(
                 }
             }
         }
-    }
 
     // Skinned mesh pass — same camera bind group, plus the joint
     // palette (group 2). Instances index their own joint block via the
     // joint_base instance attribute, so one draw per mesh still works.
-    if let (Some(list), Some(store)) = (skinned_list, mesh_store) {
-        if !list.instances.is_empty() {
+    if let (Some(list), Some(store)) = (skinned_list, mesh_store)
+        && !list.instances.is_empty() {
             pass.set_pipeline(&state.skinned_pipeline);
             pass.set_bind_group(0, &state.camera_bind_group, &[]);
             pass.set_bind_group(2, &state.joint_bind_group, &[]);
@@ -647,7 +638,6 @@ fn record_main_pass(
                 }
             }
         }
-    }
 
     // Sky pass — the IBL cubemap as background, pinned to the far
     // plane behind everything opaque.

@@ -174,9 +174,8 @@ pub(crate) async fn delay_reorder<T: Send + 'static>(
                 tokio::select! {
                     biased;
                     _ = tokio::time::sleep_until(next.at) => {
-                        if let Some(p) = pending.pop() {
-                            if tx.send(p.item).is_err() { return; }
-                        }
+                        if let Some(p) = pending.pop()
+                            && tx.send(p.item).is_err() { return; }
                     }
                     maybe = rx.recv() => match maybe {
                         Some((at, item)) => { pending.push(Pending { at, seq: next_seq, item }); next_seq += 1; }

@@ -63,11 +63,10 @@ impl Wander {
     }
 
     fn next_dir(&mut self, pos: Option<glam::Vec3>) -> glam::Vec2 {
-        if let Some(p) = pos {
-            if p.length() > 30.0 {
+        if let Some(p) = pos
+            && p.length() > 30.0 {
                 return glam::Vec2::new(-p.x, -p.z).normalize();
             }
-        }
         self.sends += 1;
         if self.sends >= 30 {
             self.sends = 0;

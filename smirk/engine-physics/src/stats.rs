@@ -13,11 +13,10 @@ impl System for PhysicsStatsSystem {
     fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
         let candidates = resources.get::<CandidatePairs>().map(|c| c.0.len()).unwrap_or(0);
         let active     = resources.get::<ActivePairs>().map(|a| a.0.len()).unwrap_or(0);
-        if let Some(stats) = resources.get_mut::<DevStats>() {
-            if stats.open {
+        if let Some(stats) = resources.get_mut::<DevStats>()
+            && stats.open {
                 stats.set("broadphase pairs", candidates);
                 stats.set("active collisions", active);
             }
-        }
     }
 }

@@ -212,11 +212,10 @@ impl System for PredictedStaticCollisionSystem {
 /// dash from its very first tick too, not just the ticks after.
 pub(crate) fn start_predicted_leap(world: &mut World, resources: &mut Resources, entity: Entity, velocity: Vec3, cast_secs: f32) {
     let _ = world.insert_one(entity, vordar_game::combat::LeapImpulse { velocity, remaining: cast_secs });
-    if let Some(state) = resources.get_mut::<NetClientState>() {
-        if let Some(pending) = state.pending.back_mut() {
+    if let Some(state) = resources.get_mut::<NetClientState>()
+        && let Some(pending) = state.pending.back_mut() {
             pending.leap = Some(velocity);
         }
-    }
 }
 
 /// Sends our movement intent each Input tick, stamped with synced server time.

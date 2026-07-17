@@ -78,11 +78,10 @@ impl NetBuffer {
     /// strictly increasing (guards both an out-of-order caller and the
     /// dry-recovery synthetic sample).
     pub(super) fn push(&mut self, tick: u64, pos: Vec3) {
-        if let Some(&(back_tick, _)) = self.samples.back() {
-            if tick <= back_tick {
+        if let Some(&(back_tick, _)) = self.samples.back()
+            && tick <= back_tick {
                 return;
             }
-        }
         if self.samples.len() >= NET_BUFFER_CAP {
             self.samples.pop_front();
         }

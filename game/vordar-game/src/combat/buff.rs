@@ -86,13 +86,13 @@ impl System for RavagerRageSystem {
             if !is_ravager {
                 continue;
             }
-            let stacked = if let Ok(mut buff) = world.get::<&mut BuffStack>(attacker) {
+            let stacked = match world.get::<&mut BuffStack>(attacker) { Ok(mut buff) => {
                 buff.stacks = (buff.stacks + 1).min(RAGE_MAX_STACKS);
                 buff.remaining = RAGE_DURATION_SECS;
                 true
-            } else {
+            } _ => {
                 false
-            };
+            }};
             if !stacked {
                 let _ = world.insert_one(attacker, BuffStack { stacks: 1, remaining: RAGE_DURATION_SECS });
             }

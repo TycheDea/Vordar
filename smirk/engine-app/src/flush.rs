@@ -38,11 +38,10 @@ impl System for DespawnFlushSystem {
 
             // SpatialGrid belongs to the physics plugin — apps without physics
             // (e.g. the networked client) still despawn CellOccupant entities.
-            if let Ok(occupant) = world.get::<&CellOccupant>(entity) {
-                if let Some(grid) = resources.get_mut::<SpatialGrid>() {
+            if let Ok(occupant) = world.get::<&CellOccupant>(entity)
+                && let Some(grid) = resources.get_mut::<SpatialGrid>() {
                     for cell in &occupant.cells { grid.remove(*cell, entity); }
                 }
-            }
 
             world.despawn(entity).ok();
         }
