@@ -9,8 +9,10 @@ workspace = true
 [features]
 # winit (default): window creation, event loop, keyboard input. Headless builds
 # (dedicated server) disable default features and use App::run_headless().
+# notify (the WindowConfig hot-reload watcher) rides along with winit — it
+# has no reason to exist in a headless build.
 default = ["winit"]
-winit   = ["dep:winit"]
+winit   = ["dep:winit", "dep:notify"]
 
 [dependencies]
 engine-core = { path = "../engine-core" }
@@ -20,4 +22,4 @@ log         = { workspace = true }
 ron         = { workspace = true }
 serde       = { workspace = true }
 winit       = { workspace = true, optional = true }
-notify      = "6"
+notify      = { version = "8", optional = true }

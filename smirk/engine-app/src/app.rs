@@ -62,6 +62,7 @@ pub struct App {
     /// Path to the config file — kept for hot-reload and persist-on-exit.
     pub(crate) config_path:    Option<String>,
     /// File watcher + event receiver for hot-reloading engine.ron.
+    #[cfg(feature = "winit")]
     pub(crate) config_watcher: Option<(
         notify::RecommendedWatcher,
         std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
@@ -113,6 +114,7 @@ impl App {
             #[cfg(feature = "winit")]
             on_resize:      Vec::new(),
             config_path:    None,
+            #[cfg(feature = "winit")]
             config_watcher: None,
         }
     }
@@ -131,17 +133,20 @@ impl App {
         self.config_path = Some(path.to_owned());
 
         // Set up file watcher — events are polled each frame via try_recv.
-        use notify::{RecursiveMode, Watcher};
-        let (tx, rx) = std::sync::mpsc::channel();
-        match notify::recommended_watcher(move |res| { let _ = tx.send(res); }) {
-            Ok(mut watcher) => {
-                if let Err(e) = watcher.watch(std::path::Path::new(path), RecursiveMode::NonRecursive) {
-                    log::warn!("config hot-reload watcher failed to start: {e}");
-                } else {
-                    self.config_watcher = Some((watcher, rx));
+        #[cfg(feature = "winit")]
+        {
+            use notify::{RecursiveMode, Watcher};
+            let (tx, rx) = std::sync::mpsc::channel();
+            match notify::recommended_watcher(move |res| { let _ = tx.send(res); }) {
+                Ok(mut watcher) => {
+                    if let Err(e) = watcher.watch(std::path::Path::new(path), RecursiveMode::NonRecursive) {
+                        log::warn!("config hot-reload watcher failed to start: {e}");
+                    } else {
+                        self.config_watcher = Some((watcher, rx));
+                    }
                 }
+                Err(e) => log::warn!("config hot-reload watcher unavailable: {e}"),
             }
-            Err(e) => log::warn!("config hot-reload watcher unavailable: {e}"),
         }
 
         self
