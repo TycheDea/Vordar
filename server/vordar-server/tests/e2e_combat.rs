@@ -96,12 +96,18 @@ fn scheduled_aoe() {
     // also covers the step-2 pacing warmup (bucket seeds full, so no
     // measurable speed loss idle).
     const DODGE_SIM_RATE_MIN: f32 = 0.9;
+    /// The dodge needs > 4.0 u of pre-T movement and each applied intent
+    /// stamped <= T integrates exactly 0.1 u (6.0 u/s x 1/60 s tick), so a
+    /// miss is mathematically unreachable below 41 pre-T sends; 45 adds
+    /// margin for pre-T sends that arrive (75 ms one-way) after an early
+    /// resolve tick. Idle measurement 2026-07-17: 5 runs = 48, 48, 48, 48, 48 (min 48, max 48).
+    const DODGE_PRE_T_SENDS_MIN: u32 = 45;
     let sim_rate = (b.latest_state_tick - tick0) as f32 / (wall0.elapsed().as_secs_f32() * TICK_HZ);
 
     a.wait_for("second hit result", Duration::from_secs(4), |bot| bot.hit_results.contains_key(&mech2));
     let hit = a.hit_results[&mech2].contains(&b_id);
     eprintln!("scheduled_aoe dodge: sends_pre_t={sends_pre_t} sim_rate={sim_rate:.2}");
-    if sim_rate >= DODGE_SIM_RATE_MIN {
+    if sim_rate >= DODGE_SIM_RATE_MIN && sends_pre_t >= DODGE_PRE_T_SENDS_MIN {
         if hit {
             for (wall_ms, ms_to_t, sent, tokens) in &trace {
                 eprintln!("  wall_ms={wall_ms} ms_to_T={ms_to_t} sent={sent} tokens={tokens}");
@@ -109,10 +115,17 @@ fn scheduled_aoe() {
         }
         assert!(!hit, "B stepped out before T — the rewound test must miss it");
     } else {
-        eprintln!(
-            "scheduled_aoe: sim ran at {:.0}% of wall rate through the dodge window — wall-contract miss assert skipped",
-            sim_rate * 100.0
-        );
+        if sim_rate < DODGE_SIM_RATE_MIN {
+            eprintln!(
+                "scheduled_aoe: sim ran at {:.0}% of wall rate through the dodge window — wall-contract miss assert skipped",
+                sim_rate * 100.0
+            );
+        }
+        if sends_pre_t < DODGE_PRE_T_SENDS_MIN {
+            eprintln!(
+                "scheduled_aoe: bot sent only {sends_pre_t} pre-T intents (min {DODGE_PRE_T_SENDS_MIN}) — wall-contract miss assert skipped"
+            );
+        }
     }
 
     // ── Backdated cast: rejected server-side, nothing gets scheduled. ──
