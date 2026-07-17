@@ -74,10 +74,15 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-17.md`):
   under a sonnet session; audits and plan reviews stay on fable" — and the
   user switches at launch. If declined: record that loop-time fable spend is
   accepted as the price of mid-loop judgment.
-- **Path:** (1) user decision; (2) if adopted, one skill line + trying it on
-  the next loop; proof: that loop's main-session output ledger shows the
-  per-finding orchestrator cycle at sonnet pricing with zero escalation
-  incidents, or names the incident that justifies reverting.
+- **DECIDED 2026-07-17: opus for loops.** The user chose the middle option —
+  implement loops run under an opus session (`/model opus` at loop launch,
+  back to fable for audits and plan reviews): cheaper than fable on the
+  mechanical cycle, stronger mid-loop judgment than sonnet. The skill
+  convention line should name opus, not sonnet.
+- **Path:** (1) ~~user decision~~ decided (opus); (2) one skill line + trying
+  it on the next loop; proof: that loop's main-session output ledger shows
+  the per-finding orchestrator cycle at opus pricing with zero escalation
+  incidents, or names the incident that justifies revisiting.
 
 ### 2. Workers still read large review files the ban doesn't cover — 23 whole-report reads this campaign
 

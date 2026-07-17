@@ -62,11 +62,19 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-17.md`):
   runner must embed the planner-fallback playbook) and finding 1's
   orchestrator-tier decision is made (a runner amplifies whatever tier the
   orchestrator runs on). The plan should decide: skill shape (extend
-  implement-finding vs a new run-reworks skill), the pause-on-plan question,
-  stop conditions, and how loop token reports aggregate.
-- **Path:** gate: fixes findings 1 and 5 decided/landed. Then /plan-rework
-  with the measured target: the next multi-rework campaign completes with
-  ≤1 content-free user prompt per campaign (vs 6 this one) at unchanged
+  implement-finding vs a new run-reworks skill), stop conditions, and how
+  loop token reports aggregate.
+- **DECIDED 2026-07-17: adopted, pause-on-plan mode.** The runner plans a
+  rework, shows the plan, and waits for one go/stop before looping it — the
+  per-plan checkpoint survives; everything after approval (loop, commit,
+  strike, token report, advance to next rework) is automatic. The
+  fully-autonomous mode was not chosen; the design pass plans pause-on-plan
+  as THE behavior, not a mode flag. Finding 1's tier decision also landed
+  (opus for loops), so only fixes finding 5 remains as gate.
+- **Path:** gate: fixes finding 5 landed (finding 1 decided 2026-07-17:
+  opus). Then /plan-rework with the measured target: the next multi-rework
+  campaign completes with one plan-approval word per rework and zero other
+  content-free prompts (vs 6 full prompts this campaign) at unchanged
   commit/gate discipline.
 
 ## Carried forward from previous report
