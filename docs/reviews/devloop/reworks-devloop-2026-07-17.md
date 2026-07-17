@@ -35,14 +35,20 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-17.md`):
 Rework 2 was filed 2026-07-17 during finding 8's implementation and is not in
 the queue above. Its plan ran to completion 2026-07-17
 (`plan-devloop-rework-2-2026-07-17.md`, 8 steps) but its Ideal is NOT reached,
-so it is not struck: the mechanisms landed and are idle-green (403/403), and
+so it is not struck: the mechanisms landed and are idle-green (404/404), and
 `rend_kills_camped_enemy` holds 5/5 at 3x load, but the proof bar ("the suite
-stays green at 3x CPU oversubscription") failed — 9/20 combined runs green,
-with two client-prediction tests violating SNAP_DISTANCE reproducibly and
-`scheduled_aoe`'s 0.9 precondition reading healthy while its race still loses.
-Rework 3 (filed 2026-07-17 by that proof step) carries the open failures and
-their attribution; rework 2 reopens or closes on rework 3's evidence. Rework 3
-is likewise not in the queue above and is orderable on its own.
+stays green at 3x CPU oversubscription") is still not met: `scheduled_aoe`
+failed 1/10 sensitive-set runs at -Load 3.0
+(`plan-devloop-rework-3-2026-07-17.md` finding 5's proof), its dodge assert
+firing at `server/vordar-server/tests/e2e_combat.rs:91`. Rework 3 (filed
+2026-07-17 by the finding-8 proof step, carrying the two client-prediction
+SNAP_DISTANCE failures) is STRUCK 2026-07-17: neither
+`onslaught_dash_replay_never_snaps_at_150ms_rtt` nor
+`predicted_wall_hug_never_snaps_at_150ms_rtt` reproduced a snap across
+rework 3's own 20-run attribution pass or finding 5's 10-run sensitive-set
+proof plus a clean 404/404 full-suite run at -Load 3.0 — see rework 3's
+section below for the full record. Rework 2 stays open on `scheduled_aoe`
+alone.
 
 ### 1. (user-decides) A queue-runner convention: one launch decision per report instead of one prompt per rework
 
@@ -238,6 +244,27 @@ prediction-test snap. Per the Path's own fallback for a 20-run miss, steps
 deterministic regardless of reproduction; the A/C guards make this report's
 stated premises explicit) and the plan proceeds without a further fix from
 this step.
+
+STRUCK 2026-07-17 (`plan-devloop-rework-3-2026-07-17.md`, finding 5): the
+proof bar from this finding's own Path step 4 — "sensitive-set x10 and one
+full-suite run green at -Load 3.0" — is met. Sensitive-set x10 at -Load 3.0
+(60 spinners, 20-logical-core machine) held
+`onslaught_dash_replay_never_snaps_at_150ms_rtt` and
+`predicted_wall_hug_never_snaps_at_150ms_rtt` green in all 10 runs (9/10
+runs fully green across all 5 tests; run 9's lone failure was
+`scheduled_aoe`'s dodge assert, unrelated to this rework). The full 404-test
+suite ran once at -Load 3.0 clean: 404 passed, 0 failed. An idle full gate
+afterward (`cargo nextest run --workspace` + `cargo test --doc --workspace`)
+held 404/404. No calibration contingency was needed — neither prediction
+test reddened in any run. This proof pass also found and fixed a
+pre-existing bug in `.config/nextest.toml`'s exclusive-override filter: both
+`kicked_connection_reconnects_and_relogs_in` and
+`onslaught_dash_replay_never_snaps_at_150ms_rtt` only exist as
+`net::e2e::<name>`, and nextest's `test(=NAME)` exact-match requires the
+fully-qualified name — the bare names in the filter matched zero tests
+(confirmed via `cargo nextest list`), so both tests silently ran in the
+capped 'realtime' group instead of exclusively. Fixed by qualifying both
+names.
 
 ### 4. Finding 4's own step-2 calibration mechanism (predicate/const threshold tweak) can't produce a healthy-context snap in either prediction e2e test
 
