@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn loads_skinned_animated_glb() {
-        let path = std::env::temp_dir().join("vordar_mesh_test_skinned.glb");
+        let path = std::env::temp_dir().join("vordar_anim_test_skinned.glb");
         crate::mesh::test_glb::write_skinned_glb(&path);
         let (doc, buffers, _images) =
             gltf::import(path.to_str().unwrap()).expect("glb imports");
