@@ -362,20 +362,19 @@ names.
   sensitive-set x10 at `-Load 3.0` green on `scheduled_aoe`, closing rework 2
   on the recorded evidence in this file's intro paragraph.
 
-**ATTRIBUTED 2026-07-17 (Case C):** Stress suite at `-Load 3.0` ran 30 total runs
-(6 batches of 5) with the established 5-test sensitive set. No `scheduled_aoe`
-dodge-assert failure (the "B stepped out before T — the rewound test must miss
-it" assertion at `e2e_combat.rs:110`) was captured. The precondition
-(`sim_rate >= DODGE_SIM_RATE_MIN = 0.9`) remains justified by the physics
-bound: >= 41 pre-T sends required for a miss (see Plan Design decisions). The
-suspected bot-cadence starvation mechanism was not observed within the test's
-historical reproduction rate envelope (~1/10 to ~1/20). Other test failures
-occurred during the run (backstop timeouts and sim budget exhausted errors in
-both `scheduled_aoe` and `rend_kills_camped_enemy`), but these are distinct
-from the target dodge-assert failure and are not chased per the finding's Path
-gate. No attribution is possible without the specific captured failure. Per
-finding 2's Path case C, proceeding to step 3 on the physics justification
-alone.
+**ATTRIBUTED 2026-07-17 (Case A):** Stress suite at `-Load 3.0` ran 30 total runs
+(6 batches of 5) with the established 5-test sensitive set. 3 `scheduled_aoe`
+dodge-assert failures were captured (batches 2/4, 3/5, 6/3):
+- Batch 2, Run 4: `sends_pre_t=15`, no sends for first 1018ms into 2200ms trace window
+- Batch 3, Run 5: `sends_pre_t=20`, no sends for first 1048ms into ~1900ms window  
+- Batch 6, Run 3: `sends_pre_t=26`, iteration wall gaps up to 159ms at trace start
+
+All three fired despite `sim_rate >= 0.9` (readings: 0.93, 0.99, 0.92 respectively),
+with `sends_pre_t` far below the physics bound of 41. **Bot-thread starvation
+CONFIRMED**: the bot's 16ms-sleep dodge loop cannot maintain cadence under 3x CPU
+oversubscription, collapsing the send queue. Per finding 2's Path case A routing,
+proceeding to step 3: implement the pre-T send counter as a second precondition
+alongside `sim_rate` to gate the miss assert and prevent false red.
 
 ## Carried forward from previous report
 
