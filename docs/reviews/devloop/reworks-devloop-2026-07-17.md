@@ -15,10 +15,16 @@ boundary.
 
 Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-17.md`):
 
-> **finding 1 (user-decides — ask at loop launch) → finding 2 → finding 3 →
+> **~~finding 1 (user-decides — ask at loop launch) → finding 2 → finding 3 →
 > finding 4 → finding 5 → finding 6 → finding 7 → finding 8 → finding 9
-> (micro) → finding 10 → rework 1 (user-decides; after finding 5: a queue
-> runner must embed the planner-fallback convention finding 5 writes).**
+> (micro) → finding 10~~ → ~~rework 1 (user-decides; after finding 5: a queue
+> runner must embed the planner-fallback convention finding 5 writes)~~.**
+> Findings 1–10 done 2026-07-17 (1–5, 7: pipeline rules, pushed to
+> ClaudeConfig; 6: allowlist content-keying; 8: measurement contradicted the
+> stated failure mode — fixed the real cause, filed rework 2; 9: micro, applied
+> inline; 10: dedicated sessions declined — plugin disabled, measurement folded
+> into the next loop).
+> Rework 1 done 2026-07-17 (plan-devloop-rework-1-2026-07-17.md, 3 steps; pause-on-plan queue runner: a run-queue skill chains plan-rework + implement-finding by invocation, rework-planner pinned to fable so an opus queue session cannot downgrade plans).
 >
 > Findings 1–4 lead on the token axis (orchestrator tier, worker read
 > channels, silent-breakage prevention, mega-step shape). 5 is the
