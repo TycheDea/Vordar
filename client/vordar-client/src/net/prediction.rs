@@ -62,25 +62,28 @@ pub(super) fn reconcile_own(
     let statics: Vec<(Vec3, CollisionShape)> =
         if own_shape.is_some() { collect_solid_anchored_statics(world) } else { Vec::new() };
     let shape = own_shape.unwrap_or(CollisionShape::Aabb { half_extents: Vec3::ZERO });
+    let local_dash_active = world.get::<&vordar_game::combat::LeapImpulse>(entity).is_ok();
     let (replayed, still_reconciling_a_dash) = {
         let state = resources.get_mut::<NetClientState>().unwrap();
         state.pending.retain(|p| p.seq > last_processed_seq);
-        // Not just "is the local LeapImpulse still active": the server mirrors
-        // the same cast only after its own one-way network delay, so its copy
-        // of the dash finishes strictly later than the local one, and the
-        // MoveIntent queue it drains at one-per-tick can lag further behind
-        // still. Any unacked intent recorded during the dash means the
-        // server hasn't caught up on the dash yet.
+        // Two-sided suppression: an unacked leap-tagged pending intent means
+        // the server hasn't caught up on the dash yet (its mirror finishes
+        // strictly later than the local one, and its one-per-tick intent
+        // queue can lag further behind still). A still-active local
+        // LeapImpulse covers the other side — a client that stalls for
+        // ≥ ~RTT sends nothing new, so its dash-tagged intents all get
+        // acked and pending empties out while the dash is still running
+        // locally. Either side unfinished means the correction must wait.
         let still_reconciling_a_dash = state.pending.iter().any(|p| p.leap.is_some());
         (replay_position(server_pos, speed, state.pending.iter(), bound, &shape, &statics), still_reconciling_a_dash)
     };
     // Collision is part of the replay (predict_step pushes out of statics
     // exactly as SeparationSystem does), so wall contact isn't a source of
     // mismatch here. What forces suppression during a dash is network
-    // timing: the server's dash mirror finishes strictly later than the
-    // local one, so corrections stay off until the server has caught up on
-    // the whole dash.
-    if still_reconciling_a_dash {
+    // timing on one side and a possibly-stalled client on the other, so
+    // corrections stay off until both the server has caught up and the
+    // local dash has finished.
+    if still_reconciling_a_dash || local_dash_active {
         return;
     }
     let Ok(mut transform) = world.get::<&mut Transform>(entity) else { return };
@@ -419,6 +422,37 @@ mod tests {
             "replay against a wall must stay in the Trust band, moved {:.2} units",
             (after - before).length()
         );
+    }
+
+    /// A client stall (no ticks sent for ≥ ~RTT) gets every dash-tagged
+    /// intent acked while its own `LeapImpulse` is still counting down: the
+    /// pending queue is empty, so only the local-impulse side of the
+    /// suppression can catch it. Reconciliation must not snap mid-dash here.
+    #[test]
+    fn reconcile_never_snaps_while_the_local_dash_is_still_running() {
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(PlayRadius::default());
+        let entity = world.spawn((
+            Transform::new(Vec3::ZERO),
+            Player { speed: 6.0 },
+            Hitbox { shape: walker_shape() },
+            vordar_game::combat::LeapImpulse { velocity: Vec3::new(15.0, 0.0, 0.0), remaining: 0.2 },
+        ));
+
+        let mut state =
+            NetClientState::new(None, "127.0.0.1:9".parse().unwrap(), "unit-test".into(), [0u8; 32], true, Duration::ZERO);
+        state.own_id = Some(1);
+        state.entities.insert(1, entity);
+        // pending left empty: every intent already acked.
+        resources.insert(state);
+
+        reconcile_own(&mut world, &mut resources, entity, Vec3::new(6.0, 0.0, 0.0), 10);
+
+        let position = world.get::<&Transform>(entity).unwrap().position;
+        assert_eq!(position, Vec3::ZERO, "must not snap while the local dash is still running, got {position:?}");
+        let state = resources.get::<NetClientState>().unwrap();
+        assert_eq!(state.correction, Vec3::ZERO);
     }
 
     #[test]
