@@ -395,6 +395,22 @@ and outside its fix, recorded per the Path, not chased. An idle full gate
 afterward (`cargo nextest run --workspace` + `cargo test --doc --workspace`)
 held 404/404 with doc-tests clean.
 
+## Tracked observations (not yet plannable)
+
+- **`rend_kills_camped_enemy` failed 3/10 in rework 5 finding 4's proof
+  (2026-07-17)**, on its own pre-existing "the bot must survive the fight"
+  assert (`server/vordar-server/tests/e2e_combat.rs:216`) — unrelated to that
+  rework and not chased there. This is the first red this test has shown at
+  3x load all session: it held 5/5 idle and 5/5 at 20-way oversubscription
+  when rework 2 landed its fix, and "in every run it reached" during rework
+  3 finding 5's proof. 3/10 is too thin a sample to tell a real regression
+  from noise, and no attribution pass has been run (no trace on what the bot
+  observed before it died, unlike the trace-first treatment `scheduled_aoe`
+  and the prediction tests got). Not filed as a plannable finding yet —
+  watch for a repeat in a future proof run before spending a design pass on
+  it; if it recurs, root-cause first the same way finding 5 did for
+  `scheduled_aoe`.
+
 ## Carried forward from previous report
 
 None — `reworks-devloop-2026-07-15.md`'s single rework (parallel execution)
