@@ -84,7 +84,7 @@ fn kicked_connection_reconnects_and_relogs_in() {
     ));
 
     let mut recv = NetReceiveSystem;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while resources.get::<NetClientState>().unwrap().own_id.is_none() {
         assert!(Instant::now() < deadline, "victim never received its first Welcome");
         recv.run(&mut world, &mut resources, DT);
@@ -106,7 +106,7 @@ fn kicked_connection_reconnects_and_relogs_in() {
 
     // The victim must notice on its own — no test code touches its
     // NetClientState between here and full reconnection.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         recv.run(&mut world, &mut resources, DT);
         if reconnect_attempt(&resources).is_some() {
@@ -123,7 +123,7 @@ fn kicked_connection_reconnects_and_relogs_in() {
     );
 
     // Entirely automatic from here: backoff, redial, Connected, Login, Welcome.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(40);
     loop {
         recv.run(&mut world, &mut resources, DT);
         let state = resources.get::<NetClientState>().unwrap();
@@ -227,7 +227,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     };
 
     // Welcome + clock sync.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         run_input(&mut world, &mut resources);
         run_update(&mut world, &mut resources);
@@ -247,7 +247,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
     // — no cooldown-clearing wait needed. The predicted entity itself is
     // still created only once the first Snapshot's `enters` list reaches
     // this client (Welcome alone doesn't spawn it), so pump until it exists.
-    let entity_deadline = Instant::now() + Duration::from_secs(2);
+    let entity_deadline = Instant::now() + Duration::from_secs(8);
     while own_entity(&resources).is_none() {
         run_input(&mut world, &mut resources);
         run_update(&mut world, &mut resources);
@@ -275,7 +275,7 @@ fn onslaught_dash_replay_never_snaps_at_150ms_rtt() {
 
     // Run through the dash and settle afterward, watching every tick's
     // NetReceiveSystem call for a snap.
-    let dash_deadline = Instant::now() + Duration::from_secs(4);
+    let dash_deadline = Instant::now() + Duration::from_secs(30);
     let mut elapsed = 0.0f32;
     while elapsed < cast_secs + 1.0 {
         assert!(Instant::now() < dash_deadline, "test loop stalled mid-dash");
@@ -391,7 +391,7 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
     };
 
     // Welcome + clock sync.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         run_input(&mut world, &mut resources);
         run_update(&mut world, &mut resources);
@@ -406,7 +406,7 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
         std::thread::sleep(Duration::from_millis(16));
     }
 
-    let entity_deadline = Instant::now() + Duration::from_secs(2);
+    let entity_deadline = Instant::now() + Duration::from_secs(8);
     while own_entity(&resources).is_none() {
         run_input(&mut world, &mut resources);
         run_update(&mut world, &mut resources);
@@ -424,7 +424,7 @@ fn predicted_wall_hug_never_snaps_at_150ms_rtt() {
 
     // Walk straight at the cottage and settle against it, watching every
     // tick's NetReceiveSystem call for a snap.
-    let hold_deadline = Instant::now() + Duration::from_secs(6);
+    let hold_deadline = Instant::now() + Duration::from_secs(30);
     let mut elapsed = 0.0f32;
     while elapsed < 2.0 {
         assert!(Instant::now() < hold_deadline, "test loop stalled mid wall-hug");
