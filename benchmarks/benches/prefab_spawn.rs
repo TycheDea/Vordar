@@ -18,13 +18,14 @@ use hecs::Entity;
 use std::time::{Duration, Instant};
 use vordar_benches::{physics_resources, prime_grid, spawn_crowd, workspace_root, Layout, DT};
 
-/// physics_resources + the prefab machinery. bolt.ron declares only core
-/// components (Transform, Velocity, RenderShape, Hitbox), so the core
-/// loaders suffice.
+/// physics_resources + the prefab machinery. bolt.ron declares the core
+/// components (Transform, Velocity, RenderShape, Hitbox) plus VfxTrail, so
+/// the registry needs both the core loaders and vordar-game's VfxTrail.
 fn prefab_resources() -> Resources {
     let mut resources = physics_resources();
     let mut registry = ComponentRegistry::new();
     register_core_components(&mut registry);
+    registry.register::<vordar_game::vfx::VfxTrail>("VfxTrail");
     let mut library = PrefabLibrary::new();
     library.load_dir("content/prefabs");
     resources.insert(registry);

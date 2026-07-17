@@ -61,8 +61,8 @@ the durable record. Update it after any change that moves a number.
 | CPU | 12th Gen Intel Core i7-12700 (12 cores / 20 threads) |
 | RAM | 32 GB |
 | OS | Windows 11 Pro |
-| rustc | 1.94.0 |
-| Date | 2026-07-04 |
+| rustc | 1.97.1 |
+| Date | 2026-07-18 |
 
 ## Architecture note: staggered 60 Hz PostUpdate
 
@@ -82,99 +82,117 @@ faster. This is why the soak `post_hz` line below now reads 60.0 instead of
 
 | Scenario | Time/tick | Share of 16.67 ms |
 |---|---|---|
-| 200 enemies + 50 players | 157.8 µs | 0.9 % |
-| 1000 enemies + 200 players | 478.1 µs | **2.9 %** |
+| 200 enemies + 50 players | 132.1 µs | 0.8 % |
+| 1000 enemies + 200 players | 1.586 ms | **9.5 %** |
 
-(was 388 µs / 2.97 ms, 17.8 % — the view-idiom, grid-targeting, and compiled-prefab
-fixes cut the worst case by ~84 %.)
+(was 388 µs / 2.97 ms, 17.8 % pre-fix — the view-idiom, grid-targeting, and
+compiled-prefab fixes cut that worst case by ~84 %; the 1000+200 figure has since
+climbed from 478.1 µs/2.9 % over the same span `CoreGamePlugin` picked up
+`XpGrantSystem` and other `CollisionResolve`/`Update` systems this scenario now
+pays for every tick.)
 
 ### Collision chain — `physics` (60 Hz)
 
 | Bench | N | Time | Notes |
 |---|---|---|---|
-| cell_update (full grid rebuild) | 200 / 1000 / 5000 | 11.7 µs / 57.3 µs / 303 µs | linear, cheap |
-| broadphase uniform | 1000 / 5000 | 288 µs / 1.58 ms | realistic density (~2.5/cell) |
-| broadphase cluster | 100 / 200 / 500 | 176 µs / 729 µs / 5.78 ms | 4 950 / 19 900 / 124 750 pairs — all-pairs inside the pile (unfixed, see WEAKPOINTS #5) |
-| narrowphase cluster | 100 / 200 / 500 | 44.0 µs / 195 µs / 1.50 ms | ≈ **12 ns/pair** (was 104 ns/pair — view idiom removed 4 world.get + shape.clone per pair) |
-| chain (all three) | uniform-1000 / uniform-5000 / cluster-200 | 438 µs / 2.52 ms / 1.11 ms | |
+| cell_update (full grid rebuild) | 200 / 1000 / 5000 | 5.82 µs / 29.1 µs / 147 µs | linear, cheap |
+| cell_update_moving (grid re-bucketing) | 200 / 1000 / 5000 | 15.1 µs / 86.4 µs / 461 µs | every entity changes cell |
+| broadphase uniform | 1000 / 5000 | 201 µs / 1.23 ms | realistic density (~2.5/cell) |
+| broadphase cluster | 100 / 200 / 500 | 122 µs / 532 µs / 4.41 ms | 4 950 / 19 900 / 124 750 pairs — all-pairs inside the pile (unfixed, see WEAKPOINTS #5) |
+| narrowphase cluster | 100 / 200 / 500 | 54.4 µs / 235 µs / 1.53 ms | ≈ **12 ns/pair** (was 104 ns/pair pre-fix — view idiom removed 4 world.get + shape.clone per pair) |
+| chain (all three) | uniform-1000 / uniform-5000 / cluster-200 | 280 µs / 1.64 ms / 790 µs | |
 
 ### Enemy AI — `enemy_ai` (60 Hz, grid-based targeting)
 
-Idle enemies (aggro_range == 0) never query and cost is independent of player count:
+Idle enemies (aggro_range == 0): below `GRID_PLAYER_MIN` (64) players the O(E×P)
+scan fallback still applies (empty result, but every enemy still scans every
+player); at or above it, the grid radius query comes back empty in O(1) per enemy:
 
-| E | idle |
+| E × P | idle |
 |---|---|
-| 50 | 370 ns |
-| 200 | 1.16 µs |
-| 1000 | 5.42 µs |
+| 50 × 1 | 387 ns |
+| 200 × 1 | 789 ns |
+| 200 × 50 | 56.3 µs |
+| 200 × 200 | 48.8 µs |
+| 1000 × 1 | 2.88 µs |
+| 1000 × 50 | 275 µs |
+| 1000 × 200 | 376 µs |
 
 Aggressive enemies (grid radius query, nearest by dist², not provoked):
 
 | E × P | aggro |
 |---|---|
-| 200 × 1 | 950 ns |
-| 200 × 200 | 124 µs |
-| 1000 × 1 | 3.09 µs |
-| 1000 × 200 | 834 µs |
+| 200 × 1 | 897 ns |
+| 200 × 50 | 57.1 µs |
+| 200 × 200 | 134 µs |
+| 1000 × 1 | 3.43 µs |
+| 1000 × 50 | 302 µs |
+| 1000 × 200 | 880 µs |
 
 Provoked / huge-radius fallback (global scan, unchanged O(E×P) — correct for this path, see plan):
 
 | E × P | engaged |
 |---|---|
-| 200 × 1 | 1.42 µs |
-| 200 × 200 | 229 µs |
-| 1000 × 1 | 6.30 µs |
-| 1000 × 200 | 1.17 ms |
+| 200 × 1 | 1.49 µs |
+| 200 × 50 | 57.3 µs |
+| 200 × 200 | 237 µs |
+| 1000 × 1 | 6.42 µs |
+| 1000 × 50 | 298 µs |
+| 1000 × 200 | 1.19 ms |
 
-O(E·P) is gone from the common (idle/aggro) case — idle cost no longer depends on P
-at all, and aggro scales with grid cell occupancy, not total player count. The
-`engaged` (provoked-only) path keeps the global scan by design; it's bounded by how
-many enemies are actively provoked, which is small in practice.
+O(E·P) is gone once P reaches `GRID_PLAYER_MIN` (64) — idle and aggro both drop to
+a grid radius query at and above that threshold, scaling with grid cell occupancy
+rather than total player count. Below the threshold every path (including idle)
+falls back to the O(E×P) scan, which is why idle/aggro/engaged converge to nearly
+the same cost at P=50. The `engaged` (provoked-only) path keeps the global scan by
+design at every P; it's bounded by how many enemies are actively provoked, which is
+small in practice.
 
 ### Separation — `separation` (60 Hz, per active pair)
 
 | Active pairs | Time | Per pair |
 |---|---|---|
-| 367 | 18.2 µs | ~49.5 ns |
-| 2 217 | 93.6 µs | ~42.2 ns |
-| 8 713 | 335 µs | ~38.4 ns |
+| 367 | 17.8 µs | ~48.5 ns |
+| 2 217 | 88.0 µs | ~39.7 ns |
+| 8 713 | 327 µs | ~37.5 ns |
 
-(was ~200–210 ns/pair — view idiom over `(&Transform, &Hitbox, Satisfies<&Solid>)`.)
+(was ~200–210 ns/pair pre-fix — view idiom over `(&Transform, &Hitbox, Satisfies<&Solid>)`.)
 
 ### Spatial grid — `spatial_grid`
 
 | Bench | Time |
 |---|---|
-| rebuild 200 / 1000 / 5000 | 6.6 µs / 32.0 µs / 169 µs |
-| query r=40 (AOI), allocating | 1.19–1.21 µs |
-| query r=40 (AOI), reused buffer (`query_radius_into`) | 0.89–0.93 µs |
+| rebuild 200 / 1000 / 5000 | 6.15 µs / 31.5 µs / 171 µs |
+| query r=40 (AOI), allocating | 1.10–1.15 µs |
+| query r=40 (AOI), reused buffer (`query_radius_into`) | 0.87–0.94 µs |
 
 ### Prefab spawn — `prefab_spawn` (compiled spawn plans, gap A)
 
 | Bench | Time | Notes |
 |---|---|---|
-| spawn/bolt | 677 ns | was 4.0 µs — RON parsed once per prefab, not per spawn |
-| churn/n8 (spawn+despawn/tick) | 6.35 µs | |
-| churn/n32 | 24.8 µs | was 126 µs |
+| spawn/bolt | 733 ns | was 4.0 µs pre-fix — RON parsed once per prefab, not per spawn |
+| churn/n8 (spawn+despawn/tick) | 8.52 µs | |
+| churn/n32 | 26.6 µs | was 126 µs pre-fix |
 
 ### Client netcode — `client_netcode` (gap B)
 
 | Bench | Time | Notes |
 |---|---|---|
-| apply_snapshot/states_a64 | 941 ns | was ~3.9 µs (4×, `mem::take` + view idiom) |
-| apply_snapshot/states_a200 | 2.84 µs | was 10.9 µs |
-| apply_snapshot/enters_64 | 50.9 µs | was 264 µs (mostly compiled prefab spawns) |
-| reconcile/pending60 | 189 ns | |
-| reconcile/pending240 | 575 ns | |
-| reconcile/pending60_statics32 | 20.7 µs | 32-static collision: ~110× pend60, replay per intent |
-| reconcile/pending240_statics32 | 81.7 µs | 32-static collision: ~142× pend240, replay per intent |
+| apply_snapshot/states_a64 | 222 ns | was ~3.9 µs pre-fix (4×, `mem::take` + view idiom) |
+| apply_snapshot/states_a200 | 295 ns | was 10.9 µs pre-fix |
+| apply_snapshot/enters_64 | 167 µs | was 264 µs pre-fix (mostly compiled prefab spawns); bolt enters now also build a `VfxTrail` component |
+| reconcile/pending60 | 555 ns | |
+| reconcile/pending240 | 1.65 µs | |
+| reconcile/pending60_statics32 | 4.26 µs | 32-static collision: ~7.7× pend60, replay per intent |
+| reconcile/pending240_statics32 | 15.7 µs | 32-static collision: ~9.5× pend240, replay per intent |
 
 ### Render CPU — `render_cpu` (VQ-F1 stress figure: 40 rigs × 64 joints)
 
 | Bench | Before | After | Notes |
 |---|---|---|---|
-| joint_palette_40x64 | 105.03 µs | 105.44 µs | unchanged (noise, p = 0.23) |
-| frustum_classify_552 | — | 12.36 µs | per-frame cull cost at 40 rigs + 512 statics (rendering rework 5) |
+| joint_palette_40x64 | 105.03 µs | 108.13 µs | ~3 % up, no `main`-baseline comparison printed (first save under this name) |
+| particle_fill_4096 | — | 23.23 µs | per-frame VFX particle buffer fill, 4096 particles |
+| frustum_classify_552 | — | 7.77 µs | per-frame cull cost at 40 rigs + 512 statics (rendering rework 5) |
 
 Rendering finding 10: `pose_player`, the per-entity posing path `MeshRenderSyncSystem`
 runs every display frame, allocated five fresh `Vec`s per skinned instance (sample,
@@ -194,9 +212,9 @@ repeated calls once warmed, i.e. zero further allocations in steady state.
 
 | Asset | Before | After | Notes |
 |---|---|---|---|
-| statue_vroid (11 MB, embedded textures) upload | 122.11 ms | 24–28 ms | decode off-thread (step 1); upload cost residual, BC compression targeted (rework 4); sidecar decode skip (rework 4): `first_sight/statue_vroid` now 17.4–18.0 ms (lazy per-slot decode, no PNG decode when the DDS sidecar wins, -81.6% vs. the still-decoding-every-embedded-image run) |
-| human (9 MB, skinned + clips) upload | 101.63 ms | 24–28 ms | same streaming path as statue; sidecar decode skip (rework 4): `first_sight/human` now 16.3–16.6 ms (-79.6% vs. the still-decoding-every-embedded-image run) |
-| zone_ground (3× 2k JPG decode + mesh gen) | 246.27 ms | 6.5–7.3 ms | decode off-thread (step 1); mesh gen on background thread, GPU submission at draw; BC sidecars (rework 4): `decode_and_generate` now 13.9–14.6 ms (3 file reads + header parses, no JPG decode, -92.8% vs. the still-JPG-decoding run) |
+| statue_vroid (11 MB, embedded textures) upload | 122.11 ms | 24–28 ms | decode off-thread (step 1); upload cost residual, BC compression targeted (rework 4); sidecar decode skip (rework 4): `first_sight/statue_vroid` now 17.7–18.2 ms (lazy per-slot decode, no PNG decode when the DDS sidecar wins, -85.3% vs. the still-decoding-every-embedded-image run) |
+| human (9 MB, skinned + clips) upload | 101.63 ms | 24–28 ms | same streaming path as statue; sidecar decode skip (rework 4): `first_sight/human` now 17.0–17.7 ms (-82.9% vs. the still-decoding-every-embedded-image run) |
+| zone_ground (3× 2k JPG decode + mesh gen) | 246.27 ms | 6.5–7.3 ms | decode off-thread (step 1); mesh gen on background thread, GPU submission at draw; BC sidecars (rework 4): `decode_and_generate` now 11.6–11.8 ms (3 file reads + header parses, no JPG decode, -95.2% vs. the still-JPG-decoding run) |
 | environment bake (per load, synchronous) | ~24 ms → ~20 ms | 6.8–7.3 ms | Baker hoist (step 2, pipeline compile once); single submit (step 3) collects 42 render passes |
 | HDRI decode (zone-change path) | 577.9–597.4 ms | 540.7–543.0 ms | off-thread (step 4); frame pays only bake cost at arrival |
 
@@ -216,26 +234,32 @@ tick, i.e. the actual per-tick cost the sim thread pays)
 
 | Bench | Time | Notes |
 |---|---|---|
-| broadcast (full round) 10 clients | 35.3 µs | |
-| broadcast (full round) 50 clients | 326 µs | |
-| broadcast (full round) 200 clients | 5.23 ms | was 7.11 ms un-staggered |
+| broadcast (full round) 10 clients | 39.5 µs | |
+| broadcast (full round) 50 clients | 386 µs | |
+| broadcast (full round) 200 clients | 5.16 ms | was 7.11 ms un-staggered pre-fix |
 | broadcast (full round) 50 clients + 500 NPCs | 3.05 ms | |
-| **broadcast_slice (per-tick) 200 clients** | **860 µs** | was the whole 7.11 ms landing on one tick — this is the number that matters for input-phase jitter |
-| broadcast_slice 10 / 50 clients | 6.4 µs / 51.1 µs | |
-| broadcast_slice 50 clients + 500 NPCs | 492 µs | |
-| select_states A=64 / 200 / 1000 | 40.6 ns / 6.2 µs / 30.7 µs | pass-through under the 64 cap |
-| mechanic_resolve 50 / 200 conns | 10.0 µs / 41.1 µs | per due mechanic, unchanged cadence |
+| **broadcast_slice (per-tick) 200 clients** | **858 µs** | was the whole 7.11 ms landing on one tick pre-fix — this is the number that matters for input-phase jitter |
+| broadcast_slice 10 / 50 clients | 6.6 µs / 60.7 µs | |
+| broadcast_slice 50 clients + 500 NPCs | 507 µs | |
+| select_states A=64 / 200 / 1000 | 43.6 ns / 5.7 µs / 27.8 µs | pass-through under the 64 cap |
+| mechanic_resolve 50 / 200 conns | 20.2 µs / 97.3 µs | per due mechanic, unchanged cadence |
 
 ### Protocol — `protocol` (postcard)
 
+Snapshot state and AOI enter/leave data now encode as two separate messages
+(networking rework 3's datagram split) rather than one combined `Snapshot`:
+
 | Bench | Time |
 |---|---|
-| encode Snapshot (64 states + 8 enters/leaves, **1 153 B**) | 1.09 µs |
-| decode same | 1.33 µs |
-| encode / decode MoveIntent | 102 ns / 14.6 ns |
+| encode snapshot_64 (64 states, **627 B**) | 1.82 µs |
+| decode same | 1.39 µs |
+| encode aoi_delta_8 (8 enters/leaves, **102 B**) | 420 ns |
+| decode same | 262 ns |
+| encode / decode MoveIntent | 185 ns / 87.9 ns |
 
-1 153 B × 10 Hz ≈ **11.3 KB/s per client** steady state — matches soak's measured
-~11 KB/s/client and fits the 25 KB/s soak budget.
+627 B + 102 B ≈ 729 B × 10 Hz ≈ **7.1 KB/s per client** for the two per-tick
+messages' encoded payload alone (excludes QUIC/datagram framing overhead, so it
+undercounts the soak test's on-wire figure below).
 
 ### Network macro — soak (real QUIC, wandering mutually-in-AOI crowd)
 
@@ -399,8 +423,8 @@ remote_render_smoothness_under_loss_probe`.
 
 ## Budget shares & where the limits are
 
-At the target load (200-player crowd, ~200 NPCs, one zone) **everything fits with
-enormous headroom**: the whole sim tick is under 3 % of budget even at 1000+200
+At the target load (200-player crowd, ~200 NPCs, one zone) **everything still fits
+with headroom**: the whole sim tick stays under 10 % of budget even at 1000+200
 entities, and the 200-client snapshot fan-out's per-tick cost (0.86 ms) is under 1 %
 of its own 100 ms budget.
 
@@ -408,15 +432,17 @@ Ranked by how soon each path becomes the limiter, post-fix:
 
 1. **Dense single-cell crowds (collision chain) — the only remaining measured
    cliff, WEAKPOINTS #5, deliberately out of scope for this pass.** A 500-entity
-   pile still costs 5.8 ms (broadphase) + 1.5 ms (narrowphase) ≈ 7.3 ms — down from
+   pile still costs 4.4 ms (broadphase) + 1.5 ms (narrowphase) ≈ 5.9 ms — down from
    ~23 ms pre-fix (the narrowphase view idiom helped here too) but still the thing
    to watch for chokepoints and boss piles.
 2. **Not bottlenecks, confirmed at this baseline:** snapshot fan-out (400-bot soak
-   now passes at 18.7 ms p99 vs a 25 ms budget), enemy AI (idle/aggro paths no
-   longer scale with player count), separation (~40 ns/pair), prefab spawn (677 ns/
-   spawn), client apply_snapshot (941 ns at A=64), grid rebuild/query, postcard
-   encode/decode, packet loss up to 5 % at both 50 ms and 200 ms RTT (208 ms p99 /
-   302 ms max worst-case datagram-snapshot gap vs a 250/500 ms gate — rework 3).
+   passed at 18.7 ms p99 vs a 25 ms budget as of networking rework 3, not re-probed
+   this pass), enemy AI (idle/aggro drop to a grid query at P ≥ 64, unaffected by E
+   below it), separation (~40 ns/pair), prefab spawn (733 ns/spawn), client
+   apply_snapshot (222 ns at A=64), grid rebuild/query, postcard encode/decode,
+   packet loss up to 5 % at both 50 ms and 200 ms RTT (208 ms p99 / 302 ms max
+   worst-case datagram-snapshot gap vs a 250/500 ms gate — rework 3, not re-probed
+   this pass).
 
 Implication for future work: with structural items #1–#4 fixed, the sim has broad
 headroom at the design point (200 players, 200 NPCs). The next real constraint is
