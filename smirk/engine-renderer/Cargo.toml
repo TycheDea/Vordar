@@ -19,15 +19,14 @@ glam        = { workspace = true }
 log         = { workspace = true }
 
 pollster = "0.4.0"
-# Verified against crates.io on 2026-03-22
-wgpu   = "29"
+wgpu   = { workspace = true }
 winit  = { workspace = true }
 bytemuck = "1.25.0"
 ddsfile  = "0.5"
-hecs = "0.11.0"
+hecs = { workspace = true }
 egui = { workspace = true }
-egui-wgpu = "0.34"
-egui-winit = "0.34"
+egui-wgpu = { workspace = true }
+egui-winit = { workspace = true }
 gltf = { version = "1.4.1", features = ["import", "KHR_materials_emissive_strength"] }
 # Radiance .hdr decode for IBL environments (+ png/jpeg for ground texture
 # sets); f32→f16 for Rgba16Float upload

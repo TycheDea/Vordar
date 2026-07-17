@@ -8,7 +8,8 @@ workspace = true
 
 [lib]
 name = "chapter_01"
-# No doctests ship here; skip building the doctest binary.
+# No unit tests or doctests ship here; skip building the empty test binaries.
+test    = false
 doctest = false
 
 [dependencies]

@@ -32,6 +32,10 @@ ron     = "0.12"
 log     = "0.4"
 winit   = "0.30"
 egui    = "0.34"   # engine-renderer draws with it; the game registers UiLayers callbacks
+egui-wgpu  = "0.34"
+egui-winit = "0.34"
+wgpu       = "29"
+smallvec   = "1"
 
 # Networking (engine-net, protocol, server, client)
 tokio    = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }

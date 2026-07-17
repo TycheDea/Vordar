@@ -15,7 +15,7 @@ hecs           = { workspace = true }
 serde          = { workspace = true }
 ron            = { workspace = true }
 log            = { workspace = true }
-smallvec       = "1"
+smallvec       = { workspace = true }
 
 [dev-dependencies]
 # Content-lint only (tests/content_lint.rs): CPU-side glTF parse via

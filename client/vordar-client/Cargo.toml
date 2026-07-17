@@ -43,7 +43,7 @@ getrandom       = { workspace = true }
 [dev-dependencies]
 # Offscreen render tests (tests/ground_render.rs) pass wgpu types to the
 # engine's headless harness.
-wgpu = "29"
+wgpu = { workspace = true }
 # engine-renderer's offscreen module is feature-gated — enable it here so
 # this test build sees it without shipping it in vordar.
 engine-renderer = { path = "../../smirk/engine-renderer", features = ["offscreen"] }

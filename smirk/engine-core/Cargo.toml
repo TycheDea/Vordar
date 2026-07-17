@@ -12,4 +12,4 @@ hecs      = { workspace = true }
 serde     = { workspace = true }
 ron       = { workspace = true }
 log       = { workspace = true }
-smallvec  = "1"
+smallvec  = { workspace = true }
