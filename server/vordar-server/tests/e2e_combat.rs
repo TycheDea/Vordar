@@ -98,10 +98,10 @@ fn scheduled_aoe() {
 }
 
 // The player's default attack, end to end. A camp-resident grunt replicates
-// into the bot's AOI; the bot closes to melee and casts "rend" (fast
-// Scheduled strike, 20 dmg with the Ravager's power) until the grunt's 30 HP
-// run out — observed as an AOI leave while the bot stays alive (player_id
-// never changes → no death re-Welcome).
+// into the bot's AOI; the bot walks into aggro and casts "rend" (fast
+// Scheduled strike, 20 dmg with the Ravager's power) as the charger arrives,
+// until the grunt's 30 HP run out — observed as an AOI leave while the bot
+// stays alive (player_id never changes → no death re-Welcome).
 #[test]
 fn rend_kills_camped_enemy() {
     workspace_root();
@@ -119,16 +119,22 @@ fn rend_kills_camped_enemy() {
     let original_body = bot.player_id.unwrap();
     let grunt_id = *bot.prefabs.iter().find(|(_, p)| *p == "grunt").unwrap().0;
 
-    // Fight at rend's edge: close to ~2.2, back off under 1.6 (the grunt's
-    // 2.5 speed can't catch the bot's 6.0 — face-tanking a 10-per-contact
-    // charger at the Ravager's zero defense loses). Two clean hits (16 + 4
-    // power) beat 30 HP. Cast attempts go out every 250 ms once well inside
-    // max_range (2.0 vs 2.5): the server silently drops out-of-range and
-    // on-cooldown casts and its own 900 ms cooldown paces the real ones, so
-    // a rejected attempt costs 250 ms — the old edge-of-range gate (2.4,
-    // 0.1 slack at up to 8.5 u/s closing speed) burned a full second per
-    // stale-snapshot miss and flaked past the deadline under parallel-test
-    // CPU load.
+    // Close to 3.0 and stand; the charger walks itself into rend's range.
+    // The bot deliberately does NOT station-keep at rend's edge. Contact
+    // damage bills 10 per NEW overlap, and the only window that both clears
+    // the 1.0 contact boundary and stays inside rend's 2.5 max_range is 1.5
+    // wide — while under CPU load snapshots arrive ~100 ms apart, which at
+    // the player's fixed 6.0 u/s (intents are direction-only; there is no
+    // slow walk) is ~0.6 u of position uncertainty per update. A
+    // hold-station band inside that window is therefore narrower than its
+    // own control dead time: the bot oscillates across the contact boundary
+    // and re-bills 10 every cycle until its 100 HP are gone. Stopping at 3.0
+    // keeps even a stalled overshoot clear of contact, and standing still
+    // has no dead time left to overshoot, so the fight stays bounded by
+    // rend's own pace: two clean hits (16 + 4 power) beat 30 HP, ~1.2 s
+    // apart at the 900 ms cooldown. Cast attempts go out every 250 ms; the
+    // server silently drops out-of-range and on-cooldown casts, and 2.2
+    // leaves 0.3 of slack against a stale snapshot.
     let mut last_cast = Instant::now() - Duration::from_secs(2);
     let deadline = Instant::now() + Duration::from_secs(25);
     let mut hp_seen: Vec<i32> = Vec::new();
@@ -137,14 +143,12 @@ fn rend_kills_camped_enemy() {
         if let (Some(own), Some(grunt)) = (bot.own_pos(), bot.last_snapshot.get(&grunt_id).copied()) {
             let offset = glam::Vec2::new(grunt.x - own.x, grunt.z - own.z);
             let dist = offset.length();
-            if dist > 2.2 {
+            if dist > 3.0 {
                 bot.send_move(offset.normalize());
-            } else if dist < 1.6 {
-                bot.send_move(-offset.normalize());
             } else {
                 bot.send_move(glam::Vec2::ZERO);
             }
-            if dist <= 2.0 && last_cast.elapsed() > Duration::from_millis(250) {
+            if dist <= 2.2 && last_cast.elapsed() > Duration::from_millis(250) {
                 bot.send_cast("rend", glam::Vec2::new(grunt.x, grunt.z));
                 last_cast = Instant::now();
             }

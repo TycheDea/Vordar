@@ -10,16 +10,26 @@
 # On top of the cap, tests that drive a closed-loop bot against a wall-clock
 # deadline are EXCLUSIVE: `threads-required = "num-cpus"` makes each occupy
 # every worker slot, so nothing else runs beside it (the group cap alone does
-# not stop unrelated tests from loading the CPU next to them —
-# rend_kills_camped_enemy has flaked exactly that way twice).
+# not stop unrelated tests from loading the CPU next to them).
 # Renaming one of these tests MUST update this filter list.
 #
 # MEASURED COST (2026-07-15): exclusive-test isolation costs 6.45s per full
-# run (3.37s + 2.06s + 1.02s with all cores idle). Despite it,
-# rend_kills_camped_enemy flaked ~2.5% of full runs under load; isolation is
-# retained (rerun cost 40s + attribution confusion outweighs the 6.45s fixed
-# cost), and future flakes get fixed via test-internal budget tuning, not
-# scheduling.
+# run (3.37s + 2.06s + 1.02s with all cores idle). Isolation is retained: the
+# rerun cost (40s + attribution confusion) outweighs the 6.45s fixed cost.
+#
+# MEASURED (2026-07-17), rend_kills_camped_enemy: its residual flake was NOT a
+# missed kill deadline. Every reproduced failure fired "the bot must survive
+# the fight" at 8-13.7s against a 25s deadline — the bot died, so widening
+# that deadline was inert. Cause: at the player's fixed 6.0 u/s, a snapshot
+# interval stretched to ~100ms under load is ~0.6u of position uncertainty,
+# which is wider than any hold-station band fitting between the 1.0 contact
+# boundary and rend's 2.5 max_range; the bot oscillated across contact and
+# re-billed 10 damage per cycle until its 100 HP were gone. Fixed in the test
+# by removing the station-keeping entirely (close to 3.0, then stand and let
+# the charger arrive), which also cut it from 3.68s to ~3.3s mean. Verified
+# 5/5 green idle and 5/5 under 20-way CPU oversubscription. Deep starvation
+# (3x oversubscription) still time-starves the server sim itself and fails
+# every bot control law equally; see docs/reviews/devloop/reworks-*.
 
 [test-groups]
 realtime = { max-threads = 4 }

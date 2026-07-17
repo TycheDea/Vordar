@@ -26,6 +26,9 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-17.md`):
 > recurring frictions; 10 is wall-only. Rework 1 goes last because it
 > packages conventions the fixes establish.
 
+Rework 2 was filed 2026-07-17 during finding 8's implementation and is not in
+the queue above; it is unblocked and orderable on its own.
+
 ### 1. (user-decides) A queue-runner convention: one launch decision per report instead of one prompt per rework
 
 - **Evidence:** the rendering campaign consumed six near-identical user
@@ -76,6 +79,62 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-17.md`):
   campaign completes with one plan-approval word per rework and zero other
   content-free prompts (vs 6 full prompts this campaign) at unchanged
   commit/gate discipline.
+
+### 2. The e2e bots drive wall-clock control loops against a server sim that CPU load can time-starve
+
+Filed 2026-07-17 by the finding-worker implementing fixes finding 8, whose
+stated failure mode the measurement contradicted. Finding 8's surgical part
+landed (see below); this is the rework-scale remainder.
+
+- **Evidence:** fixes finding 8 recorded `rend_kills_camped_enemy`'s flake as
+  "its closed-loop bot missing a wall-clock kill deadline under CPU load", and
+  prescribed widening that deadline from a measured worst case. Reproduced
+  under CPU oversubscription, the test never missed the deadline: every
+  failure fired `"the bot must survive the fight"`
+  (`server/vordar-server/tests/e2e_combat.rs:169`) at 8.4-13.7s wall against a
+  25s deadline. The bot *died*; the deadline had >2x headroom in every failing
+  run, so the prescribed fix was inert. Root cause measured by tracing the
+  bot's observed distance: snapshots arrive ~100ms apart under load, and
+  `movement_velocity` (`game/vordar-game/src/player/mod.rs:29-32`) normalizes
+  intents, so the bot only ever moves at a fixed 6.0 u/s — ~0.6u of position
+  uncertainty per update, wider than any hold-station band that fits between
+  the 1.0 contact boundary and rend's 2.5 `max_range` (a 1.5u window). The bot
+  oscillated across contact, re-billing 10 damage per new overlap
+  (`CollisionStarted` is edge-triggered, re-armed each cycle by
+  `SeparationSystem`) until its 100 HP ran out.
+- **Ideal:** an e2e bot's verdict depends on simulated progress, not on the
+  harness winning a wall-clock race the host's scheduler can revoke — so a
+  loaded machine makes tests slower, never red.
+- **Gap:** at ~3x CPU oversubscription the *server sim itself* time-starves:
+  a grunt needs 12s of wall clock to cross ~4 units, and every bot control law
+  measured (original kite band 1.6-2.2; a widened 1.9-2.4 band; stand-at-2.0;
+  stand-at-3.0/6.0) fails indistinguishably, ~1 in 5. The landed fix removes
+  the *self-inflicted* oscillation and is clean 5/5 idle and 5/5 at 20-way
+  oversubscription, but nothing test-internal survives a sim starved that
+  deep. The 2026-07-15 decision "future flakes get fixed via test-internal
+  budget tuning, not scheduling" was recorded against the wrong failure mode
+  and cannot generalize: budget tuning has no lever once the sim is the thing
+  running slow.
+- **Tradeoffs:** *Wins:* removes a whole class of load-induced red from the
+  e2e suite; makes exclusive scheduling (6.45s/run) justifiable on its own
+  terms rather than as flake insurance; the same fragility latently affects
+  every closed-loop bot test, not just this one. *Losses:* touching how
+  `test-support`'s bots observe time is a harness-wide change with real
+  regression surface across ~30 e2e tests; a sim-time gate can mask a genuine
+  wall-clock performance regression, so the deadline assert must survive in
+  some form; the payoff is bounded — the residual flake is rare under the
+  isolation already in place.
+- **Suggestion:** /plan-rework. The design pass should decide whether the bots
+  gate on server tick/`WorldTime` progress instead of `Instant::now()`
+  (deadlines become "N sim-seconds of rends", immune to host scheduling), or
+  whether the harness detects a starved sim and skips rather than fails. It
+  should also settle whether tests that cannot state a sim-time budget belong
+  in the default suite at all.
+- **Path:** (1) inventory the closed-loop bot tests and which of them race a
+  wall clock; (2) decide the sim-time-vs-skip mechanism above; (3) land it
+  behind the existing exclusive group so scheduling can be relaxed only if the
+  mechanism proves out; proof: the suite stays green at 3x CPU
+  oversubscription, where every control law measured today fails ~1 in 5.
 
 ## Carried forward from previous report
 
