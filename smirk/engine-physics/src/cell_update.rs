@@ -28,6 +28,12 @@ pub struct CellUpdateSystem {
     scratch: Vec<GridCell>,
 }
 
+impl Default for CellUpdateSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CellUpdateSystem {
     pub fn new() -> Self { Self { scratch: Vec::new() } }
 }

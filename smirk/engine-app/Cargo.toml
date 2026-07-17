@@ -3,6 +3,9 @@ name    = "engine-app"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [features]
 # winit (default): window creation, event loop, keyboard input. Headless builds
 # (dedicated server) disable default features and use App::run_headless().

@@ -32,6 +32,35 @@ impl System for DevOverlaySystem {
     }
 }
 
+/// Draw the stats panel. Non-interactable so it never steals game input.
+pub(crate) fn draw_dev_overlay(ctx: &egui::Context, lines: &[(String, String)]) {
+    use egui::{Align2, Area, Color32, Id, RichText, Vec2};
+
+    Area::new(Id::new("dev_overlay"))
+        .anchor(Align2::LEFT_TOP, Vec2::new(8.0, 8.0))
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(Color32::from_black_alpha(170))
+                .inner_margin(8.0)
+                .corner_radius(4.0)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for (key, value) in lines {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{key:<16}"))
+                                .color(Color32::from_rgb(150, 150, 150))
+                                .monospace().size(13.0));
+                            ui.label(RichText::new(value)
+                                .color(Color32::WHITE)
+                                .monospace().size(13.0));
+                        });
+                    }
+                });
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,33 +97,4 @@ mod tests {
             "no new input must leave the overlay open"
         );
     }
-}
-
-/// Draw the stats panel. Non-interactable so it never steals game input.
-pub(crate) fn draw_dev_overlay(ctx: &egui::Context, lines: &[(String, String)]) {
-    use egui::{Align2, Area, Color32, Id, RichText, Vec2};
-
-    Area::new(Id::new("dev_overlay"))
-        .anchor(Align2::LEFT_TOP, Vec2::new(8.0, 8.0))
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(Color32::from_black_alpha(170))
-                .inner_margin(8.0)
-                .corner_radius(4.0)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    for (key, value) in lines {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{key:<16}"))
-                                .color(Color32::from_rgb(150, 150, 150))
-                                .monospace().size(13.0));
-                            ui.label(RichText::new(value)
-                                .color(Color32::WHITE)
-                                .monospace().size(13.0));
-                        });
-                    }
-                });
-        });
 }

@@ -169,6 +169,8 @@ struct PlayerConn {
     carried_xp: u32,
 }
 
+type PrefabTable = (Arc<Vec<String>>, HashMap<String, u16>);
+
 pub struct NetServerState {
     server: NetServer,
     db: DbHandle,
@@ -209,7 +211,7 @@ pub struct NetServerState {
     /// cheap clone instead of a fresh sort/alloc; the `HashMap` is the
     /// reverse index used to encode `EntityState::prefab` at snapshot-gather
     /// time.
-    prefab_table: Option<(Arc<Vec<String>>, HashMap<String, u16>)>,
+    prefab_table: Option<PrefabTable>,
 }
 
 impl NetServerState {

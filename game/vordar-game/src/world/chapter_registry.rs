@@ -43,7 +43,7 @@ impl ChapterRegistry {
             ordered: &mut Vec<&'static str>,
             visiting: &mut Vec<&'a str>,
         ) -> Result<(), String> {
-            if visiting.iter().any(|v| *v == name) {
+            if visiting.contains(&name) {
                 return Err(format!("chapter dependency cycle through '{name}'"));
             }
             let module = reg.find(name)?;

@@ -25,6 +25,12 @@ pub struct KeyboardState {
     just_released: HashSet<KeyCode>,
 }
 
+impl Default for KeyboardState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KeyboardState {
     pub fn new() -> Self {
         Self { pressed: HashSet::new(), just_pressed: HashSet::new(), just_released: HashSet::new() }
@@ -83,6 +89,12 @@ pub struct MouseState {
     cursor: Option<(f32, f32)>,
     /// Wheel scroll accumulated since the last `take_wheel` (in lines).
     wheel: f32,
+}
+
+impl Default for MouseState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MouseState {

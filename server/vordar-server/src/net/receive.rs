@@ -241,6 +241,7 @@ struct PendingBolt {
 /// `AbilityEffect` arms. Scheduled and Leap mechanics are spawned and
 /// broadcast immediately; Projectile casts are deferred onto
 /// `pending_bolts` for the caller's post-event-loop spawn pass.
+#[allow(clippy::too_many_arguments)]
 fn dispatch_cast(
     world: &mut World,
     state: &mut NetServerState,

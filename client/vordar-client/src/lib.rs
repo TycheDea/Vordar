@@ -78,6 +78,12 @@ pub struct CastState {
     pub abilities: Vec<Cooldown>,
 }
 
+impl Default for CastState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CastState {
     pub fn new() -> Self {
         Self { class: None, abilities: Vec::new() }

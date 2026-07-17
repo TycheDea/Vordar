@@ -16,6 +16,12 @@ pub struct Resources {
     data: HashMap<TypeId, Box<dyn Any>>,
 }
 
+impl Default for Resources {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Resources {
     pub fn new() -> Self { Self { data: HashMap::new() } }
 
@@ -72,7 +78,16 @@ pub trait EntityLifecycle {
 // Systems never mutate the world mid-frame. Push requests here instead.
 // Drained by engine-app during Phase::SpawnFlush and Phase::DespawnFlush.
 
-pub struct SpawnQueue(pub Vec<Box<dyn FnOnce(&mut SpawnContext) + Send>>);
+/// A deferred callback run with world access once a spawn/despawn is flushed.
+pub type SpawnContextHook = Box<dyn FnOnce(&mut SpawnContext) + Send>;
+
+pub struct SpawnQueue(pub Vec<SpawnContextHook>);
+
+impl Default for SpawnQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SpawnQueue {
     pub fn new() -> Self { Self(Vec::new()) }
@@ -81,14 +96,20 @@ impl SpawnQueue {
     }
 }
 
-pub struct DespawnQueue(pub Vec<(Entity, Option<Box<dyn FnOnce(&mut SpawnContext) + Send>>)>);
+pub struct DespawnQueue(pub Vec<(Entity, Option<SpawnContextHook>)>);
+
+impl Default for DespawnQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl DespawnQueue {
     pub fn new() -> Self { Self(Vec::new()) }
     /// Queue an entity for removal.
     /// Pass Some(hook) to run cleanup (free render slot, emit event, etc.) before despawn.
     /// The hook is defined by the caller — engine-app stays unaware of what's inside.
-    pub fn push(&mut self, entity: Entity, hook: Option<Box<dyn FnOnce(&mut SpawnContext) + Send>>) {
+    pub fn push(&mut self, entity: Entity, hook: Option<SpawnContextHook>) {
         self.0.push((entity, hook));
     }
 }

@@ -14,6 +14,12 @@ pub struct ChapterSetupSystem {
     done: bool,
 }
 
+impl Default for ChapterSetupSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChapterSetupSystem {
     pub fn new() -> Self { Self { done: false } }
 }

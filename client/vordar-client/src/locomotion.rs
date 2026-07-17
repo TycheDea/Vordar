@@ -91,7 +91,7 @@ pub fn aim_at(world: &mut World, entity: Entity, target: glam::Vec3) {
 
 /// Estimated velocity for entities the local sim doesn't move (remote,
 /// snapshot-lerped players), written by `net::interpolate::NetInterpolateSystem`.
-
+///
 /// The velocity locomotion/facing should animate from: the sim's when it is
 /// actually moving the entity (local/predicted player), else the
 /// snapshot-derived estimate.

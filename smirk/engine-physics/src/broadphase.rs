@@ -17,6 +17,12 @@ use std::collections::HashSet;
 /// Candidate entity pairs output by broadphase. Cleared and rebuilt every frame.
 pub struct CandidatePairs(pub Vec<(Entity, Entity)>);
 
+impl Default for CandidatePairs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CandidatePairs {
     pub fn new() -> Self { Self(Vec::new()) }
 }
@@ -24,6 +30,12 @@ impl CandidatePairs {
 pub struct BroadphaseSystem {
     seen:  HashSet<(Entity, Entity)>,
     pairs: Vec<(Entity, Entity)>,
+}
+
+impl Default for BroadphaseSystem {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BroadphaseSystem {

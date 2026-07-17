@@ -101,6 +101,7 @@ pub(crate) fn pose_player_into(player: &mut AnimationPlayer, skin: &CpuSkin, dt:
 /// frame — replaying the cached palette/globals on skipped frames and
 /// banking `delta` into `pending_dt` so the next pose applies the full
 /// elapsed time instead of just its own frame's slice.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn pose_with_lod(
     lod:     &mut HashMap<Entity, LodEntry>,
     entity:  Entity,
@@ -125,7 +126,7 @@ pub(crate) fn pose_with_lod(
         last_seen:  frame,
     });
 
-    if is_new || (frame + entity.id() as u64) % 2 == 0 {
+    if is_new || (frame + entity.id() as u64).is_multiple_of(2) {
         pose_player_into(player, skin, delta + entry.pending_dt, scratch);
         entry.pending_dt = 0.0;
         entry.palette.clear();
@@ -253,6 +254,12 @@ pub struct MeshRenderSyncSystem {
     frame: u64,
     /// Throttles the 80%-of-cap warning to ~once per 5 s.
     warn_accum: f32,
+}
+
+impl Default for MeshRenderSyncSystem {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MeshRenderSyncSystem {

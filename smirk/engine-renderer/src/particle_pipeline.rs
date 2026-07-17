@@ -197,7 +197,7 @@ pub(crate) fn atlas_pixels(size: u32) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
     // Tiny deterministic noise for the smoke cell.
     let noise = |x: f32, y: f32| -> f32 {
-        let h = (x * 127.1 + y * 311.7).sin() * 43758.5453;
+        let h = (x * 127.1 + y * 311.7).sin() * 43_758.547;
         h.fract().abs()
     };
     for py in 0..size {
@@ -273,8 +273,8 @@ mod tests {
         const S: u32 = 128;
         let px = atlas_pixels(S);
         let cell_px = S / ATLAS_GRID;
-        // Cell 2 sits at grid (2, 0).
-        let value = |lx: u32, ly: u32| px[(((0 * cell_px + ly) * S) + 2 * cell_px + lx) as usize * 4];
+        // Cell 2 sits at grid (2, 0), so its row offset (cell_y * cell_px) is 0.
+        let value = |lx: u32, ly: u32| px[((ly * S) + 2 * cell_px + lx) as usize * 4];
         let mid = cell_px / 2;
         let along_x = value(mid + cell_px / 4, mid);
         let along_y = value(mid, mid + cell_px / 4);

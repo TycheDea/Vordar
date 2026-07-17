@@ -72,9 +72,12 @@ pub fn generate_tangents(
 mod tests {
     use super::*;
 
+    // (positions, normals, uvs, indices)
+    type QuadMesh = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>);
+
     // A unit quad in the XY plane, normal +Z, with identity-like UVs:
     // u grows with +X, v grows with +Y.
-    fn quad() -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>) {
+    fn quad() -> QuadMesh {
         (
             vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
             vec![[0.0, 0.0, 1.0]; 4],

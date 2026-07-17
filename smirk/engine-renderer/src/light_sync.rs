@@ -34,7 +34,7 @@ pub(crate) fn flicker_factor(time: f32, phase: f32, amount: f32) -> f32 {
 /// Keep the `MAX_POINT_LIGHTS` candidates nearest `focus`, mapped into the
 /// GPU struct array; unfilled tail slots stay zeroed.
 pub(crate) fn select_point_lights(
-    candidates: &mut Vec<LightCandidate>,
+    candidates: &mut [LightCandidate],
     focus: Vec3,
 ) -> ([GpuPointLight; MAX_POINT_LIGHTS as usize], u32) {
     candidates.sort_by(|a, b| {

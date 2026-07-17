@@ -336,6 +336,7 @@ pub(crate) fn create_scene_buffers_and_layout(
 /// that view's identity changes (a resize, or the offscreen harness's SSAO
 /// toggle), since a bind group keeps its bound view alive rather than
 /// tracking the field that replaced it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn create_scene_bind_group(
     device:            &wgpu::Device,
     layout:            &BindGroupLayout,

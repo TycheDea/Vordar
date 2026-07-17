@@ -9,6 +9,12 @@ pub struct Time {
     pub frame_dt: f32,
 }
 
+impl Default for Time {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Time {
     pub fn new() -> Self {
         Self { frame_dt: 0.0 }

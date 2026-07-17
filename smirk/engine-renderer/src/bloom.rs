@@ -203,7 +203,7 @@ impl BloomPass {
     /// begin write, last stage's end write) under `GpuPass::Bloom` — a
     /// single stage gets both writes on its one pass.
     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, timer: Option<&GpuTimer>) {
-        let levels = (self.stages.len() + 1) / 2; // prefilter + (levels-1) down + (levels-1) up
+        let levels = self.stages.len().div_ceil(2); // prefilter + (levels-1) down + (levels-1) up
         let last = self.stages.len().saturating_sub(1);
         for (i, (bind_group, target)) in self.stages.iter().enumerate() {
             let (pipeline, load) = if i == 0 {

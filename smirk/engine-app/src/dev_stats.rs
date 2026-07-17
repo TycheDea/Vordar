@@ -26,6 +26,12 @@ pub struct DevStats {
     custom: Vec<(String, String)>,
 }
 
+impl Default for DevStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DevStats {
     pub fn new() -> Self {
         Self {

@@ -37,6 +37,11 @@ use engine_core::World;
 /// the same tick.
 pub struct AppExit(pub bool);
 
+#[cfg(feature = "winit")]
+type WindowInitHook = Box<dyn FnOnce(&std::sync::Arc<winit::window::Window>, &mut Resources)>;
+#[cfg(feature = "winit")]
+type WindowResizeHook = Box<dyn FnMut(u32, u32, &mut Resources)>;
+
 pub struct App {
     pub(crate) world:          World,
     pub(crate) resources:      Resources,
@@ -51,9 +56,9 @@ pub struct App {
     #[cfg(feature = "winit")]
     pub(crate) next_frame:     Option<std::time::Instant>,
     #[cfg(feature = "winit")]
-    pub(crate) on_init:        Vec<Box<dyn FnOnce(&std::sync::Arc<winit::window::Window>, &mut Resources)>>,
+    pub(crate) on_init:        Vec<WindowInitHook>,
     #[cfg(feature = "winit")]
-    pub(crate) on_resize:      Vec<Box<dyn FnMut(u32, u32, &mut Resources)>>,
+    pub(crate) on_resize:      Vec<WindowResizeHook>,
     /// Path to the config file — kept for hot-reload and persist-on-exit.
     pub(crate) config_path:    Option<String>,
     /// File watcher + event receiver for hot-reloading engine.ron.
@@ -61,6 +66,12 @@ pub struct App {
         notify::RecommendedWatcher,
         std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
     )>,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl App {

@@ -35,6 +35,12 @@ pub struct CampSystem {
     initialized: bool,
 }
 
+impl Default for CampSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CampSystem {
     pub fn new() -> Self {
         Self { slots: Vec::new(), initialized: false }

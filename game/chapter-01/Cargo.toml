@@ -3,6 +3,9 @@ name    = "chapter-01"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [lib]
 name = "chapter_01"
 # No doctests ship here; skip building the doctest binary.

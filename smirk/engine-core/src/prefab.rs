@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 pub enum PrefabError {
     UnknownPrefab(String),
     UnknownComponent(String),
-    Parse { component: String, error: ron::error::SpannedError },
+    Parse { component: String, error: Box<ron::error::SpannedError> },
     RegistryMissing,
 }
 
@@ -58,6 +58,12 @@ pub struct ComponentRegistry {
     loaders: HashMap<String, ComponentLoader>,
 }
 
+impl Default for ComponentRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ComponentRegistry {
     pub fn new() -> Self {
         Self { loaders: HashMap::new() }
@@ -73,7 +79,7 @@ impl ComponentRegistry {
         self.register_with(name, move |raw| {
             let value: T = raw.into_rust().map_err(|error| PrefabError::Parse {
                 component: component.clone(),
-                error,
+                error: Box::new(error),
             })?;
             Ok(Box::new(move |builder: &mut EntityBuilder| {
                 builder.add(value.clone());
@@ -123,6 +129,12 @@ struct PrefabEntry {
 
 pub struct PrefabLibrary {
     prefabs: HashMap<String, PrefabEntry>,
+}
+
+impl Default for PrefabLibrary {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PrefabLibrary {
@@ -254,7 +266,7 @@ pub fn register_core_components(reg: &mut ComponentRegistry) {
     reg.register_with("Transform", |raw| {
         let t: Transform = raw.into_rust().map_err(|error| PrefabError::Parse {
             component: "Transform".into(),
-            error,
+            error: Box::new(error),
         })?;
         Ok(Box::new(move |builder: &mut EntityBuilder| {
             builder.add(PreviousTransform { position: t.position });
@@ -264,7 +276,7 @@ pub fn register_core_components(reg: &mut ComponentRegistry) {
     reg.register_with("Hitbox", |raw| {
         let h: Hitbox = raw.into_rust().map_err(|error| PrefabError::Parse {
             component: "Hitbox".into(),
-            error,
+            error: Box::new(error),
         })?;
         Ok(Box::new(move |builder: &mut EntityBuilder| {
             builder.add(h.clone());

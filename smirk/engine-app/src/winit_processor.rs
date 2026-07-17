@@ -13,7 +13,9 @@
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-pub struct WinitEventProcessor(Box<dyn FnMut(&Window, &WindowEvent) -> bool>);
+type WindowEventHandler = Box<dyn FnMut(&Window, &WindowEvent) -> bool>;
+
+pub struct WinitEventProcessor(WindowEventHandler);
 
 impl WinitEventProcessor {
     pub fn new(f: impl FnMut(&Window, &WindowEvent) -> bool + 'static) -> Self {

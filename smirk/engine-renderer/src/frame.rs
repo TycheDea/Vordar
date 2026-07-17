@@ -183,7 +183,7 @@ impl System for RenderSystem {
                 stats.set("gpu egui",          format!("{:.2} ms", t.egui));
             }
         }
-        let sample_gpu = overlay_open && self.frame_index % GPU_TIMING_INTERVAL == 0;
+        let sample_gpu = overlay_open && self.frame_index.is_multiple_of(GPU_TIMING_INTERVAL);
 
         // ── Egui frame: engine UI + game-registered UiLayers ─────────────────
         let egui_frame = self.build_egui_frame(resources);
@@ -554,6 +554,7 @@ fn record_ssao(state: &RendererState, encoder: &mut wgpu::CommandEncoder) {
 
 /// Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the
 /// particle pass, which resolves at its end.
+#[allow(clippy::too_many_arguments)]
 fn record_main_pass(
     state:              &RendererState,
     encoder:            &mut wgpu::CommandEncoder,

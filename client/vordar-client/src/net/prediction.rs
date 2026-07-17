@@ -130,7 +130,7 @@ fn collect_solid_anchored_statics(world: &World) -> Vec<(Vec3, CollisionShape)> 
     world
         .query::<(&Transform, &Hitbox, hecs::Satisfies<&Solid>, hecs::Satisfies<&Anchored>)>()
         .iter()
-        .filter_map(|(t, h, solid, anchored)| (solid && anchored).then(|| (t.position, h.shape.clone())))
+        .filter(|&(_t, _h, solid, anchored)| solid && anchored).map(|(t, h, _solid, _anchored)| (t.position, h.shape.clone()))
         .collect()
 }
 
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn replay_applies_unacked_intents() {
-        let pending = vec![intent(1, Vec2::new(1.0, 0.0)), intent(2, Vec2::new(1.0, 0.0))];
+        let pending = [intent(1, Vec2::new(1.0, 0.0)), intent(2, Vec2::new(1.0, 0.0))];
         let pos = replay_position(Vec3::ZERO, 6.0, pending.iter(), PlayRadius::default().0, &walker_shape(), &[]);
         assert!((pos.x - 2.0 * 6.0 * DT).abs() < 1e-6);
         assert_eq!(pos.y, 0.0);
@@ -302,8 +302,8 @@ mod tests {
     #[test]
     fn replay_normalizes_direction_like_the_simulation() {
         // An over-unit dir must move exactly as fast as a unit dir.
-        let cheat = vec![intent(1, Vec2::new(30.0, 40.0))];
-        let fair = vec![intent(1, Vec2::new(0.6, 0.8))];
+        let cheat = [intent(1, Vec2::new(30.0, 40.0))];
+        let fair = [intent(1, Vec2::new(0.6, 0.8))];
         let a = replay_position(Vec3::ZERO, 6.0, cheat.iter(), PlayRadius::default().0, &walker_shape(), &[]);
         let b = replay_position(Vec3::ZERO, 6.0, fair.iter(), PlayRadius::default().0, &walker_shape(), &[]);
         assert!((a - b).length() < 1e-6);

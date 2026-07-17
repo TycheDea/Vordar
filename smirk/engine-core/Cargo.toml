@@ -3,6 +3,9 @@ name    = "engine-core"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 glam      = { workspace = true }
 hecs      = { workspace = true }

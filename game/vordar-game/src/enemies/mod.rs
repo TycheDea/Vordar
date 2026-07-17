@@ -76,6 +76,12 @@ pub struct EnemyAISystem {
     candidates: Vec<hecs::Entity>,
 }
 
+impl Default for EnemyAISystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnemyAISystem {
     pub fn new() -> Self {
         Self { candidates: Vec::new() }

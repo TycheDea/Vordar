@@ -3,6 +3,9 @@ name    = "engine-renderer"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [features]
 # Headless offscreen render harness — used by this crate's own
 # tests/offscreen.rs and vordar-client's tests/ground_render.rs.

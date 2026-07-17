@@ -23,6 +23,12 @@ const SLOT_KEYS: [winit::keyboard::KeyCode; 2] =
 /// hygiene — the server re-validates class, cooldown, and range.
 pub struct AbilityCastSystem;
 
+impl Default for AbilityCastSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AbilityCastSystem {
     pub fn new() -> Self {
         Self

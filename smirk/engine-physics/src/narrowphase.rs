@@ -25,12 +25,24 @@ use std::collections::HashSet;
 /// transition events (started / ended).
 pub struct ActivePairs(pub HashSet<(Entity, Entity)>);
 
+impl Default for ActivePairs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActivePairs {
     pub fn new() -> Self { Self(HashSet::new()) }
 }
 
 pub struct NarrowphaseSystem {
     overlapping_buf: HashSet<(Entity, Entity)>,
+}
+
+impl Default for NarrowphaseSystem {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NarrowphaseSystem {

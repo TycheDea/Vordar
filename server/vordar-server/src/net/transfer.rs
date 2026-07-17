@@ -28,7 +28,7 @@ impl ZoneTransferSystem {
 impl System for ZoneTransferSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         // PostUpdate runs at POST_HZ; transfers keep their 10 Hz cadence.
-        let due_now = self.ticks % STAGGER == 0;
+        let due_now = self.ticks.is_multiple_of(STAGGER);
         self.ticks += 1;
         if !due_now {
             return;

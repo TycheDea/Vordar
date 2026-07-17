@@ -44,7 +44,7 @@ pub(crate) fn write_test_glb(path: &std::path::Path) {
 
     let mut json_bytes = json.into_bytes();
     while json_bytes.len() % 4 != 0 { json_bytes.push(b' '); }
-    while bin.len() % 4 != 0 { bin.push(0); }
+    while !bin.len().is_multiple_of(4) { bin.push(0); }
 
     let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
     let mut glb = Vec::with_capacity(total);
@@ -68,7 +68,7 @@ pub(crate) fn write_test_glb(path: &std::path::Path) {
 pub(crate) fn write_skinned_glb(path: &std::path::Path) {
     // Pad to 4 bytes, append, return (offset, len).
     fn push(bin: &mut Vec<u8>, data: &[u8]) -> (usize, usize) {
-        while bin.len() % 4 != 0 { bin.push(0); }
+        while !bin.len().is_multiple_of(4) { bin.push(0); }
         let off = bin.len();
         bin.extend_from_slice(data);
         (off, data.len())
@@ -157,7 +157,7 @@ pub(crate) fn write_skinned_glb(path: &std::path::Path) {
 /// prefer over.
 pub(crate) fn write_textured_glb(path: &std::path::Path) {
     fn push(bin: &mut Vec<u8>, data: &[u8]) -> (usize, usize) {
-        while bin.len() % 4 != 0 { bin.push(0); }
+        while !bin.len().is_multiple_of(4) { bin.push(0); }
         let off = bin.len();
         bin.extend_from_slice(data);
         (off, data.len())
@@ -231,7 +231,7 @@ pub(crate) fn write_textured_glb(path: &std::path::Path) {
 /// with no sidecar is a per-slot `None` rather than a whole-asset error.
 pub(crate) fn write_corrupt_textured_glb(path: &std::path::Path) {
     fn push(bin: &mut Vec<u8>, data: &[u8]) -> (usize, usize) {
-        while bin.len() % 4 != 0 { bin.push(0); }
+        while !bin.len().is_multiple_of(4) { bin.push(0); }
         let off = bin.len();
         bin.extend_from_slice(data);
         (off, data.len())
@@ -336,7 +336,7 @@ pub(crate) fn write_blend_glb(path: &std::path::Path) {
 
     let mut json_bytes = json.into_bytes();
     while json_bytes.len() % 4 != 0 { json_bytes.push(b' '); }
-    while bin.len() % 4 != 0 { bin.push(0); }
+    while !bin.len().is_multiple_of(4) { bin.push(0); }
 
     let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
     let mut glb = Vec::with_capacity(total);

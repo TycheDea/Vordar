@@ -187,7 +187,7 @@ fn smooth_surface_has_tighter_brighter_specular_peak_than_rough() {
     let smooth = render(0.2);
     let rough  = render(1.0);
 
-    let peak = |img: &[u8]| img.chunks_exact(4).map(|p| luminance(p)).fold(0.0f64, f64::max);
+    let peak = |img: &[u8]| img.chunks_exact(4).map(luminance).fold(0.0f64, f64::max);
     let (peak_smooth, peak_rough) = (peak(&smooth), peak(&rough));
     assert!(
         peak_smooth > peak_rough * 1.15,
@@ -352,7 +352,7 @@ fn denser_normal_tiling_softens_specular_peak() {
         r.read(&target)
     };
 
-    let peak = |img: &[u8]| img.chunks_exact(4).map(|p| luminance(p)).fold(0.0f64, f64::max);
+    let peak = |img: &[u8]| img.chunks_exact(4).map(luminance).fold(0.0f64, f64::max);
 
     // Measured peaks (256x256, roughness 0.2, sun at 0.3x): sparse
     // (tiles=4)=197.4 dense (tiles=64)=186.3, a 5.65% drop. The sun sits well
@@ -760,7 +760,7 @@ fn uniform_white_environment_lights_surfaces_uniformly() {
     let footprint: Vec<f64> = pixels
         .chunks_exact(4)
         .filter(|p| p[0] > 8)
-        .map(|p| luminance(p))
+        .map(luminance)
         .collect();
     assert!(footprint.len() > 1000, "quad visible");
     let mean = footprint.iter().sum::<f64>() / footprint.len() as f64;

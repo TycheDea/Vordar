@@ -17,6 +17,12 @@ members = [
 ]
 resolver = "2"
 
+[workspace.lints.rust]
+warnings = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+
 [workspace.dependencies]
 # Shared versions — all crates pull from here
 glam    = { version = "0.32", features = ["serde"] }

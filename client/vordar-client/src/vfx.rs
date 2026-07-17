@@ -324,6 +324,12 @@ pub struct VfxSystem {
     accum: HashMap<Entity, f32>,
 }
 
+impl Default for VfxSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VfxSystem {
     pub fn new() -> Self {
         Self { accum: HashMap::new() }

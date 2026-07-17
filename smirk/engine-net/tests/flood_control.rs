@@ -80,7 +80,7 @@ fn extra_connections_from_one_ip_are_refused() {
     // refused ones fire Disconnected on the client without ever seeing Connected.
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut server_connected = 0usize;
-    let mut client_connected = vec![false; ATTEMPTS];
+    let mut client_connected = [false; ATTEMPTS];
     loop {
         for ev in server.poll() {
             if let ServerEvent::Connected(_) = ev {

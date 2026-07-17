@@ -96,14 +96,22 @@ struct PhaseEntry {
 
 // ── Scheduler ────────────────────────────────────────────────────────────────
 
+type PendingSystem = (Box<dyn System>, TypeId, &'static str, SystemOrder);
+
 pub struct Scheduler {
-    pending:        BTreeMap<Phase, Vec<(Box<dyn System>, TypeId, &'static str, SystemOrder)>>,
+    pending:        BTreeMap<Phase, Vec<PendingSystem>>,
     rate_overrides: BTreeMap<Phase, TickRate>,
     phases:         BTreeMap<Phase, PhaseEntry>,
     // One fixed clock for the whole app: every Fixed phase steps off this
     // accumulator so all fixed phases interleave per step on a multi-step frame.
     fixed_dt:       f32,
     accumulator:    f32,
+}
+
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Scheduler {
@@ -180,9 +188,9 @@ impl Scheduler {
                 }
             }
             for &li in &last_idx {
-                for j in 0..n {
+                for (j, adj) in adjacency.iter_mut().enumerate() {
                     if j != li && !first_idx.contains(&j) && !last_idx.contains(&j) {
-                        adjacency[j].push(li);
+                        adj.push(li);
                     }
                 }
             }

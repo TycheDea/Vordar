@@ -177,8 +177,8 @@ impl TraceRing {
 }
 
 /// Mirrors the server's intent arrival deadline (`validate_intent`,
-/// `server/vordar-server/src/net/receive.rs`): `max(rtt, MAX_REWIND_MICROS)
-/// + ARRIVAL_MARGIN_MICROS`. Both `WireHealth` tests below run at rtt <=
+/// `server/vordar-server/src/net/receive.rs`): `max(rtt, MAX_REWIND_MICROS) +
+/// ARRIVAL_MARGIN_MICROS`. Both `WireHealth` tests below run at rtt <=
 /// MAX_REWIND_MICROS (200 ms), so the floor is 200 ms + 100 ms = 300 ms — a
 /// gap this long in any tracked signal is long enough for the server to
 /// already be rejecting stale intents on its own.

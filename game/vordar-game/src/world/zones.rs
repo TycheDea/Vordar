@@ -150,7 +150,7 @@ pub fn validate_zones(def: &ZonesDef) -> Result<(), String> {
 
 /// The portal containing `pos`, if any. Exact radius test (cell-granular
 /// borders would flap, same reasoning as AOI).
-pub fn portal_hit<'a>(portals: &'a [PortalDef], pos: Vec3) -> Option<&'a PortalDef> {
+pub fn portal_hit(portals: &[PortalDef], pos: Vec3) -> Option<&PortalDef> {
     portals.iter().find(|p| pos.distance(p.pos) <= p.radius)
 }
 

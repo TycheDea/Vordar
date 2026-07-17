@@ -3,6 +3,9 @@ name    = "engine-physics"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 engine-core = { path = "../engine-core" }
 engine-app  = { path = "../engine-app", default-features = false }

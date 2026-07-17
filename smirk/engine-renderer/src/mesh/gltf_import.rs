@@ -7,8 +7,10 @@ use super::anim_import::{extract_skeleton, extract_clips};
 
 /// The three glTF alpha modes with their associated parameters.
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Default)]
 pub enum AlphaMode {
     /// No transparency; all fragments are opaque.
+    #[default]
     Opaque,
     /// Binary transparency with a discard threshold.
     Mask(f32),
@@ -16,11 +18,6 @@ pub enum AlphaMode {
     Blend,
 }
 
-impl Default for AlphaMode {
-    fn default() -> Self {
-        AlphaMode::Opaque
-    }
-}
 
 /// RGBA8 pixels, sRGB-encoded (glTF base-color convention).
 pub struct ImageData {

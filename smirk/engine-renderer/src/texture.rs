@@ -295,7 +295,7 @@ pub fn create_checker_texture(
         for x in 0..size {
             let tile_x = x / tile_size;
             let tile_y = y / tile_size;
-            let color  = if (tile_x + tile_y) % 2 == 0 { color_a } else { color_b };
+            let color  = if (tile_x + tile_y).is_multiple_of(2) { color_a } else { color_b };
             let i      = ((y * size + x) * 4) as usize;
             pixels[i..i + 4].copy_from_slice(&color);
         }

@@ -37,6 +37,12 @@ pub struct ZoneDressingSystem {
     applied: Option<String>,
 }
 
+impl Default for ZoneDressingSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ZoneDressingSystem {
     pub fn new() -> Self {
         Self { applied: None }

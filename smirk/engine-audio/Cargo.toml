@@ -3,6 +3,9 @@ name    = "engine-audio"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [lib]
 # No unit tests or doctests ship here; skip building the empty test binaries.
 test    = false

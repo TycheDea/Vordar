@@ -109,7 +109,9 @@ pub struct RenderShape {
 }
 
 #[derive(Clone, Copy, serde::Deserialize)]
+#[derive(Default)]
 pub enum RenderShapeType {
+    #[default]
     Cube,
     Sphere,
     Diamond,
@@ -121,9 +123,6 @@ pub enum RenderShapeType {
     Custom { shape_type: u32, params: [f32; 4] },
 }
 
-impl Default for RenderShapeType {
-    fn default() -> Self { Self::Cube }
-}
 
 /// One element of a composed visual. Offset, rotation, and scale are in the
 /// parent entity's local space. `rotation` defaults to identity so existing

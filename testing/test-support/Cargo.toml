@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 engine-core     = { path = "../../smirk/engine-core" }
 engine-app      = { path = "../../smirk/engine-app", default-features = false }

@@ -55,7 +55,7 @@ fn loss_probe_inter_snapshot_gaps() {
             let end = Instant::now() + WINDOW;
             while Instant::now() < end {
                 pumps += 1;
-                if pumps % 120 == 0 {
+                if pumps.is_multiple_of(120) {
                     dir = -dir;
                 }
                 mover.send_move(dir);
@@ -147,7 +147,7 @@ fn loss_probe_upstream_intent_lag() {
             let mut ticks = 0u32;
             while Instant::now() < end {
                 ticks += 1;
-                if ticks % 100 == 0 {
+                if ticks.is_multiple_of(100) {
                     dir = -dir;
                 }
                 bot.send_move(dir);

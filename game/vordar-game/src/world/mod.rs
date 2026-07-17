@@ -115,6 +115,11 @@ pub fn day_night_light(day_fraction: f32) -> (Vec3, Vec3, f32) {
     (dir, color, ambient)
 }
 
+/// A one-shot spawn: prefab id and position.
+type OneShotSpawn = (String, Vec3);
+/// A live wave spawn: prefab id, position, event index, wave index.
+type WaveSpawn = (String, Vec3, u16, u16);
+
 /// Fires each event's one-shot `spawns` once per world day on window entry,
 /// and drives its `waves` — recurring capped pulses — for the whole window,
 /// reaping the wave spawns when the window closes. Mid-window joiners need
@@ -127,6 +132,12 @@ pub struct WorldEventSystem {
     /// count resets when the day advances; forfeited over-cap pulses are not
     /// retried (no burst catch-up).
     pulses: Vec<Vec<(i64, u64)>>,
+}
+
+impl Default for WorldEventSystem {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WorldEventSystem {
@@ -143,7 +154,7 @@ impl System for WorldEventSystem {
 
         // One-shot spawns (prefab, position), wave spawns tagged with
         // (event, wave), and event-wave entities to reap at window close.
-        let (one_shot, waves, to_despawn): (Vec<(String, Vec3)>, Vec<(String, Vec3, u16, u16)>, Vec<Entity>) = {
+        let (one_shot, waves, to_despawn): (Vec<OneShotSpawn>, Vec<WaveSpawn>, Vec<Entity>) = {
             let Some(now) = resources.get::<WorldTime>().map(|t| t.0) else { return };
             let Some(def) = resources.get::<WorldEventsDef>() else { return };
             if self.fired.len() != def.events.len() {

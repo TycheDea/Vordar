@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [lib]
 # Criterion flags (--quick, --save-baseline) go to every bench target; the
 # default libtest harness on the lib would choke on them.

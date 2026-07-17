@@ -21,6 +21,12 @@ pub struct DeathSystem {
     dead: Vec<Entity>,
 }
 
+impl Default for DeathSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeathSystem {
     pub fn new() -> Self { Self { dead: Vec::new() } }
 }

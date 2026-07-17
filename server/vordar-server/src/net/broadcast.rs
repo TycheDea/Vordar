@@ -22,6 +22,10 @@ use super::{NetServerState, AOI_RADIUS, STAGGER};
 pub const MAX_SNAPSHOT_STATES: usize = 64;
 pub const NEAREST_GUARANTEED: usize = 32;
 
+/// One AOI-gathered candidate before wire ids are assigned: entity, position,
+/// health bucket (for wire encoding), and its AOI-test radius.
+type AoiCandidate = (Entity, Vec3, Option<i32>, f32);
+
 /// Pick which AOI entries get a position update this snapshot: everything if
 /// the crowd fits the budget, else the `nearest` closest entries (by dist²,
 /// id-tiebroken) plus a round-robin rotation over the rest. Returns selected
@@ -56,6 +60,12 @@ pub struct SnapshotBroadcastSystem {
     current_ids: HashSet<u32>,
 }
 
+impl Default for SnapshotBroadcastSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SnapshotBroadcastSystem {
     pub fn new() -> Self {
         Self { aoi_scratch: Vec::new(), seen: HashSet::new(), current_ids: HashSet::new() }
@@ -68,7 +78,7 @@ impl System for SnapshotBroadcastSystem {
             let state = resources.get_mut::<NetServerState>().unwrap();
             state.tick += 1;
             // Periodic world-clock re-sync (every ~10 s at POST_HZ).
-            if state.tick % 600 == 0 {
+            if state.tick.is_multiple_of(600) {
                 // Same cadence sweeps ReplIds: entities despawned since the
                 // last sweep (bolts, dead enemies) stop holding a wire id.
                 state.repl_ids.sweep(world);
@@ -105,7 +115,7 @@ impl System for SnapshotBroadcastSystem {
         // Per-client AOI: grid cells are coarse and multi-cell entities appear
         // more than once, so dedupe and apply the exact radius test — a fuzzy
         // border would make entities flap in and out between snapshots.
-        let mut per_conn: Vec<(ConnId, Vec<(Entity, Vec3, Option<i32>, f32)>)> = Vec::with_capacity(conn_players.len());
+        let mut per_conn: Vec<(ConnId, Vec<AoiCandidate>)> = Vec::with_capacity(conn_players.len());
         {
             let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
             // One view for the whole gather: the replication filter (PrefabId),
@@ -117,7 +127,7 @@ impl System for SnapshotBroadcastSystem {
                 self.aoi_scratch.clear();
                 grid.query_radius_into(center, AOI_RADIUS, &mut self.aoi_scratch);
                 self.seen.clear();
-                let mut current: Vec<(Entity, Vec3, Option<i32>, f32)> = Vec::with_capacity(self.aoi_scratch.len());
+                let mut current: Vec<AoiCandidate> = Vec::with_capacity(self.aoi_scratch.len());
                 for &entity in &self.aoi_scratch {
                     if !self.seen.insert(entity) {
                         continue;

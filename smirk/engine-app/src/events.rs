@@ -41,6 +41,12 @@ pub struct EventBus {
     queues: HashMap<TypeId, Box<dyn AnyQueue>>,
 }
 
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventBus {
     pub fn new() -> Self { Self { queues: HashMap::new() } }
 
