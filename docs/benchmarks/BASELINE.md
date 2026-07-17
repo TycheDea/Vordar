@@ -34,7 +34,22 @@ cargo test -p vordar-server --release --test loss -- --ignored --nocapture
 
 # Remote render smoothness probe (real QUIC, WAN-impaired observer):
 cargo test -p vordar-client --release -- --ignored --nocapture remote_render_smoothness_under_loss_probe
+
+# Profiling (flamegraph): samples the real bench process via ETW and opens
+# an interactive flame graph in the browser. `[profile.bench] debug = true`
+# (root Cargo.toml) is what lets the sampled stacks resolve to function names.
+cargo install samply
+samply record -- cargo bench -p vordar-benches --bench full_tick -- --profile-time 5
 ```
+
+Verified: the command above recorded 8 911 stack samples on the `full_tick`
+process's main thread — samply's ETW-based sampler ran fine from an
+unelevated shell on this box. `cargo flamegraph` (`cargo install flamegraph`,
+then `cargo flamegraph --bench full_tick -p vordar-benches -- --bench
+--profile-time 10`) is the more commonly documented recipe, but its
+blondie/ETW backend errored `NotAnAdmin` here; it needs a shell opened as
+Administrator. Either recipe's ETW capture can be swapped for Superluminal's
+CLI if you have a license.
 
 Criterion's raw baselines live in `target/criterion` (gitignored); this file is
 the durable record. Update it after any change that moves a number.
