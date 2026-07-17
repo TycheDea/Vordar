@@ -15,7 +15,7 @@
 //   world_clock_and_blood_moon — world time + scripted events
 //   far_bot_never_sees_out_of_aoi_mechanic — AOI scope for damage telegraphs
 
-use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot, PopulateSystem};
+use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot, PopulateSystem, SimDeadline};
 use engine_app::scheduler::{Phase, System, SystemOrder};
 use engine_core::traits::{DespawnQueue, Resources};
 use engine_core::World;
@@ -393,9 +393,10 @@ fn respawn_carries_xp() {
         b.player_id != Some(first_body)
     });
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline && probe.load(Ordering::Relaxed) == 0 {
+    let mut deadline = SimDeadline::new(Duration::from_secs(10));
+    while probe.load(Ordering::Relaxed) == 0 {
         bot.pump();
+        deadline.check(&bot, "the respawned body's Xp probe to fire");
         std::thread::sleep(Duration::from_millis(50));
     }
     assert_eq!(probe.load(Ordering::Relaxed), 25, "the respawned body must inherit the dying body's Xp");
@@ -438,9 +439,10 @@ fn xp_survives_relogin() {
     first.wait_for("first welcome", Duration::from_secs(5), |b| b.player_id.is_some());
 
     // Wait for GrantXpSystem's tick-60 grant to land on the first body.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && probe.load(Ordering::Relaxed) != 25 {
+    let mut deadline = SimDeadline::new(Duration::from_secs(5));
+    while probe.load(Ordering::Relaxed) != 25 {
         first.pump();
+        deadline.check(&first, "the XP grant to land before disconnect");
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(probe.load(Ordering::Relaxed), 25, "XP grant never landed before disconnect");
@@ -455,14 +457,14 @@ fn xp_survives_relogin() {
 
     // Fail-first: without hydration at the login grant, the fresh body
     // carries no Xp component at all and the probe falls back to 0.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut deadline = SimDeadline::new(Duration::from_secs(5));
     loop {
         second.pump();
         let xp = probe.load(Ordering::Relaxed);
         if xp == 25 {
             break;
         }
-        assert!(Instant::now() < deadline, "relogged body never carried Xp 25: probe reads {xp}");
+        deadline.check(&second, "the relogged body to carry Xp 25");
         std::thread::sleep(Duration::from_millis(20));
     }
 }

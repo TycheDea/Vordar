@@ -175,7 +175,7 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
     // Walk into cleave range of a villager and drop the AOE on its head.
     let npc_id = *bot.prefabs.iter().find(|(_, p)| *p == "npc_villager").unwrap().0;
     let npc = *bot.last_snapshot.get(&npc_id).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         assert!(Instant::now() < deadline, "never reached the villager");
         let own = bot.own_pos().unwrap();

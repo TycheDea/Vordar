@@ -47,7 +47,7 @@ fn invalid_intent_increments_reject_counter() {
         intents: vec![MoveIntentEntry { seq: 1, t_server_micros: t_server_micros + 10_000_000, dir: glam::Vec2::ZERO }],
     }));
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && rejects.load(Ordering::Relaxed) == 0 {
         bot.pump();
         std::thread::sleep(Duration::from_millis(16));

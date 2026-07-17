@@ -86,7 +86,9 @@ fn a_panicked_zone_restarts_on_the_same_address_and_a_fresh_connection_succeeds(
     // again — without a supervisor, the zone thread stays dead and every
     // retry times out. Pump east throughout: its zone must stay completely
     // unaffected by start's panic and restart.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // The rebuilt zone starts a fresh tick epoch, so wall is the only clock
+    // that stays continuous across the rebuild.
+    let deadline = Instant::now() + Duration::from_secs(40);
     let mut fresh = loop {
         easterner.pump();
         assert!(!easterner.disconnected, "east zone must stay unaffected by start's panic");

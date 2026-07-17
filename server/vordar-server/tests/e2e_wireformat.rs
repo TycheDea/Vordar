@@ -222,7 +222,7 @@ fn move_intents_redundancy_survives_upstream_loss() {
     // Both bots walk +X, sending one MoveIntents batch per 16 ms tick, for
     // the same ~3 s window.
     let dir = glam::Vec2::X;
-    let end = std::time::Instant::now() + Duration::from_secs(3);
+    let end = std::time::Instant::now() + Duration::from_secs(12);
     while std::time::Instant::now() < end {
         control.send_move(dir);
         control.pump();

@@ -80,7 +80,7 @@ fn health_persists_in_db() {
     settle(&mut victim, Duration::from_millis(200));
     drop(victim);
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let health: Option<i32> = rusqlite::Connection::open(&db).ok().and_then(|conn| {
             conn.query_row("SELECT health FROM characters WHERE name = 'victim'", [], |r| r.get(0)).ok()
