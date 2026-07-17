@@ -302,6 +302,19 @@ fixes; `reworks-rust-tooling-2026-07-17.md` mirrors this note):
   wall improves ≥10% and clean-build cost stays acceptable (record both in
   the commit); otherwise revert and record the numbers in this report's
   successor so it is never re-litigated blind.
+- **Measured 2026-07-17:** clean full-workspace `cargo nextest run
+  --workspace` (compile+test, 20-logical-core machine): 110.0s at
+  opt-level 0 deps (compile 54.6s + test 54.6s) vs 156.0s at opt-level 1
+  deps (compile 101s + test 53.7s) — clean-build wall +42%, compile-only
+  +85%. Idle e2e-scope wall (the 3 exclusive-group tests:
+  `rend_kills_camped_enemy`,
+  `net::e2e::kicked_connection_reconnects_and_relogs_in`,
+  `net::e2e::onslaught_dash_replay_never_snaps_at_150ms_rtt`): 7.74s at
+  opt-level 0 vs 7.61s at opt-level 1 — a 1.7% improvement, far short of
+  the ≥10% bar (the sensitive-set stayed 5/5 green under `stress-suite.ps1
+  -Load 3.0` at opt-level 1, but that was already true pre-tuning per the
+  devloop campaign's sim-pacing fixes, so it isn't evidence for this
+  knob). Reverted; `[profile.dev]` is unchanged from `debug = 1`.
 
 ### 11. (docs-only) (micro) The bench profile keeps symbols "for future flamegraph work" but no profiling recipe exists
 
