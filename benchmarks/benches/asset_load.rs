@@ -5,8 +5,8 @@
 //   human — skinned glTF with animation clips
 //   zone_ground — texture decode + mesh generation for zone grounds
 //
-// These are the baseline costs before rendering rework 2's streaming
-// work (async load + GPU streaming) moves them off the critical path.
+// These are the baseline costs before async load + GPU streaming work
+// moves them off the critical path.
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use engine_renderer::mesh::load_gltf_data;

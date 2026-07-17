@@ -1,44 +1,12 @@
-client/vordar-client/src/presentation.rs:62
-client/vordar-client/src/presentation.rs:83
-client/vordar-client/src/telegraph.rs:24
-client/vordar-client/src/telegraph.rs:25
-client/vordar-client/src/telegraph.rs:66
-client/vordar-client/src/vfx.rs:55
-client/vordar-client/src/vfx.rs:119
-client/vordar-client/src/vfx.rs:246
-client/vordar-client/src/vfx.rs:278
-client/vordar-client/tests/ground_render.rs:39
-game/vordar-game/tests/content_lint.rs:6
-game/vordar-game/tests/content_lint.rs:7
-game/vordar-game/tests/content_lint.rs:8
-game/vordar-game/tests/content_lint.rs:9
-game/vordar-game/tests/content_lint.rs:16
-game/vordar-game/tests/content_lint.rs:17
-game/vordar-game/tests/content_lint.rs:41
-game/vordar-game/tests/content_lint.rs:52
-game/vordar-game/tests/content_lint.rs:59
-game/vordar-game/tests/content_lint.rs:75
-game/vordar-game/tests/content_lint.rs:79
-game/vordar-game/tests/content_lint.rs:86
-game/vordar-game/tests/content_lint.rs:94
-game/vordar-game/tests/content_lint.rs:100
-game/vordar-game/tests/content_lint.rs:106
-game/vordar-game/tests/content_lint.rs:137
-game/vordar-game/tests/content_lint.rs:139
-game/vordar-game/tests/content_lint.rs:148
-game/vordar-game/tests/content_lint.rs:156
-game/vordar-game/tests/content_lint.rs:193
-game/vordar-game/tests/content_lint.rs:203
-game/vordar-game/tests/content_lint.rs:314
-game/vordar-game/tests/content_lint.rs:401
-game/vordar-game/tests/content_lint.rs:404
-game/vordar-game/tests/content_lint.rs:409
-game/vordar-game/tests/content_lint.rs:439
-game/vordar-game/tests/content_lint.rs:450
-game/vordar-game/tests/content_lint.rs:457
-game/vordar-game/tests/content_lint.rs:482
-game/vordar-game/tests/content_lint.rs:494
-game/vordar-game/tests/content_lint.rs:500
-game/vordar-game/tests/content_lint.rs:507
-smirk/engine-renderer/tests/offscreen.rs:555
-smirk/engine-renderer/src/mesh/store.rs:319
+client/vordar-client/src/presentation.rs:// Environment HDRI drives IBL ambient + the visible sky (VQ-A5/D2);
+client/vordar-client/src/presentation.rs:// tiling PBR material (VQ-A2), flat across the play area. Otherwise
+client/vordar-client/src/telegraph.rs:// Components above 1.0 are HDR emissive (VQ-C3): an about-to-resolve
+client/vordar-client/src/telegraph.rs:// telegraph blooms threat red-orange (VQ-A4).
+client/vordar-client/src/telegraph.rs:// The scheduled-ability impact beat (VQ-E1/E4): the resolve moment
+client/vordar-client/src/vfx.rs:/// Atlas cell (VQ-E3): 0 soft glow, 1 core glow, 2 streak, 3 smoke.
+client/vordar-client/src/vfx.rs:/// and projectile prefabs (VQ-E1).
+client/vordar-client/src/vfx.rs:/// The cast beat (VQ-E1), at the caster's weapon hand when the renderer
+client/vordar-client/src/vfx.rs:/// The impact beat for projectiles (VQ-E1/E2): entities queued for despawn
+client/vordar-client/tests/ground_render.rs:"textured ground must vary (VQ-A2): stddev {:.2}, mean {mean:.2}",
+smirk/engine-renderer/src/mesh/store.rs:/// feeds the dev overlay's "tex mem (assets)" line (VQ-C5's budget).
+smirk/engine-renderer/tests/offscreen.rs:/// VQ-C3's "HDR emissive > 1.0 blooms" must hold in display-referred space:
