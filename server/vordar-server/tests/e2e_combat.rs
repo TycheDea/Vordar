@@ -1,7 +1,7 @@
 // Combat mechanics tests: scheduled AOE, rend, onslaught. Isolated from
 // connectivity, persistence, and wire-format concerns.
 
-use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot};
+use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot, SimDeadline};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use vordar_protocol::{encode, ClientMsg};
@@ -136,10 +136,10 @@ fn rend_kills_camped_enemy() {
     // server silently drops out-of-range and on-cooldown casts, and 2.2
     // leaves 0.3 of slack against a stale snapshot.
     let mut last_cast = Instant::now() - Duration::from_secs(2);
-    let deadline = Instant::now() + Duration::from_secs(25);
+    let mut deadline = SimDeadline::new(Duration::from_secs(25));
     let mut hp_seen: Vec<i32> = Vec::new();
     while bot.last_snapshot.contains_key(&grunt_id) {
-        assert!(Instant::now() < deadline, "grunt survived 25 s of rends");
+        deadline.check(&bot, "the grunt to die to 25 sim-seconds of rends");
         if let (Some(own), Some(grunt)) = (bot.own_pos(), bot.last_snapshot.get(&grunt_id).copied()) {
             let offset = glam::Vec2::new(grunt.x - own.x, grunt.z - own.z);
             let dist = offset.length();
