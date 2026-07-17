@@ -310,6 +310,58 @@ names.
   is a record of the calibration mechanism actually used, for any future
   rework touching these tests' teeth-check.
 
+### 5. `scheduled_aoe`'s dodge-window sim-rate precondition measures the wrong party — the bot's own send loop can starve while the precondition reads healthy
+
+- **Evidence:** `server/vordar-server/tests/e2e_combat.rs:62-100` — the dodge
+  scenario (cast 2) walks bot B east through a wall-clock-paced loop
+  (`while ... { ... std::thread::sleep(Duration::from_millis(16));
+  a.pump(); b.pump(); }`, `:67-78`) bounded only by
+  `b.client.server_now_micros()` reads against the mechanic's `resolve_at`.
+  The `DODGE_SIM_RATE_MIN = 0.9` precondition (`:86-90`, landed 2026-07-17 by
+  rework 2 step 5) computes `sim_rate` from `(b.latest_state_tick - tick0) /
+  (wall0.elapsed() * TICK_HZ)` — purely the SERVER's tick advancement over
+  wall time. It gates the miss assert on the SERVER's sim health, not on
+  whether bot B's own `send_move` calls inside this loop kept pace with
+  `resolve_at`'s wall-clock deadline. Rework 3's finding 3 evidence-gathering
+  (2026-07-17) observed the dodge assert fire twice with this precondition
+  reading pass, and finding 5's proof pass
+  (`plan-devloop-rework-3-2026-07-17.md`) reproduced it a third time (1/10
+  sensitive-set runs at `-Load 3.0`) — "B stepped out before T — the rewound
+  test must miss it" (`:93`) firing despite `sim_rate >= 0.9`. Rework 3's own
+  plan named the suspected mechanism without confirming it: "the starving
+  party is the bot's own thread, which rework 2's server-tick-anchored
+  SimDeadline cannot see" — the `Bot`/`SimDeadline` mechanism rework 2
+  landed measures server-tick pacing for the bot's WAIT conditions, not this
+  loop's own iteration cadence.
+- **Ideal:** the dodge assert's precondition measures whatever party can
+  actually cause a false miss-assert — if that's bot B's own send-loop
+  cadence under CPU load, the precondition (or an equivalent skip/park
+  mechanism) detects that directly, the same way `WireHealth` in the
+  prediction tests measures the wire's own gaps instead of a proxy.
+- **Gap:** `sim_rate` is a proxy for server health; it says nothing about
+  whether B's 16ms-sleep loop actually sent enough `send_move` calls before
+  `resolve_at` under CPU contention. Root cause is not confirmed — only
+  suspected — per rework 3's execution-tier scope, which explicitly declined
+  to chase it.
+- **Suggestion:** /plan-rework. Root-cause first: reproduce under
+  `stress-suite.ps1 -Load 3.0` with instrumentation on the dodge loop's own
+  iteration timing (wall gap between successive `send_move` calls, and how
+  many actually landed before `resolve_at`) to confirm or rule out the
+  bot-thread-starvation mechanism against the recorded failures. If
+  confirmed, extend the precondition (or the loop itself) to measure the
+  bot's own cadence directly, mirroring the `WireHealth`-style "measure the
+  thing itself" pattern rework 3 used for the prediction tests, rather than
+  widening `DODGE_SIM_RATE_MIN` or adding sleep-based padding. If the trace
+  shows the bot's loop kept pace and the server still resolved the miss
+  wrong, that is a genuine scheduled-cast rewind bug, not a harness fix.
+- **Path:** (1) instrument the dodge loop's per-iteration timing and
+  reproduce under `-Load 3.0` (historical rate: ~1/10 to ~1/20 runs) until
+  at least one failure with the precondition reading healthy is captured;
+  (2) attribute per the Suggestion; (3) fix at the attributed layer;
+  (4) proof: this rework's own bar is rework 2's outstanding gap —
+  sensitive-set x10 at `-Load 3.0` green on `scheduled_aoe`, closing rework 2
+  on the recorded evidence in this file's intro paragraph.
+
 ## Carried forward from previous report
 
 None — `reworks-devloop-2026-07-15.md`'s single rework (parallel execution)
