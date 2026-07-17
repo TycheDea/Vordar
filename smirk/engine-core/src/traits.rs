@@ -1,4 +1,4 @@
-// Engine traits — the contracts every entity capability implements
+// Resource type-map and deferred spawn/despawn plumbing shared across the engine
 
 use hecs::Entity;
 use std::any::{Any, TypeId};
@@ -44,7 +44,7 @@ impl Resources {
 
 // ── SpawnContext ──────────────────────────────────────────────────────────────
 //
-// Passed to Spawnable::spawn and EntityLifecycle hooks.
+// Passed to spawn_prefab and the SpawnQueue/DespawnQueue closures.
 // Access engine resources via self.resources.get_mut::<T>().
 //
 // Standard resources inserted by the engine:
@@ -56,21 +56,6 @@ impl Resources {
 pub struct SpawnContext<'a> {
     pub world:     &'a mut hecs::World,
     pub resources: &'a mut Resources,
-}
-
-// ── Spawning ──────────────────────────────────────────────────────────────────
-
-pub trait Spawnable {
-    fn spawn(ctx: &mut SpawnContext) -> Entity where Self: Sized;
-}
-
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
-
-// Optional hooks — default implementations are no-ops.
-// on_despawn is the right place to spawn death effects, drop pickups, etc.
-pub trait EntityLifecycle {
-    fn on_spawn(&self, _ctx: &mut SpawnContext) {}
-    fn on_despawn(&self, _ctx: &mut SpawnContext) {}
 }
 
 // ── SpawnQueue / DespawnQueue ─────────────────────────────────────────────────
