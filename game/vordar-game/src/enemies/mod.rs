@@ -105,7 +105,7 @@ impl System for EnemyAISystem {
             .map(|(t, _)| t.position)
             .collect();
 
-        let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
+        let grid = resources.expect::<SpatialGrid>();
         let few_players = players.len() < GRID_PLAYER_MIN;
 
         let mut shots: Vec<PendingShot> = Vec::new();

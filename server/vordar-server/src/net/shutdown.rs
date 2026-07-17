@@ -27,7 +27,7 @@ impl System for ShutdownSystem {
         if !flagged {
             return;
         }
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         let saved = state.conns.len();
         for pc in state.conns.values() {
             // Players still in `state.loading` have no entity yet — nothing
@@ -35,6 +35,6 @@ impl System for ShutdownSystem {
             save_character(world, state, pc);
         }
         log::info!("zone '{}': shutdown flag set, saved {saved} connected player(s), requesting app exit", state.zone.name);
-        resources.get_mut::<AppExit>().unwrap().0 = true;
+        resources.expect_mut::<AppExit>().0 = true;
     }
 }

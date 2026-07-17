@@ -102,7 +102,7 @@ pub(super) struct NetInterpolateSystem;
 impl System for NetInterpolateSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
         let cursor = {
-            let state = resources.get_mut::<NetClientState>().unwrap();
+            let state = resources.expect_mut::<NetClientState>();
             let cursor = advance_playback(state.playback, state.latest_state_tick, delta);
             state.playback = Some(cursor);
             cursor

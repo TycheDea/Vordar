@@ -42,7 +42,7 @@ pub struct PlayerMovementSystem;
 impl System for PlayerMovementSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let intents: HashMap<Entity, Vec2> = {
-            let bus = resources.get::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect::<EventBus>();
             bus.read::<MoveIntent>().map(|i| (i.entity, i.dir)).collect()
         };
 

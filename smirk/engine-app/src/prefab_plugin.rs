@@ -19,7 +19,7 @@ impl Plugin for PrefabPlugin {
         if !app.resources.contains::<PrefabLibrary>() {
             app.resources.insert(PrefabLibrary::new());
         }
-        let registry = app.resources.get_mut::<ComponentRegistry>().unwrap();
+        let registry = app.resources.expect_mut::<ComponentRegistry>();
         register_core_components(registry);
         log::info!("ComponentRegistry: {} components registered", registry.len());
     }

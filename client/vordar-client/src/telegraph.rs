@@ -50,7 +50,7 @@ pub struct TelegraphFillSystem;
 
 impl System for TelegraphFillSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let Some(now) = resources.get::<NetClientState>().unwrap().server_now_micros() else {
+        let Some(now) = resources.expect::<NetClientState>().server_now_micros() else {
             return;
         };
         let mut finished: Vec<Entity> = Vec::new();
@@ -98,7 +98,7 @@ impl System for TelegraphFillSystem {
             }
         }
         for entity in finished {
-            resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
+            resources.expect_mut::<DespawnQueue>().push(entity, None);
         }
     }
 }

@@ -52,7 +52,7 @@ impl System for MechanicResolveSystem {
         if !due_now {
             return;
         }
-        let now = resources.get::<NetServerState>().unwrap().server.now_micros();
+        let now = resources.expect::<NetServerState>().server.now_micros();
         let bound = resources.get::<PlayRadius>().copied().unwrap_or_default().0;
 
         let due: Vec<(Entity, Mechanic, Vec3)> = world
@@ -79,7 +79,7 @@ impl System for MechanicResolveSystem {
 
             let mut hit_entities: Vec<Entity> = Vec::new();
             {
-                let state = resources.get::<NetServerState>().unwrap();
+                let state = resources.expect::<NetServerState>();
                 for (entity, pos) in targets {
                     let pos_at_t = match state.conns.values().find(|pc| pc.entity == entity) {
                         Some(pc) => rewound_position(pos, &pc.history, t_eff, bound),
@@ -114,13 +114,13 @@ impl System for MechanicResolveSystem {
             }
 
             log::info!("mechanic {} resolved: {} hit", mech.id, hit_entities.len());
-            let state = resources.get_mut::<NetServerState>().unwrap();
+            let state = resources.expect_mut::<NetServerState>();
             let hits: Vec<u32> = hit_entities.iter().map(|&e| state.repl_ids.id_for(e)).collect();
             let frame = encode(&ServerMsg::HitResult { mechanic: mech.id, hits });
             for c in aoi_conns(&state.conns, world, center) {
                 state.server.send(c, frame.clone());
             }
-            resources.get_mut::<DespawnQueue>().unwrap().push(mech_entity, None);
+            resources.expect_mut::<DespawnQueue>().push(mech_entity, None);
         }
     }
 }

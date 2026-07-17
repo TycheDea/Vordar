@@ -53,7 +53,7 @@ impl System for DeathSystem {
                 .map(|d| d.attacker);
 
             // Emit event first so other systems in the same phase can react this frame.
-            let bus = resources.get_mut::<EventBus>().unwrap();
+            let bus = resources.expect_mut::<EventBus>();
             bus.emit(HealthDepleted { entity });
             if let Some(killer) = killer {
                 bus.emit(Killed { victim: entity, killer });
@@ -66,7 +66,7 @@ impl System for DeathSystem {
             }
 
             // Queue despawn; render slot is freed by RenderSlotDespawnSystem in engine-renderer.
-            resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
+            resources.expect_mut::<DespawnQueue>().push(entity, None);
         }
     }
 }

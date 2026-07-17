@@ -43,7 +43,7 @@ impl System for SandboxCastSystem {
         };
         {
             let cooldowns: Vec<f32> = abilities.iter().map(|a| a.cooldown_micros as f32 / 1e6).collect();
-            let cast = resources.get_mut::<CastState>().unwrap();
+            let cast = resources.expect_mut::<CastState>();
             cast.sync(&class, &cooldowns);
             cast.tick(delta);
         }
@@ -52,7 +52,7 @@ impl System for SandboxCastSystem {
         for (slot, ability) in abilities.iter().enumerate() {
             if !slot_pressed(slot, resources) { continue; }
             if !resources.get::<CastState>().map(|c| c.ready(slot)).unwrap_or(false) { continue; }
-            resources.get_mut::<CastState>().unwrap().fire(slot);
+            resources.expect_mut::<CastState>().fire(slot);
             crate::pose::trigger_swing(world, player);
             // Skinned-mesh cast animation (per-ability clip) — no-op on SDF bodies.
             crate::locomotion::trigger_attack_clip(world, player, ability.anim.as_deref(), ability.anim_secs);

@@ -34,7 +34,7 @@ impl System for ZoneTransferSystem {
             return;
         }
         let transfers: Vec<ConnId> = {
-            let state = resources.get::<NetServerState>().unwrap();
+            let state = resources.expect::<NetServerState>();
             if state.zone.portals.is_empty() {
                 return;
             }
@@ -48,7 +48,7 @@ impl System for ZoneTransferSystem {
         };
 
         for conn in transfers {
-            let state = resources.get_mut::<NetServerState>().unwrap();
+            let state = resources.expect_mut::<NetServerState>();
             let Some(pc) = state.conns.get(&conn) else { continue };
             let Ok(pos) = world.get::<&Transform>(pc.entity).map(|tr| tr.position) else { continue };
             let portal = portal_hit(&state.zone.portals, pos).unwrap().clone();
@@ -69,7 +69,7 @@ impl System for ZoneTransferSystem {
                 CharacterRecord { zone: portal.target_zone.clone(), pos: portal.target_pos, health, cooldowns, xp },
             );
             state.server.send(conn, encode(&ServerMsg::Redirect { zone: portal.target_zone.clone(), addr }));
-            resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
+            resources.expect_mut::<DespawnQueue>().push(pc.entity, None);
             log::info!("conn {conn}: '{}' transfers to zone '{}' via portal", pc.name, portal.target_zone);
         }
     }

@@ -78,7 +78,7 @@ impl System for ProjectileTtlSystem {
                 expired.push(entity);
             }
         }
-        let queue = resources.get_mut::<DespawnQueue>().unwrap();
+        let queue = resources.expect_mut::<DespawnQueue>();
         for entity in expired {
             queue.push(entity, None);
         }
@@ -106,7 +106,7 @@ impl System for ProjectileHitSystem {
         // only the first valid contact lands.
         let mut spent: HashSet<Entity> = HashSet::new();
         {
-            let bus = resources.get::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect::<EventBus>();
             for e in bus.read::<CollisionStarted>() {
                 for (this, other) in [(e.a, e.b), (e.b, e.a)] {
                     let Ok(projectile) = world.get::<&Projectile>(this) else { continue };
@@ -157,7 +157,7 @@ impl System for ProjectileHitSystem {
                 let _ = world.insert_one(hit.victim, Provoked);
             }
         }
-        let queue = resources.get_mut::<DespawnQueue>().unwrap();
+        let queue = resources.expect_mut::<DespawnQueue>();
         for hit in hits {
             queue.push(hit.projectile, None);
         }

@@ -185,7 +185,7 @@ impl App {
         if !self.resources.contains::<T>() {
             self.resources.insert(T::default());
         }
-        self.resources.get_mut::<T>().unwrap()
+        self.resources.expect_mut::<T>()
     }
 
     /// Register a callback invoked once after the OS window is created.
@@ -227,7 +227,7 @@ impl App {
         if !self.resources.contains::<ComponentRegistry>() {
             self.resources.insert(ComponentRegistry::new());
         }
-        self.resources.get_mut::<ComponentRegistry>().unwrap().register::<T>(name);
+        self.resources.expect_mut::<ComponentRegistry>().register::<T>(name);
         self
     }
 
@@ -237,7 +237,7 @@ impl App {
         if !self.resources.contains::<PrefabLibrary>() {
             self.resources.insert(PrefabLibrary::new());
         }
-        self.resources.get_mut::<PrefabLibrary>().unwrap().load_dir(dir);
+        self.resources.expect_mut::<PrefabLibrary>().load_dir(dir);
         self
     }
 
@@ -305,8 +305,8 @@ impl App {
     }
 
     pub(crate) fn tick(&mut self, frame_delta: f32) {
-        self.resources.get_mut::<Time>().unwrap().frame_dt = frame_delta;
-        self.resources.get_mut::<DevStats>().unwrap().record_frame(frame_delta);
+        self.resources.expect_mut::<Time>().frame_dt = frame_delta;
+        self.resources.expect_mut::<DevStats>().record_frame(frame_delta);
         self.scheduler.run_tick(&mut self.world, &mut self.resources, frame_delta);
     }
 }

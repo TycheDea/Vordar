@@ -90,7 +90,7 @@ impl System for PointLightSyncSystem {
             });
         }
 
-        let state = resources.get_mut::<RendererState>().expect("checked above");
+        let state = resources.expect_mut::<RendererState>();
         let focus = state.camera.target;
         let (points, count) = select_point_lights(&mut self.candidates, focus);
         state.light_state.points = points;

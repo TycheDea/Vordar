@@ -59,7 +59,7 @@ impl RenderSystem {
         self.gpu_buf.clear();
         self.dirty_ranges.clear();
         let slot_count = {
-            let pool = resources.get::<InstancePool>().expect("InstancePool not in resources");
+            let pool = resources.expect::<InstancePool>();
             let mut i = 0;
             while i < pool.slots.len() {
                 if pool.dirty[i] {
@@ -74,7 +74,7 @@ impl RenderSystem {
             pool.slots.len()
         };
         {
-            let pool = resources.get_mut::<InstancePool>().expect("InstancePool not in resources");
+            let pool = resources.expect_mut::<InstancePool>();
             pool.dirty.iter_mut().for_each(|d| *d = false);
         }
         slot_count
@@ -161,7 +161,7 @@ impl System for RenderSystem {
 
         // ── Collect SDF in-use runs ───────────────────────────────────────────
         {
-            let pool = resources.get::<InstancePool>().expect("InstancePool not in resources");
+            let pool = resources.expect::<InstancePool>();
             pool.used_runs(&mut self.sdf_runs);
         }
 

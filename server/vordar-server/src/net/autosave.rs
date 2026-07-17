@@ -25,7 +25,7 @@ impl System for AutosaveSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let tick = self.ticks;
         self.ticks += 1;
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         for (&conn, pc) in &state.conns {
             if !autosave_due(conn, tick) {
                 continue;

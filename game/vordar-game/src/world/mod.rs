@@ -236,7 +236,7 @@ impl System for WorldEventSystem {
             queue_prefab_spawn(resources, prefab, pos);
         }
         for (prefab, pos, event, wave) in waves {
-            resources.get_mut::<SpawnQueue>().unwrap().push(move |ctx| {
+            resources.expect_mut::<SpawnQueue>().push(move |ctx| {
                 match spawn_prefab(&prefab, pos, ctx) {
                     Ok(entity) => { let _ = ctx.world.insert_one(entity, EventSpawned { event, wave }); }
                     Err(e) => log::error!("wave spawn '{prefab}' failed: {e}"),
@@ -244,7 +244,7 @@ impl System for WorldEventSystem {
             });
         }
         for entity in to_despawn {
-            resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
+            resources.expect_mut::<DespawnQueue>().push(entity, None);
         }
     }
 }

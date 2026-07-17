@@ -226,7 +226,7 @@ impl System for CorpseTtlSystem {
         if expired.is_empty() {
             return;
         }
-        let queue = resources.get_mut::<DespawnQueue>().unwrap();
+        let queue = resources.expect_mut::<DespawnQueue>();
         for entity in expired {
             queue.push(entity, None);
         }

@@ -31,7 +31,7 @@ impl System for ContactDamageSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         // Collect first: emitting DamageDealt below needs the bus mutably.
         let contacts: Vec<(Entity, Entity, i32, DamageType)> = {
-            let bus = resources.get::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect::<EventBus>();
             bus.read::<CollisionStarted>()
                 .flat_map(|e| [(e.a, e.b), (e.b, e.a)])
                 .filter_map(|(attacker, target)| {

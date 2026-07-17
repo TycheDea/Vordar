@@ -24,11 +24,11 @@ pub struct DayNightSystem;
 impl System for DayNightSystem {
     fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
         let world_now = {
-            let wt = resources.get::<WorldTime>().unwrap();
+            let wt = resources.expect::<WorldTime>();
             if !wt.synced {
                 return;
             }
-            let state = resources.get::<NetClientState>().unwrap();
+            let state = resources.expect::<NetClientState>();
             let Some(server_now) = state.server_now_micros() else { return };
             (server_now as i64 + wt.offset_micros).max(0) as u64
         };

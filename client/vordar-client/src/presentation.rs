@@ -79,7 +79,7 @@ impl System for ZoneDressingSystem {
         // Tear down the previous zone's scenery.
         let old: Vec<Entity> = world.query::<(Entity, &ZoneDressing)>().iter().map(|(e, _)| e).collect();
         {
-            let queue = resources.get_mut::<DespawnQueue>().unwrap();
+            let queue = resources.expect_mut::<DespawnQueue>();
             for entity in old {
                 queue.push(entity, None);
             }

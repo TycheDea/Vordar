@@ -62,10 +62,10 @@ impl System for NetReceiveSystem {
             .clone();
 
         // Publish the world clock for world systems (events, future schedules).
-        let world_now = resources.get::<NetServerState>().unwrap().world_micros();
-        resources.get_mut::<WorldTime>().unwrap().0 = world_now;
+        let world_now = resources.expect::<NetServerState>().world_micros();
+        resources.expect_mut::<WorldTime>().0 = world_now;
 
-        let events = resources.get_mut::<NetServerState>().unwrap().server.poll();
+        let events = resources.expect_mut::<NetServerState>().server.poll();
 
         let mut pending_bolts: Vec<PendingBolt> = Vec::new();
 
@@ -88,13 +88,13 @@ impl System for NetReceiveSystem {
                     match msg {
                         ClientMsg::Login { name, token } => handle_login(world, resources, conn, name, token),
                         ClientMsg::MoveIntents { intents } => {
-                            let state = resources.get_mut::<NetServerState>().unwrap();
+                            let state = resources.expect_mut::<NetServerState>();
                             let rtt = state.server.rtt_micros(conn).unwrap_or(0);
                             let Some(pc) = state.conns.get_mut(&conn) else { continue };
                             queue_move_intents(pc, &intents, recv_micros, rtt, &state.server.metrics());
                         }
                         ClientMsg::CastIntent { seq, t_server_micros, skill, target } => {
-                            let state = resources.get_mut::<NetServerState>().unwrap();
+                            let state = resources.expect_mut::<NetServerState>();
                             dispatch_cast(world, state, &class_library, &mut pending_bolts, conn, seq, t_server_micros, recv_micros, skill, target);
                         }
                     }
@@ -107,7 +107,7 @@ impl System for NetReceiveSystem {
             spawn_projectile(world, resources, &b.prefab, b.origin, b.dir, b.speed, b.damage, b.damage_type, b.ttl_secs, b.caster, false);
         }
 
-        let loaded = resources.get_mut::<NetServerState>().unwrap().db.poll();
+        let loaded = resources.expect_mut::<NetServerState>().db.poll();
         for l in loaded {
             complete_db_load(world, resources, l);
         }
@@ -118,13 +118,13 @@ impl System for NetReceiveSystem {
 }
 
 fn handle_disconnect(world: &mut World, resources: &mut Resources, conn: ConnId) {
-    let state = resources.get_mut::<NetServerState>().unwrap();
+    let state = resources.expect_mut::<NetServerState>();
     state.loading.remove(&conn);
     if let Some(pc) = state.conns.remove(&conn) {
         // Persist before queuing the despawn — DespawnFlush
         // runs later in the frame, the entity is still alive.
         save_character(world, state, &pc);
-        resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
+        resources.expect_mut::<DespawnQueue>().push(pc.entity, None);
         log::info!("conn {conn}: disconnected, despawning {:?}", pc.entity);
     }
 }
@@ -132,7 +132,7 @@ fn handle_disconnect(world: &mut World, resources: &mut Resources, conn: ConnId)
 /// Login arrives from a connection that has no `PlayerConn` yet; grant and
 /// spawn happen only later, when the DB load completes.
 fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name: String, token: AccountToken) {
-    let state = resources.get_mut::<NetServerState>().unwrap();
+    let state = resources.expect_mut::<NetServerState>();
     // Per-IP failed-login rate limit: resolved and
     // checked before anything else — an over-budget IP
     // is turned away without running credential
@@ -184,9 +184,9 @@ fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name
         save_character(world, state, &pc);
         state.server.disconnect(old_conn);
         log::info!("conn {conn}: '{name}' takes over session from conn {old_conn}");
-        resources.get_mut::<DespawnQueue>().unwrap().push(pc.entity, None);
+        resources.expect_mut::<DespawnQueue>().push(pc.entity, None);
     }
-    let state = resources.get_mut::<NetServerState>().unwrap();
+    let state = resources.expect_mut::<NetServerState>();
     // A same-name load still in flight belongs to another
     // stale connection — forget it (its DbLoaded result
     // gets discarded) and kick that connection too, but
@@ -401,14 +401,14 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
     // The in-flight login's presented token, captured either way —
     // a `Granted` record below seeds the new PlayerConn's token
     // without re-reading the wire.
-    let Some((_, token)) = resources.get_mut::<NetServerState>().unwrap().loading.remove(&conn) else {
+    let Some((_, token)) = resources.expect_mut::<NetServerState>().loading.remove(&conn) else {
         return; // disconnected while the load was in flight
     };
     let record = match outcome {
         DbLoginOutcome::Granted(record) => record,
         DbLoginOutcome::BadToken => {
             log::warn!("conn {conn}: '{name}' login denied — token mismatch");
-            let state = resources.get_mut::<NetServerState>().unwrap();
+            let state = resources.expect_mut::<NetServerState>();
             // The conn may already have dropped while the DB
             // roundtrip was in flight — peer_ip is then None, and
             // there is nothing to record against.
@@ -424,7 +424,7 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
     // owner's address comes from the directory; the client closes
     // this connection and logs in there instead.
     {
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         if record.zone != state.zone.name {
             match state.directory.get(&record.zone) {
                 Some(&addr) => {
@@ -444,11 +444,11 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
     // prefab dir has loaded, so PrefabLibrary is fully populated.
     // Read here, before spawn_prefab needs `resources` mutably below.
     let new_prefab_table: Option<Vec<String>> = {
-        let has_table = resources.get::<NetServerState>().unwrap().prefab_table.is_some();
+        let has_table = resources.expect::<NetServerState>().prefab_table.is_some();
         if has_table {
             None
         } else {
-            let library = resources.get::<PrefabLibrary>().expect("PrefabLibrary not in resources");
+            let library = resources.expect::<PrefabLibrary>();
             let names = library.names();
             assert!(
                 names.len() <= u16::MAX as usize + 1,
@@ -460,7 +460,7 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
     };
 
     let result = spawn_prefab(PLAYER_PREFAB, record.pos, &mut SpawnContext { world, resources });
-    let state = resources.get_mut::<NetServerState>().unwrap();
+    let state = resources.expect_mut::<NetServerState>();
     if let Some(names) = new_prefab_table {
         let by_name: HashMap<String, u16> =
             names.iter().cloned().enumerate().map(|(i, n)| (n, i as u16)).collect();
@@ -519,7 +519,7 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
 /// snapshots rebind to the new body.
 fn respawn_dead(world: &mut World, resources: &mut Resources) {
     let dead: Vec<ConnId> = {
-        let state = resources.get::<NetServerState>().unwrap();
+        let state = resources.expect::<NetServerState>();
         state.conns.iter()
             .filter(|&(_, pc)| !world.contains(pc.entity))
             .map(|(&conn, _)| conn)
@@ -527,7 +527,7 @@ fn respawn_dead(world: &mut World, resources: &mut Resources) {
     };
     for conn in dead {
         let result = spawn_prefab(PLAYER_PREFAB, spawn_position(conn), &mut SpawnContext { world, resources });
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         let Some(pc) = state.conns.get_mut(&conn) else { continue };
         match result {
             Ok(entity) => {
@@ -554,8 +554,8 @@ pub(super) struct XpCarrySystem;
 
 impl System for XpCarrySystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let dying: Vec<Entity> = resources.get::<DespawnQueue>().unwrap().0.iter().map(|(e, _)| *e).collect();
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let dying: Vec<Entity> = resources.expect::<DespawnQueue>().0.iter().map(|(e, _)| *e).collect();
+        let state = resources.expect_mut::<NetServerState>();
         for entity in dying {
             if let Some(pc) = state.conns.values_mut().find(|pc| pc.entity == entity) {
                 if let Ok(xp) = world.get::<&Xp>(entity) {
@@ -572,7 +572,7 @@ impl System for XpCarrySystem {
 /// replay, so prediction error remains zero.
 fn drain_intents(world: &World, resources: &mut Resources) {
     let popped: Vec<(ConnId, Entity, u64, Vec2)> = {
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         state.conns.iter_mut()
             .filter_map(|(&conn, pc)| {
                 let (seq, stamp, dir) = pc.queue.pop_front()?;
@@ -587,7 +587,7 @@ fn drain_intents(world: &World, resources: &mut Resources) {
     // before the state re-borrow because `history` lives inside NetServerState.
     let applied: Vec<Vec3> = popped.iter().map(|&(_, entity, _, dir)| applied_velocity(world, entity, dir)).collect();
     {
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         for (&(conn, _, stamp, _), &velocity) in popped.iter().zip(&applied) {
             if let Some(pc) = state.conns.get_mut(&conn) {
                 pc.history.push_back((stamp, velocity));
@@ -597,7 +597,7 @@ fn drain_intents(world: &World, resources: &mut Resources) {
             }
         }
     }
-    let bus = resources.get_mut::<EventBus>().unwrap();
+    let bus = resources.expect_mut::<EventBus>();
     for (_, entity, _, dir) in popped {
         bus.emit(MoveIntent { entity, dir });
     }

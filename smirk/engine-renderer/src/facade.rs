@@ -31,19 +31,19 @@ impl Default for CameraConfig {
 
 /// Allocate a render slot for a new entity. Call from SpawnQueue callbacks.
 pub fn alloc_render_slot(resources: &mut Resources) -> InstanceSlot {
-    let pool = resources.get_mut::<InstancePool>().expect("InstancePool not in resources");
+    let pool = resources.expect_mut::<InstancePool>();
     InstanceSlot(pool.alloc())
 }
 
 /// Allocate N render slots for a ShapeGroup entity. `count` must equal `group.shapes.len()`.
 pub fn alloc_shape_group_slots(count: usize, resources: &mut Resources) -> ShapeGroupSlots {
-    let pool = resources.get_mut::<InstancePool>().expect("InstancePool not in resources");
+    let pool = resources.expect_mut::<InstancePool>();
     ShapeGroupSlots((0..count).map(|_| pool.alloc()).collect())
 }
 
 /// Free a render slot when an entity is despawned. Call from DespawnQueue hooks.
 pub fn free_render_slot(slot: InstanceSlot, resources: &mut Resources) {
-    let pool = resources.get_mut::<InstancePool>().expect("InstancePool not in resources");
+    let pool = resources.expect_mut::<InstancePool>();
     pool.free(slot.0);
 }
 
@@ -221,7 +221,7 @@ pub fn create_checker_texture(
     color_b: [u8; 4],
     resources: &mut Resources,
 ) -> TextureHandle {
-    let state = resources.get_mut::<RendererState>().expect("RendererState not in resources");
+    let state = resources.expect_mut::<RendererState>();
     let tex = texture::create_checker_texture(&state.device, &state.queue, size, tile_size, color_a, color_b);
     let bg  = texture::create_bind_group(&state.device, &state.texture_bgl, &tex);
     let idx = state.texture_store.len();
@@ -234,7 +234,7 @@ pub fn create_checker_texture(
 /// linear data). Returns a handle to use with `set_texture`. Logs a warning
 /// and returns `None` if the file is missing or invalid.
 pub fn load_texture(path: &str, srgb: bool, resources: &mut Resources) -> Option<TextureHandle> {
-    let state = resources.get_mut::<RendererState>().expect("RendererState not in resources");
+    let state = resources.expect_mut::<RendererState>();
     match texture::load_dds(&state.device, &state.queue, path, srgb) {
         Ok(tex) => {
             let bg  = texture::create_bind_group(&state.device, &state.texture_bgl, &tex);
@@ -251,13 +251,13 @@ pub fn load_texture(path: &str, srgb: bool, resources: &mut Resources) -> Option
 
 /// Set the active texture for the next render pass.
 pub fn set_texture(handle: TextureHandle, resources: &mut Resources) {
-    let state = resources.get_mut::<RendererState>().expect("RendererState not in resources");
+    let state = resources.expect_mut::<RendererState>();
     state.active_texture_idx = handle.0;
 }
 
 /// Reset to the default white texture (instance colors render unaffected).
 pub fn clear_texture(resources: &mut Resources) {
-    let state = resources.get_mut::<RendererState>().expect("RendererState not in resources");
+    let state = resources.expect_mut::<RendererState>();
     state.active_texture_idx = 0;
 }
 

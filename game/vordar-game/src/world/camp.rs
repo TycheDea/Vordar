@@ -91,7 +91,7 @@ impl System for CampSystem {
         };
 
         for (prefab, pos, ci, si) in due {
-            resources.get_mut::<SpawnQueue>().unwrap().push(move |ctx| {
+            resources.expect_mut::<SpawnQueue>().push(move |ctx| {
                 match spawn_prefab(&prefab, pos, ctx) {
                     Ok(entity) => { let _ = ctx.world.insert_one(entity, CampMember { camp: ci, slot: si }); }
                     Err(e) => log::error!("camp spawn '{prefab}' failed: {e}"),

@@ -40,8 +40,8 @@ impl System for BodyComposeSystem {
             return;
         }
 
-        let races = resources.get::<RaceLibrary>().expect("RaceLibrary not in resources");
-        let classes = resources.get::<ClassLibrary>().expect("ClassLibrary not in resources");
+        let races = resources.expect::<RaceLibrary>();
+        let classes = resources.expect::<ClassLibrary>();
         for (entity, race_id, class_id) in candidates {
             let class = class_id.as_deref().and_then(|id| classes.class(id));
 

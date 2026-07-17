@@ -37,6 +37,21 @@ impl Resources {
         self.data.get_mut(&TypeId::of::<T>())?.downcast_mut()
     }
 
+    /// Panics naming the missing type, instead of an anonymous `unwrap` panic,
+    /// when a required resource wasn't inserted by any plugin.
+    pub fn expect<T: Any>(&self) -> &T {
+        self.get::<T>().unwrap_or_else(|| {
+            panic!("resource `{}` not inserted — missing plugin?", std::any::type_name::<T>())
+        })
+    }
+
+    /// Mutable counterpart of [`Resources::expect`].
+    pub fn expect_mut<T: Any>(&mut self) -> &mut T {
+        self.get_mut::<T>().unwrap_or_else(|| {
+            panic!("resource `{}` not inserted — missing plugin?", std::any::type_name::<T>())
+        })
+    }
+
     pub fn contains<T: Any>(&self) -> bool {
         self.data.contains_key(&TypeId::of::<T>())
     }
@@ -148,6 +163,35 @@ mod tests {
         r.insert(1u32);
         r.insert(2u32);
         assert_eq!(r.get::<u32>(), Some(&2));
+    }
+
+    #[test]
+    fn resources_expect_returns_value_when_present() {
+        let mut r = Resources::new();
+        r.insert(42u32);
+        assert_eq!(r.expect::<u32>(), &42);
+    }
+
+    #[test]
+    fn resources_expect_mut_allows_mutation() {
+        let mut r = Resources::new();
+        r.insert(0u32);
+        *r.expect_mut::<u32>() = 99;
+        assert_eq!(r.get::<u32>(), Some(&99));
+    }
+
+    #[test]
+    #[should_panic(expected = "resource `u32` not inserted — missing plugin?")]
+    fn resources_expect_panics_naming_missing_type() {
+        let r = Resources::new();
+        r.expect::<u32>();
+    }
+
+    #[test]
+    #[should_panic(expected = "resource `u32` not inserted — missing plugin?")]
+    fn resources_expect_mut_panics_naming_missing_type() {
+        let mut r = Resources::new();
+        r.expect_mut::<u32>();
     }
 
     // ── SpawnQueue ────────────────────────────────────────────────────────────

@@ -56,7 +56,7 @@ impl System for NetReceiveSystem {
         maybe_reconnect(resources);
 
         let events = {
-            let state = resources.get_mut::<NetClientState>().unwrap();
+            let state = resources.expect_mut::<NetClientState>();
             state.client.as_mut().map(|c| c.poll()).unwrap_or_default()
         };
 
@@ -65,7 +65,7 @@ impl System for NetReceiveSystem {
                 ClientEvent::Connected => {
                     // Identity first: the server spawns us and sends Welcome
                     // only after Login (loads the character's saved state).
-                    let state = resources.get_mut::<NetClientState>().unwrap();
+                    let state = resources.expect_mut::<NetClientState>();
                     state.reconnect = None;
                     let name = state.user.clone();
                     let token = state.token;
@@ -82,7 +82,7 @@ impl System for NetReceiveSystem {
                 ClientEvent::Message(data) => match decode::<ServerMsg>(&data) {
                     Some(ServerMsg::Welcome { player_id }) => {
                         log::info!("welcome: our player id is {player_id}");
-                        let state = resources.get_mut::<NetClientState>().unwrap();
+                        let state = resources.expect_mut::<NetClientState>();
                         state.own_id = Some(player_id);
                         // A re-Welcome means death + respawn: the pending
                         // intents and correction belong to the old body.
@@ -91,7 +91,7 @@ impl System for NetReceiveSystem {
                     }
                     Some(ServerMsg::PrefabTable { names }) => {
                         log::info!("prefab table received: {} prefabs", names.len());
-                        resources.get_mut::<NetClientState>().unwrap().prefab_names = names;
+                        resources.expect_mut::<NetClientState>().prefab_names = names;
                     }
                     Some(ServerMsg::AoiDelta { tick, enters, leaves }) => {
                         apply::apply_aoi_delta(world, resources, tick, enters, leaves);
@@ -108,7 +108,7 @@ impl System for NetReceiveSystem {
                         log::info!("mechanic {mechanic} hit {} entities", hits.len());
                     }
                     Some(ServerMsg::WorldClock { world_micros, at_server_micros }) => {
-                        let wt = resources.get_mut::<crate::world_time::WorldTime>().unwrap();
+                        let wt = resources.expect_mut::<crate::world_time::WorldTime>();
                         wt.offset_micros = world_micros as i64 - at_server_micros as i64;
                         wt.synced = true;
                     }
@@ -123,7 +123,7 @@ impl System for NetReceiveSystem {
                         // `handle_disconnected` from scheduling a redial that
                         // would only be denied again with the same credential.
                         log::error!("login denied: {reason:?}");
-                        resources.get_mut::<NetClientState>().unwrap().login_denied = true;
+                        resources.expect_mut::<NetClientState>().login_denied = true;
                         handle_disconnected(world, resources);
                     }
                     Some(ServerMsg::Redirect { zone, addr }) => {
@@ -147,15 +147,15 @@ impl System for NetReceiveSystem {
 /// off the next Welcome.
 fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     let telegraphs: Vec<hecs::Entity> = world.query::<(hecs::Entity, &crate::telegraph::TelegraphVisual)>().iter().map(|(e, _)| e).collect();
-    let replicated: Vec<hecs::Entity> = resources.get::<NetClientState>().unwrap().entities.values().copied().collect();
+    let replicated: Vec<hecs::Entity> = resources.expect::<NetClientState>().entities.values().copied().collect();
     {
-        let queue = resources.get_mut::<DespawnQueue>().unwrap();
+        let queue = resources.expect_mut::<DespawnQueue>();
         for entity in replicated.into_iter().chain(telegraphs) {
             queue.push(entity, None);
         }
     }
 
-    let state = resources.get_mut::<NetClientState>().unwrap();
+    let state = resources.expect_mut::<NetClientState>();
     state.entities.clear();
     state.own_id = None;
     state.pending.clear();
@@ -177,7 +177,7 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     // The playback cursor is meaningless against a new connection's ticks —
     // `None` hard-snaps it fresh off the new zone's first snapshot.
     state.playback = None;
-    resources.get_mut::<crate::world_time::WorldTime>().unwrap().synced = false;
+    resources.expect_mut::<crate::world_time::WorldTime>().synced = false;
 }
 
 /// Tear down the old zone's replicated world and reconnect to the new one.
@@ -187,7 +187,7 @@ fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, add
     log::info!("redirected to zone '{zone}' at {addr}");
     teardown_replicated_world(world, resources);
 
-    let state = resources.get_mut::<NetClientState>().unwrap();
+    let state = resources.expect_mut::<NetClientState>();
     state.server_addr = addr;
     // Any in-flight backoff belonged to the old zone's address.
     state.reconnect = None;
@@ -215,7 +215,7 @@ fn handle_redirect(world: &mut World, resources: &mut Resources, zone: &str, add
 /// then schedule (or advance) a backoff-retried redial of the same address.
 fn handle_disconnected(world: &mut World, resources: &mut Resources) {
     teardown_replicated_world(world, resources);
-    let state = resources.get_mut::<NetClientState>().unwrap();
+    let state = resources.expect_mut::<NetClientState>();
     state.client = None;
     if state.login_denied {
         log::warn!("net: not reconnecting — the last login was denied");
@@ -233,7 +233,7 @@ fn handle_disconnected(world: &mut World, resources: &mut Resources) {
 /// just drained — a due retry has nothing to do with the last message
 /// received.
 fn maybe_reconnect(resources: &mut Resources) {
-    let state = resources.get_mut::<NetClientState>().unwrap();
+    let state = resources.expect_mut::<NetClientState>();
     if state.login_denied {
         return;
     }

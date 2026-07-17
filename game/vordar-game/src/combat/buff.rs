@@ -75,7 +75,7 @@ pub struct RavagerRageSystem;
 impl System for RavagerRageSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let attackers: Vec<Entity> = {
-            let bus = resources.get::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect::<EventBus>();
             bus.read::<DamageDealt>().map(|e| e.attacker).collect()
         };
         for attacker in attackers {

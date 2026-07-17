@@ -75,7 +75,7 @@ impl SnapshotBroadcastSystem {
 impl System for SnapshotBroadcastSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let (tick, conn_players): (u64, Vec<(ConnId, Entity)>) = {
-            let state = resources.get_mut::<NetServerState>().unwrap();
+            let state = resources.expect_mut::<NetServerState>();
             state.tick += 1;
             // Periodic world-clock re-sync (every ~10 s at POST_HZ).
             if state.tick.is_multiple_of(600) {
@@ -117,7 +117,7 @@ impl System for SnapshotBroadcastSystem {
         // border would make entities flap in and out between snapshots.
         let mut per_conn: Vec<(ConnId, Vec<AoiCandidate>)> = Vec::with_capacity(conn_players.len());
         {
-            let grid = resources.get::<SpatialGrid>().expect("SpatialGrid not in resources");
+            let grid = resources.expect::<SpatialGrid>();
             // One view for the whole gather: the replication filter (PrefabId),
             // position, and health come from a single lookup per candidate.
             let mut repl_q = world.query::<(&Transform, &PrefabId, Option<&Health>)>();
@@ -146,7 +146,7 @@ impl System for SnapshotBroadcastSystem {
             }
         }
 
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         for (conn, current) in per_conn {
             // Resolve each AOI candidate's zone-local wire id (assigning a
             // fresh monotonic one on first reference) before touching this
@@ -243,7 +243,7 @@ impl System for DeathBroadcastSystem {
         if deaths.is_empty() {
             return;
         }
-        let state = resources.get_mut::<NetServerState>().unwrap();
+        let state = resources.expect_mut::<NetServerState>();
         for (entity, pos) in deaths {
             let id = state.repl_ids.id_for(entity);
             let msg = encode(&ServerMsg::EntityDied { id, pos });

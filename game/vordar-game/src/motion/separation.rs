@@ -37,7 +37,7 @@ pub struct SeparationSystem;
 impl System for SeparationSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         // resources and world are separate borrows — hold ActivePairs while calling world.get.
-        let active = resources.get::<ActivePairs>().expect("ActivePairs not in resources");
+        let active = resources.expect::<ActivePairs>();
 
         // Pass 1: accumulate corrections from a consistent snapshot (order-independent).
         // One query view for all pair lookups — a single borrow acquisition

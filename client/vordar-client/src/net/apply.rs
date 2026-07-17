@@ -12,7 +12,7 @@ use super::*;
 /// burst-only — the server re-Welcomes us into a respawned entity.
 pub(super) fn handle_entity_died(world: &mut World, resources: &mut Resources, id: u32, pos: Vec3) {
     let (entity, own) = {
-        let state = resources.get_mut::<NetClientState>().unwrap();
+        let state = resources.expect_mut::<NetClientState>();
         (state.entities.remove(&id), state.own_id == Some(id))
     };
     // Death burst at the server-authoritative position.
@@ -50,7 +50,7 @@ pub(super) fn handle_entity_died(world: &mut World, resources: &mut Resources, i
         if let Some((transform, mesh, death)) = corpse {
             crate::hit_react::spawn_corpse(world, transform, mesh, &death);
         }
-        resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
+        resources.expect_mut::<DespawnQueue>().push(entity, None);
     }
 }
 
@@ -66,7 +66,7 @@ pub(super) fn apply_aoi_delta(world: &mut World, resources: &mut Resources, tick
     // prefab_names is small (a handful of short strings) and cloned once per
     // delta — see ServerMsg::PrefabTable.
     let (mut known, own_id, predict, prefab_names) = {
-        let state = resources.get_mut::<NetClientState>().unwrap();
+        let state = resources.expect_mut::<NetClientState>();
         (std::mem::take(&mut state.entities), state.own_id, state.predict, state.prefab_names.clone())
     };
 
@@ -103,11 +103,11 @@ pub(super) fn apply_aoi_delta(world: &mut World, resources: &mut Resources, tick
     // Entities that left our AOI (or despawned on the server).
     for id in leaves {
         if let Some(entity) = known.remove(&id) {
-            resources.get_mut::<DespawnQueue>().unwrap().push(entity, None);
+            resources.expect_mut::<DespawnQueue>().push(entity, None);
         }
     }
 
-    resources.get_mut::<NetClientState>().unwrap().entities = known;
+    resources.expect_mut::<NetClientState>().entities = known;
 }
 
 /// Datagram half of a snapshot (`ServerMsg::Snapshot`): current position
@@ -125,7 +125,7 @@ pub(super) fn apply_states(
     // Take the map instead of cloning it — nothing below reads it through
     // NetClientState, and it is written back at the end of this function.
     let (known, own_id, predict, cursor) = {
-        let state = resources.get_mut::<NetClientState>().unwrap();
+        let state = resources.expect_mut::<NetClientState>();
         if tick <= state.latest_state_tick {
             return;
         }
@@ -194,7 +194,7 @@ pub(super) fn apply_states(
         }
     }
 
-    resources.get_mut::<NetClientState>().unwrap().entities = known;
+    resources.expect_mut::<NetClientState>().entities = known;
 }
 
 #[cfg(test)]

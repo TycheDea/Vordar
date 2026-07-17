@@ -30,7 +30,7 @@ pub struct XpGrantSystem;
 impl System for XpGrantSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let grants: Vec<_> = {
-            let bus = resources.get::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect::<EventBus>();
             bus.read::<Killed>()
                 .filter_map(|k| world.get::<&XpReward>(k.victim).ok().map(|r| (k.killer, r.amount)))
                 .collect()

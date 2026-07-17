@@ -76,7 +76,7 @@ impl System for AbilityCastSystem {
         };
         {
             let cooldowns: Vec<f32> = slots.iter().map(|s| s.cooldown_secs).collect();
-            let cast = resources.get_mut::<crate::CastState>().unwrap();
+            let cast = resources.expect_mut::<crate::CastState>();
             cast.sync(&class, &cooldowns);
             cast.tick(delta);
         }
@@ -125,13 +125,13 @@ impl System for AbilityCastSystem {
                     target = from + offset.normalize() * *max_range;
                 }
             }
-            let state = resources.get_mut::<NetClientState>().unwrap();
+            let state = resources.expect_mut::<NetClientState>();
             if !state.send_cast_intent(id.clone(), target) {
                 return;
             }
             let own = crate::net::own_entity(resources);
-            let predict = resources.get::<NetClientState>().unwrap().predicting();
-            resources.get_mut::<crate::CastState>().unwrap().fire(slot);
+            let predict = resources.expect::<NetClientState>().predicting();
+            resources.expect_mut::<crate::CastState>().fire(slot);
             if let Some(entity) = own {
                 crate::pose::trigger_swing(world, entity);
                 // Skinned-mesh cast animation (per-ability clip) — no-op if not animated.

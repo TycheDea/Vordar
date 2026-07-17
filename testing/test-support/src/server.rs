@@ -87,7 +87,7 @@ pub struct MetricMirror {
 
 impl System for MetricMirror {
     fn run(&mut self, _world: &mut World, resources: &mut Resources, _delta: f32) {
-        let state = resources.get::<NetServerState>().expect("NetServerState not installed");
+        let state = resources.expect::<NetServerState>();
         let metrics = state.metrics();
         self.dest.store((self.select)(&metrics).load(Ordering::Relaxed), Ordering::Relaxed);
     }

@@ -129,7 +129,7 @@ pub fn local_class(world: &World, resources: &Resources) -> Option<String> {
 /// input system (sandbox) and the network send system (online play).
 pub fn read_move_dir(resources: &Resources) -> Vec2 {
     let (forward, right) = engine_renderer::camera_movement_axes(resources);
-    let kb = resources.get::<KeyboardState>().expect("KeyboardState not in resources");
+    let kb = resources.expect::<KeyboardState>();
 
     let mut dir = Vec3::ZERO;
     if kb.is_pressed(KeyCode::KeyW) { dir += forward; }
@@ -147,7 +147,7 @@ pub fn read_move_dir(resources: &Resources) -> Vec2 {
 pub fn orbit_and_follow(target: Option<Vec3>, resources: &mut Resources, delta: f32) {
     let step = ORBIT_SPEED * delta;
     let (yaw, pitch) = {
-        let kb = resources.get::<KeyboardState>().expect("KeyboardState not in resources");
+        let kb = resources.expect::<KeyboardState>();
         let yaw = if kb.is_pressed(KeyCode::ArrowLeft)  { -step }
                   else if kb.is_pressed(KeyCode::ArrowRight) { step }
                   else { 0.0 };
@@ -187,7 +187,7 @@ impl System for PlayerInputSystem {
         let dir = read_move_dir(resources);
         let player = world.query::<(Entity, &Player)>().iter().next().map(|(e, _)| e);
         if let Some(entity) = player {
-            let bus = resources.get_mut::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect_mut::<EventBus>();
             bus.emit(MoveIntent { entity, dir });
         }
     }

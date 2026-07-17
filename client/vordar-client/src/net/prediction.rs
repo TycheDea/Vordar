@@ -64,7 +64,7 @@ pub(super) fn reconcile_own(
     let shape = own_shape.unwrap_or(CollisionShape::Aabb { half_extents: Vec3::ZERO });
     let local_dash_active = world.get::<&vordar_game::combat::LeapImpulse>(entity).is_ok();
     let (replayed, still_reconciling_a_dash) = {
-        let state = resources.get_mut::<NetClientState>().unwrap();
+        let state = resources.expect_mut::<NetClientState>();
         state.pending.retain(|p| p.seq > last_processed_seq);
         // Two-sided suppression: an unacked leap-tagged pending intent means
         // the server hasn't caught up on the dash yet (its mirror finishes
@@ -101,7 +101,7 @@ pub(super) fn reconcile_own(
         }
     };
     drop(transform);
-    resources.get_mut::<NetClientState>().unwrap().correction = correction;
+    resources.expect_mut::<NetClientState>().correction = correction;
 }
 
 /// Position after replaying pending intents on top of the server's
@@ -171,7 +171,7 @@ pub(super) struct NetCorrectionSystem;
 impl System for NetCorrectionSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
         let (entity, step) = {
-            let state = resources.get_mut::<NetClientState>().unwrap();
+            let state = resources.expect_mut::<NetClientState>();
             if state.correction.length_squared() < 1e-8 {
                 return;
             }
@@ -229,7 +229,7 @@ impl System for NetSendInputSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, delta: f32) {
         let dir = read_move_dir(resources);
         let predicted_entity = {
-            let state = resources.get_mut::<NetClientState>().unwrap();
+            let state = resources.expect_mut::<NetClientState>();
             let Some(t_server_micros) = state.client.as_ref().and_then(|c| c.server_now_micros()) else {
                 return;
             };
@@ -265,7 +265,7 @@ impl System for NetSendInputSystem {
             entity
         };
         if let Some(entity) = predicted_entity {
-            let bus = resources.get_mut::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect_mut::<EventBus>();
             bus.emit(MoveIntent { entity, dir });
         }
     }
