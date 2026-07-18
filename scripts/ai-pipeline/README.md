@@ -125,7 +125,8 @@ sits outside the glTF mesh-extraction path TRELLIS actually uses.
 Install location: `C:\tools\StableMaterials\venv` (Python 3.11.9). Versions
 actually installed (no pins needed): torch `2.11.0+cu128`, torchvision
 `0.26.0+cu128`, diffusers `0.39.0`, transformers `5.14.1`, accelerate
-`1.14.0`.
+`1.14.0`, `opencv-python-headless` `5.0.0.93` (added for `hdr_post.py`'s
+Radiance `.hdr` writer — see below).
 
 Weights: `C:\tools\StableMaterials\weights` (`gvecchio/StableMaterials`,
 fetched with `--local-dir`, 5.1 GB on disk; `unet_lcm/` excluded — the
@@ -216,3 +217,154 @@ verdicts (StableMaterials — Cleared, `openrail`, listed under the
 superseded `gvecchio/MatForger` row; SDXL base — Cleared, OpenRAIL++)
 already exist in that file's "AI pipeline models" ledger — no new ledger
 row for either model, only the fixture's own asset-provenance row.
+
+## HDRI / skybox generation (Phase A2)
+
+Three pano-generation paths were bake-off'd against a shared post stage
+(`hdr_post.py`) and reviewed in-engine via `turntable --hdri`. Full
+generation-budget accounting, per-path stats, and the reference-HDRI
+calibration table live in `tasks/ai-pipeline/a2.md`.
+
+### Bake-off outcome
+
+**Winner: Path 3** (`gen_pano_sdxl.py`, circular-x SDXL) — the only path
+passing `hdr_post.py`'s seam gate on both bake-off prompts (0.0197 / 0.0126
+vs. the 0.02 gate); best in-engine light (neutral ambient, crisp
+directional sun) and unconditionally licensed (SDXL OpenRAIL++). This is
+the production path.
+
+**Runner-up: Path 2** (`gen_pano_d360.py`, Diffusion360) — the best single
+seam and fastest (~33 s/run), but failed the seam gate on the overcast
+prompt (0.075) and floods the IBL with oversaturated ambient on the dusk
+prompt. Kept as an alternate for dramatic-sky one-offs.
+
+**Path 1** (`sdxl_360_diffusion.safetensors` via ComfyUI,
+`workflows/pano_sdxl360.json` + `comfy_run.py`) — blocked at the machine
+gate: seam MAD 0.175 / 0.090, since vanilla ComfyUI sampling has no
+circular-padding machinery and raw equirects don't wrap. Its license
+(Cleared, conditional — `content/source/CREDITS.md`) is moot as long as it
+stays blocked. Option kept open: run the sdxl_360 checkpoint through
+`gen_pano_sdxl.py`'s circular-x path via `from_single_file` once the
+license is formalized (see `tasks/ai-pipeline/sdxl360-license-request.md`);
+the checkpoint stays on disk meanwhile.
+
+Full per-candidate notes: `tasks/ai-pipeline/a2.md` → "Bake-off decision
+log".
+
+### `gen_pano_sdxl.py` — Path 3, production (StableMaterials venv)
+
+```
+C:\tools\StableMaterials\venv\Scripts\python.exe scripts/ai-pipeline/gen_pano_sdxl.py "<prompt>" --out <dir> [--seed N]
+```
+
+Vanilla SDXL (`sd_xl_base_1.0.safetensors`, already on disk) has no native
+tiling/circular nodes, so wrap-tileability comes from a context manager
+that monkeypatches `torch.nn.Conv2d.forward` globally for the duration of
+each pipeline call: random even x-roll, `F.pad` circular in x only (y
+keeps the conv's native zero padding), run the original forward, crop back
+by `round()` of the padding scaled to the conv's width change, then
+unroll. Because the patch is global while active it covers the UNet *and*
+the VAE encode/decode, so both latent and pixel space wrap in x.
+
+Generation is native **1536×768** (SDXL's native area budget — going
+straight to 2048×1024 degrades the output, A1's lesson), 40 steps, cfg 7,
+then one whole-canvas img2img hop to **2048×1024** (strength 0.35, 40
+steps, cfg 7.0). Both passes run under `enable_model_cpu_offload()`
+(mandatory on a 12 GB card at this size) with `vae.enable_tiling()` off
+(tiling would cut the x-wrap the conv patch builds). An inline wrap-seam
+check (8 px left/right strips, MAD threshold 20) gates the output — FAIL
+exits 1. Writes `<out>/pano_2048x1024.png` + `<out>/generation_manifest.json`.
+
+### `gen_pano_d360.py` — Path 2, alternate (Diffusion360 venv)
+
+```
+C:\tools\Diffusion360\venv\Scripts\python.exe scripts/ai-pipeline/gen_pano_d360.py "<prompt>" --out <dir> [--seed N]
+```
+
+Diffusion360 (`archerfmy0831/sd-t2i-360panoimage`, code
+`ArcherFMY/SD-T2I-360PanoImage` @ `3e980d2`) needs its own venv — its
+pinned `diffusers==0.26.0` is two majors behind the StableMaterials venv's
+`0.39.0` and the two can't share an environment (`pipeline_sr.py` imports
+`LoraLoaderMixin`, removed from modern diffusers):
+
+```
+C:\Users\egm_8\AppData\Local\Programs\Python\Python311\python.exe -m venv C:\tools\Diffusion360\venv
+C:\tools\Diffusion360\venv\Scripts\python.exe -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+C:\tools\Diffusion360\venv\Scripts\python.exe -m pip install diffusers==0.26.0 transformers==4.44.2 huggingface_hub==0.25.2 accelerate safetensors
+```
+
+`huggingface_hub==0.25.2` is a required pin, not incidental: `diffusers
+0.26.0` calls `cached_download`, which is removed in hub 0.26. Weights live
+in `C:\tools\Diffusion360\weights\{sd-base,sr-base,sr-control}` (~12.4 GB;
+`sd-i2p/` and the RealESRGAN checkpoint excluded, see divergence 3 in
+`tasks/ai-pipeline/a2.md`); SHA256 per file in `models.sha256`.
+
+Two runner-local caveats, both handled inside `gen_pano_d360.py` itself
+(no vendored file edited):
+- The RealESRGAN upscale stage is dropped — the diffusion SR stage alone
+  already reaches 3072×1536, above the 2048×1024 target — so the runner
+  loads `pipeline_base.py`/`pipeline_sr.py` directly via
+  `importlib.util.spec_from_file_location` instead of importing
+  `txt2panoimg`, whose package `__init__` transitively imports
+  `realesrgan` (deliberately not installed in this venv).
+- `enable_model_cpu_offload()` reports `pipe.device` as `cpu` to the
+  vendored fork's `get_weighted_text_embeddings`, which then resolves the
+  wrong device. The script monkeypatches `DiffusionPipeline.device` to
+  scan for an active accelerate hook's `execution_device` first, falling
+  back to the original property.
+
+Pipeline: base txt2img at 1024×512 (20 steps, cfg 7.5, `<360panorama>, `
+trigger prefix) → diffusion SR img2img+ControlNet at 3072×1536 (7 steps,
+strength 0.8, cfg 15) → Lanczos downsample to 2048×1024. Writes
+`<out>/pano_2048x1024.png` + `<out>/generation_manifest.json`.
+
+### `hdr_post.py` — LDR equirect PNG → game-ready Radiance `.hdr`
+
+```
+C:\tools\StableMaterials\venv\Scripts\python.exe scripts/ai-pipeline/hdr_post.py <ldr.png> --out <file.hdr> [--sun auto|AZ,EL|none] [--sun-intensity N] [--seed-manifest <generation_manifest.json>]
+```
+
+The shared post stage all three paths feed: sRGB→linear, a monotonic
+highlight-expansion curve into HDR range, a cosine wrap-seam cross-blend,
+optional sun-disc injection, self-checks, then a Radiance write via
+`cv2.imwrite` (`#?RADIANCE` / `32-bit_rle_rgbe`).
+
+`--sun auto` (default) places the sun at the circular-mean centroid of the
+brightest above-horizon region; `--sun AZ,EL` (degrees) places it
+explicitly; `--sun none` skips injection entirely (for overcast/no-sun
+skies). Either way the output is **hard-clamped at 30000**:
+`EquirectImage::decode_hdr` converts f32→f16 on upload, and f16 tops out at
+65504 — 30000 keeps margin under that ceiling while already exceeding
+anything the engine visibly uses (kloppenheim's real 36416 peak sits above
+the clamp; evening_road's soft-sun peak is ~20).
+
+The highlight-expansion curve is calibrated against `cv2`-probed stats of
+the two committed CC0 references — `evening_road_01_puresky_2k.hdr`: peak
+20.1 / median 0.554; `kloppenheim_02_puresky_1k.hdr`: peak 36415.9 / median
+0.097 (full table in `tasks/ai-pipeline/a2.md`'s reference calibration
+section) — so a lit dusk sky lands near evening_road's register and a
+hard-sun sky lands near kloppenheim's.
+
+Self-checks (any FAIL exits 1): exact 2048×1024, all values finite and
+≥ 0, peak ≤ 30000, median in [0.02, 2.0], wrap-seam MAD ≤ 0.02. Writes
+`<out>.hdr` + `<out stem>.manifest.json` (source hash, every resolved
+parameter including sun az/el, output stats, chained
+`generation_manifest.json` provenance if `--seed-manifest` was given).
+
+### `turntable --hdri` — review render under a generated environment
+
+```
+cargo run -p engine-renderer --release --features offscreen --bin turntable -- content/source/test/DamagedHelmet.glb --out <dir> --angles N --size WxH --hdri <file.hdr>
+```
+
+`--hdri` is optional; omitting it renders under the hardcoded default
+(`evening_road_01_puresky_2k.hdr`). This is the engine-side gate for any
+generated HDRI — the full `load_environment_hdr` → `decode_hdr` → f16
+upload → IBL bake → sky + lit render path, exercised end to end.
+
+### Fixture
+
+`content/textures/env/castilian_plateau_dusk_2k.hdr` (+ its
+`.manifest.json`) is the Phase A2 fixture: Path 3, seed 7, sun az
+263.1°/el 8°. Provenance and shippability note: `content/source/CREDITS.md`
+→ "Castilian Plateau Dusk HDRI, 2k" row.
