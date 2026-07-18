@@ -21,11 +21,12 @@ struct Args {
     out:    String,
     angles: u32,
     size:   (u32, u32),
+    hdri:   String,
 }
 
 fn usage(msg: &str) -> ! {
     eprintln!("turntable: {msg}");
-    eprintln!("usage: turntable <glb> --out <dir> --angles N --size WxH");
+    eprintln!("usage: turntable <glb> --out <dir> --angles N --size WxH [--hdri <path>]");
     exit(2);
 }
 
@@ -35,20 +36,21 @@ fn parse_size(s: &str) -> Option<(u32, u32)> {
 }
 
 fn parse_args() -> Args {
-    let (mut glb, mut out, mut angles, mut size) = (None, None, None, None);
+    let (mut glb, mut out, mut angles, mut size, mut hdri) = (None, None, None, None, None);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--out"    => out = it.next(),
             "--angles" => angles = it.next().and_then(|s| s.parse().ok()),
             "--size"   => size = it.next().as_deref().and_then(parse_size),
+            "--hdri"   => hdri = it.next(),
             _ if a.starts_with("--") => usage(&format!("unknown flag {a}")),
             _ => glb = Some(a),
         }
     }
     match (glb, out, angles, size) {
         (Some(glb), Some(out), Some(angles), Some(size)) if angles > 0 => {
-            Args { glb, out, angles, size }
+            Args { glb, out, angles, size, hdri: hdri.unwrap_or_else(|| HDRI.to_string()) }
         }
         _ => usage("required: <glb> --out <dir> --angles N --size WxH"),
     }
@@ -153,8 +155,8 @@ fn main() {
         eprintln!("turntable: no GPU adapter available");
         exit(1);
     };
-    if let Err(e) = r.load_environment_hdr(HDRI) {
-        eprintln!("turntable: failed to load HDRI {HDRI}: {e}");
+    if let Err(e) = r.load_environment_hdr(&args.hdri) {
+        eprintln!("turntable: failed to load HDRI {}: {e}", args.hdri);
         exit(1);
     }
     r.draw_sky = true;
