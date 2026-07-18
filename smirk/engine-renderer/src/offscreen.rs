@@ -447,6 +447,17 @@ impl OffscreenRenderer {
         self.camera_eye = camera.eye();
     }
 
+    /// Orbit the camera to absolute `yaw_radians`, keeping the default framing
+    /// (radius/target/pitch from `Camera::new`) — spins the fixed view around
+    /// a scene authored to the default camera scale.
+    pub fn set_camera_yaw(&mut self, yaw_radians: f32) {
+        let mut camera = Camera::new(self.aspect);
+        camera.orbit(yaw_radians - camera.angle, 0.0);
+        let cam_uniform = CameraUniform::from_camera(&camera, (0, 0));
+        self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
+        self.camera_eye = camera.eye();
+    }
+
     /// Swap in a real baked HDRI environment decoded from a Radiance .hdr on
     /// disk. Set `draw_sky` to make it the visible background.
     pub fn load_environment_hdr(&mut self, path: &str) -> Result<(), String> {

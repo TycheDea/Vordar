@@ -13,6 +13,9 @@ name = "vordar_client"
 # Exposes private netcode internals to vordar-benches. Never enabled by
 # normal builds — same pattern as vordar-server's bench-internals.
 bench-internals = []
+# Forwards to engine-renderer's offscreen feature; gates render_material
+# exactly as engine-renderer's own [features]/[[bin]] gate turntable.
+offscreen = ["engine-renderer/offscreen"]
 
 [[bin]]
 name = "sandbox"
@@ -21,6 +24,11 @@ path = "src/bin/sandbox.rs"
 [[bin]]
 name = "vordar"
 path = "src/bin/vordar.rs"
+
+[[bin]]
+name = "render_material"
+path = "src/bin/render_material.rs"
+required-features = ["offscreen"]
 
 [dependencies]
 engine-core     = { path = "../../smirk/engine-core" }
@@ -39,11 +47,12 @@ log             = { workspace = true }
 egui            = { workspace = true }
 ron             = { workspace = true }
 getrandom       = { workspace = true }
+# Direct deps (not dev-only): the render_material bin needs wgpu::Color and
+# PNG encoding, and a [[bin]] target can't see dev-dependencies.
+wgpu            = { workspace = true }
+image           = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
-# Offscreen render tests (tests/ground_render.rs) pass wgpu types to the
-# engine's headless harness.
-wgpu = { workspace = true }
 # engine-renderer's offscreen module is feature-gated — enable it here so
 # this test build sees it without shipping it in vordar.
 engine-renderer = { path = "../../smirk/engine-renderer", features = ["offscreen"] }
