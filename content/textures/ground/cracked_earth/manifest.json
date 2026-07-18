@@ -1,0 +1,23 @@
+{
+  "source": "cracked_earth",
+  "images": [
+    {
+      "slot": "diff",
+      "file": "diff_2048.dds",
+      "source": "diff_2048.png",
+      "sha256": "cb8fbcfe08ca4f4db299c63a4d2ddf6daf22181ae87603498057fb50adaacd0f"
+    },
+    {
+      "slot": "normal",
+      "file": "nor_gl_2048.dds",
+      "source": "nor_gl_2048.png",
+      "sha256": "372dd8aef242b625fa423c3620eda874bc046352eebcda44c59dfe5bf1f29735"
+    },
+    {
+      "slot": "mr",
+      "file": "rough_2048_mr.dds",
+      "source": "rough_2048.png",
+      "sha256": "adef7d850a838b38b7fa98b3459b22b649a784e6dda397235a41a412502e10dc"
+    }
+  ]
+}

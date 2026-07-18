@@ -1,0 +1,32 @@
+{
+  "model": "gvecchio/StableMaterials",
+  "prompt": "cracked dry earth, parched mud flats, brown dusty soil, deep fissures",
+  "seed": 1,
+  "size": 2048,
+  "native_generation_size": 512,
+  "upscale_hops": [
+    1024,
+    2048
+  ],
+  "upscale_model": "stabilityai/stable-diffusion-xl-base-1.0",
+  "guidance_scale": 10.0,
+  "num_inference_steps": 50,
+  "tiling_check": {
+    "threshold": 20.0,
+    "strip_px": 8,
+    "metrics": {
+      "diff": {
+        "left_right": 4.74822998046875,
+        "top_bottom": 4.535786946614583
+      },
+      "nor_gl": {
+        "left_right": 10.55865478515625,
+        "top_bottom": 12.99920654296875
+      },
+      "rough": {
+        "left_right": 1.748046875,
+        "top_bottom": 2.1103515625
+      }
+    }
+  }
+}

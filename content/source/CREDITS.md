@@ -14,6 +14,7 @@ license, and where it is used. Add a row *when the asset lands*, not after.
 | Rock 07, Rock 09, Rock Face 01, Dead Quiver Trunk models, 1k | Poly Haven (Rico Cilliers / Dimitrios Savva) — https://polyhaven.com/models | CC0 | Zone props — `content/models/props/` (fetched via `scripts/asset-pipeline/fetch_polyhaven.mjs`) |
 | "Human - Male_" VRoid character (user-authored) | Created in VRoid Studio by the project owner | Owner's asset (VRoid Studio output belongs to its creator, commercial use allowed) | Character-direction look-test — `content/source/characters/vroid/Human - Male_.vrm` → `content/models/statue_vroid.glb` (via `scripts/asset-pipeline/vrm_to_glb.mjs`), placed as a start-zone statue |
 | Kloppenheim 02 (Pure Sky) HDRI, 1k | Poly Haven (Greg Zaal / Jarod Guest) — https://polyhaven.com/a/kloppenheim_02_puresky | CC0 | Spare sky/IBL environment (fetched via `fetch_polyhaven.mjs --type hdris` to verify A0.10) — `content/textures/env/kloppenheim_02_puresky_1k.hdr` |
+| Cracked earth ground PBR set, 2k | Generated — StableMaterials (`gvecchio/StableMaterials`) + SDXL img2img upscale (`stabilityai/stable-diffusion-xl-base-1.0`), prompt: "cracked dry earth, parched mud flats, brown dusty soil, deep fissures", seed 1, see `generation_manifest.json` for full provenance | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL), both already `Cleared` rows in the "AI pipeline models" ledger table | A1 fixture; held for Phase B2's zone swap — `content/textures/ground/cracked_earth/` |
 
 ## Incoming (planned, AA visual upgrade)
 
