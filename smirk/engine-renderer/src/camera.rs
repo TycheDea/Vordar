@@ -96,6 +96,15 @@ impl Camera {
         self.recompute_eye();
     }
 
+    /// Frame a world-space AABB in perspective: target its center and pull
+    /// back so its bounding sphere fills `fill` (0..1) of the vertical FOV.
+    pub(crate) fn fit_bounds(&mut self, min: glam::Vec3, max: glam::Vec3, fill: f32) {
+        self.target = (min + max) * 0.5;
+        let sphere = (max - min).length() * 0.5;
+        self.radius = sphere / (fill * (self.fovy * 0.5).tan() * self.aspect.min(1.0));
+        self.recompute_eye();
+    }
+
     /// Advance to the next projection mode and snap pitch/yaw to canonical values.
     pub(crate) fn cycle_projection(&mut self) {
         self.mode = match self.mode {

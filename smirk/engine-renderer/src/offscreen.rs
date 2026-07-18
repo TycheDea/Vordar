@@ -435,6 +435,29 @@ impl OffscreenRenderer {
         self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
     }
 
+    /// Aim the camera for one turntable frame: fit the asset AABB to ~75% of
+    /// the vertical FOV, then orbit to absolute `yaw_radians`. Rebuilds a
+    /// fresh `Camera` each call — the harness retains only the camera buffer.
+    pub fn set_camera_turntable(&mut self, min: Vec3, max: Vec3, yaw_radians: f32) {
+        let mut camera = Camera::new(self.aspect);
+        camera.fit_bounds(min, max, 0.75);
+        camera.orbit(yaw_radians - camera.angle, 0.0);
+        let cam_uniform = CameraUniform::from_camera(&camera, (0, 0));
+        self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
+        self.camera_eye = camera.eye();
+    }
+
+    /// Swap in a real baked HDRI environment decoded from a Radiance .hdr on
+    /// disk. Set `draw_sky` to make it the visible background.
+    pub fn load_environment_hdr(&mut self, path: &str) -> Result<(), String> {
+        let image = EquirectImage::decode_hdr(path)?;
+        self.environment = Environment::from_equirect_pixels(
+            &self.gpu.device, &self.gpu.queue, &self.baker,
+            &self.env_bgl, &self.sky_bgl, &self.brdf_view, &image,
+        );
+        Ok(())
+    }
+
     pub fn set_light(&mut self, light: TestLight) {
         self.light_dir = light.direction.normalize();
         self.light_state.direction = self.light_dir.to_array();

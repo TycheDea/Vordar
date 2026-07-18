@@ -12,6 +12,13 @@ workspace = true
 # Never enabled by normal builds.
 offscreen = []
 
+# The turntable tool renders through the offscreen harness, so it only builds
+# when that feature is on (skipped by plain `cargo build`, never built for the
+# game which consumes the lib alone).
+[[bin]]
+name = "turntable"
+required-features = ["offscreen"]
+
 [dependencies]
 engine-core = { path = "../engine-core" }
 engine-app  = { path = "../engine-app" }
