@@ -119,3 +119,100 @@ no generation smoke test was required or run.
 `diffoctreerast` (one of TRELLIS's vendored submodules) has a broken DLL on
 this install — irrelevant here, since its license is Blocked anyway and it
 sits outside the glTF mesh-extraction path TRELLIS actually uses.
+
+## StableMaterials (tiling PBR materials)
+
+Install location: `C:\tools\StableMaterials\venv` (Python 3.11.9). Versions
+actually installed (no pins needed): torch `2.11.0+cu128`, torchvision
+`0.26.0+cu128`, diffusers `0.39.0`, transformers `5.14.1`, accelerate
+`1.14.0`.
+
+Weights: `C:\tools\StableMaterials\weights` (`gvecchio/StableMaterials`,
+fetched with `--local-dir`, 5.1 GB on disk; `unet_lcm/` excluded — the
+optional fast-inference distilled UNet, unused by the default pipeline).
+SHA256 for every downloaded file: `scripts/ai-pipeline/models.sha256`.
+
+### texconv.exe (DDS-bake prerequisite)
+
+`bake_textures.mjs` (used by the bake step below) locates it via the
+`TEXCONV` env var, else `smirk\texconv.exe` — gitignored, machine-local, not
+a repo asset. Restore on a fresh machine:
+
+```
+winget install Microsoft.DirectXTex.Texconv
+```
+
+then copy the installed exe (`Get-Command texconv.exe` once winget's shim is
+on PATH, or check `$env:LOCALAPPDATA\Microsoft\WinGet\Links\`) to
+`smirk\texconv.exe`. If winget is unavailable, get it from
+https://github.com/microsoft/DirectXTex/releases instead.
+
+### `gen_material.py` — generate a tileable ground PBR set
+
+```
+C:\tools\StableMaterials\venv\Scripts\python.exe scripts/ai-pipeline/gen_material.py "<prompt>" --out <dir> [--size N] [--seed N]
+```
+
+`--size` default 2048; `--seed` default random (the resolved value is always
+recorded). Generation is always native at 512×512 — StableMaterials' output
+is crispest there (1024-native generation washes out its crack-network
+structure) and `tileable=True`'s circular padding can't run below it. Sizes
+above 512 are reached by chained ×2 whole-canvas SDXL img2img hops
+(`sd_xl_base_1.0.safetensors`) applied to the albedo (`diff`) map only — a
+normal map is a tangent-space unit vector and roughness a physical scalar,
+so diffusion "detail" on either would be wrong rather than just noisier;
+both get a plain Lanczos resize to the target size instead.
+`enable_model_cpu_offload()` on the SDXL pipe is mandatory on a 12 GB card:
+without it the 2048 hop spills into WDDM shared memory (~28 min); with it,
+~4 min (~4.5 min wall time for a full 2048 set end to end).
+
+Tileability seam gate: an 8px edge strip per map (left/right, top/bottom),
+mean-abs-pixel-diff threshold 20, PASS/FAIL printed per map/edge pair; any
+FAIL exits 1 — retry with a different `--seed` rather than treat one
+failure as broken. Writes `<out>/generation_manifest.json` (model, prompt,
+seed, size, native_generation_size, upscale_hops, upscale_model,
+guidance_scale, num_inference_steps, tiling_check) — provenance for the
+generation step only, distinct from `bake_textures.mjs`'s own
+`manifest.json` written into the same directory by the next step.
+
+**Preview recipe:** only `--size 512` previews (~25 s) predict final
+structure at any target size — 1024-native previews wash out. Preview at
+512, then finalize at the same `--seed` and the real `--size` once the seam
+gate passes.
+
+### Bake, lint, render loop
+
+```
+node scripts/asset-pipeline/bake_textures.mjs ground <texture-dir>
+```
+
+Needs `texconv.exe` (above). Produces `diff_<N>.dds` (BC7_UNORM_SRGB),
+`nor_gl_<N>.dds` (BC5_UNORM), `rough_<N>_mr.dds` (BC7_UNORM, composed from
+the roughness map via a `0r01` texconv swizzle), and `manifest.json`
+(`{source, images}`) alongside the source PNGs.
+
+```
+cargo test -p vordar-game --test content_lint
+```
+
+`material_textures_have_fresh_sidecars` (VQ-C5) asserts the manifest exists,
+its recorded sha256 matches each source file's current hash, and every
+listed `.dds` sidecar exists on disk.
+
+```
+cargo run -p vordar-client --release --features offscreen --bin render_material -- <texture-dir> --out <dir> [--angles N] [--size WxH]
+```
+
+`--angles` default 4, `--size` default `512x512`. Requires `--features
+offscreen` (`vordar-client`'s own feature, forwarding to
+`engine-renderer/offscreen`; a plain `cargo build -p vordar-client` skips
+the bin entirely). Writes `frame_NN.png` per angle plus a stitched
+`contact_sheet.png` for vision review.
+
+`content/textures/ground/cracked_earth/` is the committed A1 fixture built
+with this pipeline; its provenance row lives in
+`content/source/CREDITS.md`'s asset-provenance table. Both models' license
+verdicts (StableMaterials — Cleared, `openrail`, listed under the
+superseded `gvecchio/MatForger` row; SDXL base — Cleared, OpenRAIL++)
+already exist in that file's "AI pipeline models" ledger — no new ledger
+row for either model, only the fixture's own asset-provenance row.
