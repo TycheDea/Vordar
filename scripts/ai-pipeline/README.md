@@ -507,17 +507,29 @@ area) exit non-zero rather than patch silently.
 **3. `prop_texture.py`** — Blender headless texture bake:
 
 ```
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb>
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metal-roughness N]
 ```
 
-Strategy: **Blender projection bake** — Smart-UV atlas, concept image
-EMIT-projected onto basecolor, real hires→clean Cycles normal bake, MR from
-per-material-zone constants. Full ruling and rejected-option evidence:
-`tasks/ai-pipeline/a3.md` → "Texture strategy log". **Requires an
+Default strategy: **Blender projection bake** — Smart-UV atlas, concept
+image EMIT-projected onto basecolor, real hires→clean Cycles normal bake,
+MR from per-material-zone constants. Full ruling and rejected-option
+evidence: `tasks/ai-pipeline/a3.md` → "Texture strategy log". **Requires an
 alpha-matted concept** (`prop_hi3dgen.py`'s `concept_rgba.png`, not a raw RGB
 image) — a concept with no usable alpha matte hard-fails instead of
 degenerating silently into a full-frame projection and a washed-out fill
 color.
+
+**`--strategy multiview`** (Strategy 2, the evidenced escalation for prop
+classes needing true material register or strong backsides; needs
+`--subject` and `--seed`): ortho depth renders of the clean mesh from four
+azimuths feed xinsir ControlNet-depth SDXL
+(`workflows/prop_multiview.json`), and the generated views are reprojected
+into the atlas with facing weights, a depth-occlusion test, and silhouette
+edge padding. The ComfyUI server lifecycle lives entirely inside this
+stage (started headless, killed after). Per-view outputs and provenance
+manifests are cached under `<textured.glb dir>/multiview/`, so a killed
+run resumes without respending GPU. Normal and MR channels follow the same
+contract as the default strategy; the concept image is unused.
 
 **4. `preprocess_prop.mjs`** — gltf-transform prune/dedup/resize:
 
@@ -534,7 +546,7 @@ node scripts/asset-pipeline/bake_textures.mjs gltf <final.glb>
 **5. `gen_prop.py`** — chain assembly, one candidate per invocation:
 
 ```
-python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>]
+python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metal-roughness N]
 ```
 
 Runs concept → geometry → cleanup → texture → preprocess+bake → turntable →
@@ -550,7 +562,9 @@ candidates, so every command stays under the shell's timeout budget.
 never be up while a geometry stage runs.** `gen_prop.py` itself starts and
 stops no server — the caller generates every candidate's concept first with
 ComfyUI up, stops it, then runs geometry-onward for every candidate with the
-server down.
+server down. `--texture-strategy multiview` is safe under this rule: its
+SDXL passes run behind `prop_texture.py`'s own server start/stop, strictly
+after the geometry stage, and hard-fail if a server is already up.
 
 ### Fixture
 

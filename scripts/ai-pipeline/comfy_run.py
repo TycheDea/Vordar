@@ -155,27 +155,21 @@ def download_outputs(entry, out_dir):
     return saved
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run a ComfyUI workflow and collect its outputs + provenance manifest.")
-    parser.add_argument("workflow", type=Path, help="Path to an API-format ComfyUI workflow JSON")
-    parser.add_argument("--out", type=Path, required=True, help="Directory to write outputs and manifest.json into")
-    parser.add_argument("--wait-timeout", type=float, default=DEFAULT_WAIT_TIMEOUT, help="Seconds to wait for completion")
-    args = parser.parse_args()
-
-    workflow = json.loads(args.workflow.read_text(encoding="utf-8"))
-
+def run_workflow(workflow, out_dir, wait_timeout=DEFAULT_WAIT_TIMEOUT):
+    """Submit an API-format workflow dict, wait, download outputs into
+    out_dir, write out_dir/manifest.json, and return the manifest."""
     seeds = resolve_seeds(workflow)
     prompts = extract_prompts(workflow)
     models = extract_models(workflow)
 
     try:
         prompt_id = submit(workflow)
-        entry = wait_for_completion(prompt_id, args.wait_timeout)
+        entry = wait_for_completion(prompt_id, wait_timeout)
     except urllib.error.URLError as e:
         raise SystemExit(f"Could not reach ComfyUI at {COMFY_URL}: {e}")
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    outputs = download_outputs(entry, args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    outputs = download_outputs(entry, out_dir)
 
     manifest = {
         "workflow": workflow,
@@ -185,10 +179,22 @@ def main():
         "models": models,
         "outputs": outputs,
     }
-    (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest
 
-    print(f"prompt_id={prompt_id}")
-    print(f"outputs: {len(outputs)} file(s) -> {args.out}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Run a ComfyUI workflow and collect its outputs + provenance manifest.")
+    parser.add_argument("workflow", type=Path, help="Path to an API-format ComfyUI workflow JSON")
+    parser.add_argument("--out", type=Path, required=True, help="Directory to write outputs and manifest.json into")
+    parser.add_argument("--wait-timeout", type=float, default=DEFAULT_WAIT_TIMEOUT, help="Seconds to wait for completion")
+    args = parser.parse_args()
+
+    workflow = json.loads(args.workflow.read_text(encoding="utf-8"))
+    manifest = run_workflow(workflow, args.out, args.wait_timeout)
+
+    print(f"prompt_id={manifest['prompt_id']}")
+    print(f"outputs: {len(manifest['outputs'])} file(s) -> {args.out}")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,9 @@ Run:
 ComfyUI server lifecycle is the CALLER's job, not this script's: the concept
 stage needs it running, the geometry stage must never run while it's up
 (A3.4's measured 11.5 GiB Hi3DGen peak) -- gen_prop.py starts/stops nothing.
+The one exception is the multiview texture strategy, whose SDXL passes run
+inside prop_texture.py behind its own start/stop of the server; that stage
+runs strictly after geometry, so the VRAM rule holds.
 """
 import argparse
 import hashlib
@@ -170,7 +173,7 @@ def stage_cleanup(cand_dir: Path) -> dict:
     return meta
 
 
-def stage_texture(cand_dir: Path) -> dict:
+def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int, metal_roughness: float) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -179,8 +182,13 @@ def stage_texture(cand_dir: Path) -> dict:
         clean_glb = cand_dir / "clean.glb"
         hires_glb = cand_dir / "clean_hires.glb"
         concept_rgba = cand_dir / "concept_rgba.png"
-        out = run_capture([BLENDER, "--background", "--python", PROP_TEXTURE, "--",
-                           clean_glb, hires_glb, concept_rgba, textured_glb])
+        cmd = [BLENDER, "--background", "--python", PROP_TEXTURE, "--",
+               clean_glb, hires_glb, concept_rgba, textured_glb]
+        if strategy != "projection":
+            cmd += ["--strategy", strategy, "--subject", subject, "--seed", seed]
+        if metal_roughness is not None:
+            cmd += ["--metal-roughness", metal_roughness]
+        out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
     meta = read_or_note(meta_path)
@@ -244,6 +252,10 @@ def main():
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--skip-concept", type=Path, default=None, metavar="IMAGE",
                         help="Bypass concept generation with a provided image (re-roll geometry without re-rolling the concept)")
+    parser.add_argument("--texture-strategy", choices=["projection", "multiview"], default="projection",
+                        help="Basecolor strategy for prop_texture.py (multiview = SDXL ControlNet-depth retexture)")
+    parser.add_argument("--metal-roughness", type=float, default=None,
+                        help="Iron-zone roughness override for prop_texture.py (contract default 0.4)")
     args = parser.parse_args()
 
     cand_dir = args.out / f"cand_{args.seed}"
@@ -252,7 +264,7 @@ def main():
     concept = stage_concept(cand_dir, args.subject, args.seed, args.skip_concept)
     geometry = stage_geometry(cand_dir, args.seed)
     cleanup = stage_cleanup(cand_dir)
-    texture = stage_texture(cand_dir)
+    texture = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed, args.metal_roughness)
     preprocess_bake = stage_preprocess_bake(cand_dir)  # final.glb, needed by the turntable stage below
     turntable = stage_turntable(cand_dir)
 
