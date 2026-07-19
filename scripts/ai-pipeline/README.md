@@ -88,7 +88,7 @@ reproducible from this file alone.
 | `models` | Every `*Loader` node's filename input, cross-referenced against `models.sha256` for its sha256 (`null` if not in the manifest) |
 | `outputs` | Each saved output file: node id, output kind, filename, subfolder, type, local save path |
 
-## TRELLIS (image → 3D)
+## TRELLIS (image → 3D, eval-only)
 
 Install location: `C:\tools\TRELLIS\` — native Windows, via the
 `IgorAherne/trellis-stable-projectorz` fork (commit `90c829d`) of
@@ -109,12 +109,27 @@ HuggingFace cache (`~/.cache/huggingface/hub/models--microsoft--TRELLIS-image-la
 3.3 GB) — `from_pretrained("microsoft/TRELLIS-image-large")` resolves it
 from there, no explicit path needed.
 
-**Known blocker (carried to Phase A3):** the installed xformers wheel has no
-CUDA kernels, so real mesh generation is not yet functional — needs a
-CUDA-enabled xformers or triton build before A3 can run it for real. A0 only
-verified the environment installs and CUDA is visible (`torch.cuda.is_available()`
-and `from trellis.pipelines import TrellisImageTo3DPipeline` both succeed);
-no generation smoke test was required or run.
+The installed xformers wheel now has compiled CUDA kernels:
+`xformers==0.0.31.post1` (same release line as torch 2.7.1, `cu128` index).
+Fresh-machine reinstall (`--no-deps --force-reinstall` swaps only this one
+package, torch untouched):
+
+```
+C:\tools\TRELLIS\venv\Scripts\python.exe -m pip install --force-reinstall --no-deps xformers==0.0.31.post1 --index-url https://download.pytorch.org/whl/cu128
+```
+
+**TRELLIS is eval-only** under the strict NC-tooling ruling (2026-07-19,
+`content/source/CREDITS.md` → "AI pipeline models" → TRELLIS core row): its
+only glb export path (`trellis/utils/postprocessing_utils.py`) hard-imports
+`nvdiffrast.torch` (NC-licensed) to bake the texture, so its outputs never
+enter `content/`. Hi3DGen (below) is the production image→3D backbone
+precisely because its geometry-only chain has no NC dependency anywhere.
+TRELLIS stays installed as a baseline: a one-off textured run under
+`target/trellis-eval/` sanity-checks Hi3DGen's geometry and the A3 texture
+stage's material register against TRELLIS's native (NC) bake — comparison
+in `tasks/ai-pipeline/a3.md`'s decision log. Fork quirk:
+`postprocessing_utils.py` imports `api_spz` from the repo root, so eval
+runners execute with `cwd=C:\tools\TRELLIS`.
 
 `diffoctreerast` (one of TRELLIS's vendored submodules) has a broken DLL on
 this install — irrelevant here, since its license is Blocked anyway and it
@@ -368,3 +383,183 @@ upload → IBL bake → sky + lit render path, exercised end to end.
 `.manifest.json`) is the Phase A2 fixture: Path 3, seed 7, sun az
 263.1°/el 8°. Provenance and shippability note: `content/source/CREDITS.md`
 → "Castilian Plateau Dusk HDRI, 2k" row.
+
+## Prop generation (Phase A3)
+
+Image → 3D prop pipeline: an SDXL concept image feeds Hi3DGen for untextured
+geometry, then a Blender-only stage textures it. Full task-by-task record,
+the texture-strategy ruling, and the three-pass candidate review live in
+`tasks/ai-pipeline/a3.md`.
+
+### Hi3DGen (image → untextured geometry)
+
+Install location: `C:\tools\Hi3DGen\Hi3DGen` — `Stable-X/Hi3DGen` @
+`c29f668`, MIT (nvdiffrast/kaolin/flexicubes/diffoctreerast/flash-attn
+stripped by its authors "for commercial use" — why it replaced TRELLIS 1 as
+the production backbone under the strict NC ruling; see the TRELLIS section
+above). Venv: `C:\tools\Hi3DGen\venv` (Python 3.11.9).
+
+Install (fresh machine):
+
+```
+git clone https://github.com/Stable-X/Hi3DGen C:\tools\Hi3DGen\Hi3DGen
+C:\Users\egm_8\AppData\Local\Programs\Python\Python311\python.exe -m venv C:\tools\Hi3DGen\venv
+C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install torch==2.7.1 torchvision --index-url https://download.pytorch.org/whl/cu128
+C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install --no-deps xformers==0.0.31.post1 --index-url https://download.pytorch.org/whl/cu128
+C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install C:\tools\TRELLIS\whl\cumm_cu128-0.7.13-cp311-cp311-win_amd64.whl
+C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install C:\tools\TRELLIS\whl\spconv_cu128-2.3.8-cp311-cp311-win_amd64.whl
+C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install diffusers==0.28.0 accelerate kornia==0.8.0 timm==1.0.28 transformers==4.46.3 huggingface_hub==0.24.6 pillow tqdm scipy trimesh numpy==1.26.4 scikit-image opencv-python-headless einops
+```
+
+Runtime env vars (same convention as TRELLIS, required for every run):
+
+```
+ATTN_BACKEND=xformers
+SPCONV_ALGO=native
+```
+
+Actually-installed versions, and why they diverge from the README's own pin
+set (torch 2.4.0/xformers 0.0.27.post2/spconv 2.3.6): this box's proven
+TRELLIS-architecture stack was used instead, and held — no torch-pin
+fallback was needed. torch `2.7.1+cu128`; xformers `0.0.31.post1` (CUDA
+kernels compiled, verified with the probe below); spconv `2.3.8` — its
+`cumm-cu128 <0.8.0,>=0.7.11` pin isn't on PyPI (PyPI only serves 0.8.2), so
+the local `cumm_cu128-0.7.13-cp311-cp311-win_amd64.whl` wheel from the
+TRELLIS fork must install **before** the spconv wheel above, or spconv pulls
+the incompatible PyPI cumm and breaks. `triton` (listed in
+`requirements.txt`) is omitted entirely — no official Windows wheel, and
+StableNormal-turbo never demanded it at runtime; `triton-windows` is the
+evidenced fallback if a future weight update does. Three more pins were
+forced once BiRefNet/YOSO's actual remote code ran (discovered running the
+first real smoke, not from `requirements.txt`): `timm` → `1.0.28` (BiRefNet
+needs `timm.layers`, absent from the older `0.6.7`), `diffusers` →
+`0.28.0` (pinned to yoso's `model_index.json` version; newer diffusers
+removes an import path yoso needs), `huggingface_hub` → `0.24.6` (diffusers
+0.28 calls `cached_download`, removed from newer hub releases).
+
+Verify with the cheap CUDA-kernel probe (no generation):
+
+```
+C:\tools\Hi3DGen\venv\Scripts\python.exe -m xformers.info
+C:\tools\Hi3DGen\venv\Scripts\python.exe -c "import torch, xformers.ops as xops; assert torch.cuda.is_available(); q = torch.randn(1, 256, 8, 64, device='cuda', dtype=torch.float16); o = xops.memory_efficient_attention(q, q, q); torch.cuda.synchronize(); print('xformers CUDA OK', tuple(o.shape))"
+```
+
+`xformers.info` must report no "Need to compile C++ extensions" warning.
+Importing `Hi3DGenPipeline` (from `C:\tools\Hi3DGen\Hi3DGen`, with
+`ATTN_BACKEND=xformers SPCONV_ALGO=native` set) prints `[SPARSE] Backend:
+spconv, Attention: xformers`.
+
+**Weights** (~5.7 GB total; all MIT or Apache-2.0 — verdicts in
+`content/source/CREDITS.md`):
+
+| Repo | Role | Location |
+|---|---|---|
+| `Stable-X/trellis-normal-v0-1` | normal-conditioned geometry pipeline (2.65 GB) | `C:\tools\Hi3DGen\Hi3DGen\weights\trellis-normal-v0-1` |
+| `Stable-X/yoso-normal-v1-8-1` | StableNormal-turbo predictor (2.63 GB) | `C:\tools\Hi3DGen\Hi3DGen\weights\yoso-normal-v1-8-1` |
+| `ZhengPeng7/BiRefNet` | background removal (~0.44 GB) | standard HF cache (snapshot `e2bf8e4`) |
+| `hugoycj/StableNormal` (Apache-2.0 code, fork of `Stable-X/StableNormal`) | normal-predictor code | torch.hub snapshot `hugoycj_StableNormal_main` |
+
+One dependency the original plan missed: StableNormal's YOSO predictor pulls
+a DINOv2 backbone (`dinov2_vitl14_reg`, ~1.13 GB) via its own internal
+`torch.hub.load` on first run — not listed in Hi3DGen's `requirements.txt`,
+found running the first real smoke. It downloads into the default torch hub
+cache the first time `prop_hi3dgen.py` runs and is reused on every run after.
+
+SHA256 for every downloaded weight file: `scripts/ai-pipeline/models.sha256`
+(one `Hi3DGen/<relative-path>` line per file).
+
+### Scripts
+
+Five scripts chain a concept image into a shippable prop glb. Every stage is
+resumable — re-running the same command skips any stage whose output already
+exists.
+
+**1. `prop_hi3dgen.py`** — image → untextured geometry (Hi3DGen venv,
+`cwd=C:\tools\Hi3DGen\Hi3DGen`):
+
+```
+C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--steps N]
+```
+
+BiRefNet matte → StableNormal-turbo normal prediction →
+`Hi3DGenPipeline` geometry → `to_trimesh` export. Writes `<out>/raw.glb`
+(bare geometry — texturing is a later stage), `<out>/concept_rgba.png` (the
+BiRefNet-matted concept at the input's own framing — this, not the raw RGB
+concept, is what `prop_texture.py` projects), and
+`<out>/generation_manifest.json`. `--steps` overrides both sampler stages
+uniformly; omitted, each stage keeps `app.py`'s own default (50
+sparse-structure / 6 slat). Peak VRAM measured at 11.5 GiB of 12 — see the
+VRAM sequencing rule under `gen_prop.py` below.
+
+**2. `prop_cleanup.py`** — Blender headless normalize + decimate:
+
+```
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_cleanup.py -- <raw.glb> <clean.glb> [--height M] [--tri-budget N]
+```
+
+Arg convention matches `mixamo_to_glb.py`: everything after `--` is the
+script's own argv. Strips loose floaters, scale/ground-normalizes to
+`--height` (default 1.8 m), decimates to `--tri-budget` (default 15000).
+Exports `<clean stem>_hires.glb` before decimating — the high-poly source
+`prop_texture.py`'s normal bake needs. Structural failures (no mesh, zero
+area) exit non-zero rather than patch silently.
+
+**3. `prop_texture.py`** — Blender headless texture bake:
+
+```
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb>
+```
+
+Strategy: **Blender projection bake** — Smart-UV atlas, concept image
+EMIT-projected onto basecolor, real hires→clean Cycles normal bake, MR from
+per-material-zone constants. Full ruling and rejected-option evidence:
+`tasks/ai-pipeline/a3.md` → "Texture strategy log". **Requires an
+alpha-matted concept** (`prop_hi3dgen.py`'s `concept_rgba.png`, not a raw RGB
+image) — a concept with no usable alpha matte hard-fails instead of
+degenerating silently into a full-frame projection and a washed-out fill
+color.
+
+**4. `preprocess_prop.mjs`** — gltf-transform prune/dedup/resize:
+
+```
+node scripts/ai-pipeline/preprocess_prop.mjs <textured.glb> <final.glb>
+```
+
+Then the existing DDS bake, reused as-is (no new bake code):
+
+```
+node scripts/asset-pipeline/bake_textures.mjs gltf <final.glb>
+```
+
+**5. `gen_prop.py`** — chain assembly, one candidate per invocation:
+
+```
+python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>]
+```
+
+Runs concept → geometry → cleanup → texture → preprocess+bake → turntable →
+chained `generation_manifest.json`; every stage is skipped if its output
+already exists, so a second identical invocation exits in under a second
+instead of regenerating. `--skip-concept <image.png>` bypasses concept
+generation with a provided image — re-rolls geometry and everything
+downstream of it without spending a new SDXL concept. **One seed per
+command:** one invocation is one candidate; a batch is the caller looping
+seeds across separate foreground invocations, never one script call for N
+candidates, so every command stays under the shell's timeout budget.
+**VRAM sequencing (forced by the 11.5 GiB Hi3DGen peak above): ComfyUI must
+never be up while a geometry stage runs.** `gen_prop.py` itself starts and
+stops no server — the caller generates every candidate's concept first with
+ComfyUI up, stops it, then runs geometry-onward for every candidate with the
+server down.
+
+### Fixture
+
+`content/models/props/candelabra_shrine/` — winner seed 2 (`cand_2`),
+chosen over three review passes; full record (per-candidate notes, the
+TRELLIS-baseline comparison, two texture-stage defects found and fixed
+along the way): `tasks/ai-pipeline/a3.md` → "Decision log". Known gap: thin
+iron members (posts, scroll arms) render as polished pewter rather than the
+concept's weathered dark iron — a characterized ceiling of the projection
+bake on thin-member-dominated props, ruled tolerable at game camera distance
+for this fixture; Strategy 2 (SDXL multi-view retexture) is the evidenced
+escalation if a later art review rejects it.
