@@ -10,13 +10,15 @@
 #     openpose conditioning lock makes this near-rigid, and the stats
 #     record the shoulder-band span residual as A4.11 decision data if it
 #     wasn't
-#   - skin weights come from Blender's automatic weights (bone heat);
-#     rig-quality gate: weightless verts > 0.5%, or a bone-heat solver
-#     error, is a structural failure -> exit non-zero WITH the numbers (a
-#     failed candidate is A4.11 decision-gate data, never silently
-#     patched). One internal fallback for the weight computation only: a
-#     voxel-remeshed proxy is weighted and its weights transferred to the
-#     real mesh (no shipped geometry changes; recorded in the stats)
+#   - skin weights come from Blender's automatic weights (bone heat),
+#     always solved on a seam-welded copy of the mesh: the render mesh is
+#     vertex-split along every UV seam and bone heat needs the connected
+#     surface (a no-op weld for already-connected meshes). Weights are
+#     copied back by nearest vertex — coincident positions, so the copy is
+#     exact; shipped geometry is untouched. Rig-quality gate: weightless
+#     verts > 0.5%, or a bone-heat solver error, is a structural failure
+#     -> exit non-zero WITH the numbers (a failed candidate is A4.11
+#     decision-gate data, never silently patched)
 #   - finger prune, socket bones, clip stash, height/ground bake, and glb
 #     export settings are mixamo_rig.py, shared with mixamo_to_glb.py
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
@@ -33,6 +35,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
+import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix
@@ -51,9 +54,6 @@ BAND_FRACTION = 0.05
 # plausible limb radius at humanoid scale.
 BLEED_DISTANCE = 0.30
 WEIGHTLESS_LIMIT_FRACTION = 0.005
-# Weighting-proxy voxel size: ~2 cm closes generation-scale surface
-# noise/self-intersections while keeping limbs from fusing to the torso.
-PROXY_VOXEL_SIZE = 0.02
 SOLVER_ERROR_TEXT = "failed to find solution"
 
 
@@ -154,43 +154,36 @@ def structural_failure(warnings, weightless, vert_count) -> bool:
         or weightless > WEIGHTLESS_LIMIT_FRACTION * vert_count
 
 
-def unbind(mesh_obj):
-    for mod in [m for m in mesh_obj.modifiers if m.type == "ARMATURE"]:
-        mesh_obj.modifiers.remove(mod)
-    world = mesh_obj.matrix_world.copy()
-    mesh_obj.parent = None
-    mesh_obj.matrix_world = world
-    mesh_obj.vertex_groups.clear()
+def weld_weights(mesh_obj, armature):
+    """Bone-heat solve on a seam-welded copy of the mesh, weights copied
+    back by nearest vertex (coincident positions — exact), then bind the
+    real mesh without regenerating weights. Returns (solver output text,
+    welded vertex count)."""
+    weld = mesh_obj.copy()
+    weld.data = mesh_obj.data.copy()
+    bpy.context.collection.objects.link(weld)
+    bm = bmesh.new()
+    bm.from_mesh(weld.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
+    bm.to_mesh(weld.data)
+    bm.free()
+    weld_verts = len(weld.data.vertices)
 
-
-def proxy_weights(mesh_obj, armature) -> str:
-    """Weight a voxel-remeshed copy, transfer its weights to the real mesh
-    by nearest vertex, and bind the real mesh without regenerating weights.
-    Shipped geometry is untouched."""
-    proxy = mesh_obj.copy()
-    proxy.data = mesh_obj.data.copy()
-    bpy.context.collection.objects.link(proxy)
-    mod = proxy.modifiers.new("voxel", "REMESH")
-    mod.mode = "VOXEL"
-    mod.voxel_size = PROXY_VOXEL_SIZE
-    select_only([proxy], proxy)
-    bpy.ops.object.modifier_apply(modifier=mod.name)
-
-    text = auto_parent(proxy, armature)
+    text = auto_parent(weld, armature)
 
     dt = mesh_obj.modifiers.new("weights", "DATA_TRANSFER")
-    dt.object = proxy
+    dt.object = weld
     dt.use_vert_data = True
     dt.data_types_verts = {"VGROUP_WEIGHTS"}
     dt.vert_mapping = "NEAREST"
     select_only([mesh_obj], mesh_obj)
     bpy.ops.object.datalayout_transfer(modifier=dt.name)
     bpy.ops.object.modifier_apply(modifier=dt.name)
-    bpy.data.objects.remove(proxy, do_unlink=True)
+    bpy.data.objects.remove(weld, do_unlink=True)
 
-    select_only([mesh_obj, armature], armature)
-    bpy.ops.object.parent_set(type="ARMATURE")
-    return text
+    mod = mesh_obj.modifiers.new("Armature", "ARMATURE")
+    mod.object = armature
+    return text, weld_verts
 
 
 def main():
@@ -269,23 +262,27 @@ def main():
     mesh_span = float(shoulder_band[:, 0].max() - shoulder_band[:, 0].min()) \
         if len(shoulder_band) else 0.0
 
+    # ---- adopt the incumbent rig's object structure: mesh data in the
+    # armature's object space, mesh a plain child with identity local
+    # transform. The glTF exporter is only proven against this shape (FBX
+    # import delivers skinned meshes this way); a world-space mesh bound
+    # through parent_set's parent-inverse compensation exports with
+    # inconsistent inverse-bind matrices ----
+    me.transform(armature.matrix_world.inverted())
+    mesh_obj.parent = armature
+    mesh_obj.matrix_parent_inverse = Matrix.Identity(4)
+    mesh_obj.matrix_basis = Matrix.Identity(4)
+    bpy.context.view_layer.update()
+
     # ---- automatic weights + rig-quality gate ----
     vert_count = len(me.vertices)
-    warnings = solver_warnings(auto_parent(mesh_obj, armature))
+    text, weld_verts = weld_weights(mesh_obj, armature)
+    warnings = solver_warnings(text)
     weightless, bleed = weight_metrics(mesh_obj, armature)
-    proxy_used = False
-    gate_warnings = warnings
-    if structural_failure(warnings, weightless, vert_count):
-        proxy_used = True
-        unbind(mesh_obj)
-        # the gate judges the rescue solve on its own outcome; the raw
-        # solve's warnings stay recorded in stats but no longer fail it
-        gate_warnings = solver_warnings(proxy_weights(mesh_obj, armature))
-        warnings = warnings + gate_warnings
-        weightless, bleed = weight_metrics(mesh_obj, armature)
 
     stats = {
         "verts": vert_count,
+        "weld_domain_verts": weld_verts,
         "fit_scale": fit_scale,
         "skeleton_height": skel_height,
         "shoulder_span_mesh": mesh_span,
@@ -294,14 +291,13 @@ def main():
         "weightless_fraction": weightless / vert_count,
         "bleed_verts_over_30cm": bleed,
         "solver_warnings": warnings,
-        "weight_proxy_used": proxy_used,
     }
-    if proxy_used and structural_failure(gate_warnings, weightless, vert_count):
+    if structural_failure(warnings, weightless, vert_count):
         print(json.dumps(stats))
         fail(f"rig-quality gate: weightless {weightless}/{vert_count} "
              f"({weightless / vert_count:.2%}, limit "
              f"{WEIGHTLESS_LIMIT_FRACTION:.2%}), "
-             f"{len(gate_warnings)} rescue-solve warning(s) — candidate is "
+             f"{len(warnings)} solver warning(s) — candidate is "
              f"decision-gate data")
 
     # ---- shared machinery: prune, sockets, clips, bake, export ----
