@@ -171,7 +171,8 @@ def stage_geometry(cand_dir: Path, seed: int) -> dict:
         print(f"geometry: skip (exists) -> {raw_glb}")
     else:
         concept_png = cand_dir / "concept.png"
-        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png, "--out", cand_dir, "--seed", seed], cwd=HI3DGEN_REPO)
+        # Use absolute paths since subprocess runs with cwd=HI3DGEN_REPO
+        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png.resolve(), "--out", cand_dir.resolve(), "--seed", seed], cwd=HI3DGEN_REPO)
         # prop_hi3dgen.py writes <out>/generation_manifest.json -- move it
         # aside immediately so that filename stays reserved for this script's
         # own chained manifest (the final stage); otherwise the aggregate
@@ -296,8 +297,9 @@ def stage_review(cand_dir: Path) -> dict:
     if (static_dir / "contact_sheet.png").exists():
         print(f"review(static): skip (exists) -> {static_dir}")
     else:
+        # Use absolute paths since subprocess runs with cwd=REPO_ROOT
         run(["cargo", "run", "-p", "engine-renderer", "--release", "--features", "offscreen", "--bin", "turntable",
-             "--", final_glb, "--out", static_dir, "--angles", TURNTABLE_ANGLES, "--size", TURNTABLE_SIZE],
+             "--", final_glb.resolve(), "--out", static_dir.resolve(), "--angles", str(TURNTABLE_ANGLES), "--size", TURNTABLE_SIZE],
             cwd=REPO_ROOT)
         print(f"review(static): generated -> {static_dir}")
     renders["static"] = {"angles": TURNTABLE_ANGLES, "size": TURNTABLE_SIZE,
@@ -308,8 +310,9 @@ def stage_review(cand_dir: Path) -> dict:
         if (clip_dir / "contact_sheet.png").exists():
             print(f"review({clip}): skip (exists) -> {clip_dir}")
         else:
+            # Use absolute paths since subprocess runs with cwd=REPO_ROOT
             run(["cargo", "run", "-p", "engine-renderer", "--release", "--features", "offscreen", "--bin", "turntable",
-                 "--", final_glb, "--out", clip_dir, "--clip", clip, "--size", TURNTABLE_SIZE],
+                 "--", final_glb.resolve(), "--out", clip_dir.resolve(), "--clip", clip, "--size", TURNTABLE_SIZE],
                 cwd=REPO_ROOT)
             print(f"review({clip}): generated -> {clip_dir}")
         renders[clip] = {"size": TURNTABLE_SIZE,
