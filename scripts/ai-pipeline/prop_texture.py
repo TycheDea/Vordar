@@ -210,9 +210,11 @@ def main():
     px = np.empty(TEXTURE_SIZE * TEXTURE_SIZE * 4, dtype=np.float32)
     base_img.pixels.foreach_get(px)
     px = px.reshape(-1, 4)
-    # float buffers are scene-linear; threshold in sRGB-ish value space
+    # base_img is a byte image (new_image() leaves float_buffer unset), so
+    # pixels() already returns sRGB-encoded values -- the band applies
+    # directly, no further gamma transform.
     lum = (0.2126 * px[:, 0] + 0.7152 * px[:, 1] + 0.0722 * px[:, 2])
-    value = np.clip(lum, 0.0, 1.0) ** (1.0 / 2.2)
+    value = np.clip(lum, 0.0, 1.0)
     lo, hi = METAL_VALUE_BAND
     t = np.clip((value - lo) / (hi - lo), 0.0, 1.0)
     metallic = 1.0 - t * t * (3.0 - 2.0 * t)  # smoothstep: dark = metal
@@ -221,7 +223,10 @@ def main():
     mr[:, 1], mr[:, 2], mr[:, 3] = rough, metallic, 1.0
     mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
     mr_img.pixels.foreach_set(mr.ravel())
-    metal_fraction = float((metallic > 0.5).mean())
+    # off-island texels sit at the bake's cleared (0,0,0) fill; exclude them
+    # so the stat reflects the mesh's material split, not atlas padding
+    on_island = px[:, :3].any(axis=1)
+    metal_fraction = float((metallic[on_island] > 0.5).mean()) if on_island.any() else 0.0
 
     # ---- final material + export (hires dropped, images saved so the
     #      glTF exporter embeds them) ----
