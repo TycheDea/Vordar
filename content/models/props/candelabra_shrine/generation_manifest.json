@@ -1,5 +1,5 @@
 {
-  "subject": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, weathered dark iron, stone base, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background",
+  "subject": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, near-black weathered dark iron, stone base, semi-realistic dark fantasy",
   "seed": 2,
   "candidate_dir": "target\\prop-batch\\candelabra\\cand_2",
   "concept": {
@@ -160,39 +160,153 @@
     "clean_hires_glb_sha256": "a47d0d5f55eadfae68b2e9a4ea87df2c1e698a136e9c3839b9bdeed3026ba651"
   },
   "texture": {
-    "strategy": "blender_projection_bake",
+    "strategy": "sdxl_multiview_controlnet_depth",
     "front_axis": "-Y",
+    "workflow": "prop_multiview.json",
+    "subject": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, near-black weathered dark iron, stone base, semi-realistic dark fantasy",
+    "render_resolution": 1024,
+    "views": [
+      {
+        "hint": "front view",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 15.0,
+        "seed": 200,
+        "prompt_id": "73f95959-5668-4a90-9f00-601627dbd1ce",
+        "prompts": {
+          "2": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, near-black weathered dark iron, stone base, semi-realistic dark fantasy, front view, neutral studio lighting, single object centered, plain dark grey background",
+          "3": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "CheckpointLoaderSimple",
+            "input": "ckpt_name",
+            "filename": "sd_xl_base_1.0.safetensors",
+            "sha256": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b"
+          },
+          {
+            "node_id": "4",
+            "class_type": "ControlNetLoader",
+            "input": "control_net_name",
+            "filename": "controlnet-depth-sdxl-1.0.safetensors",
+            "sha256": "ea3770af4c33ea8ba8dccc0106ec5d5c5c6e504eb382119a3ccac3c9d973d344"
+          }
+        ],
+        "depth_png_sha256": "e327cbc4ba8f3342a4ea28c97bb286d5af001ad1c661babce79f29764837f527",
+        "gen_png_sha256": "cfb4733082b0cbeac523fade9db9a8fe25c3c015473b62557e5a44d1fcccc868"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 90.0,
+        "elevation_deg": 15.0,
+        "seed": 201,
+        "prompt_id": "e2638db0-426b-4f08-9943-54f042bb3675",
+        "prompts": {
+          "2": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, near-black weathered dark iron, stone base, semi-realistic dark fantasy, side view, neutral studio lighting, single object centered, plain dark grey background",
+          "3": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "CheckpointLoaderSimple",
+            "input": "ckpt_name",
+            "filename": "sd_xl_base_1.0.safetensors",
+            "sha256": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b"
+          },
+          {
+            "node_id": "4",
+            "class_type": "ControlNetLoader",
+            "input": "control_net_name",
+            "filename": "controlnet-depth-sdxl-1.0.safetensors",
+            "sha256": "ea3770af4c33ea8ba8dccc0106ec5d5c5c6e504eb382119a3ccac3c9d973d344"
+          }
+        ],
+        "depth_png_sha256": "e8299a590eacbbe2a1440c9fa76fbe3d018cdc039b2c9e1864a3d74ad5bd002e",
+        "gen_png_sha256": "367820d798b1354c3077f5de7d9ff888ef5b8ff339df0d0397caf74c275fc34b"
+      },
+      {
+        "hint": "back view",
+        "azimuth_deg": 180.0,
+        "elevation_deg": 15.0,
+        "seed": 202,
+        "prompt_id": "0024dd5f-7a37-4463-a8d8-d4db53cbd6b5",
+        "prompts": {
+          "2": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, near-black weathered dark iron, stone base, semi-realistic dark fantasy, back view, neutral studio lighting, single object centered, plain dark grey background",
+          "3": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "CheckpointLoaderSimple",
+            "input": "ckpt_name",
+            "filename": "sd_xl_base_1.0.safetensors",
+            "sha256": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b"
+          },
+          {
+            "node_id": "4",
+            "class_type": "ControlNetLoader",
+            "input": "control_net_name",
+            "filename": "controlnet-depth-sdxl-1.0.safetensors",
+            "sha256": "ea3770af4c33ea8ba8dccc0106ec5d5c5c6e504eb382119a3ccac3c9d973d344"
+          }
+        ],
+        "depth_png_sha256": "14f404074c904d4f1efbf81eea11b0a49e613a678a1e5e24dfc9ffd43687a9c1",
+        "gen_png_sha256": "342f173fa716bbe22e5e8957b0066dfc72261e81e373b16222819b7a4b27d6ac"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 270.0,
+        "elevation_deg": 15.0,
+        "seed": 203,
+        "prompt_id": "ee08e9bb-4a5c-43fc-bfec-3beadc07afd6",
+        "prompts": {
+          "2": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, near-black weathered dark iron, stone base, semi-realistic dark fantasy, side view, neutral studio lighting, single object centered, plain dark grey background",
+          "3": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "CheckpointLoaderSimple",
+            "input": "ckpt_name",
+            "filename": "sd_xl_base_1.0.safetensors",
+            "sha256": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b"
+          },
+          {
+            "node_id": "4",
+            "class_type": "ControlNetLoader",
+            "input": "control_net_name",
+            "filename": "controlnet-depth-sdxl-1.0.safetensors",
+            "sha256": "ea3770af4c33ea8ba8dccc0106ec5d5c5c6e504eb382119a3ccac3c9d973d344"
+          }
+        ],
+        "depth_png_sha256": "a45e7ba481724925e4c98b38fa0ed58dadca974972697d63540d3aaeb7b84623",
+        "gen_png_sha256": "62e4714dc9156a72b95fd7a0d45180e7c5df3581e8dbffc62c0ff19bffd301f0"
+      }
+    ],
+    "weight_exponent": 2.0,
+    "occlusion_eps": 0.02,
+    "edge_pad_px": 8,
+    "blend_coverage": 0.6801,
     "texture_size": 1024,
-    "concept_alpha_bbox_uv": [
-      0.2295,
-      0.7695,
-      0.0254,
-      0.9668
-    ],
-    "fill_color": [
-      0.3981,
-      0.3753,
-      0.3612
-    ],
     "metal_value_band": [
       0.24,
       0.34
     ],
-    "metal_roughness": 0.4,
+    "metal_roughness": 0.65,
     "dielectric_roughness": 0.7,
-    "metal_fraction": 0.2972,
-    "base_bake_s": 0.9,
-    "normal_bake_s": 0.2,
+    "metal_fraction": 0.4076,
+    "base_bake_s": 3.9,
+    "normal_bake_s": 0.3,
     "textured_glb": "target\\prop-batch\\candelabra\\cand_2\\textured.glb",
-    "textured_glb_sha256": "32ff64bb8c40096c84b4d36a629638857ec3922974044c217d818853b106aeed"
+    "textured_glb_sha256": "d9140badbd611ad53b9b03e100b780027e5ac79c0cadd96bc70b608b98e0fde3"
   },
   "preprocess": {
-    "textured_glb_bytes": 3836772,
-    "final_glb_bytes": 3836744
+    "textured_glb_bytes": 4015020,
+    "final_glb_bytes": 4014992
   },
   "bake": {
     "source": "final.glb",
-    "sha256": "9453c4d394aa7ff659b05b357556dc0b72d71efdf520a30e4af6f783e14a34ce",
+    "sha256": "a0657a07b8c60741251a6dd8b0f86c8d7dcfa1136e081d169616e4fa2fa0808b",
     "images": [
       {
         "index": 0,
@@ -211,7 +325,7 @@
       }
     ]
   },
-  "final_glb_sha256": "9453c4d394aa7ff659b05b357556dc0b72d71efdf520a30e4af6f783e14a34ce",
+  "final_glb_sha256": "a0657a07b8c60741251a6dd8b0f86c8d7dcfa1136e081d169616e4fa2fa0808b",
   "turntable": {
     "angles": 8,
     "size": "512x512",
