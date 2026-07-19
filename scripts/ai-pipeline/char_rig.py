@@ -274,10 +274,14 @@ def main():
     warnings = solver_warnings(auto_parent(mesh_obj, armature))
     weightless, bleed = weight_metrics(mesh_obj, armature)
     proxy_used = False
+    gate_warnings = warnings
     if structural_failure(warnings, weightless, vert_count):
         proxy_used = True
         unbind(mesh_obj)
-        warnings += solver_warnings(proxy_weights(mesh_obj, armature))
+        # the gate judges the rescue solve on its own outcome; the raw
+        # solve's warnings stay recorded in stats but no longer fail it
+        gate_warnings = solver_warnings(proxy_weights(mesh_obj, armature))
+        warnings = warnings + gate_warnings
         weightless, bleed = weight_metrics(mesh_obj, armature)
 
     stats = {
@@ -292,12 +296,13 @@ def main():
         "solver_warnings": warnings,
         "weight_proxy_used": proxy_used,
     }
-    if proxy_used and structural_failure(warnings, weightless, vert_count):
+    if proxy_used and structural_failure(gate_warnings, weightless, vert_count):
         print(json.dumps(stats))
         fail(f"rig-quality gate: weightless {weightless}/{vert_count} "
              f"({weightless / vert_count:.2%}, limit "
              f"{WEIGHTLESS_LIMIT_FRACTION:.2%}), "
-             f"{len(warnings)} solver warning(s) — candidate is decision-gate data")
+             f"{len(gate_warnings)} rescue-solve warning(s) — candidate is "
+             f"decision-gate data")
 
     # ---- shared machinery: prune, sockets, clips, bake, export ----
     mixamo_rig.prune_fingers(armature, [mesh_obj])
