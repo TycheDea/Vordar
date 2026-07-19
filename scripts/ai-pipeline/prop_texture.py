@@ -15,16 +15,20 @@
 #     facing weights, depth-occlusion and silhouette tests.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
 #     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
-#   - MR map = per-material-zone constants (A3.6 channels contract): zones
-#     are classified per texel from baked basecolor value -- dark texels =
-#     metal (weathered iron), light = dielectric (wax/stone). No real MR
-#     capture exists in either strategy; the constants are the contract.
+#   - MR map = constants, two modes (--mr). zoned (prop default, A3.6
+#     channels contract): per-texel zones classified from baked basecolor
+#     value -- dark texels = metal (weathered iron), light = dielectric
+#     (wax/stone). dielectric (character contract, A4.6): constant
+#     metallic 0 / roughness 0.8 everywhere, matching every existing race
+#     model -- darkest=iron zoning would metalize dark robes/hair. No real
+#     MR capture exists in either strategy; the constants are the contract.
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
 #     gen_prop.py's chained manifest.
 #
 # Usage: blender --background --python prop_texture.py -- \
 #            <clean.glb> <hires.glb> <concept.png> <textured.glb> \
-#            [--strategy projection|multiview] [--subject STR] [--seed N]
+#            [--strategy projection|multiview] [--subject STR] [--seed N] \
+#            [--mr zoned|dielectric]
 
 import argparse
 import hashlib
@@ -60,6 +64,9 @@ FRONT_AXIS = "-Y"
 METAL_VALUE_BAND = (0.24, 0.34)
 METAL_ROUGHNESS = 0.4
 DIELECTRIC_ROUGHNESS = 0.7
+# --mr dielectric emits this single constant everywhere (metallic 0): the
+# character MR contract (A4.6), matching every existing race model.
+DIELECTRIC_MODE_ROUGHNESS = 0.8
 
 MV_WORKFLOW = SCRIPT_DIR / "workflows" / "prop_multiview.json"
 MV_VIEWS = [("front view", 0.0), ("side view", 90.0),
@@ -553,6 +560,9 @@ def main():
     parser.add_argument("--seed", type=int, help="Base seed for the multiview SDXL passes")
     parser.add_argument("--metal-roughness", type=float, default=METAL_ROUGHNESS,
                         help="Iron-zone roughness override (A3.6 contract default 0.4)")
+    parser.add_argument("--mr", choices=["zoned", "dielectric"], default="zoned",
+                        help="MR mode: zoned value-classified constants (prop default) or "
+                             "the constant character contract (metallic 0 / roughness 0.8)")
     args = parser.parse_args(argv)
 
     t0 = time.time()
@@ -599,28 +609,40 @@ def main():
                         uv_layer=atlas)
     t_normal = time.time()
 
-    # ---- MR: zone constants keyed off the baked basecolor's value ----
-    px = np.empty(TEXTURE_SIZE * TEXTURE_SIZE * 4, dtype=np.float32)
-    base_img.pixels.foreach_get(px)
-    px = px.reshape(-1, 4)
-    if island is None:
-        # projection bakes onto a black-cleared atlas: any-color = on-island
-        island = px[:, :3].any(axis=1)
-    # base_img is a byte image (new_image() leaves float_buffer unset), so
-    # pixels() already returns sRGB-encoded values -- the band applies
-    # directly, no further gamma transform.
-    lum = (0.2126 * px[:, 0] + 0.7152 * px[:, 1] + 0.0722 * px[:, 2])
-    value = np.clip(lum, 0.0, 1.0)
-    lo, hi = METAL_VALUE_BAND
-    t = np.clip((value - lo) / (hi - lo), 0.0, 1.0)
-    metallic = 1.0 - t * t * (3.0 - 2.0 * t)  # smoothstep: dark = metal
-    rough = args.metal_roughness * metallic + DIELECTRIC_ROUGHNESS * (1 - metallic)
-    mr = np.zeros((TEXTURE_SIZE * TEXTURE_SIZE, 4), dtype=np.float32)
+    # ---- MR: zone constants keyed off the baked basecolor's value, or
+    #      the constant dielectric character contract ----
+    n_tex = TEXTURE_SIZE * TEXTURE_SIZE
+    if args.mr == "dielectric":
+        metallic = np.zeros(n_tex, dtype=np.float32)
+        rough = np.full(n_tex, DIELECTRIC_MODE_ROUGHNESS, dtype=np.float32)
+        mr_stats = {"roughness": DIELECTRIC_MODE_ROUGHNESS}
+    else:
+        px = np.empty(n_tex * 4, dtype=np.float32)
+        base_img.pixels.foreach_get(px)
+        px = px.reshape(-1, 4)
+        if island is None:
+            # projection bakes onto a black-cleared atlas: any-color = on-island
+            island = px[:, :3].any(axis=1)
+        # base_img is a byte image (new_image() leaves float_buffer unset), so
+        # pixels() already returns sRGB-encoded values -- the band applies
+        # directly, no further gamma transform.
+        lum = (0.2126 * px[:, 0] + 0.7152 * px[:, 1] + 0.0722 * px[:, 2])
+        value = np.clip(lum, 0.0, 1.0)
+        lo, hi = METAL_VALUE_BAND
+        t = np.clip((value - lo) / (hi - lo), 0.0, 1.0)
+        metallic = 1.0 - t * t * (3.0 - 2.0 * t)  # smoothstep: dark = metal
+        rough = args.metal_roughness * metallic + DIELECTRIC_ROUGHNESS * (1 - metallic)
+        mr_stats = {
+            "metal_value_band": list(METAL_VALUE_BAND),
+            "metal_roughness": args.metal_roughness,
+            "dielectric_roughness": DIELECTRIC_ROUGHNESS,
+            # off-island texels reflect atlas padding, not the mesh's material split
+            "metal_fraction": round(float((metallic[island] > 0.5).mean()) if island.any() else 0.0, 4),
+        }
+    mr = np.zeros((n_tex, 4), dtype=np.float32)
     mr[:, 1], mr[:, 2], mr[:, 3] = rough, metallic, 1.0
     mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
     mr_img.pixels.foreach_set(mr.ravel())
-    # off-island texels reflect atlas padding, not the mesh's material split
-    metal_fraction = float((metallic[island] > 0.5).mean()) if island.any() else 0.0
 
     # ---- final material + export (hires dropped, images saved so the
     #      glTF exporter embeds them) ----
@@ -662,10 +684,8 @@ def main():
     stats = {
         **extras,
         "texture_size": TEXTURE_SIZE,
-        "metal_value_band": list(METAL_VALUE_BAND),
-        "metal_roughness": args.metal_roughness,
-        "dielectric_roughness": DIELECTRIC_ROUGHNESS,
-        "metal_fraction": round(metal_fraction, 4),
+        "mr_mode": args.mr,
+        **mr_stats,
         "base_bake_s": round(t_base - t0, 1),
         "normal_bake_s": round(t_normal - t_base, 1),
         "textured_glb": args.textured_glb,
