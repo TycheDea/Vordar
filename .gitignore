@@ -5,6 +5,9 @@
 # Node (asset pipeline scripts)
 node_modules/
 
+# Python (pipeline scripts import shared modules)
+__pycache__/
+
 # Cargo.lock is committed for binaries (smirk is a binary — keep it)
 # If you ever publish engine crates as libraries, add their Cargo.lock here
 
