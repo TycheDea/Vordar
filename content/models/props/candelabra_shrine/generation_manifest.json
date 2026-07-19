@@ -1,0 +1,230 @@
+{
+  "subject": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, weathered dark iron, stone base, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background",
+  "seed": 2,
+  "candidate_dir": "target\\prop-batch\\candelabra\\cand_2",
+  "concept": {
+    "mode": "generated",
+    "subject": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, weathered dark iron, stone base, semi-realistic dark fantasy",
+    "workflow_copy": "concept_workflow.json",
+    "comfy_manifest": {
+      "workflow": {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "sd_xl_base_1.0.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "1",
+              1
+            ],
+            "text": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, weathered dark iron, stone base, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "1",
+              1
+            ],
+            "text": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 1024,
+            "height": 1024,
+            "batch_size": 1
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 2,
+            "steps": 30,
+            "cfg": 7.0,
+            "sampler_name": "dpmpp_2m",
+            "scheduler": "karras",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "prop_concept"
+          }
+        }
+      },
+      "prompt_id": "606c4064-6f52-4bba-a3c5-78fe0d32f4c0",
+      "prompts": {
+        "2": "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, weathered dark iron, stone base, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background",
+        "3": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+      },
+      "seed": {
+        "5": 2
+      },
+      "models": [
+        {
+          "node_id": "1",
+          "class_type": "CheckpointLoaderSimple",
+          "input": "ckpt_name",
+          "filename": "sd_xl_base_1.0.safetensors",
+          "sha256": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b"
+        }
+      ],
+      "outputs": [
+        {
+          "node_id": "7",
+          "output_kind": "images",
+          "filename": "prop_concept_00004_.png",
+          "subfolder": "",
+          "type": "output",
+          "saved_as": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra\\cand_2\\concept_raw\\prop_concept_00004_.png"
+        }
+      ]
+    },
+    "concept_png_sha256": "d40cb03e43bc008a50adb16bf7daea016f9f309b75446c58acbb8918de2f5f8b"
+  },
+  "geometry": {
+    "model": "Stable-X/Hi3DGen",
+    "weights": {
+      "geometry": "Stable-X/trellis-normal-v0-1",
+      "normal": "Stable-X/yoso-normal-v1-8-1",
+      "birefnet": "ZhengPeng7/BiRefNet"
+    },
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra\\cand_2\\concept.png",
+    "input_image_sha256": "d40cb03e43bc008a50adb16bf7daea016f9f309b75446c58acbb8918de2f5f8b",
+    "seed": 2,
+    "steps": {
+      "sparse_structure_sampler": 50,
+      "slat_sampler": 6
+    },
+    "torch_version": "2.7.1+cu128",
+    "xformers_version": "0.0.31.post1",
+    "vertex_count": 106891,
+    "face_count": 213802,
+    "peak_vram_allocated_gb": 11.384233472,
+    "raw_glb_sha256": "c2ea1f5f4e1f4a79e1223f95936b9ef27fcc3450cd89782c9da162fffe6dd56f",
+    "concept_rgba_sha256": "102a94fe4e8ecdf6f7c6543761b7cd2943d52f1ffca58e3b3da936ef961ce42c"
+  },
+  "cleanup": {
+    "raw_tris": 213802,
+    "fragments_removed": 3,
+    "fragment_tris_removed": 108,
+    "hires_tris": 213694,
+    "clean_tris": 15000,
+    "height_target": 1.8,
+    "clean_height": 1.7997993230819702,
+    "clean_min_y": 0.0,
+    "hires_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra\\cand_2\\clean_hires.glb",
+    "clean_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra\\cand_2\\clean.glb",
+    "clean_glb_sha256": "3f52ca5c95bbd337d8ab132c3c1e6dc4b026ad983ec90b9eb2b084e5276ff6d9",
+    "clean_hires_glb_sha256": "a47d0d5f55eadfae68b2e9a4ea87df2c1e698a136e9c3839b9bdeed3026ba651"
+  },
+  "texture": {
+    "strategy": "blender_projection_bake",
+    "front_axis": "-Y",
+    "texture_size": 1024,
+    "concept_alpha_bbox_uv": [
+      0.2295,
+      0.7695,
+      0.0254,
+      0.9668
+    ],
+    "fill_color": [
+      0.3981,
+      0.3753,
+      0.3612
+    ],
+    "metal_value_band": [
+      0.24,
+      0.34
+    ],
+    "metal_roughness": 0.4,
+    "dielectric_roughness": 0.7,
+    "metal_fraction": 0.2972,
+    "base_bake_s": 0.9,
+    "normal_bake_s": 0.2,
+    "textured_glb": "target\\prop-batch\\candelabra\\cand_2\\textured.glb",
+    "textured_glb_sha256": "32ff64bb8c40096c84b4d36a629638857ec3922974044c217d818853b106aeed"
+  },
+  "preprocess": {
+    "textured_glb_bytes": 3836772,
+    "final_glb_bytes": 3836744
+  },
+  "bake": {
+    "source": "final.glb",
+    "sha256": "9453c4d394aa7ff659b05b357556dc0b72d71efdf520a30e4af6f783e14a34ce",
+    "images": [
+      {
+        "index": 0,
+        "slot": "normal",
+        "file": "img0.dds"
+      },
+      {
+        "index": 1,
+        "slot": "base",
+        "file": "img1.dds"
+      },
+      {
+        "index": 2,
+        "slot": "mr",
+        "file": "img2.dds"
+      }
+    ]
+  },
+  "final_glb_sha256": "9453c4d394aa7ff659b05b357556dc0b72d71efdf520a30e4af6f783e14a34ce",
+  "turntable": {
+    "angles": 8,
+    "size": "512x512",
+    "contact_sheet": "contact_sheet.png",
+    "frames": [
+      "frame_00.png",
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png",
+      "frame_04.png",
+      "frame_05.png",
+      "frame_06.png",
+      "frame_07.png"
+    ]
+  }
+}

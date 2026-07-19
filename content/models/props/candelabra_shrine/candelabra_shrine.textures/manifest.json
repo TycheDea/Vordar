@@ -1,0 +1,21 @@
+{
+  "source": "candelabra_shrine.glb",
+  "sha256": "9453c4d394aa7ff659b05b357556dc0b72d71efdf520a30e4af6f783e14a34ce",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    }
+  ]
+}
