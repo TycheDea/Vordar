@@ -1,10 +1,12 @@
-// Turntable render tool (A0.12): render N yaw angles of a glb under the
-// standard HDRI environment plus a ground quad, writing one PNG per frame and
-// a stitched contact sheet — an eyeball check on asset quality without
-// launching the game. Skinned meshes are flattened to bind pose on the CPU so
-// the static mesh path draws them (animated turntables are a later phase).
+// Turntable render tool (A0.12): render a glb under the standard HDRI
+// environment plus a ground quad, writing one PNG per frame and a stitched
+// contact sheet — an eyeball check on asset quality without launching the
+// game. Two modes: `--angles N` spins the camera around the bind pose;
+// `--clip <name>` holds a fixed 3/4 camera and renders one frame per sampled
+// clip time. Either way the pose is skinned on the CPU so the static mesh
+// path draws it.
 
-use engine_renderer::anim::{joint_matrices, LocalTransform};
+use engine_renderer::anim::{joint_matrices, sample_pose, AnimationClip, LocalTransform};
 use engine_renderer::mesh::{load_gltf_data, MaterialData, MeshData, PrimitiveData};
 use engine_renderer::offscreen::OffscreenRenderer;
 use engine_renderer::MeshVertex;
@@ -15,19 +17,37 @@ use std::process::exit;
 
 const HDRI: &str = "content/textures/env/evening_road_01_puresky_2k.hdr";
 const GROUND_EXTENT: f32 = 40.0;
+/// Fixed camera yaw for `--clip` frames: the classic 3/4 view.
+const THREE_QUARTER_YAW: f32 = std::f32::consts::TAU / 8.0;
 
 struct Args {
-    glb:    String,
-    out:    String,
-    angles: u32,
-    size:   (u32, u32),
-    hdri:   String,
+    glb:  String,
+    out:  String,
+    size: (u32, u32),
+    hdri: String,
+    mode: Mode,
+}
+
+enum Mode {
+    /// Spin the camera: one frame per evenly spaced yaw angle, bind pose.
+    Static { angles: u32 },
+    /// Fixed 3/4 camera: one frame per clip sample time (seconds). `times`
+    /// None → 5 evenly spaced samples across the clip's duration.
+    Clip { name: String, times: Option<Vec<f32>> },
 }
 
 fn usage(msg: &str) -> ! {
     eprintln!("turntable: {msg}");
-    eprintln!("usage: turntable <glb> --out <dir> --angles N --size WxH [--hdri <path>]");
+    eprintln!(
+        "usage: turntable <glb> --out <dir> --size WxH \
+         (--angles N | --clip <name> [--times t0,t1,..]) [--hdri <path>]"
+    );
     exit(2);
+}
+
+fn die(e: String) -> ! {
+    eprintln!("turntable: {e}");
+    exit(1);
 }
 
 fn parse_size(s: &str) -> Option<(u32, u32)> {
@@ -35,8 +55,14 @@ fn parse_size(s: &str) -> Option<(u32, u32)> {
     Some((w.parse().ok()?, h.parse().ok()?))
 }
 
+fn parse_times(s: &str) -> Option<Vec<f32>> {
+    let times: Option<Vec<f32>> = s.split(',').map(|t| t.parse().ok()).collect();
+    times.filter(|t| !t.is_empty())
+}
+
 fn parse_args() -> Args {
     let (mut glb, mut out, mut angles, mut size, mut hdri) = (None, None, None, None, None);
+    let (mut clip, mut times) = (None, None);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -44,26 +70,50 @@ fn parse_args() -> Args {
             "--angles" => angles = it.next().and_then(|s| s.parse().ok()),
             "--size"   => size = it.next().as_deref().and_then(parse_size),
             "--hdri"   => hdri = it.next(),
+            "--clip"   => clip = it.next(),
+            "--times"  => times = it.next().as_deref().and_then(parse_times),
             _ if a.starts_with("--") => usage(&format!("unknown flag {a}")),
             _ => glb = Some(a),
         }
     }
-    match (glb, out, angles, size) {
-        (Some(glb), Some(out), Some(angles), Some(size)) if angles > 0 => {
-            Args { glb, out, angles, size, hdri: hdri.unwrap_or_else(|| HDRI.to_string()) }
+    let mode = match (clip, angles) {
+        (Some(name), None) => Mode::Clip { name, times },
+        (None, Some(angles)) if angles > 0 && times.is_none() => Mode::Static { angles },
+        _ => usage("exactly one of --angles N / --clip <name> (--times goes with --clip)"),
+    };
+    match (glb, out, size) {
+        (Some(glb), Some(out), Some(size)) => {
+            Args { glb, out, size, hdri: hdri.unwrap_or_else(|| HDRI.to_string()), mode }
         }
-        _ => usage("required: <glb> --out <dir> --angles N --size WxH"),
+        _ => usage("required: <glb> --out <dir> --size WxH"),
     }
 }
 
-/// Load the glb, flatten any skin to bind pose, and add a ground quad at the
-/// asset's floor. Returns the asset's world-space AABB (before the ground) for
-/// camera framing. Rebuilt per frame because `render_mesh` consumes MeshData.
-fn build_scene(glb: &str) -> Result<(MeshData, Vec3, Vec3), String> {
-    let mut data = load_gltf_data(glb)?;
-    flatten_to_bind_pose(&mut data);
+/// The named clip, or an error listing what the asset actually carries.
+fn find_clip<'d>(data: &'d MeshData, name: &str) -> Result<&'d AnimationClip, String> {
+    data.clips.iter().find(|c| c.name == name).ok_or_else(|| {
+        let have: Vec<&str> = data.clips.iter().map(|c| c.name.as_str()).collect();
+        format!("no clip {name:?} (asset clips: [{}])", have.join(", "))
+    })
+}
+
+/// Skin the loaded mesh to a pose — the named clip sampled at `t` when
+/// `clip_time` is `Some((name, t))`, the bind pose otherwise — and return it
+/// with its world-space AABB for camera framing and ground placement.
+/// Consumes `data` because `render_mesh` consumes MeshData, so callers reload
+/// per frame.
+fn pose_scene(
+    mut data:  MeshData,
+    clip_time: Option<(&str, f32)>,
+) -> Result<(MeshData, Vec3, Vec3), String> {
+    let pose = match (clip_time, data.skeleton.as_ref()) {
+        (Some((name, _)), None) => return Err(format!("--clip {name}: mesh has no skeleton")),
+        (Some((name, t)), Some(skel)) => sample_pose(skel, find_clip(&data, name)?, t),
+        (None, Some(skel)) => skel.joints.iter().map(|j| j.rest).collect(),
+        (None, None) => Vec::new(),
+    };
+    skin_to_pose(&mut data, &pose);
     let (min, max) = aabb(&data);
-    data.primitives.push(ground_quad(min.y));
     Ok((data, min, max))
 }
 
@@ -79,13 +129,12 @@ fn aabb(data: &MeshData) -> (Vec3, Vec3) {
     (min, max)
 }
 
-/// Replace every skinned vertex with the bind-pose-weighted sum over its
-/// joints, then drop the skeleton so the static mesh path draws it. A no-op
-/// for meshes that carry no skin.
-fn flatten_to_bind_pose(data: &mut MeshData) {
+/// Replace every skinned vertex with the pose-weighted sum over its joints,
+/// then drop the skeleton so the static mesh path draws it. A no-op for
+/// meshes that carry no skin.
+fn skin_to_pose(data: &mut MeshData, pose: &[LocalTransform]) {
     let Some(skel) = data.skeleton.as_ref() else { return };
-    let rest: Vec<LocalTransform> = skel.joints.iter().map(|j| j.rest).collect();
-    let mats = joint_matrices(skel, &rest);
+    let mats = joint_matrices(skel, pose);
     for prim in &mut data.primitives {
         let Some(skin) = prim.skin.take() else { continue };
         for (v, s) in prim.vertices.iter_mut().zip(&skin) {
@@ -167,14 +216,41 @@ fn main() {
         exit(1);
     }
 
-    let mut frames: Vec<RgbaImage> = Vec::with_capacity(args.angles as usize);
-    for i in 0..args.angles {
-        let (scene, min, max) = build_scene(&args.glb).unwrap_or_else(|e| {
-            eprintln!("turntable: {e}");
-            exit(1);
-        });
-        let yaw = std::f32::consts::TAU * i as f32 / args.angles as f32;
-        r.set_camera_turntable(min, max, yaw);
+    // One (clip sample time, camera yaw) per frame. Clip mode also fixes the
+    // framing bounds to the bind-pose AABB so the camera and ground hold
+    // still while the pose changes between frames.
+    let (plan, fixed_bounds, clip_name): (Vec<(Option<f32>, f32)>, _, _) = match args.mode {
+        Mode::Static { angles } => (
+            (0..angles)
+                .map(|i| (None, std::f32::consts::TAU * i as f32 / angles as f32))
+                .collect(),
+            None,
+            None,
+        ),
+        Mode::Clip { name, times } => {
+            let data = load_gltf_data(&args.glb).unwrap_or_else(|e| die(e));
+            let duration = find_clip(&data, &name).unwrap_or_else(|e| die(e)).duration;
+            // i·d/5, i<5: even spacing that skips t=d, which a looping clip
+            // renders identical to t=0.
+            let times = times
+                .unwrap_or_else(|| (0..5).map(|i| duration * i as f32 / 5.0).collect());
+            let (_, min, max) = pose_scene(data, None).unwrap_or_else(|e| die(e));
+            (
+                times.into_iter().map(|t| (Some(t), THREE_QUARTER_YAW)).collect(),
+                Some((min, max)),
+                Some(name),
+            )
+        }
+    };
+
+    let mut frames: Vec<RgbaImage> = Vec::with_capacity(plan.len());
+    for (i, &(time, yaw)) in plan.iter().enumerate() {
+        let data = load_gltf_data(&args.glb).unwrap_or_else(|e| die(e));
+        let clip_time = clip_name.as_deref().zip(time);
+        let (mut scene, min, max) = pose_scene(data, clip_time).unwrap_or_else(|e| die(e));
+        let (fmin, fmax) = fixed_bounds.unwrap_or((min, max));
+        scene.primitives.push(ground_quad(fmin.y));
+        r.set_camera_turntable(fmin, fmax, yaw);
         let target = r.target(w, h);
         r.render_mesh(&target, scene, wgpu::Color::BLACK);
         let pixels = r.read(&target);
@@ -193,5 +269,5 @@ fn main() {
         eprintln!("turntable: cannot write {}: {e}", sheet_path.display());
         exit(1);
     }
-    println!("turntable: wrote {} frames + contact sheet to {}", args.angles, args.out);
+    println!("turntable: wrote {} frames + contact sheet to {}", frames.len(), args.out);
 }
