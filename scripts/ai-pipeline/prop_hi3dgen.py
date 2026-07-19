@@ -26,6 +26,7 @@ import random
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 import xformers
 from PIL import Image
@@ -68,6 +69,25 @@ def preload_birefnet(pipeline: Hi3DGenPipeline) -> None:
     pipeline.birefnet_model = birefnet_model
 
 
+def matte_concept(pipeline: Hi3DGenPipeline, image: Image.Image) -> Image.Image:
+    """BiRefNet background-removal matte at the concept image's own
+    resolution/framing -- mirrors preprocess_image()'s internal
+    resize-if-large + mask steps but stops short of its bbox crop/pad/resize/
+    premultiply, so the alpha lines up pixel-for-pixel with the untouched
+    concept image. This is what the texturing stage (prop_texture.py)
+    projects: it needs the object's silhouette and the sampled pixels to
+    come from the same frame, not Hi3DGen's cropped/centered working copy."""
+    rgb = image.convert("RGB")
+    max_size = max(rgb.size)
+    scale = min(1, 1024 / max_size)
+    if scale < 1:
+        rgb = rgb.resize((int(rgb.width * scale), int(rgb.height * scale)), Image.Resampling.LANCZOS)
+    mask = pipeline._get_birefnet_mask(rgb)
+    rgba = np.array(rgb.convert("RGBA"))
+    rgba[:, :, 3] = mask * 255
+    return Image.fromarray(rgba)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Hi3DGen image -> raw untextured glb geometry.")
     parser.add_argument("image", type=Path)
@@ -105,7 +125,12 @@ def main():
         )
 
     image = Image.open(args.image).convert("RGBA")
-    image = hi3dgen_pipeline.preprocess_image(image, resolution=1024)
+    concept_rgba = matte_concept(hi3dgen_pipeline, image)
+    concept_rgba_path = args.out / "concept_rgba.png"
+    concept_rgba.save(concept_rgba_path)
+    # concept_rgba already carries the real matte, so preprocess_image()'s
+    # has_alpha branch reuses it directly instead of running BiRefNet again.
+    image = hi3dgen_pipeline.preprocess_image(concept_rgba, resolution=1024)
     # app.py never seeds this stage (YOSONormalsPipeline draws from the
     # ambient RNG, no generator= plumbed through hubconf's Predictor), so a
     # same-seed re-run doesn't reproduce the same normal map without this --
@@ -136,6 +161,8 @@ def main():
         },
         "input_image": str(args.image),
         "input_image_sha256": hashlib.sha256(args.image.read_bytes()).hexdigest(),
+        "concept_rgba": str(concept_rgba_path),
+        "concept_rgba_sha256": hashlib.sha256(concept_rgba_path.read_bytes()).hexdigest(),
         "seed": seed,
         "steps": {"sparse_structure_sampler": ss_steps, "slat_sampler": slat_steps},
         "torch_version": torch.__version__,

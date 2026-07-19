@@ -134,8 +134,9 @@ def stage_concept(cand_dir: Path, subject: str, seed: int, skip_concept: Path) -
 
 def stage_geometry(cand_dir: Path, seed: int) -> dict:
     raw_glb = cand_dir / "raw.glb"
+    concept_rgba = cand_dir / "concept_rgba.png"
     hi3dgen_manifest_path = cand_dir / "hi3dgen_manifest.json"
-    if raw_glb.exists():
+    if raw_glb.exists() and concept_rgba.exists():
         print(f"geometry: skip (exists) -> {raw_glb}")
     else:
         concept_png = cand_dir / "concept.png"
@@ -148,6 +149,7 @@ def stage_geometry(cand_dir: Path, seed: int) -> dict:
         print(f"geometry: generated -> {raw_glb}")
     meta = read_or_note(hi3dgen_manifest_path)
     meta["raw_glb_sha256"] = sha256_file(raw_glb)
+    meta["concept_rgba_sha256"] = sha256_file(concept_rgba)
     return meta
 
 
@@ -176,9 +178,9 @@ def stage_texture(cand_dir: Path) -> dict:
     else:
         clean_glb = cand_dir / "clean.glb"
         hires_glb = cand_dir / "clean_hires.glb"
-        concept_png = cand_dir / "concept.png"
+        concept_rgba = cand_dir / "concept_rgba.png"
         out = run_capture([BLENDER, "--background", "--python", PROP_TEXTURE, "--",
-                           clean_glb, hires_glb, concept_png, textured_glb])
+                           clean_glb, hires_glb, concept_rgba, textured_glb])
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
     meta = read_or_note(meta_path)

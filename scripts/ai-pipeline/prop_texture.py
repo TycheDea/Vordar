@@ -81,6 +81,11 @@ def concept_stats(img):
     img.pixels.foreach_get(px)
     px = px.reshape(h, w, 4)  # row 0 = image bottom in Blender
     opaque = px[:, :, 3] > 0.1
+    opaque_fraction = float(opaque.mean())
+    if opaque_fraction >= 0.995:
+        fail(f"concept image has no usable alpha matte ({opaque_fraction:.1%} opaque) -- "
+             "pass a BiRefNet-matted concept_rgba.png, not a raw RGB concept image "
+             "(a full-frame bbox and a washed-out fill color is silent degeneration, not a fit)")
     if not opaque.any():
         fail("concept image has no opaque pixels (alpha everywhere)")
     ys, xs = np.where(opaque)
