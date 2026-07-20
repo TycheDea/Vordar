@@ -507,12 +507,12 @@ area) exit non-zero rather than patch silently.
 **3. `prop_texture.py`** — Blender headless texture bake:
 
 ```
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metal-roughness N]
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metallic F] [--roughness F]
 ```
 
 Default strategy: **Blender projection bake** — Smart-UV atlas, concept
 image EMIT-projected onto basecolor, real hires→clean Cycles normal bake,
-MR from per-material-zone constants. Full ruling and rejected-option
+MR from the two declared constants. Full ruling and rejected-option
 evidence: `tasks/ai-pipeline/a3.md` → "Texture strategy log". **Requires an
 alpha-matted concept** (`prop_hi3dgen.py`'s `concept_rgba.png`, not a raw RGB
 image) — a concept with no usable alpha matte hard-fails instead of
@@ -522,7 +522,7 @@ color.
 **`--strategy multiview`** (Strategy 2, the evidenced escalation for prop
 classes needing true material register or strong backsides; needs
 `--subject` and `--seed`): ortho depth renders of the clean mesh from four
-azimuths feed xinsir ControlNet-depth SDXL
+azimuths feed Z-Image Turbo + its Fun ControlNet-depth model patch
 (`workflows/prop_multiview.json`), and the generated views are reprojected
 into the atlas with facing weights, a depth-occlusion test, and silhouette
 edge padding. The ComfyUI server lifecycle lives entirely inside this
@@ -530,6 +530,17 @@ stage (started headless, killed after). Per-view outputs and provenance
 manifests are cached under `<textured.glb dir>/multiview/`, so a killed
 run resumes without respending GPU. Normal and MR channels follow the same
 contract as the default strategy; the concept image is unused.
+
+**Writing `--subject` for this strategy — name every material's colour.**
+Z-Image runs at cfg 1, and unlike SDXL at cfg 7 it does not infer a material's
+colour from its name: `"melted wax candles"` produced black iron candles,
+`"pale cream-white wax candles"` produced correct ones. Each view is an
+independent generation, so an unnamed colour gets resolved differently per view
+and the disagreement survives the facing-weighted blend into the atlas.
+Name the colour of each material and nothing more — prompt verbosity trades
+directly against geometric fidelity on a distilled base, so added clauses cost
+silhouette accuracy (`tasks/ai-pipeline/research/a6-3-material-separation.md`,
+`a5b-bakeoff-results.md`).
 
 **4. `preprocess_prop.mjs`** — gltf-transform prune/dedup/resize:
 
@@ -546,7 +557,7 @@ node scripts/asset-pipeline/bake_textures.mjs gltf <final.glb>
 **5. `gen_prop.py`** — chain assembly, one candidate per invocation:
 
 ```
-python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metal-roughness N]
+python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metallic F] [--roughness F]
 ```
 
 Runs concept → geometry → cleanup → texture → preprocess+bake → turntable →

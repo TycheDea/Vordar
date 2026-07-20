@@ -9,26 +9,26 @@
 #     targets survive that.
 #   - multiview (escalation for prop classes needing true material register
 #     or strong backsides): ortho depth renders of the clean mesh from
-#     MV_VIEWS cameras feed xinsir ControlNet-depth SDXL via a ComfyUI
+#     MV_VIEWS cameras feed a ControlNet-depth text-to-image base via a ComfyUI
 #     server whose lifecycle lives entirely inside this stage; the
 #     generated views are reprojected into the atlas and blended with
 #     facing weights, depth-occlusion and silhouette tests.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
 #     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
-#   - MR map = constants, two modes (--mr). zoned (prop default, A3.6
-#     channels contract): per-texel zones classified from baked basecolor
-#     value -- dark texels = metal (weathered iron), light = dielectric
-#     (wax/stone). dielectric (character contract, A4.6): constant
-#     metallic 0 / roughness 0.8 everywhere, matching every existing race
-#     model -- darkest=iron zoning would metalize dark robes/hair. No real
-#     MR capture exists in either strategy; the constants are the contract.
+#   - MR = two declared constants (--metallic/--roughness), carried by the
+#     glTF scalar factors rather than a map. No stage captures per-texel
+#     material identity, so it is declared per prop rather than guessed.
+#     Classifying it from basecolor value was tried
+#     and retired (A6.1, tasks/ai-pipeline/research/a6-1-mr-contract.md):
+#     luma conflates albedo, shading and material, so the dominant split in
+#     a dark render is lit-vs-shadowed, not iron-vs-wax.
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
 #     gen_prop.py's chained manifest.
 #
 # Usage: blender --background --python prop_texture.py -- \
 #            <clean.glb> <hires.glb> <concept.png> <textured.glb> \
 #            [--strategy projection|multiview] [--subject STR] [--seed N] \
-#            [--mr zoned|dielectric]
+#            [--metallic F] [--roughness F]
 
 import argparse
 import hashlib
@@ -58,15 +58,10 @@ TEXTURE_SIZE = 1024
 # the +Y projection renders mirrored against the concept). The multiview
 # rig keeps the same convention: azimuth 0 is the -Y camera.
 FRONT_AXIS = "-Y"
-# Material-zone constants (A3.6 channels contract, candelabra fixture):
-# texels darker than the band are weathered iron, lighter are wax/stone.
-# sRGB-value smoothstep band avoids hard speckle at the zone boundary.
-METAL_VALUE_BAND = (0.24, 0.34)
-METAL_ROUGHNESS = 0.4
-DIELECTRIC_ROUGHNESS = 0.7
-# --mr dielectric emits this single constant everywhere (metallic 0): the
-# character MR contract (A4.6), matching every existing race model.
-DIELECTRIC_MODE_ROUGHNESS = 0.8
+# Declared MR defaults: non-metal, matching every existing race model and the
+# stone/wood/cloth props the art direction calls for. Metal props override.
+DEFAULT_METALLIC = 0.0
+DEFAULT_ROUGHNESS = 0.8
 
 MV_WORKFLOW = SCRIPT_DIR / "workflows" / "prop_multiview.json"
 MV_VIEWS = [("front view", 0.0), ("side view", 90.0),
@@ -75,7 +70,7 @@ MV_ELEVATION_DEG = 15.0
 MV_RES = 1024
 MV_WEIGHT_EXPONENT = 2.0
 MV_OCCLUSION_EPS = 0.02  # meters; props are ~1.8 m tall (prop_cleanup)
-MV_EDGE_PAD_PX = 8  # SDXL bleeds background across the depth edge; padding
+MV_EDGE_PAD_PX = 8  # the base bleeds background across the depth edge; padding
 # the object's colors outward keeps edge texels on-material without
 # shrinking thin members (erosion would erase a ~6 px scroll arm entirely)
 COMFY_PYTHON = Path(r"C:\tools\ComfyUI\python_embeded\python.exe")
@@ -231,11 +226,11 @@ def basecolor_projection(clean, atlas, concept_png):
         "concept_alpha_bbox_uv": [round(v, 4) for v in bbox_uv],
         "fill_color": [round(c, 4) for c in mean_color],
     }
-    return base_img, None, extras
+    return base_img, extras
 
 
 # ---------------------------------------------------------------------------
-# Strategy 2: SDXL multi-view retexture (ControlNet-depth)
+# Strategy 2: multi-view retexture (ControlNet-depth)
 # ---------------------------------------------------------------------------
 
 def mv_camera_rig(clean):
@@ -351,7 +346,7 @@ def start_comfy():
 
 
 def generate_views(views, work_dir, subject, seed):
-    """One SDXL ControlNet-depth pass per view -> <work_dir>/view_<i>/gen.png.
+    """One ControlNet-depth pass per view -> <work_dir>/view_<i>/gen.png.
     Views whose gen.png already exists are skipped, so a killed run resumes.
     Returns per-view provenance entries."""
     template = json.loads(MV_WORKFLOW.read_text(encoding="utf-8"))
@@ -391,7 +386,9 @@ def generate_views(views, work_dir, subject, seed):
             "hint": v["hint"],
             "azimuth_deg": v["azimuth_deg"],
             "elevation_deg": MV_ELEVATION_DEG,
-            "seed": manifest["seed"].get("8"),
+            # every node's resolved seed: keying one sampler node id silently
+            # returned null the moment the workflow graph changed
+            "seeds": manifest["seed"],
             "prompt_id": manifest["prompt_id"],
             "prompts": manifest["prompts"],
             "models": manifest["models"],
@@ -466,7 +463,7 @@ def bilinear(arr, px, py):
 
 def pad_edges(colors, mask, iterations):
     """Dilate on-mask colors outward so samples just past the silhouette
-    read the object's material instead of the SDXL background."""
+    read the object's material instead of the generated background."""
     for _ in range(iterations):
         grown = mask.copy()
         for src, dst in (((slice(1, None),), (slice(None, -1),)),
@@ -532,7 +529,7 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
     base_img = new_image("prop_base", srgb=True, fill=(0, 0, 0))
     base_img.pixels.foreach_set(base_px.ravel())
     extras = {
-        "strategy": "sdxl_multiview_controlnet_depth",
+        "strategy": "multiview_controlnet_depth",
         "front_axis": FRONT_AXIS,
         "workflow": MV_WORKFLOW.name,
         "subject": subject,
@@ -543,7 +540,7 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
         "edge_pad_px": MV_EDGE_PAD_PX,
         "blend_coverage": round(coverage, 4),
     }
-    return base_img, island, extras
+    return base_img, extras
 
 
 # ---------------------------------------------------------------------------
@@ -557,12 +554,11 @@ def main():
     parser.add_argument("textured_glb")
     parser.add_argument("--strategy", choices=["projection", "multiview"], default="projection")
     parser.add_argument("--subject", help="Prompt substituted into the multiview workflow's {subject}")
-    parser.add_argument("--seed", type=int, help="Base seed for the multiview SDXL passes")
-    parser.add_argument("--metal-roughness", type=float, default=METAL_ROUGHNESS,
-                        help="Iron-zone roughness override (A3.6 contract default 0.4)")
-    parser.add_argument("--mr", choices=["zoned", "dielectric"], default="zoned",
-                        help="MR mode: zoned value-classified constants (prop default) or "
-                             "the constant character contract (metallic 0 / roughness 0.8)")
+    parser.add_argument("--seed", type=int, help="Base seed for the multiview passes")
+    parser.add_argument("--metallic", type=float, default=DEFAULT_METALLIC,
+                        help="Declared metallic constant (default 0: stone/wood/cloth/skin)")
+    parser.add_argument("--roughness", type=float, default=DEFAULT_ROUGHNESS,
+                        help="Declared roughness constant (default 0.8)")
     args = parser.parse_args(argv)
 
     t0 = time.time()
@@ -587,13 +583,13 @@ def main():
 
     # ---- basecolor, per strategy ----
     if args.strategy == "projection":
-        base_img, island, extras = basecolor_projection(clean, atlas, args.concept_png)
+        base_img, extras = basecolor_projection(clean, atlas, args.concept_png)
     else:
         if not args.subject or args.seed is None:
             fail("--strategy multiview requires --subject and --seed")
         work_dir = Path(args.textured_glb).resolve().parent / "multiview"
-        base_img, island, extras = basecolor_multiview(clean, hires, atlas,
-                                                       args.subject, args.seed, work_dir)
+        base_img, extras = basecolor_multiview(clean, hires, atlas,
+                                               args.subject, args.seed, work_dir)
     t_base = time.time()
 
     # ---- normal: real high-to-low bake from the hires mesh ----
@@ -609,46 +605,11 @@ def main():
                         uv_layer=atlas)
     t_normal = time.time()
 
-    # ---- MR: zone constants keyed off the baked basecolor's value, or
-    #      the constant dielectric character contract ----
-    n_tex = TEXTURE_SIZE * TEXTURE_SIZE
-    if args.mr == "dielectric":
-        metallic = np.zeros(n_tex, dtype=np.float32)
-        rough = np.full(n_tex, DIELECTRIC_MODE_ROUGHNESS, dtype=np.float32)
-        mr_stats = {"roughness": DIELECTRIC_MODE_ROUGHNESS}
-    else:
-        px = np.empty(n_tex * 4, dtype=np.float32)
-        base_img.pixels.foreach_get(px)
-        px = px.reshape(-1, 4)
-        if island is None:
-            # projection bakes onto a black-cleared atlas: any-color = on-island
-            island = px[:, :3].any(axis=1)
-        # base_img is a byte image (new_image() leaves float_buffer unset), so
-        # pixels() already returns sRGB-encoded values -- the band applies
-        # directly, no further gamma transform.
-        lum = (0.2126 * px[:, 0] + 0.7152 * px[:, 1] + 0.0722 * px[:, 2])
-        value = np.clip(lum, 0.0, 1.0)
-        lo, hi = METAL_VALUE_BAND
-        t = np.clip((value - lo) / (hi - lo), 0.0, 1.0)
-        metallic = 1.0 - t * t * (3.0 - 2.0 * t)  # smoothstep: dark = metal
-        rough = args.metal_roughness * metallic + DIELECTRIC_ROUGHNESS * (1 - metallic)
-        mr_stats = {
-            "metal_value_band": list(METAL_VALUE_BAND),
-            "metal_roughness": args.metal_roughness,
-            "dielectric_roughness": DIELECTRIC_ROUGHNESS,
-            # off-island texels reflect atlas padding, not the mesh's material split
-            "metal_fraction": round(float((metallic[island] > 0.5).mean()) if island.any() else 0.0, 4),
-        }
-    mr = np.zeros((n_tex, 4), dtype=np.float32)
-    mr[:, 1], mr[:, 2], mr[:, 3] = rough, metallic, 1.0
-    mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
-    mr_img.pixels.foreach_set(mr.ravel())
-
     # ---- final material + export (hires dropped, images saved so the
     #      glTF exporter embeds them) ----
+    mr_stats = {"metallic": args.metallic, "roughness": args.roughness}
     tmpdir = tempfile.TemporaryDirectory()
-    for img, name in ((base_img, "base.png"), (mr_img, "mr.png"),
-                      (normal_img, "normal.png")):
+    for img, name in ((base_img, "base.png"), (normal_img, "normal.png")):
         img.filepath_raw = str(Path(tmpdir.name) / name)
         img.file_format = "PNG"
         img.save()
@@ -660,12 +621,11 @@ def main():
     n_base = tree.nodes.new("ShaderNodeTexImage")
     n_base.image = base_img
     tree.links.new(n_base.outputs["Color"], bsdf.inputs["Base Color"])
-    n_mr = tree.nodes.new("ShaderNodeTexImage")
-    n_mr.image = mr_img
-    n_sep = tree.nodes.new("ShaderNodeSeparateColor")
-    tree.links.new(n_mr.outputs["Color"], n_sep.inputs["Color"])
-    tree.links.new(n_sep.outputs["Green"], bsdf.inputs["Roughness"])
-    tree.links.new(n_sep.outputs["Blue"], bsdf.inputs["Metallic"])
+    # MR is uniform, so it rides the glTF scalar factors -- a 1024^2 texture
+    # encoding two constants is ~1.4 MB of nothing. A per-texel material mask
+    # (A6.3) would bring the texture back.
+    bsdf.inputs["Metallic"].default_value = args.metallic
+    bsdf.inputs["Roughness"].default_value = args.roughness
     n_nrm = tree.nodes.new("ShaderNodeTexImage")
     n_nrm.image = normal_img
     n_nmap = tree.nodes.new("ShaderNodeNormalMap")
@@ -684,7 +644,6 @@ def main():
     stats = {
         **extras,
         "texture_size": TEXTURE_SIZE,
-        "mr_mode": args.mr,
         **mr_stats,
         "base_bake_s": round(t_base - t0, 1),
         "normal_bake_s": round(t_normal - t_base, 1),
@@ -693,12 +652,13 @@ def main():
     print(json.dumps(stats))
 
 
-try:
-    main()
-except SystemExit:
-    raise
-except Exception:
-    # without --python-exit-code Blender exits 0 on an uncaught script
-    # exception -- route every failure through an explicit non-zero exit
-    traceback.print_exc()
-    sys.exit(1)
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception:
+        # without --python-exit-code Blender exits 0 on an uncaught script
+        # exception -- route every failure through an explicit non-zero exit
+        traceback.print_exc()
+        sys.exit(1)

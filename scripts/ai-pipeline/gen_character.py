@@ -15,10 +15,10 @@ whose failure carries extra context is rig: a rig-quality-gate failure is a
 recorded candidate outcome (A4.4), so the abort message includes the gate's
 stats alongside the exit code, not just the stage name.
 
-The character texture and MR strategy are fixed by the A4.6 ruling
-(multiview SDXL ControlNet-depth + constant-dielectric MR) -- not exposed
-as CLI flags, unlike gen_prop.py's --texture-strategy (props still default
-to projection).
+The character texture strategy is fixed by the A4.6 ruling (multiview
+ControlNet-depth) -- not exposed as a CLI flag, unlike gen_prop.py's
+--texture-strategy (props still default to projection). MR takes
+prop_texture's non-metal defaults, which are the character contract.
 
 Run:
   python scripts/ai-pipeline/gen_character.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--height M]
@@ -213,13 +213,12 @@ def stage_texture(cand_dir: Path, subject: str, seed: int) -> dict:
         clean_glb = cand_dir / "clean.glb"
         hires_glb = cand_dir / "clean_hires.glb"
         concept_rgba = cand_dir / "concept_rgba.png"
-        # Strategy + MR mode are the A4.6 ruling, not CLI-selectable here:
-        # multiview (projection mirrors the face onto the hood's back) with
-        # constant-dielectric MR (zoned would metalize dark robes/hair).
+        # Strategy is the A4.6 ruling, not CLI-selectable here: multiview,
+        # because projection mirrors the face onto the hood's back. MR takes
+        # prop_texture's non-metal defaults, which are the character contract.
         cmd = [BLENDER, "--background", "--python", PROP_TEXTURE, "--",
                clean_glb, hires_glb, concept_rgba, textured_glb,
-               "--strategy", "multiview", "--subject", subject, "--seed", seed,
-               "--mr", "dielectric"]
+               "--strategy", "multiview", "--subject", subject, "--seed", seed]
         out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
