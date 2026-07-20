@@ -1,9 +1,0 @@
-{
-  "name": "preprocess-characters",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@gltf-transform/core": "^4.4.1",
-    "@gltf-transform/functions": "^4.4.1"
-  }
-}

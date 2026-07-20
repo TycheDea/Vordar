@@ -49,8 +49,9 @@ game (`vordar`) built on it — no Bevy, no Unity, everything hand-rolled.
 
 ## Content pipeline & art tooling
 
-16. **Character asset pipeline** — Mixamo rigging/animation retargeting, VRoid
-    workflow, FBX→glTF conversion, the `scripts/preprocess-characters` flow.
+16. **Character asset pipeline** — the canonical Mixamo skeleton convention and
+    its clip library, MPFB2/MHCLO parametric bodies and garments, FBX→glTF
+    conversion, the `scripts/ai-pipeline` character chain.
 17. **AA art direction constraints** — semi-realistic dark fantasy is locked;
     asset decisions are made autonomously within that.
 

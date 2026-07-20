@@ -1,6 +1,5 @@
 // Generated-prop gltf-transform pass: prune + dedup + texture resize to the
-// dimension/size caps below, the same @gltf-transform/functions recipe
-// scripts/preprocess-characters/preprocess.mjs proved for character glbs.
+// dimension/size caps below.
 // Defaults are the prop caps (VQ-B2); the character chain overrides
 // --max-bytes to the 16 MB character cap.
 // Run: node preprocess_prop.mjs <textured.glb> <final.glb> [--max-bytes N] [--max-dim N]
