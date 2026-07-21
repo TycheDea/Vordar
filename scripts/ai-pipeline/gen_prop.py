@@ -45,6 +45,8 @@ BLENDER = Path(r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
 TURNTABLE_ANGLES = 8
 TURNTABLE_SIZE = "512x512"
 
+STAGES = ["concept", "geometry", "cleanup", "texture", "preprocess", "turntable"]
+
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -178,7 +180,7 @@ def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dic
 
 def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
                   metallic: float, roughness: float,
-                  mr_mask: str, metal_roughness: float) -> dict:
+                  mr_mask: str, metal_roughness: float, azimuths: str) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -201,6 +203,8 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
             cmd += ["--mr-mask", mr_mask]
         if metal_roughness is not None:
             cmd += ["--metal-roughness", metal_roughness]
+        if azimuths is not None:
+            cmd += ["--azimuths", azimuths]
         out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
@@ -279,6 +283,11 @@ def main():
                         help="Mirror one half of the cleaned mesh across its best-fit vertical plane")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
                         help="Half to mirror in prop_cleanup.py's plane-aligned frame")
+    parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
+                        help="Multiview camera azimuths for prop_texture.py")
+    parser.add_argument("--through", choices=STAGES, default="turntable",
+                        help="Stop after this stage (batch triage: --through cleanup "
+                             "sweeps geometry seeds without paying for texturing)")
     args = parser.parse_args()
 
     # Resolve once here: stage_geometry and stage_turntable run their
@@ -289,25 +298,25 @@ def main():
     cand_dir = args.out / f"cand_{args.seed}"
     cand_dir.mkdir(parents=True, exist_ok=True)
 
-    concept = stage_concept(cand_dir, args.subject, args.seed, args.skip_concept)
-    geometry = stage_geometry(cand_dir, args.seed)
-    cleanup = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
-    texture = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                            args.metallic, args.roughness, args.mr_mask, args.metal_roughness)
-    preprocess_bake = stage_preprocess_bake(cand_dir)  # final.glb, needed by the turntable stage below
-    turntable = stage_turntable(cand_dir)
-
+    stop = STAGES.index(args.through)
     manifest = {
         "subject": args.subject,
         "seed": args.seed,
         "candidate_dir": str(cand_dir),
-        "concept": concept,
-        "geometry": geometry,
-        "cleanup": cleanup,
-        "texture": texture,
-        **preprocess_bake,
-        "turntable": turntable,
+        "concept": stage_concept(cand_dir, args.subject, args.seed, args.skip_concept),
     }
+    if stop >= STAGES.index("geometry"):
+        manifest["geometry"] = stage_geometry(cand_dir, args.seed)
+    if stop >= STAGES.index("cleanup"):
+        manifest["cleanup"] = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
+    if stop >= STAGES.index("texture"):
+        manifest["texture"] = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
+                                            args.metallic, args.roughness, args.mr_mask,
+                                            args.metal_roughness, args.azimuths)
+    if stop >= STAGES.index("preprocess"):
+        manifest.update(stage_preprocess_bake(cand_dir))  # final.glb, needed by the turntable stage below
+    if stop >= STAGES.index("turntable"):
+        manifest["turntable"] = stage_turntable(cand_dir)
     manifest_path = cand_dir / "generation_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"OK: wrote {manifest_path}")

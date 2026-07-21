@@ -76,8 +76,23 @@ DEFAULT_METAL_ROUGHNESS = 0.65
 MR_MASK_SMOOTHSTEP_EDGES = (0.35, 0.65)
 
 MV_WORKFLOW = SCRIPT_DIR / "workflows" / "prop_multiview.json"
-MV_VIEWS = [("front view", 0.0), ("side view", 90.0),
-            ("back view", 180.0), ("side view", 270.0)]
+
+
+def view_hint(az_deg):
+    a = az_deg % 360.0
+    if a <= 30 or a >= 330:
+        return "front view"
+    if 150 <= a <= 210:
+        return "back view"
+    if 80 <= a <= 100 or 260 <= a <= 280:
+        return "side view"
+    return "three-quarter view"
+
+
+# Rebound in main() when --azimuths is passed: planar props degenerate to a
+# sliver in exact side depth views, which frees the base to hallucinate an
+# unrelated object into them — oblique azimuths keep the conditioning real.
+MV_VIEWS = [(view_hint(a), a) for a in (0.0, 90.0, 180.0, 270.0)]
 MV_ELEVATION_DEG = 15.0
 MV_RES = 1024
 MV_WEIGHT_EXPONENT = 2.0
@@ -618,7 +633,14 @@ def main():
                              "metallicRoughnessTexture")
     parser.add_argument("--metal-roughness", type=float, default=DEFAULT_METAL_ROUGHNESS,
                         help="Roughness assigned to mask-classified metal texels (default 0.65)")
+    parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
+                        help="Multiview camera azimuths (default 0,90,180,270); "
+                             "use oblique sides, e.g. 0,60,180,300, for planar props")
     args = parser.parse_args(argv)
+
+    if args.azimuths is not None:
+        global MV_VIEWS
+        MV_VIEWS = [(view_hint(a), a) for a in (float(s) for s in args.azimuths.split(","))]
 
     t0 = time.time()
     bpy.ops.wm.read_factory_settings(use_empty=True)
