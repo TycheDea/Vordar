@@ -88,8 +88,7 @@ impl Plugin for NetClientPlugin {
         .add_plugin(crate::PresentationPlugin)
         .add_system(NetInterpolateSystem, Phase::Update, SystemOrder::First)
         .add_system(crate::NetCameraFollowSystem, Phase::RenderSync, SystemOrder::First)
-        .add_system(crate::telegraph::TelegraphFillSystem, Phase::RenderSync, SystemOrder::First)
-        .add_system(crate::world_time::DayNightSystem, Phase::RenderSync, SystemOrder::First);
+        .add_system(crate::telegraph::TelegraphFillSystem, Phase::RenderSync, SystemOrder::First);
         if self.predict {
             // The shared simulation moves our own player. Remote players stay
             // playback-driven (NetInterpolateSystem): no intents are emitted

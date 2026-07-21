@@ -64,7 +64,6 @@ fn offline_and_online_presentation_lists_diverge_only_by_input_cast_camera_net()
         "NetInterpolateSystem",
         "NetCameraFollowSystem",
         "TelegraphFillSystem",
-        "DayNightSystem",
     ]
     .map(String::from)
     .into_iter()
