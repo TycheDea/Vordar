@@ -15,20 +15,26 @@
 #     facing weights, depth-occlusion and silhouette tests.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
 #     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
-#   - MR = two declared constants (--metallic/--roughness), carried by the
-#     glTF scalar factors rather than a map. No stage captures per-texel
-#     material identity, so it is declared per prop rather than guessed.
-#     Classifying it from basecolor value was tried
-#     and retired (A6.1, tasks/ai-pipeline/research/a6-1-mr-contract.md):
-#     luma conflates albedo, shading and material, so the dominant split in
-#     a dark render is lit-vs-shadowed, not iron-vs-wax.
+#   - MR defaults to two declared constants (--metallic/--roughness), carried
+#     by the glTF scalar factors rather than a map. --mr-mask escalates to a
+#     per-texel mask: a second depth-conditioned multiview pass renders the
+#     prop as a two-tone material-ID image (metal near-white, everything else
+#     near-black) through the same camera rig/blend machinery as the
+#     basecolor pass, and this stage smoothsteps that render's luma into
+#     metallic/roughness and packs them into a glTF metallicRoughnessTexture.
+#     Classifying material from the BASECOLOR value was tried and retired
+#     (A6.1, tasks/ai-pipeline/research/a6-1-mr-contract.md): luma conflates
+#     albedo, shading and material, so the dominant split in a dark render is
+#     lit-vs-shadowed, not iron-vs-wax. A dedicated mask render sidesteps
+#     that -- the generation prompt states the material split directly.
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
 #     gen_prop.py's chained manifest.
 #
 # Usage: blender --background --python prop_texture.py -- \
 #            <clean.glb> <hires.glb> <concept.png> <textured.glb> \
 #            [--strategy projection|multiview] [--subject STR] [--seed N] \
-#            [--metallic F] [--roughness F]
+#            [--metallic F] [--roughness F] \
+#            [--mr-mask STR] [--metal-roughness F]
 
 import argparse
 import hashlib
@@ -62,6 +68,12 @@ FRONT_AXIS = "-Y"
 # stone/wood/cloth props the art direction calls for. Metal props override.
 DEFAULT_METALLIC = 0.0
 DEFAULT_ROUGHNESS = 0.8
+# Roughness assigned to mask-classified metal texels (--mr-mask only).
+DEFAULT_METAL_ROUGHNESS = 0.65
+# Mask-pass classification band: a narrow smoothstep straddling the two-tone
+# render's midpoint, wide enough to absorb generation/blend noise near the
+# metal/non-metal boundary without misreading it as a third material.
+MR_MASK_SMOOTHSTEP_EDGES = (0.35, 0.65)
 
 MV_WORKFLOW = SCRIPT_DIR / "workflows" / "prop_multiview.json"
 MV_VIEWS = [("front view", 0.0), ("side view", 90.0),
@@ -479,7 +491,10 @@ def pad_edges(colors, mask, iterations):
 
 def blend_views(views, depths, rig, work_dir, pos, nrm, island):
     """Facing-weighted, occlusion- and silhouette-tested blend of the
-    generated views into a flat (N, 4) sRGB basecolor array."""
+    generated views into a flat (N, 4) sRGB basecolor array. Returns the
+    array, the fractional island coverage, and the per-texel covered mask
+    (island texels that actually received blended weight, as opposed to the
+    mean-color fill applied to the rest of the array)."""
     half = rig["half"]
     accum = np.zeros((pos.shape[0], 3))
     wsum = np.zeros(pos.shape[0])
@@ -515,7 +530,7 @@ def blend_views(views, depths, rig, work_dir, pos, nrm, island):
     out[:, :3] = fill
     out[covered, :3] = blended
     coverage = float(covered[island].mean()) if island.any() else 0.0
-    return out, coverage
+    return out, coverage, covered
 
 
 def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
@@ -524,7 +539,7 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
     depths = render_depth_views(clean, hires, views, rig, work_dir)
     view_metas = generate_views(views, work_dir, subject, seed)
     pos, nrm, island = bake_geometry_atlas(clean, atlas, rig)
-    base_px, coverage = blend_views(views, depths, rig, work_dir, pos, nrm, island)
+    base_px, coverage, _ = blend_views(views, depths, rig, work_dir, pos, nrm, island)
 
     base_img = new_image("prop_base", srgb=True, fill=(0, 0, 0))
     base_img.pixels.foreach_set(base_px.ravel())
@@ -543,6 +558,43 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
     return base_img, extras
 
 
+def mr_multiview(clean, hires, atlas, mask_subject, seed, work_dir, metal_roughness, roughness):
+    """Second multiview pass, independent cache from the basecolor one: same
+    camera rig/depth-conditioned generation/blend machinery, but the prompt
+    renders a two-tone material-ID image instead of the prop's basecolor.
+    The blend's luma smoothsteps into a per-texel metallic mask; texels the
+    blend never covered (see blend_views) default to fully dielectric rather
+    than inheriting its mean-color fill, which carries no material meaning."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    views, rig = mv_camera_rig(clean)
+    depths = render_depth_views(clean, hires, views, rig, work_dir)
+    view_metas = generate_views(views, work_dir, mask_subject, seed)
+    pos, nrm, island = bake_geometry_atlas(clean, atlas, rig)
+    mask_px, coverage, covered = blend_views(views, depths, rig, work_dir, pos, nrm, island)
+
+    lo, hi = MR_MASK_SMOOTHSTEP_EDGES
+    lum = 0.2126 * mask_px[:, 0] + 0.7152 * mask_px[:, 1] + 0.0722 * mask_px[:, 2]
+    t = np.clip((lum - lo) / (hi - lo), 0.0, 1.0)
+    metallic = t * t * (3.0 - 2.0 * t)  # smoothstep: near-white mask = metal
+    metallic[~covered] = 0.0  # dielectric default, not the mean-color fill
+
+    mr = np.zeros((pos.shape[0], 4), dtype=np.float32)
+    mr[:, 1] = metal_roughness * metallic + roughness * (1.0 - metallic)
+    mr[:, 2] = metallic
+    mr[:, 3] = 1.0
+    mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
+    mr_img.pixels.foreach_set(mr.ravel())
+
+    extras = {
+        "mask_subject": mask_subject,
+        "workflow": MV_WORKFLOW.name,
+        "views": view_metas,
+        "blend_coverage": round(coverage, 4),
+        "metal_fraction": round(float((metallic[island] > 0.5).mean()) if island.any() else 0.0, 4),
+    }
+    return mr_img, extras
+
+
 # ---------------------------------------------------------------------------
 
 def main():
@@ -559,6 +611,13 @@ def main():
                         help="Declared metallic constant (default 0: stone/wood/cloth/skin)")
     parser.add_argument("--roughness", type=float, default=DEFAULT_ROUGHNESS,
                         help="Declared roughness constant (default 0.8)")
+    parser.add_argument("--mr-mask", metavar="SUBJECT",
+                        help="Prompt for a second multiview pass rendering a two-tone "
+                             "metal/non-metal material-ID image; presence escalates MR "
+                             "from the declared scalar factors to a per-texel packed "
+                             "metallicRoughnessTexture")
+    parser.add_argument("--metal-roughness", type=float, default=DEFAULT_METAL_ROUGHNESS,
+                        help="Roughness assigned to mask-classified metal texels (default 0.65)")
     args = parser.parse_args(argv)
 
     t0 = time.time()
@@ -605,11 +664,29 @@ def main():
                         uv_layer=atlas)
     t_normal = time.time()
 
+    # ---- MR mask: optional second multiview pass classifying per-texel
+    #      material identity (dead without --mr-mask) ----
+    mr_img = None
+    mr_mask_extras = None
+    if args.mr_mask:
+        if args.seed is None:
+            fail("--mr-mask requires --seed")
+        mr_work_dir = Path(args.textured_glb).resolve().parent / "multiview_mr"
+        mr_img, mr_mask_extras = mr_multiview(clean, hires, atlas, args.mr_mask, args.seed,
+                                              mr_work_dir, args.metal_roughness, args.roughness)
+    t_mr = time.time()
+
     # ---- final material + export (hires dropped, images saved so the
     #      glTF exporter embeds them) ----
     mr_stats = {"metallic": args.metallic, "roughness": args.roughness}
+    if mr_img is not None:
+        mr_stats["metal_roughness"] = args.metal_roughness
+        mr_stats["mr_mask"] = mr_mask_extras
     tmpdir = tempfile.TemporaryDirectory()
-    for img, name in ((base_img, "base.png"), (normal_img, "normal.png")):
+    images_to_save = [(base_img, "base.png"), (normal_img, "normal.png")]
+    if mr_img is not None:
+        images_to_save.append((mr_img, "mr.png"))
+    for img, name in images_to_save:
         img.filepath_raw = str(Path(tmpdir.name) / name)
         img.file_format = "PNG"
         img.save()
@@ -621,11 +698,22 @@ def main():
     n_base = tree.nodes.new("ShaderNodeTexImage")
     n_base.image = base_img
     tree.links.new(n_base.outputs["Color"], bsdf.inputs["Base Color"])
-    # MR is uniform, so it rides the glTF scalar factors -- a 1024^2 texture
-    # encoding two constants is ~1.4 MB of nothing. A per-texel material mask
-    # (A6.3) would bring the texture back.
-    bsdf.inputs["Metallic"].default_value = args.metallic
-    bsdf.inputs["Roughness"].default_value = args.roughness
+    if mr_img is not None:
+        n_mr = tree.nodes.new("ShaderNodeTexImage")
+        n_mr.image = mr_img
+        n_sep = tree.nodes.new("ShaderNodeSeparateColor")
+        tree.links.new(n_mr.outputs["Color"], n_sep.inputs["Color"])
+        tree.links.new(n_sep.outputs["Green"], bsdf.inputs["Roughness"])
+        tree.links.new(n_sep.outputs["Blue"], bsdf.inputs["Metallic"])
+        # metallicFactor/roughnessFactor multiply the packed texture in the
+        # glTF spec, so both must be 1.0 for the texture's values to carry
+        # through to the exporter unscaled.
+        bsdf.inputs["Metallic"].default_value = 1.0
+        bsdf.inputs["Roughness"].default_value = 1.0
+    else:
+        # MR is uniform, so it rides the glTF scalar factors instead of a map.
+        bsdf.inputs["Metallic"].default_value = args.metallic
+        bsdf.inputs["Roughness"].default_value = args.roughness
     n_nrm = tree.nodes.new("ShaderNodeTexImage")
     n_nrm.image = normal_img
     n_nmap = tree.nodes.new("ShaderNodeNormalMap")
@@ -649,6 +737,8 @@ def main():
         "normal_bake_s": round(t_normal - t_base, 1),
         "textured_glb": args.textured_glb,
     }
+    if mr_img is not None:
+        stats["mr_mask_bake_s"] = round(t_mr - t_normal, 1)
     print(json.dumps(stats))
 
 

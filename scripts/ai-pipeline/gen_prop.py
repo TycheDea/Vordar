@@ -174,7 +174,8 @@ def stage_cleanup(cand_dir: Path) -> dict:
 
 
 def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
-                  metallic: float, roughness: float) -> dict:
+                  metallic: float, roughness: float,
+                  mr_mask: str, metal_roughness: float) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -187,10 +188,16 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
                clean_glb, hires_glb, concept_rgba, textured_glb]
         if strategy != "projection":
             cmd += ["--strategy", strategy, "--subject", subject, "--seed", seed]
+        elif mr_mask is not None:
+            cmd += ["--seed", seed]
         if metallic is not None:
             cmd += ["--metallic", metallic]
         if roughness is not None:
             cmd += ["--roughness", roughness]
+        if mr_mask is not None:
+            cmd += ["--mr-mask", mr_mask]
+        if metal_roughness is not None:
+            cmd += ["--metal-roughness", metal_roughness]
         out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
@@ -261,6 +268,10 @@ def main():
                         help="Declared metallic for prop_texture.py (default 0; use 1 for metal props)")
     parser.add_argument("--roughness", type=float, default=None,
                         help="Declared roughness for prop_texture.py (default 0.8)")
+    parser.add_argument("--mr-mask", default=None, metavar="SUBJECT",
+                        help="Mask prompt for prop_texture.py's per-texel metallic-roughness pass")
+    parser.add_argument("--metal-roughness", type=float, default=None,
+                        help="Roughness for mask-classified metal texels (default 0.65)")
     args = parser.parse_args()
 
     # Resolve once here: stage_geometry and stage_turntable run their
@@ -275,7 +286,7 @@ def main():
     geometry = stage_geometry(cand_dir, args.seed)
     cleanup = stage_cleanup(cand_dir)
     texture = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                            args.metallic, args.roughness)
+                            args.metallic, args.roughness, args.mr_mask, args.metal_roughness)
     preprocess_bake = stage_preprocess_bake(cand_dir)  # final.glb, needed by the turntable stage below
     turntable = stage_turntable(cand_dir)
 
