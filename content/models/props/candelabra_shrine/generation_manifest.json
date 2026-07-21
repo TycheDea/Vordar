@@ -321,16 +321,16 @@
     "edge_pad_px": 8,
     "blend_coverage": 0.6823,
     "texture_size": 1024,
-    "metallic": 1.0,
-    "roughness": 0.65,
-    "base_bake_s": 73.0,
-    "normal_bake_s": 0.2,
+    "metallic": 0.0,
+    "roughness": 0.8,
+    "base_bake_s": 4.1,
+    "normal_bake_s": 0.3,
     "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_2\\textured.glb",
-    "textured_glb_sha256": "5eb95b3b760e32536b5464169c7c68c175aef2bbe25ea413a9b959f54b5ef494"
+    "textured_glb_sha256": "20af28a9e5bdbb0855e447b93cd5bb981d268cdf6e4ac56874f49dc86e29605d"
   },
   "preprocess": {
-    "textured_glb_bytes": 2970928,
-    "final_glb_bytes": 2970900
+    "textured_glb_bytes": 2970944,
+    "final_glb_bytes": 2970916
   },
   "bake": {
     "source": "final.glb",
@@ -348,7 +348,7 @@
       }
     ]
   },
-  "final_glb_sha256": "459474c54901dcf9c1960bfe105d03cc3d66342de659bf4dade65a12ec39c5bb",
+  "final_glb_sha256": "2c8cf16a22312f48d2ef6888cad0b05bcd2462e7a031f9ed73c086699164ce43",
   "turntable": {
     "angles": 8,
     "size": "512x512",
