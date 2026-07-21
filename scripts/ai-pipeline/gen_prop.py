@@ -263,6 +263,11 @@ def main():
                         help="Declared roughness for prop_texture.py (default 0.8)")
     args = parser.parse_args()
 
+    # Resolve once here: stage_geometry and stage_turntable run their
+    # subprocess under cwd=HI3DGEN_REPO / cwd=REPO_ROOT respectively, so a
+    # relative --out would otherwise resolve against the wrong directory.
+    args.out = args.out.resolve()
+
     cand_dir = args.out / f"cand_{args.seed}"
     cand_dir.mkdir(parents=True, exist_ok=True)
 
