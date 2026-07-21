@@ -7,8 +7,12 @@
 //   - ground set <dir> (diff/nor_gl/rough jpgs) -> DDS written alongside the
 //     sources in <dir>, plus manifest.json { source, images: [{ slot, file,
 //     source, sha256 }] }; the metallic-roughness map is composed from the
-//     rough map via texconv swizzle (glTF MR convention: R unused, G =
-//     roughness, B = metallic = 0).
+//     rough map via texconv swizzle "rrr1" — roughness replicated into every
+//     colour channel. texconv only parses uniform masks reliably (any mask
+//     mixing selectors and 0/1 constants, e.g. the old "0r01", silently
+//     produced ZERO channels — mirror-flat ground), so the shader's G read
+//     gets roughness and metallic comes from the material's metallic_factor
+//     (0.0 for ground sets), never from the texture's B channel.
 //
 // Usage:
 //   node bake_textures.mjs gltf <asset.glb|asset.gltf> ...
@@ -206,11 +210,28 @@ function bakeGroundSet(setDir) {
     bakeOne(norFile, SLOT_FLAGS.normal, `${path.basename(norFile, path.extname(norFile))}.dds`, "normal"),
     bakeOne(
       roughFile,
-      ["-f", "BC7_UNORM", "-m", "0", "-dx10", "-y", "-swizzle", "0r01", "-sx", "_mr"],
+      ["-f", "BC7_UNORM", "-m", "0", "-dx10", "-y", "-swizzle", "rrr1", "-sx", "_mr"],
       `${path.basename(roughFile, path.extname(roughFile))}_mr.dds`,
       "mr",
     ),
   ];
+
+  // The old "0r01" swizzle silently baked all-zero channels (texconv parses
+  // only uniform masks reliably), shipping mirror-flat ground. Decode the MR
+  // bake back and refuse a degenerate roughness channel.
+  const mrDds = path.join(setDir, images[2].file);
+  const probeDir = mkdtempSync(path.join(tmpdir(), "mrprobe-"));
+  try {
+    runTexconv(["-ft", "bmp", "-y", "-o", probeDir, mrDds]);
+    const bmp = readFileSync(path.join(probeDir, `${path.basename(mrDds, ".dds")}.bmp`));
+    const off = bmp.readUInt32LE(10);
+    let sum = 0;
+    const n = Math.min(4096, (bmp.length - off) / 3 | 0);
+    for (let i = 0; i < n; i++) sum += bmp[off + i * 3 + 1]; // G channel, BGR order
+    if (sum / n < 5) throw new Error(`${mrDds}: roughness channel is ~zero after bake — swizzle regression`);
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
 
   const manifest = { source: path.basename(setDir), images };
   writeFileSync(path.join(setDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

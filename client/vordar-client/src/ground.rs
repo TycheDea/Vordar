@@ -165,7 +165,11 @@ pub fn load_ground_material(dir: &str) -> Result<MaterialData, String> {
         base_color_image:         Some(base_color_image),
         normal_image:             Some(normal_image),
         metallic_roughness_image: Some(metallic_roughness_image),
-        metallic_factor:          1.0, // texture already encodes 0
+        // Ground sets are dielectric by declaration: the baked MR sidecar
+        // replicates roughness into every colour channel (texconv only
+        // parses uniform swizzle masks reliably), so its B channel is NOT
+        // metallic-0 and the factor must kill it.
+        metallic_factor:          0.0,
         roughness_factor:         1.0,
         ..Default::default()
     })
