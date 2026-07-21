@@ -150,15 +150,22 @@
     "raw_tris": 186148,
     "fragments_removed": 1,
     "fragment_tris_removed": 24,
-    "hires_tris": 186124,
+    "hires_tris": 211660,
     "clean_tris": 15000,
     "height_target": 1.8,
-    "clean_height": 1.8001337051391602,
+    "clean_height": 1.799993872642517,
     "clean_min_y": 0.0,
     "hires_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_2\\clean_hires.glb",
     "clean_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_2\\clean.glb",
-    "clean_glb_sha256": "bcb5a0b8cf3340c651efa9d4c0d8f29ff56287da44cb4a82ddd9f684479e91bf",
-    "clean_hires_glb_sha256": "b6a8f6d5d8cdde1dddf9ff906a9709481fdb0d577c239f34adac4b0f5a4113c4"
+    "symmetrize": {
+      "theta_deg": 90.0,
+      "offset_m": -0.0003,
+      "keep": "+x",
+      "score_before_m": 0.00614,
+      "score_after_m": 0.0
+    },
+    "clean_glb_sha256": "d14561415e97960e417f85e1aadb93de4ff231b4298a3a4f71b940d3b8c584a4",
+    "clean_hires_glb_sha256": "51ae0c52739a9a853931b4f76558b0478ab1a879ce881ee51efd7b5155b02c26"
   },
   "texture": {
     "strategy": "multiview_controlnet_depth",
@@ -174,7 +181,7 @@
         "seeds": {
           "11": 200
         },
-        "prompt_id": "c6e4cf61-bc05-438e-acc4-1e1381494c3b",
+        "prompt_id": "fccae045-c6a8-402b-bb1f-2178200c0786",
         "prompts": {
           "4": "wrought iron candelabra shrine, standing votive candle stand, pale cream-white wax candles, near-black weathered iron, grey stone base, semi-realistic dark fantasy, front view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -201,8 +208,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "886cd34db260bb1f8f330cee0e9a9b41cfdbc1282569cb981211914d0f93acf2",
-        "gen_png_sha256": "fc9f6a35242ff8ee5bf5d96a027c1f0730d679b0aed7a6af4e45e857b4f7777a"
+        "depth_png_sha256": "b446a007f32398ec65785e0e51eaf2a0d45d10c2bda918c9cf1d9e4d4b76a57b",
+        "gen_png_sha256": "b07d9517474dd84bcd8956fa92f6b6c9b33d95b8a2636f70d06edb95b7683eda"
       },
       {
         "hint": "side view",
@@ -211,7 +218,7 @@
         "seeds": {
           "11": 201
         },
-        "prompt_id": "4e299ee9-8888-4607-87f4-d8f2a631d9f0",
+        "prompt_id": "4527882f-a30f-4e35-bb9d-bab418717758",
         "prompts": {
           "4": "wrought iron candelabra shrine, standing votive candle stand, pale cream-white wax candles, near-black weathered iron, grey stone base, semi-realistic dark fantasy, side view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -238,8 +245,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "20eaaab2929fcd1dd91c4ee558497c551380182d1e3933bcf6fd4971ead873ee",
-        "gen_png_sha256": "ec2a970183d681010c3c8761f2127f3c9f4849c2419067351d5f2eaedadf7666"
+        "depth_png_sha256": "d299b3607e6faeeec441c61f61e7a61d1f3ea4076e93abc30541998da0e1d6b5",
+        "gen_png_sha256": "147983cadc6a5b067dbd609c5928f472c9340f2506eb1b431173cf619b658928"
       },
       {
         "hint": "back view",
@@ -248,7 +255,7 @@
         "seeds": {
           "11": 202
         },
-        "prompt_id": "5341cda2-56a2-4887-a7f9-d8cb1a185cb2",
+        "prompt_id": "9e89c4c8-b3f0-4a65-8e92-1e0e4ccd8327",
         "prompts": {
           "4": "wrought iron candelabra shrine, standing votive candle stand, pale cream-white wax candles, near-black weathered iron, grey stone base, semi-realistic dark fantasy, back view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -275,8 +282,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "5b93215f2745ec520fc0341bfcd72d980a8e73148e5d284d9a64bc3229d5fa51",
-        "gen_png_sha256": "164bdf0fd3321f2b8c5c46e242ff549281f71b35289f84dbe85d74b1c16ecb74"
+        "depth_png_sha256": "ce5f9d3b60733f574382b3a1ab0080f35a61d903e3e2e334dedfb428d6c8938d",
+        "gen_png_sha256": "8fe7adaf3e02e628cdde380bd8e8e8e7c218cbbfdf21c5b9b159fc41fadccfd7"
       },
       {
         "hint": "side view",
@@ -285,7 +292,7 @@
         "seeds": {
           "11": 203
         },
-        "prompt_id": "d8aa42a7-570f-4669-a790-296fbf4cb3b5",
+        "prompt_id": "aaa7b92a-e213-4eb7-9c0b-729f5ae16469",
         "prompts": {
           "4": "wrought iron candelabra shrine, standing votive candle stand, pale cream-white wax candles, near-black weathered iron, grey stone base, semi-realistic dark fantasy, side view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -312,18 +319,18 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "5f0fb0257ff6dd686d359c5fbb77f51bd57eae57e2a698dedf0eb6e389a24dbe",
-        "gen_png_sha256": "6f14833647a9ff0380762f330524e77485f6875db65d17d757aabbca697558b2"
+        "depth_png_sha256": "c57670a06968b3f5b32d31f2356803ddc8ec54983b48c7cdeecc331fb7952a9e",
+        "gen_png_sha256": "ad85d2f9d3a3af4bf5da17843e4121def31486c19263d453289da0adb42e1a63"
       }
     ],
     "weight_exponent": 2.0,
     "occlusion_eps": 0.02,
     "edge_pad_px": 8,
-    "blend_coverage": 0.6823,
+    "blend_coverage": 0.7106,
     "texture_size": 1024,
     "metallic": 0.0,
     "roughness": 0.8,
-    "metal_roughness": 0.65,
+    "metal_roughness": 0.8,
     "mr_mask": {
       "mask_subject": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base",
       "workflow": "prop_multiview.json",
@@ -335,7 +342,7 @@
           "seeds": {
             "11": 200
           },
-          "prompt_id": "dbd80b4e-40db-4de6-a1df-7277bb9aba42",
+          "prompt_id": "5bc704b2-95a7-4924-a800-b530424284a4",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, front view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -362,8 +369,8 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "886cd34db260bb1f8f330cee0e9a9b41cfdbc1282569cb981211914d0f93acf2",
-          "gen_png_sha256": "2e8aefd36c14920ba1c9d1db961a2aa93000a6ea264ce3b68f8723c176dd58ae"
+          "depth_png_sha256": "b446a007f32398ec65785e0e51eaf2a0d45d10c2bda918c9cf1d9e4d4b76a57b",
+          "gen_png_sha256": "395cea3b3420e38461ed9f871005ff5e0926f719a39ade5db0dae2ef5c287a54"
         },
         {
           "hint": "side view",
@@ -372,7 +379,7 @@
           "seeds": {
             "11": 201
           },
-          "prompt_id": "40a3da2c-6cea-480a-a123-6133b9281407",
+          "prompt_id": "4eaab454-49d5-4578-bc48-7c08d48fb204",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, side view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -399,8 +406,8 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "20eaaab2929fcd1dd91c4ee558497c551380182d1e3933bcf6fd4971ead873ee",
-          "gen_png_sha256": "8a0e7e4e0417a9d35ede05c9026909ab15500bc054c3515269399a006ea665a1"
+          "depth_png_sha256": "d299b3607e6faeeec441c61f61e7a61d1f3ea4076e93abc30541998da0e1d6b5",
+          "gen_png_sha256": "9c0b3529c0a9d21ee3c3093cb258750939e153b52a1615b1726da5d293942856"
         },
         {
           "hint": "back view",
@@ -409,7 +416,7 @@
           "seeds": {
             "11": 202
           },
-          "prompt_id": "c30d8242-6c36-4318-81a9-9b73afe6f604",
+          "prompt_id": "c00d6dd9-33d2-4b22-957c-fc62404ba60f",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, back view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -436,8 +443,8 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "5b93215f2745ec520fc0341bfcd72d980a8e73148e5d284d9a64bc3229d5fa51",
-          "gen_png_sha256": "01f907ba42941344e59027c921a8be070407eabf47ac6a401f7a691e66c5e0d5"
+          "depth_png_sha256": "ce5f9d3b60733f574382b3a1ab0080f35a61d903e3e2e334dedfb428d6c8938d",
+          "gen_png_sha256": "bca8419098db7808f7ec973b233a86cef987459d7c2cedaa69ee4319159d371a"
         },
         {
           "hint": "side view",
@@ -446,7 +453,7 @@
           "seeds": {
             "11": 203
           },
-          "prompt_id": "49714690-8f38-453b-b6c0-11a4a5e571be",
+          "prompt_id": "0f22ce3e-cd3b-42d6-833b-1446c4f38c74",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, side view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -473,26 +480,26 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "5f0fb0257ff6dd686d359c5fbb77f51bd57eae57e2a698dedf0eb6e389a24dbe",
-          "gen_png_sha256": "18a3e7886d588e759b1117ea690d7cf2fb82aea39eaa5a5160b63d37ec246cf3"
+          "depth_png_sha256": "c57670a06968b3f5b32d31f2356803ddc8ec54983b48c7cdeecc331fb7952a9e",
+          "gen_png_sha256": "06830175caedc05950ff214815e17412d183aa8768cca6203517df4da111ccff"
         }
       ],
-      "blend_coverage": 0.6823,
-      "metal_fraction": 0.2997
+      "blend_coverage": 0.7106,
+      "metal_fraction": 0.3088
     },
-    "base_bake_s": 3.8,
-    "normal_bake_s": 0.2,
+    "base_bake_s": 316.7,
+    "normal_bake_s": 0.4,
     "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_2\\textured.glb",
-    "mr_mask_bake_s": 148.7,
-    "textured_glb_sha256": "37b8c1351e69c01093531a092c1caa68ac2c904135f9d740a964e3424ba82aa2"
+    "mr_mask_bake_s": 321.9,
+    "textured_glb_sha256": "50fccc2a98d778e38505e1712d49af89439133e890ae6c399219b33c34edafa5"
   },
   "preprocess": {
-    "textured_glb_bytes": 3370528,
-    "final_glb_bytes": 3370504
+    "textured_glb_bytes": 3582312,
+    "final_glb_bytes": 3582280
   },
   "bake": {
     "source": "final.glb",
-    "sha256": "2b675027cada9a1da108aa7dfc81127416c2d04c94f818080885dcae5c8fc419",
+    "sha256": "0cd1f026763157d8a3b6f40e21e11e7a6a46f8d13ca08e4f0f625362ea50a217",
     "images": [
       {
         "index": 0,
@@ -511,7 +518,7 @@
       }
     ]
   },
-  "final_glb_sha256": "2b675027cada9a1da108aa7dfc81127416c2d04c94f818080885dcae5c8fc419",
+  "final_glb_sha256": "0cd1f026763157d8a3b6f40e21e11e7a6a46f8d13ca08e4f0f625362ea50a217",
   "turntable": {
     "angles": 8,
     "size": "512x512",
