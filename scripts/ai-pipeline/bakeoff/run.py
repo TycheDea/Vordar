@@ -38,12 +38,15 @@ WORKFLOWS = {
 SUBJECT = ("wrought iron candelabra shrine, standing votive candle stand with "
            "melted wax candles, near-black weathered dark iron, stone base, "
            "semi-realistic dark fantasy")
+# A6.3's colour cue, split out so other subjects can carry their own colours.
+MATERIALS = "cream wax candles, black iron, stone base"
 SEED = 2
 
 
 def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     positional, views, models = [], len(pt.MV_VIEWS), list(WORKFLOWS)
+    subject, materials, seed = SUBJECT, MATERIALS, SEED
     i = 0
     while i < len(argv):
         if argv[i] == "--views":
@@ -52,14 +55,25 @@ def parse_args():
         elif argv[i] == "--models":
             i += 1
             models = argv[i].split(",")
+        elif argv[i] == "--subject":
+            i += 1
+            subject = argv[i]
+        elif argv[i] == "--materials":
+            i += 1
+            materials = argv[i]
+        elif argv[i] == "--seed":
+            i += 1
+            seed = int(argv[i])
         else:
             positional.append(argv[i])
         i += 1
     if len(positional) != 2:
-        pt.fail("usage: run.py -- <mesh.glb> <out_dir> [--views N] [--models a,b]")
+        pt.fail("usage: run.py -- <mesh.glb> <out_dir> [--views N] [--models a,b] "
+                "[--subject S] [--materials M] [--seed N]")
     # Blender resolves relative render paths against its own notion of cwd, not
     # the shell's -- every path handed to bpy has to be absolute.
-    return Path(positional[0]).resolve(), Path(positional[1]).resolve(), views, models
+    return (Path(positional[0]).resolve(), Path(positional[1]).resolve(),
+            views, models, subject, materials, seed)
 
 
 def render_depths(mesh, out_dir, n_views):
@@ -83,7 +97,7 @@ def render_depths(mesh, out_dir, n_views):
     return views
 
 
-def run_model(model, views, out_dir):
+def run_model(model, views, out_dir, subject, materials, seed):
     template = json.loads(WORKFLOWS[model].read_text(encoding="utf-8"))
     model_dir = out_dir / model
     timings = []
@@ -100,11 +114,12 @@ def run_model(model, views, out_dir):
             inputs = node.get("inputs", {})
             for key, value in inputs.items():
                 if isinstance(value, str):
-                    inputs[key] = (value.replace("{subject}", SUBJECT)
+                    inputs[key] = (value.replace("{subject}", subject)
                                    .replace("{view_hint}", view["hint"])
+                                   .replace("{materials}", materials)
                                    .replace("{depth_image}", input_name))
                 elif key == "seed":
-                    inputs[key] = SEED * 100 + i
+                    inputs[key] = seed * 100 + i
         started = time.monotonic()
         manifest = comfy_run.run_workflow(wf, model_dir / f"_run_{i}", wait_timeout=1800)
         elapsed = time.monotonic() - started
@@ -119,7 +134,7 @@ def run_model(model, views, out_dir):
 
 
 def main():
-    mesh, out_dir, n_views, models = parse_args()
+    mesh, out_dir, n_views, models, subject, materials, seed = parse_args()
     out_dir.mkdir(parents=True, exist_ok=True)
     views = render_depths(mesh, out_dir, n_views)
     print(f"depth: {len(views)} view(s) -> {out_dir}")
@@ -129,7 +144,7 @@ def main():
     try:
         for model in models:
             print(f"[{model}]")
-            report[model] = run_model(model, views, out_dir)
+            report[model] = run_model(model, views, out_dir, subject, materials, seed)
     finally:
         proc.kill()
         proc.wait()

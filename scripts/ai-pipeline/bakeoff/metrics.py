@@ -64,8 +64,12 @@ def baked_fraction(luma, normals, mask):
     return best
 
 
+def rgb_of(path):
+    return np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+
+
 def luma_of(path):
-    a = np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+    a = rgb_of(path)
     return 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
 
 
@@ -80,18 +84,24 @@ def main():
         masks.append(d > 2)
         nrms.append(normals_from_depth(d))
 
-    print(f"{'model':<20} {'baked':>6} {'meanLuma':>9}   per-view")
+    # drift = sigma of per-view mean colour: blend_views() reprojects all views
+    # into one atlas, so per-view colour disagreement lands directly as seams.
+    print(f"{'model':<20} {'baked':>6} {'drift':>7} {'lumRng':>7} {'meanLuma':>9}   per-view baked")
     for m in models:
-        vals, lums = [], []
+        vals, lums, means = [], [], []
         for i in range(len(masks)):
             p = root / m / f"view_{i}.png"
             if not p.exists():
                 continue
-            lum = luma_of(p)
+            rgb = rgb_of(p)
+            lum = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
             vals.append(baked_fraction(lum, nrms[i], masks[i]))
             lums.append(lum[masks[i]].mean())
+            means.append(rgb[masks[i]].mean(axis=0))
         if vals:
-            print(f"{m:<20} {np.mean(vals):>6.3f} {np.mean(lums):>9.3f}   "
+            drift = np.array(means).std(axis=0).mean()
+            print(f"{m:<20} {np.mean(vals):>6.3f} {drift:>7.4f} "
+                  f"{max(lums) - min(lums):>7.4f} {np.mean(lums):>9.3f}   "
                   + " ".join(f"{v:.3f}" for v in vals))
 
 
