@@ -156,7 +156,7 @@ def stage_geometry(cand_dir: Path, seed: int) -> dict:
     return meta
 
 
-def stage_cleanup(cand_dir: Path) -> dict:
+def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dict:
     clean_glb = cand_dir / "clean.glb"
     hires_glb = cand_dir / "clean_hires.glb"
     meta_path = cand_dir / "cleanup_stats.json"
@@ -164,7 +164,10 @@ def stage_cleanup(cand_dir: Path) -> dict:
         print(f"cleanup: skip (exists) -> {clean_glb}")
     else:
         raw_glb = cand_dir / "raw.glb"
-        out = run_capture([BLENDER, "--background", "--python", PROP_CLEANUP, "--", raw_glb, clean_glb])
+        cmd = [BLENDER, "--background", "--python", PROP_CLEANUP, "--", raw_glb, clean_glb]
+        if symmetrize:
+            cmd += ["--symmetrize", f"--symmetrize-keep={symmetrize_keep}"]
+        out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"cleanup: generated -> {clean_glb}")
     meta = read_or_note(meta_path)
@@ -272,6 +275,10 @@ def main():
                         help="Mask prompt for prop_texture.py's per-texel metallic-roughness pass")
     parser.add_argument("--metal-roughness", type=float, default=None,
                         help="Roughness for mask-classified metal texels (default 0.65)")
+    parser.add_argument("--symmetrize", action="store_true",
+                        help="Mirror one half of the cleaned mesh across its best-fit vertical plane")
+    parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
+                        help="Half to mirror in prop_cleanup.py's plane-aligned frame")
     args = parser.parse_args()
 
     # Resolve once here: stage_geometry and stage_turntable run their
@@ -284,7 +291,7 @@ def main():
 
     concept = stage_concept(cand_dir, args.subject, args.seed, args.skip_concept)
     geometry = stage_geometry(cand_dir, args.seed)
-    cleanup = stage_cleanup(cand_dir)
+    cleanup = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
     texture = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
                             args.metallic, args.roughness, args.mr_mask, args.metal_roughness)
     preprocess_bake = stage_preprocess_bake(cand_dir)  # final.glb, needed by the turntable stage below

@@ -8,6 +8,10 @@
 #     center of the ground-contact band), mesh bottom exactly at y=0 in
 #     the exported +Y-up glb — zone props sit on the ground plane via
 #     pos y=-0.5 in zones.ron, the model itself must carry no offset
+#   - --symmetrize (opt-in): finds the best-fit vertical mirror plane and
+#     mirrors the --symmetrize-keep half across it; exported orientation
+#     is unchanged (the mesh is rotated back), so existing zone placements
+#     stay valid
 #   - exports <clean stem>_hires.glb before decimating (A3.6's high-poly
 #     normal-bake source), then collapse-decimates to --tri-budget
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
@@ -66,6 +70,88 @@ def export_glb(path):
                               export_yup=True)
 
 
+def reflect(points, normal, offset):
+    """Reflect points about the plane {p . normal = offset}."""
+    return points - 2.0 * ((points @ normal) - offset)[:, None] * normal[None, :]
+
+
+def plane_normal(theta):
+    # Props stand upright, so the mirror plane is vertical: its normal
+    # lies in the Blender-frame XY plane (Z is up here; glTF +Y-up comes
+    # from export_yup), parameterized by yaw alone.
+    return np.array([np.cos(theta), np.sin(theta), 0.0])
+
+
+def build_kdtree(points):
+    import mathutils
+    tree = mathutils.kdtree.KDTree(len(points))
+    for i, p in enumerate(points):
+        tree.insert(mathutils.Vector(p), i)
+    tree.balance()
+    return tree
+
+
+def find_symmetry_plane(co):
+    """Best-fit vertical mirror plane of the vertex cloud: (theta, offset,
+    score) minimizing the mean nearest-neighbor distance from the reflected
+    samples back to the mesh. Deterministic (fixed sampling seed)."""
+    rng = np.random.default_rng(0)
+    sample = co[rng.choice(len(co), min(len(co), 20000), replace=False)]
+    tree = build_kdtree(sample)
+    probes = sample[:5000]
+
+    def score(theta, offset):
+        refl = reflect(probes, plane_normal(theta), offset)
+        return sum(tree.find(p)[2] for p in refl) / len(refl)
+
+    centroid = sample.mean(axis=0)
+
+    def centroid_offset(theta):
+        return float(centroid @ plane_normal(theta))
+
+    coarse = [(score(t, centroid_offset(t)), t)
+              for t in np.deg2rad(np.arange(0.0, 180.0, 2.0))]
+    _, best_t = min(coarse)
+    fine = [(score(t, centroid_offset(t)), t)
+            for t in best_t + np.deg2rad(np.arange(-2.0, 2.0, 0.25))]
+    _, best_t = min(fine)
+    offsets = [(score(best_t, centroid_offset(best_t) + d),
+                centroid_offset(best_t) + d)
+               for d in np.arange(-0.05, 0.055, 0.005)]
+    best_score, best_d = min(offsets)
+    return float(best_t), float(best_d), float(best_score)
+
+
+def symmetrize(obj, me, keep):
+    """Mirror the `keep` half ('+x'/'-x' in the plane-aligned frame) across
+    the mesh's best-fit vertical mirror plane, preserving orientation."""
+    co = vert_coords(me)
+    theta, offset, score_before = find_symmetry_plane(co)
+    plane_point = offset * plane_normal(theta)
+
+    align = Matrix.Rotation(-theta, 4, "Z") @ Matrix.Translation(-plane_point)
+    me.transform(align)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    # Blender's direction enum names the source half: 'POSITIVE_X' = "+X to -X".
+    bpy.ops.mesh.symmetrize(direction="POSITIVE_X" if keep == "+x" else "NEGATIVE_X")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    me.transform(align.inverted())
+
+    co = vert_coords(me)
+    tree = build_kdtree(co)
+    refl = reflect(co, plane_normal(theta), offset)
+    score_after = sum(tree.find(p)[2] for p in refl) / len(refl)
+    return {
+        "theta_deg": round(np.rad2deg(theta), 2),
+        "offset_m": round(offset, 4),
+        "keep": keep,
+        "score_before_m": round(score_before, 5),
+        "score_after_m": round(float(score_after), 5),
+    }
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:]
     parser = argparse.ArgumentParser(prog="prop_cleanup.py")
@@ -73,6 +159,10 @@ def main():
     parser.add_argument("clean_glb")
     parser.add_argument("--height", type=float, default=1.8)
     parser.add_argument("--tri-budget", type=int, default=15000)
+    parser.add_argument("--symmetrize", action="store_true")
+    parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
+                        help="Half to mirror, in the plane-aligned frame "
+                             "(pass as --symmetrize-keep=-x)")
     args = parser.parse_args(argv)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -135,6 +225,13 @@ def main():
     scale = args.height / raw_height
     me.transform(Matrix.Diagonal((scale, scale, scale, 1.0)))
 
+    # ---- optional mirror across the best-fit vertical plane ----
+    # Runs before re-origin so the footprint centroid is computed on the
+    # final (symmetric) geometry.
+    symmetrize_stats = None
+    if args.symmetrize:
+        symmetrize_stats = symmetrize(obj, me, args.symmetrize_keep)
+
     # ---- origin at footprint centroid, bottom on the ground ----
     co = vert_coords(me)
     min_z = float(co[:, 2].min())
@@ -183,6 +280,8 @@ def main():
         "hires_glb": str(hires),
         "clean_glb": str(clean),
     }
+    if symmetrize_stats is not None:
+        stats["symmetrize"] = symmetrize_stats
     print(json.dumps(stats))
 
 
