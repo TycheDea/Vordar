@@ -43,7 +43,7 @@ impl Camera {
             aspect,
             fovy: 45.0_f32.to_radians(),
             znear: 0.1,
-            zfar: 200.0,
+            zfar: 400.0,
             // Pulled back far enough to read the battlefield, not just the
             // player's feet. Mouse wheel adjusts via zoom().
             radius: 34.0,

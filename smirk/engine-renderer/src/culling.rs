@@ -118,7 +118,7 @@ mod tests {
         let behind = Aabb { min: behind_eye - Vec3::splat(0.5), max: behind_eye + Vec3::splat(0.5) };
         assert!(!frustum.intersects(&behind), "point behind the eye must be culled");
 
-        // 500 units past the target along the view direction: beyond zfar=200.
+        // 500 units past the target along the view direction: beyond zfar=400.
         let forward = (target - eye).normalize();
         let past_far = target + forward * 500.0;
         let far = Aabb { min: past_far - Vec3::splat(0.5), max: past_far + Vec3::splat(0.5) };
