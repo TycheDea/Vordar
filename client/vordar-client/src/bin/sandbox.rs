@@ -38,9 +38,6 @@ fn main() {
         .add_plugin(PhysicsPlugin)
         .add_plugin(PrefabPlugin)
         .add_plugin(CoreGamePlugin);
-    vordar_game::chapter::ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module()])
-        .install("chapter01", &mut app)
-        .expect("chapter01 must be linked");
     app.add_plugin(ClientPlugin)
         .add_system(SpawnPlayerSystem { done: false }, Phase::PreUpdate, SystemOrder::First)
         .run()
