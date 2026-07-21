@@ -1,5 +1,5 @@
 {
-  "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy",
+  "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
   "seed": 4,
   "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4",
   "concept": {
@@ -164,14 +164,14 @@
       "score_before_m": 0.00861,
       "score_after_m": 0.0
     },
-    "clean_glb_sha256": "3a537ddd37f4bf0bb5ccebdea47ae295b183ba02f055a43e183f309b4df3c560",
-    "clean_hires_glb_sha256": "186957432d64deafb2f2d6751f36010a501627b1eaef967a14dfb16b3e4a3397"
+    "clean_glb_sha256": "c5d5f98d9c52a7f20ceb869974bdf1f7297aec3f41a44a5e4bb893ec6871dd49",
+    "clean_hires_glb_sha256": "e67f4a4faa2b33db68c3131aebd164c2df9768d8b757059b96956ec150cd8b36"
   },
   "texture": {
     "strategy": "multiview_controlnet_depth",
     "front_axis": "-Y",
     "workflow": "prop_multiview.json",
-    "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy",
+    "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
     "render_resolution": 1024,
     "views": [
       {
@@ -181,9 +181,9 @@
         "seeds": {
           "11": 400
         },
-        "prompt_id": "e9e57e6d-01cd-4bed-a87a-1b9130c96646",
+        "prompt_id": "2fac800d-ab8c-4d58-b2ec-b008c08c0fc3",
         "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy, front view, flat even neutral studio lighting, single object centered, plain dark grey background"
+          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, front view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
         "models": [
           {
@@ -208,8 +208,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "e286f0c02babdc7c80dc32b5905096b96ef69df4ec9f821fc3ed4c366694eb6b",
-        "gen_png_sha256": "276db1759e05c414064032c513b8738aca136f4ed3f2e42e274adb9cbff2d76b"
+        "depth_png_sha256": "27b66508bba94436da4ad8cadf7c63570cef07209f67201fe6a266f017301ba5",
+        "gen_png_sha256": "64029c1f337709dc6bae5efbe98943a6d643af858c87fd9f54c28c8a5b4cf89c"
       },
       {
         "hint": "three-quarter view",
@@ -218,9 +218,9 @@
         "seeds": {
           "11": 401
         },
-        "prompt_id": "3ac1f31f-b759-44c4-b968-fae61605df35",
+        "prompt_id": "5856f1c1-2e84-4082-9515-5b7405c7f010",
         "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
+          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
         "models": [
           {
@@ -245,8 +245,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "27a44401981b7d7b9e9949a91cdc91452388bb3a30d394dcff65f02f46fca79a",
-        "gen_png_sha256": "a4b8ce022883372dd5810529b99505d829a349fe2176f44b24d56e1e9a3ced90"
+        "depth_png_sha256": "1c386e089f258058ec13222499b1e4f9087b9b45a5d5332fb1a2355e5150bf59",
+        "gen_png_sha256": "0bb17fa250c641a0afb2034aa4757aa454e106ea60624fbf2ecce85f380d2c46"
       },
       {
         "hint": "back view",
@@ -255,9 +255,9 @@
         "seeds": {
           "11": 402
         },
-        "prompt_id": "dcf168b0-8237-4a40-b308-f82c1689b805",
+        "prompt_id": "23f38d82-1dc1-447e-aaee-4a04125a949d",
         "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy, back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, back view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
         "models": [
           {
@@ -282,8 +282,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "c20d4182efe4d58ccde5f98bba3674c733aa40ecb3456f9ce411789063a5fbec",
-        "gen_png_sha256": "2ff7d92cdef1c3cb190807459512156d98836de0daec8f997584dfcf74fe5ec0"
+        "depth_png_sha256": "3fa729607d9d74f71497c5891f99c13802b718ce3b3471eb2bbfff80d412c248",
+        "gen_png_sha256": "05c45579c533f02dee440e6905d50855dca40c2ad02cc096878719105853fb32"
       },
       {
         "hint": "three-quarter view",
@@ -292,9 +292,9 @@
         "seeds": {
           "11": 403
         },
-        "prompt_id": "2954d0f7-8b03-4ae2-94bb-c1ecbbe53112",
+        "prompt_id": "edd0749c-dda8-4963-a317-4a779581b09d",
         "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
+          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
         "models": [
           {
@@ -319,18 +319,18 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "f2346d45765e8fb1b23784f34eebfcce05f7043b3efd63f1dd98644d16da42cd",
-        "gen_png_sha256": "daccbb739bbe6ef8c49b6c0fe43074f24576a66f80bfae5a890cdd6b9eeaeedd"
+        "depth_png_sha256": "d45b1e8de2bce99139d35dc861ee74df7b8c396801251053177468f0f2feb1f6",
+        "gen_png_sha256": "5b1431c0f925f1091725a3125c80882c0365f11e70dca70e345e1f41af549dfb"
       }
     ],
     "weight_exponent": 2.0,
     "occlusion_eps": 0.02,
     "edge_pad_px": 8,
-    "blend_coverage": 0.5646,
+    "blend_coverage": 0.6088,
     "texture_size": 1024,
     "metallic": 0.0,
     "roughness": 0.8,
-    "metal_roughness": 0.8,
+    "metal_roughness": 0.9,
     "mr_mask": {
       "mask_subject": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base",
       "workflow": "prop_multiview.json",
@@ -342,7 +342,7 @@
           "seeds": {
             "11": 400
           },
-          "prompt_id": "9a9d60a8-9977-45fb-8a32-d1da34b8d1ed",
+          "prompt_id": "f5f3528d-1fee-432e-8b88-f97dac2f1926",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, front view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -369,8 +369,8 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "e286f0c02babdc7c80dc32b5905096b96ef69df4ec9f821fc3ed4c366694eb6b",
-          "gen_png_sha256": "5c70c6eff4e3392548388f4e734d0ac83d3157c95128c1f6880d08f032d2be1f"
+          "depth_png_sha256": "27b66508bba94436da4ad8cadf7c63570cef07209f67201fe6a266f017301ba5",
+          "gen_png_sha256": "1eb3cf88e00657a476d43b4a786a8d1bfafc955879b1a948f2d2f6417c358b30"
         },
         {
           "hint": "three-quarter view",
@@ -379,7 +379,7 @@
           "seeds": {
             "11": 401
           },
-          "prompt_id": "37d77310-ebd2-4055-8993-9c9cf8b4e891",
+          "prompt_id": "da38eb00-84d5-41c5-a951-96080cc0a9b9",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -406,8 +406,8 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "27a44401981b7d7b9e9949a91cdc91452388bb3a30d394dcff65f02f46fca79a",
-          "gen_png_sha256": "b7240a470813f438f1543ee1cc88d2dd0fba4844970eb31330ad45060d5b2f6e"
+          "depth_png_sha256": "1c386e089f258058ec13222499b1e4f9087b9b45a5d5332fb1a2355e5150bf59",
+          "gen_png_sha256": "c8df95c932ccec7753d27db32abc7c0bb92c48fd4636aafb8648153ce8a6a4ed"
         },
         {
           "hint": "back view",
@@ -416,7 +416,7 @@
           "seeds": {
             "11": 402
           },
-          "prompt_id": "c3864a26-e398-4ece-9d3a-d131fd0aedf2",
+          "prompt_id": "94d4da2e-75b7-4551-893a-476df4cf8fdd",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, back view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -443,8 +443,8 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "c20d4182efe4d58ccde5f98bba3674c733aa40ecb3456f9ce411789063a5fbec",
-          "gen_png_sha256": "027f3587c24368b633737ed70f97b541c356a895884a2805c8e9e183b5901cf5"
+          "depth_png_sha256": "3fa729607d9d74f71497c5891f99c13802b718ce3b3471eb2bbfff80d412c248",
+          "gen_png_sha256": "45bb0521f9a446f0f493fa7247d4900feda2f37cfe964fd2dba4927a90e3e263"
         },
         {
           "hint": "three-quarter view",
@@ -453,7 +453,7 @@
           "seeds": {
             "11": 403
           },
-          "prompt_id": "479335c1-0cc6-4fe2-8d1a-d1b5b7081b28",
+          "prompt_id": "75ad8844-8477-446f-9f51-8ec6de462400",
           "prompts": {
             "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
           },
@@ -480,26 +480,26 @@
               "sha256": null
             }
           ],
-          "depth_png_sha256": "f2346d45765e8fb1b23784f34eebfcce05f7043b3efd63f1dd98644d16da42cd",
-          "gen_png_sha256": "b97987566e1cb25150fa69d0938a8499f1f2e811c60a37ef0912b2672159fc05"
+          "depth_png_sha256": "d45b1e8de2bce99139d35dc861ee74df7b8c396801251053177468f0f2feb1f6",
+          "gen_png_sha256": "d449787537f5f7a6b7f61f11059fa41dcd987c9b71c6b729e814aad4a1028e78"
         }
       ],
-      "blend_coverage": 0.5646,
-      "metal_fraction": 0.2517
+      "blend_coverage": 0.6088,
+      "metal_fraction": 0.2723
     },
-    "base_bake_s": 127.2,
-    "normal_bake_s": 0.3,
+    "base_bake_s": 105.0,
+    "normal_bake_s": 0.4,
     "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4\\textured.glb",
-    "mr_mask_bake_s": 3.1,
-    "textured_glb_sha256": "7a05fdcce9f61fc0c824b9b9640ca76bd95bd1f9918c3276d1b11b29ff3f1c4b"
+    "mr_mask_bake_s": 94.7,
+    "textured_glb_sha256": "6c71dbca99a4461de1670df6f76134ea281052e3a3bab39b79fdc653ee5ec88e"
   },
   "preprocess": {
-    "textured_glb_bytes": 3108352,
-    "final_glb_bytes": 3108328
+    "textured_glb_bytes": 3218224,
+    "final_glb_bytes": 3218200
   },
   "bake": {
     "source": "final.glb",
-    "sha256": "5464438dd6306d595152c2996c356c843478f4b8cfa1ffa3374c140c9dfec579",
+    "sha256": "45a077f03047dc16b806136de100462ed7318ae1fef4fe0a6e3d1dabeed1cbd2",
     "images": [
       {
         "index": 0,
@@ -518,7 +518,7 @@
       }
     ]
   },
-  "final_glb_sha256": "5464438dd6306d595152c2996c356c843478f4b8cfa1ffa3374c140c9dfec579",
+  "final_glb_sha256": "45a077f03047dc16b806136de100462ed7318ae1fef4fe0a6e3d1dabeed1cbd2",
   "turntable": {
     "angles": 8,
     "size": "512x512",
