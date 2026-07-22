@@ -1,20 +1,52 @@
 # Asset provenance
 
-Every third-party asset that enters `content/` is recorded here with its source,
-license, and where it is used. Add a row *when the asset lands*, not after.
+**This file is the operative license record for everything under `content/`.** An
+asset not listed here is unrecorded, not free — add its row *when the asset lands*,
+not after. Two records live here: the asset table (output side — what ships, and
+under what terms it may leave the project) and the AI-pipeline model ledger (input
+side — which models are allowed to generate anything that ships).
 
-| Asset | Source | License | Used for / location |
-|---|---|---|---|
-| KayKit Adventurers characters (Knight, Mage, Barbarian, Rogue) | Kay Lousberg — https://kaylousberg.itch.io/kaykit-adventurers | CC0 1.0 | Placeholder races — the derived `content/models/{dwarf,elf,valkyrie}.glb` still ship pending their generated replacements. Source glbs and the preprocessing script were removed 2026-07-20 under the no-asset-libraries ruling; recover from git history if regeneration is ever needed. |
-| Mixamo auto-rig + 11 animation clips | Adobe Mixamo — https://www.mixamo.com | Royalty-free for use in games (Adobe terms; no redistribution of raw assets) | Rigging service for the VRoid body + shared clip library — `content/source/characters/mixamo/{Character.fbx,clips/}`, merged by `scripts/asset-pipeline/mixamo_to_glb.py` into `content/models/human.glb` |
-| DamagedHelmet glTF sample | Khronos glTF-Sample-Assets (model by theblueturtle_) — https://github.com/KhronosGroup/glTF-Sample-Assets | CC BY 4.0 | Renderer test fixture only (PBR/IBL verification) — `content/source/test/DamagedHelmet.glb`. Never shipped in game content. |
-| Evening Road 01 (Pure Sky) HDRI, 2k | Poly Haven (Jarod Guest / Sergej Majboroda) — https://polyhaven.com/a/evening_road_01_puresky | CC0 | Zone sky + IBL environment — `content/textures/env/evening_road_01_puresky_2k.hdr` |
-| Brown Mud Leaves 01 texture set, 2k | Poly Haven (Rob Tuytel) — https://polyhaven.com/a/brown_mud_leaves_01 | CC0 | Zone ground PBR set — `content/textures/ground/mud_leaves/` |
-| Rock 07, Rock 09, Rock Face 01, Dead Quiver Trunk models, 1k | Poly Haven (Rico Cilliers / Dimitrios Savva) — https://polyhaven.com/models | CC0 | Zone props — `content/models/props/`. Retained until generated replacements land; the `fetch_polyhaven.mjs` fetcher was removed 2026-07-20 under the no-asset-libraries ruling. |
-| "Human - Male_" VRoid character (user-authored) | Created in VRoid Studio by the project owner | Owner's asset (VRoid Studio output belongs to its creator, commercial use allowed) | `content/models/statue_vroid.glb`, a start-zone statue, and the origin of the `human.glb` player body (auto-rigged via Mixamo). Both still ship pending generated replacements; the `.vrm`/`.vroid` sources and `vrm_to_glb.mjs` were removed 2026-07-20 under the no-asset-libraries ruling. |
-| Cracked earth ground PBR set, 2k | Generated — StableMaterials (`gvecchio/StableMaterials`) + SDXL img2img upscale (`stabilityai/stable-diffusion-xl-base-1.0`), prompt: "cracked dry earth, parched mud flats, brown dusty soil, deep fissures", seed 1, see `generation_manifest.json` for full provenance | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL), both already `Cleared` rows in the "AI pipeline models" ledger table | A1 fixture; held for Phase B2's zone swap — `content/textures/ground/cracked_earth/` |
-| Castilian Plateau Dusk HDRI, 2k | Generated — SDXL base (`stabilityai/stable-diffusion-xl-base-1.0`) circular-x pano txt2img + img2img hop (`gen_pano_sdxl.py`) + `hdr_post.py` sun injection, prompt: "dusk sky over an empty dry Castilian plateau, wide open horizon, no trees, low amber sun near the horizon, scattered amber-lit clouds, distant low mountains, semi-realistic dark fantasy", seed 7, sun az 263.1°/el 8°, see `generation_manifest.json` / `castilian_plateau_dusk_2k.manifest.json` for full provenance | CreativeML Open RAIL++-M (SDXL), already `Cleared` in the "AI pipeline models" ledger table | A2 fixture; held for Phase B2's environment swap — `content/textures/env/castilian_plateau_dusk_2k.hdr`. **Shippable now**: bake-off winner (Path 3, `gen_pano_sdxl.py`) carries no license condition, unlike the sdxl_360 runner-up-path candidate. |
-| Iron candelabra shrine prop | Generated — SDXL concept (`stabilityai/stable-diffusion-xl-base-1.0`) + Hi3DGen geometry (`Stable-X/Hi3DGen`, weights `Stable-X/trellis-normal-v0-1` / `Stable-X/yoso-normal-v1-8-1` / `ZhengPeng7/BiRefNet`) + Blender projection-bake texturing (Strategy 1) via `gen_prop.py`, prompt: "wrought iron candelabra shrine, standing votive candle stand with melted wax candles, weathered dark iron, stone base, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background", seed 2, see `generation_manifest.json` for full provenance | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack), already `Cleared` rows in the "AI pipeline models" ledger table | A3 fixture; held for Phase B3's zone dressing — `content/models/props/candelabra_shrine/candelabra_shrine.glb`. **Shippable now**: no NC tool touched the production path (strict ruling 2026-07-19 satisfied). **Known-look caveat**: thin members (posts, scroll arms) render lighter pewter than the concept's dark iron — Strategy 1's projection-bake ceiling on thin-member-dominated geometry (accepted per A3.12's third-pass review, game-distance simulation judged it tolerable); Strategy 2 (SDXL multi-view ControlNet-depth retexture) is the named escalation if B3's art review wants true near-black iron. |
+## Redistribution values
+
+| Value | What it means |
+|---|---|
+| Yes | Freely redistributable (CC0). |
+| Yes, attribution required | Redistributable with credit to the author (CC BY). |
+| With the project only | Ships as part of the game; not licensed for extraction or standalone redistribution (generated assets, owner-authored assets, Mixamo-derived clips baked into our glbs). |
+| No, permission required | Not redistributable without asking first. No asset carries this today; the value names the default-closed posture that applies to anything unlisted. |
+
+## Assets
+
+| Assets | Author | Source | License | Redistribution |
+|---|---|---|---|---|
+| KayKit Adventurers characters (Knight, Mage, Barbarian, Rogue) — derived `content/models/{dwarf,elf,valkyrie}.glb` | Kay Lousberg | https://kaylousberg.itch.io/kaykit-adventurers | CC0 1.0 | Yes |
+| Mixamo auto-rig + 11 animation clips — `content/source/characters/mixamo/{Character.fbx,clips/}`, merged into `content/models/human.glb` by `scripts/asset-pipeline/mixamo_to_glb.py` | Adobe Mixamo | https://www.mixamo.com | Royalty-free for use in games (Adobe terms; no redistribution of raw assets) | With the project only |
+| DamagedHelmet glTF sample — `content/source/test/DamagedHelmet.glb` | theblueturtle_ (via Khronos glTF-Sample-Assets) | https://github.com/KhronosGroup/glTF-Sample-Assets | CC BY 4.0 | Yes, attribution required |
+| Evening Road 01 (Pure Sky) HDRI, 2k — `content/textures/env/evening_road_01_puresky_2k.hdr` | Jarod Guest / Sergej Majboroda (Poly Haven) | https://polyhaven.com/a/evening_road_01_puresky | CC0 | Yes |
+| Brown Mud Leaves 01 texture set, 2k — `content/textures/ground/mud_leaves/` | Rob Tuytel (Poly Haven) | https://polyhaven.com/a/brown_mud_leaves_01 | CC0 | Yes |
+| Rock 07, Rock 09, Rock Face 01, Dead Quiver Trunk models, 1k — `content/models/props/` | Rico Cilliers / Dimitrios Savva (Poly Haven) | https://polyhaven.com/models | CC0 | Yes |
+| "Human - Male_" VRoid character — `content/models/statue_vroid.glb`, origin of the `human.glb` player body | Project owner (VRoid Studio) | Authored in VRoid Studio (output belongs to its creator, commercial use allowed) | Owner's asset | With the project only |
+| Cracked earth ground PBR set, 2k — `content/textures/ground/cracked_earth/` | Project-generated | StableMaterials (`gvecchio/StableMaterials`) + SDXL img2img upscale; full provenance in `content/textures/ground/cracked_earth/generation_manifest.json` | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL) — `Cleared` rows in the model ledger | With the project only |
+| Castilian Plateau Dusk HDRI, 2k — `content/textures/env/castilian_plateau_dusk_2k.hdr` | Project-generated | SDXL circular-x pano (`gen_pano_sdxl.py`) + `hdr_post.py` sun injection; full provenance in `castilian_plateau_dusk_2k.manifest.json` | CreativeML Open RAIL++-M (SDXL) — `Cleared` row in the model ledger | With the project only |
+| Iron candelabra shrine prop — `content/models/props/candelabra_shrine/` | Project-generated | SDXL concept + Hi3DGen geometry + Blender bake texturing via `gen_prop.py`; full provenance in `content/models/props/candelabra_shrine/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) — `Cleared` rows in the model ledger | With the project only |
+
+Notes:
+
+- **KayKit / Poly Haven models / VRoid**: placeholders retained until generated
+  replacements land. The source archives and their fetch/preprocess scripts were
+  removed 2026-07-20 under the no-asset-libraries ruling — recover from git history
+  if regeneration is ever needed.
+- **DamagedHelmet**: renderer test fixture only (PBR/IBL verification), never shipped
+  in game content.
+- **Castilian Plateau Dusk**: shippable now — the bake-off winner (Path 3,
+  `gen_pano_sdxl.py`) carries no license condition, unlike the sdxl_360
+  runner-up-path candidate.
+- **Candelabra shrine**: shippable now — no NC tool touched the production path
+  (strict ruling 2026-07-19 satisfied). Known-look caveat: thin members (posts,
+  scroll arms) render lighter pewter than the concept's dark iron — Strategy 1's
+  projection-bake ceiling on thin-member-dominated geometry (accepted per A3.12's
+  third-pass review); Strategy 2 (multiview ControlNet-depth retexture) is the named
+  escalation if B3's art review wants true near-black iron.
 
 ## AI pipeline models (governance ledger)
 
