@@ -108,7 +108,7 @@ def run_model(model, views, out_dir, subject, materials, seed):
             continue
         depth_png = out_dir / f"depth_{i}.png"
         input_name = f"bakeoff_{pt.sha256_file(depth_png)[:8]}_{i}.png"
-        shutil.copyfile(depth_png, pt.COMFY_INPUT_DIR / input_name)
+        shutil.copyfile(depth_png, comfy_run.COMFY_INPUT_DIR / input_name)
         wf = json.loads(json.dumps(template))
         for node in wf.values():
             inputs = node.get("inputs", {})
@@ -127,7 +127,7 @@ def run_model(model, views, out_dir, subject, materials, seed):
         if len(pngs) != 1:
             pt.fail(f"{model} view {i}: expected 1 PNG, got {len(pngs)}")
         shutil.copyfile(pngs[0]["saved_as"], gen)
-        (pt.COMFY_INPUT_DIR / input_name).unlink()
+        (comfy_run.COMFY_INPUT_DIR / input_name).unlink()
         timings.append(elapsed)
         print(f"  {model} view {i}: {elapsed:.1f}s")
     return timings
@@ -139,15 +139,11 @@ def main():
     views = render_depths(mesh, out_dir, n_views)
     print(f"depth: {len(views)} view(s) -> {out_dir}")
 
-    proc = pt.start_comfy()
     report = {}
-    try:
+    with comfy_run.server():
         for model in models:
             print(f"[{model}]")
             report[model] = run_model(model, views, out_dir, subject, materials, seed)
-    finally:
-        proc.kill()
-        proc.wait()
 
     (out_dir / "timings.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({m: round(sum(t) / len(t), 1) if t else None

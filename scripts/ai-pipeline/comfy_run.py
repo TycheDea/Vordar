@@ -2,13 +2,18 @@
 """Submit a ComfyUI API-format workflow, wait for it to finish, and pull its
 outputs plus a provenance manifest down to a local directory.
 
+run_workflow() (and the CLI) target an already-running server; pipeline
+stages that own the server wrap their calls in the server() contextmanager.
+
 Stdlib-only so it runs under either the ComfyUI-bundled embedded Python or a
 plain system Python.
 """
 import argparse
+import contextlib
 import json
 import random
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -17,6 +22,9 @@ import urllib.request
 from pathlib import Path
 
 COMFY_URL = "http://127.0.0.1:8188"
+COMFY_PYTHON = Path(r"C:\tools\ComfyUI\python_embeded\python.exe")
+COMFY_MAIN = Path(r"C:\tools\ComfyUI\ComfyUI\main.py")
+COMFY_INPUT_DIR = Path(r"C:\tools\ComfyUI\ComfyUI\input")
 DEFAULT_WAIT_TIMEOUT = 300.0
 SEED_KEY = re.compile(r"^(seed|noise_seed)$")
 MODEL_INPUT_KEY = re.compile(r"_name\d*$", re.IGNORECASE)
@@ -36,6 +44,40 @@ def http_json(method, path, payload=None):
             return json.loads(body)
         except json.JSONDecodeError:
             raise SystemExit(f"{method} {path} failed: HTTP {e.code}: {body}")
+
+
+def reachable():
+    try:
+        urllib.request.urlopen(f"{COMFY_URL}/system_stats", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+@contextlib.contextmanager
+def server():
+    """A headless ComfyUI server owned for the duration of the block. An
+    external server is refused, not reused: the caller's VRAM sequencing
+    (geometry must never run while ComfyUI is up) only holds for a server
+    this process controls."""
+    if reachable():
+        raise SystemExit("a ComfyUI server is already running -- this stage owns the "
+                         "server lifecycle (VRAM sequencing); stop the external one first")
+    proc = subprocess.Popen(
+        [str(COMFY_PYTHON), "-s", str(COMFY_MAIN), "--listen", "127.0.0.1", "--port", "8188"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.monotonic() + 120
+        while not reachable():
+            if proc.poll() is not None:
+                raise SystemExit(f"ComfyUI exited during startup (code {proc.returncode})")
+            if time.monotonic() >= deadline:
+                raise SystemExit("ComfyUI not ready after 120 s")
+            time.sleep(1)
+        yield
+    finally:
+        proc.kill()
+        proc.wait()
 
 
 def resolve_seeds(workflow):

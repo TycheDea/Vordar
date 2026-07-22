@@ -570,12 +570,12 @@ command:** one invocation is one candidate; a batch is the caller looping
 seeds across separate foreground invocations, never one script call for N
 candidates, so every command stays under the shell's timeout budget.
 **VRAM sequencing (forced by the 11.5 GiB Hi3DGen peak above): ComfyUI must
-never be up while a geometry stage runs.** `gen_prop.py` itself starts and
-stops no server — the caller generates every candidate's concept first with
-ComfyUI up, stops it, then runs geometry-onward for every candidate with the
-server down. `--texture-strategy multiview` is safe under this rule: its
-SDXL passes run behind `prop_texture.py`'s own server start/stop, strictly
-after the geometry stage, and hard-fail if a server is already up.
+never be up while a geometry stage runs.** Every ComfyUI stage owns its
+server lifecycle (`comfy_run.server()`): the concept stage and
+`--texture-strategy multiview`'s generation passes each start a headless
+server and stop it before returning, so the chain runs unattended and the
+rule holds by construction. An already-running external server is refused,
+not reused — the chain can't stop somebody else's server before geometry.
 
 ### Fixture
 

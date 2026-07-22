@@ -23,13 +23,13 @@ prop_texture's non-metal defaults, which are the character contract.
 Run:
   python scripts/ai-pipeline/gen_character.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--height M]
 
-ComfyUI server lifecycle is the CALLER's job for the concept stage only
-(gen_prop.py's convention): it must already be running before this script
-starts. Geometry (Hi3DGen) must never run while it's up (11.4-11.5 GiB
-peak, A3.4/A4.3-measured). The multiview texture stage starts/stops its own
-server strictly after geometry, so the VRAM rule holds. Rig, preprocess,
-bake, and review-render stages are CPU/offscreen-GPU only -- no VRAM
-sequencing concern.
+Every ComfyUI stage owns its server lifecycle (comfy_run.server(),
+gen_prop.py's convention): the concept stage and the multiview texture
+stage each start a headless server and stop it before returning, so the
+chain runs unattended and ComfyUI is never up while geometry (Hi3DGen,
+11.4-11.5 GiB peak, A3.4/A4.3-measured) runs. An external ComfyUI server
+is refused, not reused. Rig, preprocess, bake, and review-render stages
+are CPU/offscreen-GPU only -- no VRAM sequencing concern.
 """
 import argparse
 import hashlib
@@ -39,10 +39,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import comfy_run
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
-COMFY_RUN = SCRIPT_DIR / "comfy_run.py"
 CHAR_CONCEPT_WORKFLOW = SCRIPT_DIR / "workflows" / "char_concept.json"
 PROP_HI3DGEN = SCRIPT_DIR / "prop_hi3dgen.py"
 PROP_CLEANUP = SCRIPT_DIR / "prop_cleanup.py"
@@ -132,20 +133,18 @@ def stage_concept(cand_dir: Path, subject: str, seed: int, skip_concept: Path) -
         }
         print(f"concept: skip-concept -> copied {skip_concept} -> {concept_png}")
     else:
-        # A3.7 convention (char_concept.json ships the same {subject}
-        # placeholder): str-replace and submit a candidate-scoped copy
-        # (comfy_run.py has no prompt override CLI).
+        # A3.7 convention: char_concept.json ships the same {subject}
+        # placeholder as prop_concept.json.
         workflow = json.loads(CHAR_CONCEPT_WORKFLOW.read_text(encoding="utf-8").replace("{subject}", subject))
         for node in workflow.values():
             inputs = node.get("inputs", {})
             for key in inputs:
                 if key in ("seed", "noise_seed"):
                     inputs[key] = seed
-        workflow_copy = cand_dir / "concept_workflow.json"
-        workflow_copy.write_text(json.dumps(workflow, indent=2), encoding="utf-8")
 
         concept_raw = cand_dir / "concept_raw"
-        run([sys.executable, COMFY_RUN, workflow_copy, "--out", concept_raw])
+        with comfy_run.server():
+            manifest = comfy_run.run_workflow(workflow, concept_raw)
         pngs = sorted(concept_raw.glob("*.png"))
         if len(pngs) != 1:
             sys.exit(f"gen_character: concept stage produced {len(pngs)} PNG(s) in {concept_raw}, expected exactly 1")
@@ -153,8 +152,7 @@ def stage_concept(cand_dir: Path, subject: str, seed: int, skip_concept: Path) -
         meta = {
             "mode": "generated",
             "subject": subject,
-            "workflow_copy": workflow_copy.name,
-            "comfy_manifest": json.loads((concept_raw / "manifest.json").read_text(encoding="utf-8")),
+            "comfy_manifest": manifest,
         }
         print(f"concept: generated -> {concept_png}")
 

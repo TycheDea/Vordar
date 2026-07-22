@@ -40,12 +40,10 @@ import argparse
 import hashlib
 import json
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
 import traceback
-import urllib.request
 from math import cos, radians, sin
 from pathlib import Path
 
@@ -100,9 +98,6 @@ MV_OCCLUSION_EPS = 0.02  # meters; props are ~1.8 m tall (prop_cleanup)
 MV_EDGE_PAD_PX = 8  # the base bleeds background across the depth edge; padding
 # the object's colors outward keeps edge texels on-material without
 # shrinking thin members (erosion would erase a ~6 px scroll arm entirely)
-COMFY_PYTHON = Path(r"C:\tools\ComfyUI\python_embeded\python.exe")
-COMFY_MAIN = Path(r"C:\tools\ComfyUI\ComfyUI\main.py")
-COMFY_INPUT_DIR = Path(r"C:\tools\ComfyUI\ComfyUI\input")
 
 
 def fail(msg):
@@ -346,32 +341,6 @@ def render_depth_views(clean, hires, views, rig, work_dir):
     return depths
 
 
-def comfy_reachable():
-    try:
-        urllib.request.urlopen(f"{comfy_run.COMFY_URL}/system_stats", timeout=2)
-        return True
-    except Exception:
-        return False
-
-
-def start_comfy():
-    if comfy_reachable():
-        fail("a ComfyUI server is already running -- this stage owns the server "
-             "lifecycle (A3 VRAM sequencing); stop the external one first")
-    proc = subprocess.Popen(
-        [str(COMFY_PYTHON), "-s", str(COMFY_MAIN), "--listen", "127.0.0.1", "--port", "8188"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            fail(f"ComfyUI exited during startup (code {proc.returncode})")
-        if comfy_reachable():
-            return proc
-        time.sleep(1)
-    proc.kill()
-    fail("ComfyUI not ready after 120 s")
-
-
 def generate_views(views, work_dir, subject, seed):
     """One ControlNet-depth pass per view -> <work_dir>/view_<i>/gen.png.
     Views whose gen.png already exists are skipped, so a killed run resumes.
@@ -379,12 +348,11 @@ def generate_views(views, work_dir, subject, seed):
     template = json.loads(MV_WORKFLOW.read_text(encoding="utf-8"))
     missing = [i for i in range(len(views)) if not (work_dir / f"view_{i}" / "gen.png").exists()]
     if missing:
-        proc = start_comfy()
-        try:
+        with comfy_run.server():
             for i in missing:
                 depth_png = work_dir / f"depth_{i}.png"
                 input_name = f"vordar_mv_{sha256_file(depth_png)[:8]}_{i}.png"
-                shutil.copyfile(depth_png, COMFY_INPUT_DIR / input_name)
+                shutil.copyfile(depth_png, comfy_run.COMFY_INPUT_DIR / input_name)
                 wf = json.loads(json.dumps(template))
                 for node in wf.values():
                     inputs = node.get("inputs", {})
@@ -401,10 +369,7 @@ def generate_views(views, work_dir, subject, seed):
                 if len(pngs) != 1:
                     fail(f"view {i}: expected exactly 1 PNG output, got {len(pngs)}")
                 shutil.copyfile(pngs[0]["saved_as"], view_dir / "gen.png")
-                (COMFY_INPUT_DIR / input_name).unlink()
-        finally:
-            proc.kill()
-            proc.wait()
+                (comfy_run.COMFY_INPUT_DIR / input_name).unlink()
 
     metas = []
     for i, v in enumerate(views):
