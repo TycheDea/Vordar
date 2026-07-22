@@ -673,3 +673,37 @@ Mixamo end bones trimmed, rig-quality gate, clips/height/export). The
 round-trip through their tokenizer drops non-deforming leaf bones
 variably and quantizes joint positions (~5 cm at human scale), which is
 why finish matches joints structurally rather than by nearest position.
+
+### MPFB2 (parametric CC0 body — `char_mpfb.py`, `--mpfb` mode)
+
+Install location: `C:\tools\MPFB2\` — `makehumancommunity/mpfb2` 2.0.17
+(nightly `mpfb2-20260720.zip`; code GPLv3, bundled assets CC0 1.0 —
+license verdicts in `content/source/CREDITS.md`). Installs as a Blender
+5.2 **extension**, not the legacy addon path — no separate venv,
+CPU-only:
+
+```python
+bpy.ops.extensions.package_install_files(
+    filepath="C:/tools/MPFB2/mpfb2-20260720.zip",
+    repo="user_default", enable_on_install=True)
+bpy.ops.wm.save_userpref()
+```
+
+then the two CC0 asset packs the fixture body uses:
+
+```python
+bpy.ops.mpfb.load_pack(filepath="<path>/makehuman_system_assets_cc0.zip")
+bpy.ops.mpfb.load_pack(filepath="<path>/suits02_cc0.zip")
+```
+
+Module import name is `bl_ext.user_default.mpfb` — a bare `import mpfb`
+fails; scripts resolve the package by scanning `sys.modules` for a name
+ending in `.mpfb` (`char_mpfb.py`'s `resolve_mpfb()`).
+
+`gen_character.py --mpfb --out <dir>` builds the parametric MPFB2 monk
+(CC0 body + donitz monk robe/hood/eyes, MPFB's artist-authored mixamorig
+weights bound to the transplanted canonical armature by `char_mpfb.py` —
+no concept/geometry/texture/SkinTokens stages, no subject/seed, CPU-only
+~10 s) into `<out>/cand_mpfb/`, then the shared preprocess (`--max-dim
+1024` — the robe's 4096² sources exceed the 16 MB model cap at 2048) /
+DDS bake / turntable review stages.

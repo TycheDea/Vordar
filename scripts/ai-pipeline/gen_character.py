@@ -52,6 +52,7 @@ PROP_CLEANUP = SCRIPT_DIR / "prop_cleanup.py"
 PROP_TEXTURE = SCRIPT_DIR / "prop_texture.py"
 CHAR_RIG = SCRIPT_DIR / "char_rig.py"
 CHAR_SKIN = SCRIPT_DIR / "char_skin.py"
+CHAR_MPFB = SCRIPT_DIR / "char_mpfb.py"
 PREPROCESS_PROP_MJS = SCRIPT_DIR / "preprocess_prop.mjs"
 BAKE_TEXTURES_MJS = REPO_ROOT / "scripts" / "asset-pipeline" / "bake_textures.mjs"
 
@@ -73,6 +74,9 @@ TRI_BUDGET = 30000
 # VQ-B2's character file cap (docs/visual-quality.md), vs the 8 MB prop
 # default preprocess_prop.mjs otherwise applies.
 MAX_BYTES = 16 * 1024 * 1024
+# At 2048 the packed final.glb hits 18.97 MB, over the MAX_BYTES cap (VQ-B2);
+# 1024 lands at 7.1 MB despite the MPFB robe assets shipping 4096x4096 sources.
+MPFB_MAX_DIM = 1024
 
 TURNTABLE_ANGLES = 8
 TURNTABLE_SIZE = "512x512"
@@ -285,7 +289,22 @@ def stage_rig(cand_dir: Path, height: float, seed: int) -> dict:
     return meta
 
 
-def stage_preprocess_bake(cand_dir: Path) -> dict:
+def stage_mpfb(cand_dir: Path, height: float) -> dict:
+    rigged_glb = cand_dir / "rigged.glb"
+    meta_path = cand_dir / "rig_stats.json"
+    if rigged_glb.exists():
+        print(f"mpfb: skip (exists) -> {rigged_glb}")
+    else:
+        out = run_capture([BLENDER, "--background", "--python", CHAR_MPFB, "--",
+                           rigged_glb, "--height", height])
+        meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
+        print(f"mpfb: generated -> {rigged_glb}")
+    meta = read_or_note(meta_path)
+    meta["rigged_glb_sha256"] = sha256_file(rigged_glb)
+    return meta
+
+
+def stage_preprocess_bake(cand_dir: Path, max_dim: int = None) -> dict:
     rigged_glb = cand_dir / "rigged.glb"
     final_glb = cand_dir / "final.glb"
     bake_manifest = cand_dir / "final.textures" / "manifest.json"
@@ -295,7 +314,10 @@ def stage_preprocess_bake(cand_dir: Path) -> dict:
         print(f"preprocess: skip (exists) -> {final_glb}")
     else:
         preprocess_stats = {"rigged_glb_bytes": rigged_glb.stat().st_size}
-        run(["node", PREPROCESS_PROP_MJS, rigged_glb, final_glb, "--max-bytes", MAX_BYTES])
+        cmd = ["node", PREPROCESS_PROP_MJS, rigged_glb, final_glb, "--max-bytes", MAX_BYTES]
+        if max_dim is not None:
+            cmd += ["--max-dim", max_dim]
+        run(cmd)
         preprocess_stats["final_glb_bytes"] = final_glb.stat().st_size
         meta_path.write_text(json.dumps(preprocess_stats, indent=2), encoding="utf-8")
         print(f"preprocess: generated -> {final_glb}")
@@ -354,14 +376,50 @@ def main():
     sys.stdout.reconfigure(line_buffering=True)
 
     parser = argparse.ArgumentParser(description="Generate one character candidate through the full A4 chain.")
-    parser.add_argument("subject", help="Character description substituted into char_concept.json's {subject}")
-    parser.add_argument("--out", type=Path, required=True, help="Batch directory; the candidate lands in <out>/cand_<seed>/")
-    parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("subject", nargs="?", default=None,
+                        help="Character description substituted into char_concept.json's {subject} (omit with --mpfb)")
+    parser.add_argument("--out", type=Path, required=True,
+                        help="Batch directory; the candidate lands in <out>/cand_<seed>/ (<out>/cand_mpfb/ with --mpfb)")
+    parser.add_argument("--seed", type=int, default=None, help="Required unless --mpfb")
     parser.add_argument("--skip-concept", type=Path, default=None, metavar="IMAGE",
                         help="Bypass concept generation with a provided image (re-roll geometry without re-rolling the concept)")
     parser.add_argument("--height", type=float, default=TARGET_HEIGHT,
                         help="Target character height in metres, applied to both the cleanup and rig stages")
+    parser.add_argument("--mpfb", action="store_true",
+                        help="Parametric MPFB2 body instead of the generative chain (char_mpfb.py); no subject/seed")
     args = parser.parse_args()
+
+    if args.mpfb:
+        if args.subject is not None:
+            parser.error("--mpfb takes no subject: the parametric body has no prompt")
+        if args.seed is not None:
+            parser.error("--mpfb takes no --seed: the parametric body has no seed")
+        if args.skip_concept is not None:
+            parser.error("--mpfb takes no --skip-concept: the parametric body has no concept stage")
+
+        cand_dir = args.out / "cand_mpfb"
+        cand_dir.mkdir(parents=True, exist_ok=True)
+
+        rig = stage_mpfb(cand_dir, args.height)
+        preprocess_bake = stage_preprocess_bake(cand_dir, max_dim=MPFB_MAX_DIM)  # final.glb, needed by the review stage below
+        review = stage_review(cand_dir)
+        manifest = {
+            "mode": "mpfb",
+            "height": args.height,
+            "candidate_dir": str(cand_dir),
+            "rig": rig,
+            **preprocess_bake,
+            "review": review,
+        }
+        manifest_path = cand_dir / "generation_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"OK: wrote {manifest_path}")
+        return
+
+    if args.subject is None:
+        parser.error("the following arguments are required: subject")
+    if args.seed is None:
+        parser.error("the following arguments are required: --seed")
 
     cand_dir = args.out / f"cand_{args.seed}"
     cand_dir.mkdir(parents=True, exist_ok=True)
