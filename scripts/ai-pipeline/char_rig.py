@@ -54,24 +54,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "asset-pipeline"))
 import mixamo_rig  # noqa: E402
 
-BONE_PREFIX = "mixamorig:"
 # Landmark bands are cut at ±5% of skeleton height around a joint — wide
 # enough to always catch torso/leg cross-sections on a full-body mesh,
 # narrow enough that a hips band never reaches the shoulders.
 BAND_FRACTION = 0.05
-# A vertex whose dominant joint sits further than this from it (metres,
-# point-to-bone-segment) is counted as weight bleed: 30 cm exceeds any
-# plausible limb radius at humanoid scale.
-BLEED_DISTANCE = 0.30
-WEIGHTLESS_LIMIT_FRACTION = 0.005
-# The Mixamo end bones: no runtime references (only the crown landmark
-# below reads HeadTop_End, before the trim) — finish deletes them for
-# good, folding any predicted weights into their parents.
-# The socket bones (handslot.r/l, head) are also dropped leaves but ARE
-# runtime-referenced (weapons.rs, vfx.rs, content_lint.rs), so they are
-# re-added by mixamo_rig.add_socket_bones, never trimmed.
-END_BONES = tuple(BONE_PREFIX + n
-                  for n in ("HeadTop_End", "LeftToe_End", "RightToe_End"))
 # Joint positions round-trip SkinTokens' 256-level quantizer with up to
 # ~5 cm error at human scale, and a chain-tip joint absorbs its dropped
 # leaf, landing anywhere along the merged segment (their Head sits at our
@@ -94,7 +80,8 @@ def vert_coords(me):
 
 
 def joint_head(armature, name):
-    return armature.matrix_world @ armature.data.bones[BONE_PREFIX + name].head_local
+    return armature.matrix_world @ \
+        armature.data.bones[mixamo_rig.BONE_PREFIX + name].head_local
 
 
 def select_only(objs, active):
@@ -102,44 +89,6 @@ def select_only(objs, active):
     for o in objs:
         o.select_set(True)
     bpy.context.view_layer.objects.active = active
-
-
-def dist_point_segment(p, a, b) -> float:
-    ab = b - a
-    denom = ab.length_squared
-    t = 0.0 if denom == 0.0 else max(0.0, min(1.0, (p - a).dot(ab) / denom))
-    return (p - (a + ab * t)).length
-
-
-def deform_segments(armature):
-    mw = armature.matrix_world
-    return {b.name: (mw @ b.head_local, mw @ b.tail_local)
-            for b in armature.data.bones if b.use_deform}
-
-
-def weight_metrics(mesh_obj, armature):
-    """(weightless count, bleed count): verts with no deform-bone weight,
-    and verts whose dominant joint is over BLEED_DISTANCE away."""
-    segments = deform_segments(armature)
-    group_bone = {g.index: g.name for g in mesh_obj.vertex_groups
-                  if g.name in segments}
-    mesh_mw = mesh_obj.matrix_world
-    weightless = 0
-    bleed = 0
-    for v in mesh_obj.data.vertices:
-        total, best_w, best_g = 0.0, 0.0, None
-        for vg in v.groups:
-            if vg.group in group_bone:
-                total += vg.weight
-                if vg.weight > best_w:
-                    best_w, best_g = vg.weight, vg.group
-        if total <= 1e-8:
-            weightless += 1
-            continue
-        head, tail = segments[group_bone[best_g]]
-        if dist_point_segment(mesh_mw @ v.co, head, tail) > BLEED_DISTANCE:
-            bleed += 1
-    return weightless, bleed
 
 
 def build_scene(textured_glb, character_fbx):
@@ -264,13 +213,13 @@ def rigid_bind(mesh_obj, armature):
     exporter writes a skin only for a weighted mesh, and SkinTokens'
     validated input shape is a skinned glb). Prediction replaces these
     weights wholesale."""
-    segments = deform_segments(armature)
+    segments = mixamo_rig.deform_segments(armature)
     groups = {name: mesh_obj.vertex_groups.new(name=name) for name in segments}
     mesh_mw = mesh_obj.matrix_world
     for v in mesh_obj.data.vertices:
         p = mesh_mw @ v.co
         name = min(segments,
-                   key=lambda n: dist_point_segment(p, *segments[n]))
+                   key=lambda n: mixamo_rig.dist_point_segment(p, *segments[n]))
         groups[name].add([v.index], 1.0, "REPLACE")
     mod = mesh_obj.modifiers.new("Armature", "ARMATURE")
     mod.object = armature
@@ -311,9 +260,10 @@ def match_joints(source_arm, canon_arm):
                        (head(source_arm, s) - head(canon_arm, c)).length
                        for s, c in zip(src_bones, perm)))
         for s, c in zip(src_bones, best):
-            dist = dist_point_segment(head(source_arm, s),
-                                      canon_arm.matrix_world @ c.head_local,
-                                      canon_arm.matrix_world @ c.tail_local)
+            dist = mixamo_rig.dist_point_segment(
+                head(source_arm, s),
+                canon_arm.matrix_world @ c.head_local,
+                canon_arm.matrix_world @ c.tail_local)
             if dist > MATCH_EPSILON:
                 fail(f"joint match gate: {s.name} assigned to {c.name} at "
                      f"{dist:.3f} m (limit {MATCH_EPSILON}) — candidate is "
@@ -332,10 +282,10 @@ def match_joints(source_arm, canon_arm):
     pair_level(src_roots, canon_roots, "root level")
 
     dropped = sorted(unmatched)
-    if set(dropped) - set(END_BONES):
+    extra = set(dropped) - set(mixamo_rig.END_BONES)
+    if extra:
         fail(f"joint match gate: skeleton round-trip dropped deforming "
-             f"bone(s) {sorted(set(dropped) - set(END_BONES))} — candidate "
-             f"is decision-gate data")
+             f"bone(s) {sorted(extra)} — candidate is decision-gate data")
     return mapping, max_dist, dropped
 
 
@@ -392,31 +342,6 @@ def adopt_weights(mesh_obj, armature, skinned_glb):
     }
 
 
-def trim_end_bones(armature, mesh_obj):
-    """Delete the Mixamo end bones, folding any weights SkinTokens put on
-    them into their parents first — whether the round-trip drops the ends
-    or keeps and weights them varies per mesh (both observed), and an
-    orphaned vertex group would silently shrink its verts (the armature
-    modifier ignores groups without a bone, leaving weight sums < 1)."""
-    parents = {name: armature.data.bones[name].parent.name
-               for name in END_BONES}
-    for name, parent in parents.items():
-        group = mesh_obj.vertex_groups.get(name)
-        if group is not None:
-            parent_group = mesh_obj.vertex_groups.get(parent) \
-                or mesh_obj.vertex_groups.new(name=parent)
-            for v in mesh_obj.data.vertices:
-                for vg in v.groups:
-                    if vg.group == group.index and vg.weight > 0.0:
-                        parent_group.add([v.index], vg.weight, "ADD")
-            mesh_obj.vertex_groups.remove(group)
-    bpy.context.view_layer.objects.active = armature
-    bpy.ops.object.mode_set(mode="EDIT")
-    for name in END_BONES:
-        armature.data.edit_bones.remove(armature.data.edit_bones[name])
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-
 def cmd_fit(args):
     armature, mesh_obj, stats = build_scene(args.textured_glb, args.character_fbx)
     rigid_bind(mesh_obj, armature)
@@ -429,21 +354,21 @@ def cmd_finish(args):
     armature, mesh_obj, stats = build_scene(args.textured_glb, args.character_fbx)
 
     stats.update(adopt_weights(mesh_obj, armature, args.skinned_glb))
-    trim_end_bones(armature, mesh_obj)
+    mixamo_rig.trim_end_bones(armature, mesh_obj)
 
     # ---- rig-quality gate ----
     vert_count = len(mesh_obj.data.vertices)
-    weightless, bleed = weight_metrics(mesh_obj, armature)
+    weightless, bleed = mixamo_rig.weight_metrics(mesh_obj, armature)
     stats.update({
         "weightless_verts": weightless,
         "weightless_fraction": weightless / vert_count,
         "bleed_verts_over_30cm": bleed,
     })
-    if weightless > WEIGHTLESS_LIMIT_FRACTION * vert_count:
+    if weightless > mixamo_rig.WEIGHTLESS_LIMIT_FRACTION * vert_count:
         print(json.dumps(stats))
         fail(f"rig-quality gate: weightless {weightless}/{vert_count} "
              f"({weightless / vert_count:.2%}, limit "
-             f"{WEIGHTLESS_LIMIT_FRACTION:.2%}) — candidate is "
+             f"{mixamo_rig.WEIGHTLESS_LIMIT_FRACTION:.2%}) — candidate is "
              f"decision-gate data")
 
     # ---- shared machinery: clips, bake, export ----

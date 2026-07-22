@@ -17,6 +17,81 @@ FLOOR_TOP = -0.5
 FINGERS = ("Thumb", "Index", "Middle", "Ring", "Pinky")
 CLIP_RENAMES = {"jump": "leap"}
 CLIP_SKIP = {"tpose"}
+BONE_PREFIX = "mixamorig:"
+# A vertex whose dominant joint sits further than this from it (metres,
+# point-to-bone-segment) is counted as weight bleed: 30 cm exceeds any
+# plausible limb radius at humanoid scale.
+BLEED_DISTANCE = 0.30
+WEIGHTLESS_LIMIT_FRACTION = 0.005
+# The Mixamo end bones: no runtime references — callers delete them for
+# good via trim_end_bones, folding any weights into their parents.
+# The socket bones (handslot.r/l, head) are also non-deforming leaves but
+# ARE runtime-referenced (weapons.rs, vfx.rs, content_lint.rs), so they
+# are re-added by add_socket_bones, never trimmed.
+END_BONES = tuple(BONE_PREFIX + n
+                  for n in ("HeadTop_End", "LeftToe_End", "RightToe_End"))
+
+
+def dist_point_segment(p, a, b) -> float:
+    ab = b - a
+    denom = ab.length_squared
+    t = 0.0 if denom == 0.0 else max(0.0, min(1.0, (p - a).dot(ab) / denom))
+    return (p - (a + ab * t)).length
+
+
+def deform_segments(armature):
+    mw = armature.matrix_world
+    return {b.name: (mw @ b.head_local, mw @ b.tail_local)
+            for b in armature.data.bones if b.use_deform}
+
+
+def weight_metrics(mesh_obj, armature):
+    """(weightless count, bleed count): verts with no deform-bone weight,
+    and verts whose dominant joint is over BLEED_DISTANCE away."""
+    segments = deform_segments(armature)
+    group_bone = {g.index: g.name for g in mesh_obj.vertex_groups
+                  if g.name in segments}
+    mesh_mw = mesh_obj.matrix_world
+    weightless = 0
+    bleed = 0
+    for v in mesh_obj.data.vertices:
+        total, best_w, best_g = 0.0, 0.0, None
+        for vg in v.groups:
+            if vg.group in group_bone:
+                total += vg.weight
+                if vg.weight > best_w:
+                    best_w, best_g = vg.weight, vg.group
+        if total <= 1e-8:
+            weightless += 1
+            continue
+        head, tail = segments[group_bone[best_g]]
+        if dist_point_segment(mesh_mw @ v.co, head, tail) > BLEED_DISTANCE:
+            bleed += 1
+    return weightless, bleed
+
+
+def trim_end_bones(armature, mesh_obj):
+    """Delete the Mixamo end bones, folding any weights on them into their
+    parents first — an orphaned vertex group would silently shrink its
+    verts (the armature modifier ignores groups without a bone, leaving
+    weight sums < 1)."""
+    parents = {name: armature.data.bones[name].parent.name
+               for name in END_BONES}
+    for name, parent in parents.items():
+        group = mesh_obj.vertex_groups.get(name)
+        if group is not None:
+            parent_group = mesh_obj.vertex_groups.get(parent) \
+                or mesh_obj.vertex_groups.new(name=parent)
+            for v in mesh_obj.data.vertices:
+                for vg in v.groups:
+                    if vg.group == group.index and vg.weight > 0.0:
+                        parent_group.add([v.index], vg.weight, "ADD")
+            mesh_obj.vertex_groups.remove(group)
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    for name in END_BONES:
+        armature.data.edit_bones.remove(armature.data.edit_bones[name])
+    bpy.ops.object.mode_set(mode="OBJECT")
 
 
 def new_scene():
