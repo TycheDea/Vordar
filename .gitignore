@@ -28,6 +28,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Third-party repos cloned locally for study (not ours, never committed)
+/reference/
+
 # Claude Code / AI config + local design notes & task lists (kept local).
 # Only Claude-produced audit/plan/rework reports (docs/reviews/) are versioned.
 .claude/
