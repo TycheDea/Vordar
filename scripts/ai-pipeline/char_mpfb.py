@@ -345,15 +345,21 @@ def main():
     mixamo_rig.add_socket_bones(canon_arm)
     mixamo_rig.trim_end_bones(canon_arm, mesh_obj)
 
-    # Character MR contract: constant dielectric, like every shipped race.
+    # Character MR contract: constant dielectric AND opaque, like every
+    # shipped race. MPFB's MakeSkin node trees carry a transparency chain
+    # + blended surface method, which the glTF exporter turns into
+    # alphaMode BLEND — the engine then renders the whole character
+    # translucent (robe see-through, eyes visible through the hood).
     for slot in mesh_obj.material_slots:
         mat = slot.material
         if not mat or not mat.node_tree:
             continue
+        mat.surface_render_method = "DITHERED"
         for node in mat.node_tree.nodes:
             if node.type != "BSDF_PRINCIPLED":
                 continue
-            for input_name, value in (("Metallic", 0.0), ("Roughness", 0.8)):
+            for input_name, value in (("Metallic", 0.0), ("Roughness", 0.8),
+                                      ("Alpha", 1.0)):
                 socket = node.inputs[input_name]
                 for link in list(socket.links):
                     mat.node_tree.links.remove(link)
