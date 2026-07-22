@@ -5,7 +5,8 @@
 // Run: node preprocess_prop.mjs <textured.glb> <final.glb> [--max-bytes N] [--max-dim N]
 import { NodeIO } from '@gltf-transform/core';
 import { prune, dedup, textureCompress } from '@gltf-transform/functions';
-import { statSync } from 'node:fs';
+import { statSync, renameSync, rmSync } from 'node:fs';
+import { dirname, basename } from 'node:path';
 
 const DEFAULT_MAX_TEXTURE_DIM = 1024;
 const DEFAULT_MAX_OUT_BYTES = 8 * 1024 * 1024;
@@ -44,11 +45,19 @@ if (oversized) {
   await doc.transform(textureCompress({ resize: [maxTextureDim, maxTextureDim] }));
 }
 
-await io.write(outPath, doc);
+// Write beside the final path and rename in only after the size assert
+// passes, so callers gating stage-resume on outPath's existence never see
+// an oversized reject left behind by a failed run. The temp name keeps the
+// .glb suffix: NodeIO.write picks binary-GLB vs. split-glTF serialization
+// by regexing the write path's extension, not the Document contents.
+const tmpOutPath = `${dirname(outPath)}/.tmp-${basename(outPath)}`;
+await io.write(tmpOutPath, doc);
 
-const size = statSync(outPath).size;
+const size = statSync(tmpOutPath).size;
 if (size >= maxOutBytes) {
+  rmSync(tmpOutPath);
   console.error(`ASSERT FAILED: ${outPath} is ${size} bytes, exceeds ${maxOutBytes}`);
   process.exit(1);
 }
+renameSync(tmpOutPath, outPath);
 console.log(`${outPath} ${(size / 1e6).toFixed(2)}MB`);
