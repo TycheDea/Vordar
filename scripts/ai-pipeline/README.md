@@ -588,3 +588,37 @@ concept's weathered dark iron — a characterized ceiling of the projection
 bake on thin-member-dominated props, ruled tolerable at game camera distance
 for this fixture; Strategy 2 (SDXL multi-view retexture) is the evidenced
 escalation if a later art review rejects it.
+
+## Character auto-skinning (SkinTokens, Phase A4)
+
+Install location: `C:\tools\SkinTokens\SkinTokens` —
+`VAST-AI-Research/SkinTokens`, UniRig's successor (code MIT; weights MIT at
+`VAST-AI/SkinTokens` on HF, ~1.6 GB GRPO-refined checkpoint
+`experiments/articulation_xl_quantization_256_token_4/grpo_1400.ckpt`,
+fetched by the repo's `download.py`). Venv: `C:\tools\SkinTokens\venv`
+(Python 3.11, torch 2.7.0+cu128, prebuilt flash-attn 2.8.3 cu128 wheel —
+flash-attn is hardcoded in their model code, no config escape — plus
+`scipy`, which their `requirements.txt` omits).
+
+### `char_skin.py` — skin-only weight prediction (SkinTokens venv)
+
+```
+C:\tools\SkinTokens\venv\Scripts\python.exe scripts\ai-pipeline\char_skin.py <fit.glb> --out <skinned.glb> [--seed N]
+```
+
+Run with `cwd=C:\tools\SkinTokens\SkinTokens` (checkpoint path and their
+`bpy_server.py` resolve from there). Predicts skin weights for fit.glb's
+mesh over the canonical Mixamo-standard skeleton it carries and transfers
+them onto that same textured mesh. SkinTokens ships no seed control
+(sampling generation), so the wrapper seeds torch/numpy/random itself and
+records the seed in its JSON stats line. 3.7 GiB peak VRAM measured
+(`num_beams` fixed at 4, the validated 12 GB setting).
+
+This is step 2 of `gen_character.py`'s rig stage: `char_rig.py fit`
+(skeleton transplant + mesh fit + rigid bind → `fit.glb`) → `char_skin.py`
+(→ `skinned.glb`, generic re-emitted bone names) → `char_rig.py finish`
+(canonical names recovered by lockstep hierarchy descent, weights adopted,
+Mixamo end bones trimmed, rig-quality gate, clips/height/export). The
+round-trip through their tokenizer drops non-deforming leaf bones
+variably and quantizes joint positions (~5 cm at human scale), which is
+why finish matches joints structurally rather than by nearest position.

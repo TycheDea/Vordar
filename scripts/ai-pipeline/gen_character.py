@@ -28,8 +28,10 @@ gen_prop.py's convention): the concept stage and the multiview texture
 stage each start a headless server and stop it before returning, so the
 chain runs unattended and ComfyUI is never up while geometry (Hi3DGen,
 11.4-11.5 GiB peak, A3.4/A4.3-measured) runs. An external ComfyUI server
-is refused, not reused. Rig, preprocess, bake, and review-render stages
-are CPU/offscreen-GPU only -- no VRAM sequencing concern.
+is refused, not reused. The rig stage's SkinTokens skin step also uses
+the GPU (3.7 GiB peak, A1b-measured) but never overlaps ComfyUI or
+Hi3DGen by construction; preprocess, bake, and review-render stages are
+CPU/offscreen-GPU only.
 """
 import argparse
 import hashlib
@@ -49,11 +51,14 @@ PROP_HI3DGEN = SCRIPT_DIR / "prop_hi3dgen.py"
 PROP_CLEANUP = SCRIPT_DIR / "prop_cleanup.py"
 PROP_TEXTURE = SCRIPT_DIR / "prop_texture.py"
 CHAR_RIG = SCRIPT_DIR / "char_rig.py"
+CHAR_SKIN = SCRIPT_DIR / "char_skin.py"
 PREPROCESS_PROP_MJS = SCRIPT_DIR / "preprocess_prop.mjs"
 BAKE_TEXTURES_MJS = REPO_ROOT / "scripts" / "asset-pipeline" / "bake_textures.mjs"
 
 HI3DGEN_PYTHON = Path(r"C:\tools\Hi3DGen\venv\Scripts\python.exe")
 HI3DGEN_REPO = Path(r"C:\tools\Hi3DGen\Hi3DGen")
+SKINTOKENS_PYTHON = Path(r"C:\tools\SkinTokens\venv\Scripts\python.exe")
+SKINTOKENS_REPO = Path(r"C:\tools\SkinTokens\SkinTokens")
 BLENDER = Path(r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
 
 MIXAMO_DIR = REPO_ROOT / "content" / "source" / "characters" / "mixamo"
@@ -225,15 +230,36 @@ def stage_texture(cand_dir: Path, subject: str, seed: int) -> dict:
     return meta
 
 
-def stage_rig(cand_dir: Path, height: float) -> dict:
+def stage_rig(cand_dir: Path, height: float, seed: int) -> dict:
     textured_glb = cand_dir / "textured.glb"
+    fit_glb = cand_dir / "fit.glb"
+    skinned_glb = cand_dir / "skinned.glb"
     rigged_glb = cand_dir / "rigged.glb"
     meta_path = cand_dir / "rig_stats.json"
+    skin_meta_path = cand_dir / "skin_stats.json"
     if rigged_glb.exists():
         print(f"rig: skip (exists) -> {rigged_glb}")
     else:
+        if fit_glb.exists():
+            print(f"rig(fit): skip (exists) -> {fit_glb}")
+        else:
+            run([BLENDER, "--background", "--python", CHAR_RIG, "--",
+                 "fit", textured_glb, CHARACTER_FBX, fit_glb])
+            print(f"rig(fit): generated -> {fit_glb}")
+
+        if skinned_glb.exists():
+            print(f"rig(skin): skip (exists) -> {skinned_glb}")
+        else:
+            # Absolute paths since the subprocess runs with cwd=SKINTOKENS_REPO
+            out = run_capture([SKINTOKENS_PYTHON, CHAR_SKIN, fit_glb.resolve(),
+                               "--out", skinned_glb.resolve(), "--seed", seed],
+                              cwd=SKINTOKENS_REPO)
+            skin_meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
+            print(f"rig(skin): generated -> {skinned_glb}")
+
         cmd = [BLENDER, "--background", "--python", CHAR_RIG, "--",
-               textured_glb, CHARACTER_FBX, CLIPS_DIR, rigged_glb, "--height", height]
+               "finish", textured_glb, CHARACTER_FBX, skinned_glb, CLIPS_DIR, rigged_glb,
+               "--height", height]
         proc = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
         sys.stdout.write(proc.stdout)
@@ -244,6 +270,7 @@ def stage_rig(cand_dir: Path, height: float) -> dict:
             if line.startswith("{"):
                 stats = json.loads(line)
         if stats is not None:
+            stats["skin"] = read_or_note(skin_meta_path)
             meta_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
         if proc.returncode != 0:
             # A rig-gate failure is a recorded candidate outcome (A4.4), not
@@ -343,7 +370,7 @@ def main():
     geometry = stage_geometry(cand_dir, args.seed)
     cleanup = stage_cleanup(cand_dir, args.height)
     texture = stage_texture(cand_dir, args.subject, args.seed)
-    rig = stage_rig(cand_dir, args.height)
+    rig = stage_rig(cand_dir, args.height, args.seed)
     preprocess_bake = stage_preprocess_bake(cand_dir)  # final.glb, needed by the review stage below
     review = stage_review(cand_dir)
 

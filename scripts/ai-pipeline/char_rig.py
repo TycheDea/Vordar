@@ -1,5 +1,12 @@
-# Blender-headless: transplant the canonical Mixamo skeleton onto a
-# generated character mesh -> one engine-ready .glb (Phase A4.4).
+# Blender-headless halves of the character rig stage (Phase A4.4), on
+# either side of the SkinTokens skin prediction (char_skin.py):
+#
+#   fit     transplant the canonical Mixamo skeleton, fit the generated
+#           mesh into its space, prune fingers, add socket bones,
+#           rigid-bind -> the SkinTokens handoff glb
+#   finish  rebuild the same scene, adopt SkinTokens' predicted weights,
+#           trim the Mixamo end bones, rig-quality gate, clips, height
+#           bake -> one engine-ready glb
 #
 #   - the Character.fbx armature is kept EXACTLY as imported (units
 #     invariant: the engine's weapon-socket path bakes the FBX cm scale,
@@ -10,32 +17,35 @@
 #     openpose conditioning lock makes this near-rigid, and the stats
 #     record the shoulder-band span residual as A4.11 decision data if it
 #     wasn't
-#   - skin weights come from Blender's automatic weights (bone heat),
-#     always solved on a seam-welded copy of the mesh: the render mesh is
-#     vertex-split along every UV seam and bone heat needs the connected
-#     surface (a no-op weld for already-connected meshes). Weights are
-#     copied back by nearest vertex — coincident positions, so the copy is
-#     exact; shipped geometry is untouched. Rig-quality gate: weightless
-#     verts > 0.5%, or a bone-heat solver error, is a structural failure
-#     -> exit non-zero WITH the numbers (a failed candidate is A4.11
-#     decision-gate data, never silently patched)
+#   - finish rebuilds the scene from the same inputs instead of importing
+#     fit.glb: the fit math is deterministic, and a glTF round-trip of the
+#     armature object transform would break the socket-scale invariant
+#     above
+#   - SkinTokens re-emits generic bone names and drops non-deforming leaf
+#     bones; the skeleton is ours, so canonical names are recovered by
+#     descending both hierarchies in lockstep (min-total-distance sibling
+#     assignment), and only END_BONES may go unmatched. Rig-quality
+#     gate: a failed match, a round-trip-dropped deforming bone, or
+#     weightless verts > 0.5% is a structural failure -> exit non-zero
+#     WITH the numbers (a failed candidate is A4.11 decision-gate data,
+#     never silently patched)
 #   - finger prune, socket bones, clip stash, height/ground bake, and glb
 #     export settings are mixamo_rig.py, shared with mixamo_to_glb.py
-#   - prints one JSON stats line (the only '{'-prefixed stdout line) for
-#     the chained generation manifest
+#   - each subcommand prints one JSON stats line (the only '{'-prefixed
+#     stdout line) for the chained generation manifest
 #
 # Usage: blender --background --python char_rig.py -- \
-#            <textured.glb> <Character.fbx> <clips_dir> <out.glb> [--height M]
+#            fit <textured.glb> <Character.fbx> <fit.glb>
+#        blender --background --python char_rig.py -- \
+#            finish <textured.glb> <Character.fbx> <skinned.glb> <clips_dir> <out.glb> [--height M]
 
 import argparse
 import json
-import os
 import sys
-import tempfile
 import traceback
+from itertools import permutations
 from pathlib import Path
 
-import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix
@@ -54,38 +64,27 @@ BAND_FRACTION = 0.05
 # plausible limb radius at humanoid scale.
 BLEED_DISTANCE = 0.30
 WEIGHTLESS_LIMIT_FRACTION = 0.005
-SOLVER_ERROR_TEXT = "failed to find solution"
+# The Mixamo end bones: no runtime references (only the crown landmark
+# below reads HeadTop_End, before the trim) — finish deletes them for
+# good, folding any predicted weights into their parents.
+# The socket bones (handslot.r/l, head) are also dropped leaves but ARE
+# runtime-referenced (weapons.rs, vfx.rs, content_lint.rs), so they are
+# re-added by mixamo_rig.add_socket_bones, never trimmed.
+END_BONES = tuple(BONE_PREFIX + n
+                  for n in ("HeadTop_End", "LeftToe_End", "RightToe_End"))
+# Joint positions round-trip SkinTokens' 256-level quantizer with up to
+# ~5 cm error at human scale, and a chain-tip joint absorbs its dropped
+# leaf, landing anywhere along the merged segment (their Head sits at our
+# crown) — both measured on the human rig. So the sanity gate on the
+# hierarchy-assigned pairs bounds the distance to the assigned bone's
+# SEGMENT, not its head: a correct assignment stays ~5 cm off-segment, a
+# structurally wrong one jumps past limb spacing.
+MATCH_EPSILON = 0.10
 
 
 def fail(msg):
     print(f"char_rig: {msg}", file=sys.stderr)
     sys.exit(1)
-
-
-def run_captured(fn) -> str:
-    """Run fn with stdout+stderr redirected at the fd level (Blender
-    operator reports print from C, past sys.stdout), echo the text back,
-    and return it — the only way to capture bone-heat solver warnings
-    headless."""
-    sys.stdout.flush()
-    sys.stderr.flush()
-    saved = os.dup(1), os.dup(2)
-    with tempfile.TemporaryFile(mode="w+b") as tmp:
-        os.dup2(tmp.fileno(), 1)
-        os.dup2(tmp.fileno(), 2)
-        try:
-            fn()
-        finally:
-            sys.stdout.flush()
-            sys.stderr.flush()
-            os.dup2(saved[0], 1)
-            os.dup2(saved[1], 2)
-            os.close(saved[0])
-            os.close(saved[1])
-        tmp.seek(0)
-        text = tmp.read().decode("utf-8", "replace")
-    sys.stdout.write(text)
-    return text
 
 
 def vert_coords(me):
@@ -105,16 +104,6 @@ def select_only(objs, active):
     bpy.context.view_layer.objects.active = active
 
 
-def auto_parent(mesh_obj, armature) -> str:
-    select_only([mesh_obj, armature], armature)
-    return run_captured(lambda: bpy.ops.object.parent_set(type="ARMATURE_AUTO"))
-
-
-def solver_warnings(text) -> list:
-    return [line.strip() for line in text.splitlines()
-            if "Bone Heat" in line or SOLVER_ERROR_TEXT in line]
-
-
 def dist_point_segment(p, a, b) -> float:
     ab = b - a
     denom = ab.length_squared
@@ -122,12 +111,16 @@ def dist_point_segment(p, a, b) -> float:
     return (p - (a + ab * t)).length
 
 
+def deform_segments(armature):
+    mw = armature.matrix_world
+    return {b.name: (mw @ b.head_local, mw @ b.tail_local)
+            for b in armature.data.bones if b.use_deform}
+
+
 def weight_metrics(mesh_obj, armature):
     """(weightless count, bleed count): verts with no deform-bone weight,
     and verts whose dominant joint is over BLEED_DISTANCE away."""
-    mw = armature.matrix_world
-    segments = {b.name: (mw @ b.head_local, mw @ b.tail_local)
-                for b in armature.data.bones if b.use_deform}
+    segments = deform_segments(armature)
     group_bone = {g.index: g.name for g in mesh_obj.vertex_groups
                   if g.name in segments}
     mesh_mw = mesh_obj.matrix_world
@@ -149,73 +142,41 @@ def weight_metrics(mesh_obj, armature):
     return weightless, bleed
 
 
-def structural_failure(warnings, weightless, vert_count) -> bool:
-    return any(SOLVER_ERROR_TEXT in w for w in warnings) \
-        or weightless > WEIGHTLESS_LIMIT_FRACTION * vert_count
-
-
-def weld_weights(mesh_obj, armature):
-    """Bone-heat solve on a seam-welded copy of the mesh, weights copied
-    back by nearest vertex (coincident positions — exact), then bind the
-    real mesh without regenerating weights. Returns (solver output text,
-    welded vertex count)."""
-    weld = mesh_obj.copy()
-    weld.data = mesh_obj.data.copy()
-    bpy.context.collection.objects.link(weld)
-    bm = bmesh.new()
-    bm.from_mesh(weld.data)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
-    bm.to_mesh(weld.data)
-    bm.free()
-    weld_verts = len(weld.data.vertices)
-
-    text = auto_parent(weld, armature)
-
-    dt = mesh_obj.modifiers.new("weights", "DATA_TRANSFER")
-    dt.object = weld
-    dt.use_vert_data = True
-    dt.data_types_verts = {"VGROUP_WEIGHTS"}
-    dt.vert_mapping = "NEAREST"
-    select_only([mesh_obj], mesh_obj)
-    bpy.ops.object.datalayout_transfer(modifier=dt.name)
-    bpy.ops.object.modifier_apply(modifier=dt.name)
-    bpy.data.objects.remove(weld, do_unlink=True)
-
-    mod = mesh_obj.modifiers.new("Armature", "ARMATURE")
-    mod.object = armature
-    return text, weld_verts
-
-
-def main():
-    argv = sys.argv[sys.argv.index("--") + 1:]
-    parser = argparse.ArgumentParser(prog="char_rig.py")
-    parser.add_argument("textured_glb")
-    parser.add_argument("character_fbx")
-    parser.add_argument("clips_dir")
-    parser.add_argument("out_glb")
-    parser.add_argument("--height", type=float, default=mixamo_rig.TARGET_HEIGHT)
-    args = parser.parse_args(argv)
-
+def build_scene(textured_glb, character_fbx):
+    """Canonical skeleton + generated mesh fitted into its space, fingers
+    pruned, sockets added — the shared scene both subcommands start from.
+    Returns (armature, mesh_obj, fit stats)."""
     mixamo_rig.new_scene()
 
     # ---- canonical skeleton in, its own meshes out ----
-    bpy.ops.import_scene.fbx(filepath=args.character_fbx)
+    bpy.ops.import_scene.fbx(filepath=character_fbx)
     armatures = [o for o in bpy.context.scene.objects if o.type == "ARMATURE"]
     if len(armatures) != 1:
-        fail(f"expected exactly 1 armature in {args.character_fbx}, "
+        fail(f"expected exactly 1 armature in {character_fbx}, "
              f"found {len(armatures)}")
     armature = armatures[0]
     for o in [o for o in bpy.context.scene.objects if o.type == "MESH"]:
         bpy.data.objects.remove(o, do_unlink=True)
+    # Character.fbx ships its own T-pose action; drop it now — the
+    # ACTIONS-mode export writes every action, and fit.glb must carry none
+    # (finish gets its actions from stash_clips). Removing it exposes the
+    # FBX importer's junk static pose (the assigned action used to mask it
+    # on every evaluation), so force the pose back to rest explicitly.
+    if armature.animation_data and armature.animation_data.action:
+        armature.animation_data.action = None
+    for a in list(bpy.data.actions):
+        bpy.data.actions.remove(a)
+    for b in armature.pose.bones:
+        b.matrix_basis = Matrix.Identity(4)
 
     # ---- generated mesh in: one object, transforms baked into verts ----
     before = set(bpy.context.scene.objects)
-    bpy.ops.import_scene.gltf(filepath=args.textured_glb)
+    bpy.ops.import_scene.gltf(filepath=textured_glb)
     imported = set(bpy.context.scene.objects) - before
     meshes = [o for o in imported if o.type == "MESH"]
     extras = [o for o in imported if o.type != "MESH"]
     if not meshes:
-        fail(f"no mesh in {args.textured_glb}")
+        fail(f"no mesh in {textured_glb}")
     select_only(meshes, meshes[0])
     if len(meshes) > 1:
         bpy.ops.object.join()
@@ -228,6 +189,11 @@ def main():
     select_only([mesh_obj], mesh_obj)
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     me = mesh_obj.data
+    if me.shape_keys:
+        # me.transform() below moves base vertices but NOT shape-key data,
+        # and evaluation/export read through the active key — the mesh
+        # would silently keep its pre-fit geometry.
+        fail("textured mesh carries shape keys — unsupported input")
 
     # ---- fit the mesh into the armature's space (uniform scale + move) ----
     crown_z = joint_head(armature, "HeadTop_End").z
@@ -269,40 +235,218 @@ def main():
     # through parent_set's parent-inverse compensation exports with
     # inconsistent inverse-bind matrices ----
     me.transform(armature.matrix_world.inverted())
+    # Direct data mutation does not tag the mesh for re-evaluation, and
+    # the glTF exporter reads the EVALUATED mesh — without this it can
+    # export the stale pre-fit vertices (the old bone-heat path was saved
+    # only by its operator calls forcing depsgraph flushes).
+    me.update()
     mesh_obj.parent = armature
     mesh_obj.matrix_parent_inverse = Matrix.Identity(4)
     mesh_obj.matrix_basis = Matrix.Identity(4)
     bpy.context.view_layer.update()
 
-    # ---- automatic weights + rig-quality gate ----
-    vert_count = len(me.vertices)
-    text, weld_verts = weld_weights(mesh_obj, armature)
-    warnings = solver_warnings(text)
-    weightless, bleed = weight_metrics(mesh_obj, armature)
+    mixamo_rig.prune_fingers(armature, [mesh_obj])
+    mixamo_rig.add_socket_bones(armature)
 
     stats = {
-        "verts": vert_count,
-        "weld_domain_verts": weld_verts,
+        "verts": len(me.vertices),
         "fit_scale": fit_scale,
         "skeleton_height": skel_height,
         "shoulder_span_mesh": mesh_span,
         "shoulder_span_skeleton": skel_span,
+    }
+    return armature, mesh_obj, stats
+
+
+def rigid_bind(mesh_obj, armature):
+    """Weight-1 bind of every vertex to its nearest deform-bone segment —
+    the minimal valid skin for the SkinTokens handoff glb (the glTF
+    exporter writes a skin only for a weighted mesh, and SkinTokens'
+    validated input shape is a skinned glb). Prediction replaces these
+    weights wholesale."""
+    segments = deform_segments(armature)
+    groups = {name: mesh_obj.vertex_groups.new(name=name) for name in segments}
+    mesh_mw = mesh_obj.matrix_world
+    for v in mesh_obj.data.vertices:
+        p = mesh_mw @ v.co
+        name = min(segments,
+                   key=lambda n: dist_point_segment(p, *segments[n]))
+        groups[name].add([v.index], 1.0, "REPLACE")
+    mod = mesh_obj.modifiers.new("Armature", "ARMATURE")
+    mod.object = armature
+
+
+def match_joints(source_arm, canon_arm):
+    """SkinTokens bone name -> canonical deform-bone name, by descending
+    both hierarchies in lockstep from the roots: at each matched parent,
+    children are paired by the minimum-total-distance assignment. Raw
+    nearest-position matching cannot work here — the quantizer's ~5 cm
+    error exceeds the neck/shoulder and toe-base/toe-end spacings — but
+    within one sibling set the correct assignment wins globally, and every
+    chain link is forced by its parent. Canonical deform bones left
+    unmatched must be exactly the round-trip-dropped END_BONES."""
+    mapping = {}
+    unmatched = []
+    max_dist = 0.0
+
+    def head(arm, b):
+        return arm.matrix_world @ b.head_local
+
+    def deform_children(b):
+        return [c for c in b.children if c.use_deform]
+
+    def skip_subtree(canon_bone):
+        unmatched.append(canon_bone.name)
+        for c in deform_children(canon_bone):
+            skip_subtree(c)
+
+    def pair_level(src_bones, canon_bones, context):
+        nonlocal max_dist
+        if len(src_bones) > len(canon_bones):
+            fail(f"joint match gate: {context} has {len(src_bones)} "
+                 f"round-trip bone(s) for {len(canon_bones)} canonical "
+                 f"candidate(s) — candidate is decision-gate data")
+        best = min(permutations(canon_bones, len(src_bones)),
+                   key=lambda perm: sum(
+                       (head(source_arm, s) - head(canon_arm, c)).length
+                       for s, c in zip(src_bones, perm)))
+        for s, c in zip(src_bones, best):
+            dist = dist_point_segment(head(source_arm, s),
+                                      canon_arm.matrix_world @ c.head_local,
+                                      canon_arm.matrix_world @ c.tail_local)
+            if dist > MATCH_EPSILON:
+                fail(f"joint match gate: {s.name} assigned to {c.name} at "
+                     f"{dist:.3f} m (limit {MATCH_EPSILON}) — candidate is "
+                     f"decision-gate data")
+            max_dist = max(max_dist, dist)
+            mapping[s.name] = c.name
+            pair_level(list(s.children), deform_children(c),
+                       f"children of {c.name}")
+        for c in canon_bones:
+            if c not in best:
+                skip_subtree(c)
+
+    src_roots = [b for b in source_arm.data.bones if b.parent is None]
+    canon_roots = [b for b in canon_arm.data.bones
+                   if b.parent is None and b.use_deform]
+    pair_level(src_roots, canon_roots, "root level")
+
+    dropped = sorted(unmatched)
+    if set(dropped) - set(END_BONES):
+        fail(f"joint match gate: skeleton round-trip dropped deforming "
+             f"bone(s) {sorted(set(dropped) - set(END_BONES))} — candidate "
+             f"is decision-gate data")
+    return mapping, max_dist, dropped
+
+
+def adopt_weights(mesh_obj, armature, skinned_glb):
+    """Take SkinTokens' predicted vertex groups from skinned.glb onto our
+    mesh under canonical bone names, then bind. Vertex positions are the
+    same mesh (their transfer path preserves it), so the NEAREST mapping
+    is exact — the same argument the old seam-weld copy-back used."""
+    before = set(bpy.context.scene.objects)
+    bpy.ops.import_scene.gltf(filepath=skinned_glb)
+    imported = set(bpy.context.scene.objects) - before
+    st_arms = [o for o in imported if o.type == "ARMATURE"]
+    # Skinned meshes only: importing a glb with a skin also creates a
+    # groupless bone-shape display mesh ("Icosphere") that must not be
+    # joined into the weight source.
+    st_meshes = sorted((o for o in imported
+                        if o.type == "MESH" and o.vertex_groups),
+                       key=lambda o: o.name)
+    if len(st_arms) != 1 or not st_meshes:
+        fail(f"expected 1 armature and >=1 skinned mesh in {skinned_glb}, "
+             f"found {len(st_arms)} armature(s), {len(st_meshes)} skinned "
+             f"mesh(es)")
+    select_only(st_meshes, st_meshes[0])
+    if len(st_meshes) > 1:
+        bpy.ops.object.join()
+    st_mesh = bpy.context.view_layer.objects.active
+
+    mapping, max_dist, dropped = match_joints(st_arms[0], armature)
+    for g in st_mesh.vertex_groups:
+        if g.name not in mapping:
+            fail(f"skinned mesh has a vertex group '{g.name}' matching no "
+                 f"joint of its own skeleton")
+        g.name = mapping[g.name]
+
+    dt = mesh_obj.modifiers.new("weights", "DATA_TRANSFER")
+    dt.object = st_mesh
+    dt.use_vert_data = True
+    dt.data_types_verts = {"VGROUP_WEIGHTS"}
+    dt.vert_mapping = "NEAREST"
+    select_only([mesh_obj], mesh_obj)
+    bpy.ops.object.datalayout_transfer(modifier=dt.name)
+    bpy.ops.object.modifier_apply(modifier=dt.name)
+    # join() already deleted the merged-away objects, so sweep what is
+    # still alive rather than iterating the stale imported set.
+    for o in [o for o in bpy.context.scene.objects if o not in before]:
+        bpy.data.objects.remove(o, do_unlink=True)
+
+    mod = mesh_obj.modifiers.new("Armature", "ARMATURE")
+    mod.object = armature
+    return {
+        "matched_joints": len(mapping),
+        "joint_match_max_distance_m": max_dist,
+        "roundtrip_dropped_bones": dropped,
+    }
+
+
+def trim_end_bones(armature, mesh_obj):
+    """Delete the Mixamo end bones, folding any weights SkinTokens put on
+    them into their parents first — whether the round-trip drops the ends
+    or keeps and weights them varies per mesh (both observed), and an
+    orphaned vertex group would silently shrink its verts (the armature
+    modifier ignores groups without a bone, leaving weight sums < 1)."""
+    parents = {name: armature.data.bones[name].parent.name
+               for name in END_BONES}
+    for name, parent in parents.items():
+        group = mesh_obj.vertex_groups.get(name)
+        if group is not None:
+            parent_group = mesh_obj.vertex_groups.get(parent) \
+                or mesh_obj.vertex_groups.new(name=parent)
+            for v in mesh_obj.data.vertices:
+                for vg in v.groups:
+                    if vg.group == group.index and vg.weight > 0.0:
+                        parent_group.add([v.index], vg.weight, "ADD")
+            mesh_obj.vertex_groups.remove(group)
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    for name in END_BONES:
+        armature.data.edit_bones.remove(armature.data.edit_bones[name])
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def cmd_fit(args):
+    armature, mesh_obj, stats = build_scene(args.textured_glb, args.character_fbx)
+    rigid_bind(mesh_obj, armature)
+    mixamo_rig.export_glb(args.out_glb)
+    stats["out_glb"] = str(args.out_glb)
+    print(json.dumps(stats))
+
+
+def cmd_finish(args):
+    armature, mesh_obj, stats = build_scene(args.textured_glb, args.character_fbx)
+
+    stats.update(adopt_weights(mesh_obj, armature, args.skinned_glb))
+    trim_end_bones(armature, mesh_obj)
+
+    # ---- rig-quality gate ----
+    vert_count = len(mesh_obj.data.vertices)
+    weightless, bleed = weight_metrics(mesh_obj, armature)
+    stats.update({
         "weightless_verts": weightless,
         "weightless_fraction": weightless / vert_count,
         "bleed_verts_over_30cm": bleed,
-        "solver_warnings": warnings,
-    }
-    if structural_failure(warnings, weightless, vert_count):
+    })
+    if weightless > WEIGHTLESS_LIMIT_FRACTION * vert_count:
         print(json.dumps(stats))
         fail(f"rig-quality gate: weightless {weightless}/{vert_count} "
              f"({weightless / vert_count:.2%}, limit "
-             f"{WEIGHTLESS_LIMIT_FRACTION:.2%}), "
-             f"{len(warnings)} solver warning(s) — candidate is "
+             f"{WEIGHTLESS_LIMIT_FRACTION:.2%}) — candidate is "
              f"decision-gate data")
 
-    # ---- shared machinery: prune, sockets, clips, bake, export ----
-    mixamo_rig.prune_fingers(armature, [mesh_obj])
-    mixamo_rig.add_socket_bones(armature)
+    # ---- shared machinery: clips, bake, export ----
     mixamo_rig.stash_clips(armature, args.clips_dir)
     bake_scale = mixamo_rig.bake_height(armature, [mesh_obj], args.height)
     mixamo_rig.export_glb(args.out_glb)
@@ -320,6 +464,30 @@ def main():
         "out_glb": str(args.out_glb),
     })
     print(json.dumps(stats))
+
+
+def main():
+    argv = sys.argv[sys.argv.index("--") + 1:]
+    parser = argparse.ArgumentParser(prog="char_rig.py")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("fit")
+    p.add_argument("textured_glb")
+    p.add_argument("character_fbx")
+    p.add_argument("out_glb")
+    p.set_defaults(func=cmd_fit)
+
+    p = sub.add_parser("finish")
+    p.add_argument("textured_glb")
+    p.add_argument("character_fbx")
+    p.add_argument("skinned_glb")
+    p.add_argument("clips_dir")
+    p.add_argument("out_glb")
+    p.add_argument("--height", type=float, default=mixamo_rig.TARGET_HEIGHT)
+    p.set_defaults(func=cmd_finish)
+
+    args = parser.parse_args(argv)
+    args.func(args)
 
 
 try:
