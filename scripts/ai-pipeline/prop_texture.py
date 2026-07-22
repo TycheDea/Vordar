@@ -1,18 +1,27 @@
 # Blender-headless: texture a cleaned Hi3DGen prop mesh (Phase A3.6; both
 # strategy rulings in tasks/ai-pipeline/a3.md -> "Texture strategy log").
 #
+# Every bake targets the clean mesh's UV atlas, unwrapped once by
+# prop_cleanup.py (xatlas) — this stage fails if the mesh arrives without
+# UVs, so the atlas is identical across texture re-runs of a candidate.
+#
 # Two basecolor strategies share one channels contract:
-#   - projection (default): Smart-UV atlas, concept image planar-projected
-#     along the concept view axis and EMIT-baked into basecolor. The
+#   - projection (default): concept image planar-projected along the
+#     concept view axis and EMIT-baked into basecolor. The
 #     projection passes through the mesh, so back faces receive the
 #     mirrored front read -- the near-symmetric prop classes this pipeline
 #     targets survive that.
 #   - multiview (escalation for prop classes needing true material register
 #     or strong backsides): ortho depth renders of the clean mesh from
 #     MV_VIEWS cameras feed a ControlNet-depth text-to-image base via a ComfyUI
-#     server whose lifecycle lives entirely inside this stage; the
-#     generated views are reprojected into the atlas and blended with
-#     facing weights, depth-occlusion and silhouette tests.
+#     server whose lifecycle lives entirely inside this stage. Opposite
+#     views are tiled side by side into ONE conditioning canvas per
+#     sampling pass (Paint3D's front+back grid: the model attends to both
+#     views at once, so they come out consistent), with silhouettes
+#     dilated a few px so it paints material past the true edge; the
+#     decoded canvas is split back into per-view images, reprojected into
+#     the atlas and blended with facing weights and depth-occlusion
+#     tests; island texels no view covered are Telea-inpainted.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
 #     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
 #   - MR defaults to two declared constants (--metallic/--roughness), carried
@@ -48,6 +57,7 @@ from math import cos, radians, sin
 from pathlib import Path
 
 import bpy
+import cv2
 import numpy as np
 from mathutils import Vector
 
@@ -98,6 +108,10 @@ MV_OCCLUSION_EPS = 0.02  # meters; props are ~1.8 m tall (prop_cleanup)
 MV_EDGE_PAD_PX = 8  # the base bleeds background across the depth edge; padding
 # the object's colors outward keeps edge texels on-material without
 # shrinking thin members (erosion would erase a ~6 px scroll arm entirely)
+MV_DEPTH_DILATE_PX = 5  # conditioning-PNG silhouette grow (Paint3D's setting):
+# the model then paints material past the true edge, so blend taps at the
+# silhouette read object color; only the PNG is dilated — the float depth
+# must keep the true silhouette for the occlusion test and pad_edges mask
 
 
 def fail(msg):
@@ -327,10 +341,12 @@ def render_depth_views(clean, hires, views, rig, work_dir):
         bpy.data.images.remove(exr)
         depths.append(depth)
 
+        cond = cv2.dilate(depth, np.ones((3, 3), np.float32),
+                          iterations=MV_DEPTH_DILATE_PX)
         png = bpy.data.images.new(f"mv_depth_{i}", MV_RES, MV_RES)
         png.colorspace_settings.name = "Non-Color"
         rgba = np.empty((MV_RES * MV_RES, 4), dtype=np.float32)
-        rgba[:, 0] = rgba[:, 1] = rgba[:, 2] = depth.ravel()
+        rgba[:, 0] = rgba[:, 1] = rgba[:, 2] = cond.ravel()
         rgba[:, 3] = 1.0
         png.pixels.foreach_set(rgba.ravel())
         png.filepath_raw = str(work_dir / f"depth_{i}.png")
@@ -341,43 +357,85 @@ def render_depth_views(clean, hires, views, rig, work_dir):
     return depths
 
 
+def view_pairs(n):
+    """Opposite-azimuth pairs under even spacing (front+back, left+right);
+    an odd count leaves the last view solo."""
+    half = n // 2
+    pairs = [(i, i + half) for i in range(half)]
+    if n % 2:
+        pairs.append((n - 1,))
+    return pairs
+
+
 def generate_views(views, work_dir, subject, seed):
-    """One ControlNet-depth pass per view -> <work_dir>/view_<i>/gen.png.
-    Views whose gen.png already exists are skipped, so a killed run resumes.
+    """One ControlNet-depth pass per opposite-view pair: both depth maps
+    tiled side by side into a single conditioning canvas, the decoded
+    canvas split back into per-view crops -> <work_dir>/view_<i>/gen.png.
+    Pairs whose crops all exist are skipped, so a killed run resumes.
     Returns per-view provenance entries."""
     template = json.loads(MV_WORKFLOW.read_text(encoding="utf-8"))
-    missing = [i for i in range(len(views)) if not (work_dir / f"view_{i}" / "gen.png").exists()]
+    pairs = view_pairs(len(views))
+    missing = [k for k, pair in enumerate(pairs)
+               if not all((work_dir / f"view_{i}" / "gen.png").exists() for i in pair)]
     if missing:
         with comfy_run.server():
-            for i in missing:
-                depth_png = work_dir / f"depth_{i}.png"
-                input_name = f"vordar_mv_{sha256_file(depth_png)[:8]}_{i}.png"
-                shutil.copyfile(depth_png, comfy_run.COMFY_INPUT_DIR / input_name)
+            for k in missing:
+                pair = pairs[k]
+                canvas_dir = work_dir / f"canvas_{k}"
+                canvas_dir.mkdir(parents=True, exist_ok=True)
+                canvas_png = canvas_dir / "depth.png"
+                cv2.imwrite(str(canvas_png), cv2.hconcat(
+                    [cv2.imread(str(work_dir / f"depth_{i}.png")) for i in pair]))
+                if len(pair) == 1:
+                    hint = views[pair[0]]["hint"]
+                else:
+                    hint = (f"two views of the same object side by side, "
+                            f"left: {views[pair[0]]['hint']}, "
+                            f"right: {views[pair[1]]['hint']}")
+                input_name = f"vordar_mv_{sha256_file(canvas_png)[:8]}_{k}.png"
+                shutil.copyfile(canvas_png, comfy_run.COMFY_INPUT_DIR / input_name)
                 wf = json.loads(json.dumps(template))
                 for node in wf.values():
                     inputs = node.get("inputs", {})
+                    # keyed by class_type: node-id keying silently broke
+                    # once already (see the seed comment below)
+                    if node.get("class_type") == "EmptySD3LatentImage":
+                        inputs["width"] = MV_RES * len(pair)
+                        inputs["height"] = MV_RES
                     for key, value in inputs.items():
                         if isinstance(value, str):
                             inputs[key] = (value.replace("{subject}", subject)
-                                           .replace("{view_hint}", views[i]["hint"])
+                                           .replace("{view_hint}", hint)
                                            .replace("{depth_image}", input_name))
                         elif key == "seed":
-                            inputs[key] = seed * 100 + i
-                view_dir = work_dir / f"view_{i}"
-                manifest = comfy_run.run_workflow(wf, view_dir, wait_timeout=300)
+                            inputs[key] = seed * 100 + k
+                manifest = comfy_run.run_workflow(wf, canvas_dir, wait_timeout=300)
                 pngs = [o for o in manifest["outputs"] if o["filename"].endswith(".png")]
                 if len(pngs) != 1:
-                    fail(f"view {i}: expected exactly 1 PNG output, got {len(pngs)}")
-                shutil.copyfile(pngs[0]["saved_as"], view_dir / "gen.png")
+                    fail(f"canvas {k}: expected exactly 1 PNG output, got {len(pngs)}")
+                gen = cv2.imread(pngs[0]["saved_as"])
+                if gen.shape[:2] != (MV_RES, MV_RES * len(pair)):
+                    fail(f"canvas {k}: got {gen.shape[1]}x{gen.shape[0]}, "
+                         f"expected {MV_RES * len(pair)}x{MV_RES}")
+                for slot, i in enumerate(pair):
+                    view_dir = work_dir / f"view_{i}"
+                    view_dir.mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(str(view_dir / "gen.png"),
+                                gen[:, slot * MV_RES:(slot + 1) * MV_RES])
                 (comfy_run.COMFY_INPUT_DIR / input_name).unlink()
 
+    pair_of = {i: (k, slot)
+               for k, pair in enumerate(pairs) for slot, i in enumerate(pair)}
     metas = []
     for i, v in enumerate(views):
-        manifest = json.loads((work_dir / f"view_{i}" / "manifest.json").read_text(encoding="utf-8"))
+        k, slot = pair_of[i]
+        manifest = json.loads((work_dir / f"canvas_{k}" / "manifest.json").read_text(encoding="utf-8"))
         metas.append({
             "hint": v["hint"],
             "azimuth_deg": v["azimuth_deg"],
             "elevation_deg": MV_ELEVATION_DEG,
+            "canvas": k,
+            "canvas_slot": slot,
             # every node's resolved seed: keying one sampler node id silently
             # returned null the moment the workflow graph changed
             "seeds": manifest["seed"],
@@ -470,11 +528,11 @@ def pad_edges(colors, mask, iterations):
 
 
 def blend_views(views, depths, rig, work_dir, pos, nrm, island):
-    """Facing-weighted, occlusion- and silhouette-tested blend of the
-    generated views into a flat (N, 4) sRGB basecolor array. Returns the
-    array, the fractional island coverage, and the per-texel covered mask
-    (island texels that actually received blended weight, as opposed to the
-    mean-color fill applied to the rest of the array)."""
+    """Facing-weighted, occlusion-tested blend of the generated views into
+    a flat (N, 4) sRGB basecolor array. Returns the array, the fractional
+    island coverage, and the per-texel covered mask (island texels that
+    actually received blended weight; island holes are Telea-inpainted
+    from their surroundings, off-island texels keep a mean-color fill)."""
     half = rig["half"]
     accum = np.zeros((pos.shape[0], 3))
     wsum = np.zeros(pos.shape[0])
@@ -509,6 +567,17 @@ def blend_views(views, depths, rig, work_dir, pos, nrm, island):
     fill = blended.mean(axis=0) if covered.any() else np.full(3, 0.5)
     out[:, :3] = fill
     out[covered, :3] = blended
+
+    holes = island & ~covered
+    if holes.any() and covered.any():
+        img8 = (np.clip(out[:, :3], 0.0, 1.0) * 255.0).round().astype(np.uint8)
+        img8 = img8.reshape(TEXTURE_SIZE, TEXTURE_SIZE, 3)
+        mask8 = holes.reshape(TEXTURE_SIZE, TEXTURE_SIZE).astype(np.uint8)
+        filled = cv2.inpaint(img8, mask8, 3, cv2.INPAINT_TELEA)
+        # only hole texels take the 8-bit inpaint; covered texels keep
+        # their float-precision blend
+        out[holes, :3] = filled.reshape(-1, 3)[holes] / 255.0
+
     coverage = float(covered[island].mean()) if island.any() else 0.0
     return out, coverage, covered
 
@@ -519,7 +588,7 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
     depths = render_depth_views(clean, hires, views, rig, work_dir)
     view_metas = generate_views(views, work_dir, subject, seed)
     pos, nrm, island = bake_geometry_atlas(clean, atlas, rig)
-    base_px, coverage, _ = blend_views(views, depths, rig, work_dir, pos, nrm, island)
+    base_px, coverage, covered = blend_views(views, depths, rig, work_dir, pos, nrm, island)
 
     base_img = new_image("prop_base", srgb=True, fill=(0, 0, 0))
     base_img.pixels.foreach_set(base_px.ravel())
@@ -533,7 +602,9 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
         "weight_exponent": MV_WEIGHT_EXPONENT,
         "occlusion_eps": MV_OCCLUSION_EPS,
         "edge_pad_px": MV_EDGE_PAD_PX,
+        "depth_dilate_px": MV_DEPTH_DILATE_PX,
         "blend_coverage": round(coverage, 4),
+        "hole_texels": int((island & ~covered).sum()),
     }
     return base_img, extras
 
@@ -618,13 +689,10 @@ def main():
     scene.cycles.samples = 1
     scene.cycles.use_denoising = False
 
-    # ---- atlas unwrap (the mesh arrives without UVs) ----
-    select_only([clean], clean)
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=radians(66), island_margin=0.003)
-    bpy.ops.object.mode_set(mode="OBJECT")
+    # ---- atlas: unwrapped once by prop_cleanup (xatlas), consumed here ----
     me = clean.data
+    if not me.uv_layers:
+        fail("clean mesh carries no UV atlas — re-run prop_cleanup")
     atlas = me.uv_layers[0].name
 
     # ---- basecolor, per strategy ----

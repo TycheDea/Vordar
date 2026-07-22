@@ -474,6 +474,15 @@ Five scripts chain a concept image into a shippable prop glb. Every stage is
 resumable — re-running the same command skips any stage whose output already
 exists.
 
+The Blender-headless stages need two wheels inside Blender's own Python
+(`xatlas` for the cleanup unwrap, `opencv-python-headless` for the texture
+stage's dilate/inpaint). Blender does not scan the regular Python user
+site, so install into its per-user modules dir:
+
+```
+& "C:\Program Files\Blender Foundation\Blender 5.2\5.2\python\bin\python.exe" -m pip install --target "$env:APPDATA\Blender Foundation\Blender\5.2\scripts\addons\modules" xatlas opencv-python-headless
+```
+
 **1. `prop_hi3dgen.py`** — image → untextured geometry (Hi3DGen venv,
 `cwd=C:\tools\Hi3DGen\Hi3DGen`):
 
@@ -499,10 +508,14 @@ VRAM sequencing rule under `gen_prop.py` below.
 
 Arg convention matches `mixamo_to_glb.py`: everything after `--` is the
 script's own argv. Strips loose floaters, scale/ground-normalizes to
-`--height` (default 1.8 m), decimates to `--tri-budget` (default 15000).
-Exports `<clean stem>_hires.glb` before decimating — the high-poly source
-`prop_texture.py`'s normal bake needs. Structural failures (no mesh, zero
-area) exit non-zero rather than patch silently.
+`--height` (default 1.8 m), decimates to `--tri-budget` (default 15000),
+then xatlas-unwraps the decimated mesh into a single 1024-target UV atlas
+(`uv_charts`/`uv_utilization` in the stats line) — the layer every
+`prop_texture.py` bake targets, so the atlas is identical across texture
+re-runs. Exports `<clean stem>_hires.glb` before decimating — the
+high-poly source `prop_texture.py`'s normal bake needs (it carries no UVs;
+the bake is selected-to-active). Structural failures (no mesh, zero area)
+exit non-zero rather than patch silently.
 
 **3. `prop_texture.py`** — Blender headless texture bake:
 
@@ -510,9 +523,10 @@ area) exit non-zero rather than patch silently.
 & "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metallic F] [--roughness F]
 ```
 
-Default strategy: **Blender projection bake** — Smart-UV atlas, concept
-image EMIT-projected onto basecolor, real hires→clean Cycles normal bake,
-MR from the two declared constants. Full ruling and rejected-option
+Default strategy: **Blender projection bake** — concept image
+EMIT-projected onto basecolor (into the clean mesh's cleanup-made UV
+atlas; a mesh arriving without UVs hard-fails), real hires→clean Cycles
+normal bake, MR from the two declared constants. Full ruling and rejected-option
 evidence: `tasks/ai-pipeline/a3.md` → "Texture strategy log". **Requires an
 alpha-matted concept** (`prop_hi3dgen.py`'s `concept_rgba.png`, not a raw RGB
 image) — a concept with no usable alpha matte hard-fails instead of
@@ -523,12 +537,18 @@ color.
 classes needing true material register or strong backsides; needs
 `--subject` and `--seed`): ortho depth renders of the clean mesh from four
 azimuths feed Z-Image Turbo + its Fun ControlNet-depth model patch
-(`workflows/prop_multiview.json`), and the generated views are reprojected
-into the atlas with facing weights, a depth-occlusion test, and silhouette
-edge padding. The ComfyUI server lifecycle lives entirely inside this
-stage (started headless, killed after). Per-view outputs and provenance
-manifests are cached under `<textured.glb dir>/multiview/`, so a killed
-run resumes without respending GPU. Normal and MR channels follow the same
+(`workflows/prop_multiview.json`). Opposite views are tiled side by side
+into one 2048×1024 conditioning canvas per sampling pass (Paint3D's
+front+back grid — the model attends to both views at once, so they come
+out consistent) with silhouettes dilated 5 px so it paints material past
+the true edge; the decoded canvas is split into per-view images and
+reprojected into the atlas with facing weights, a depth-occlusion test,
+and silhouette edge padding, and island texels no view covered are
+Telea-inpainted from their surroundings. The ComfyUI server lifecycle
+lives entirely inside this stage (started headless, killed after).
+Per-canvas outputs and provenance manifests are cached under
+`<textured.glb dir>/multiview/`, so a killed run resumes without
+respending GPU. Normal and MR channels follow the same
 contract as the default strategy; the concept image is unused.
 
 **Writing `--subject` for this strategy — name every material's colour.**
