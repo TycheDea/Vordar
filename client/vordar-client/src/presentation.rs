@@ -75,6 +75,7 @@ impl System for ZoneDressingSystem {
             resources,
         );
         engine_renderer::set_fog(visuals.fog_color, visuals.fog_density, resources);
+        engine_renderer::set_fog_height(visuals.fog_height, visuals.fog_height_falloff, resources);
 
         // Tear down the previous zone's scenery.
         let old: Vec<Entity> = world.query::<(Entity, &ZoneDressing)>().iter().map(|(e, _)| e).collect();

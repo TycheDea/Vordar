@@ -37,6 +37,12 @@ pub struct ZoneVisuals {
     pub fog_color: Vec3,
     #[serde(default = "default_fog_density")]
     pub fog_density: f32,
+    /// Height fog: density is attenuated above `fog_height` by
+    /// exp(-fog_height_falloff · height above it); 0/0 = pure distance fog.
+    #[serde(default)]
+    pub fog_height: f32,
+    #[serde(default)]
+    pub fog_height_falloff: f32,
     /// PBR ground texture set; None keeps the dev slab.
     #[serde(default)]
     pub ground: Option<GroundDef>,
@@ -47,11 +53,13 @@ pub struct ZoneVisuals {
 impl Default for ZoneVisuals {
     fn default() -> Self {
         Self {
-            env:         None,
-            fog_color:   default_fog_color(),
-            fog_density: default_fog_density(),
-            ground:      None,
-            props:       Vec::new(),
+            env:                None,
+            fog_color:          default_fog_color(),
+            fog_density:        default_fog_density(),
+            fog_height:         0.0,
+            fog_height_falloff: 0.0,
+            ground:             None,
+            props:              Vec::new(),
         }
     }
 }

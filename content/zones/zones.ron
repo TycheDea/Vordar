@@ -19,6 +19,10 @@
             visuals: (
                 fog_color: (0.28, 0.24, 0.27),
                 fog_density: 0.0055,
+                // Height fog (VQ-A1): full density at ground level (y = -0.5),
+                // thinning above so prop tops read clearer than the ground haze.
+                fog_height: 0.0,
+                fog_height_falloff: 0.12,
                 ground: Some((texture_dir: "content/textures/ground/mud_leaves", tile: 7.0)),
                 props: [
                     // First Z-Image prop, near spawn for the feel-check.
