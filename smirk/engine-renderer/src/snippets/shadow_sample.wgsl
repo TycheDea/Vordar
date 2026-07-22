@@ -11,6 +11,11 @@
 // (coarser) cascade instead of PCF-sampling past its map edge (seam guard).
 const CASCADE_EDGE_MARGIN: f32 = 0.02;
 
+// The outer cascade's edge is the max shadow distance; past this fraction
+// of its NDC extent the result fades toward unshadowed, so views that see
+// beyond the last cascade get a smooth falloff instead of a hard pop.
+const OUTER_FADE_START: f32 = 0.85;
+
 /// PCF 3×3 over the first (tightest) cascade whose fitted volume contains
 /// `world_pos`; 1.0 = fully lit. Points outside every cascade are lit (the
 /// map only covers the play area).
@@ -29,7 +34,13 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
                 sum += textureSampleCompareLevel(t_shadow, s_shadow, uv + offset, c, ndc.z);
             }
         }
-        return sum / 9.0;
+        var factor = sum / 9.0;
+        if (c == CASCADE_COUNT - 1u) {
+            let edge = max(abs(ndc.x), abs(ndc.y));
+            let fade = smoothstep(OUTER_FADE_START, 1.0 - CASCADE_EDGE_MARGIN, edge);
+            factor = mix(factor, 1.0, fade);
+        }
+        return factor;
     }
     return 1.0;
 }

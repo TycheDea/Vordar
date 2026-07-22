@@ -101,21 +101,21 @@ fn frustum_classify(c: &mut Criterion) {
 
     // Build orthographic frustum (shadow light): sun_dir = (-1, 2, -1).normalized()
     let sun_dir = Vec3::new(-1.0, 2.0, -1.0).normalize();
-    let ortho_vp = Mat4::orthographic_rh(-80.0, 80.0, -80.0, 80.0, 0.0, 400.0)
+    let ortho_vp = Mat4::orthographic_rh(-160.0, 160.0, -160.0, 160.0, 0.0, 400.0)
         * Mat4::look_at_rh(sun_dir * 200.0, Vec3::ZERO, Vec3::Y);
     let shadow_frustum = Frustum::from_view_proj(ortho_vp);
 
-    // 552 unit AABBs scattered deterministically over ±80-unit square
+    // 552 unit AABBs scattered deterministically over ±160-unit square
     // (40 rigs + 512 statics, index-hash positions)
     let aabbs: Vec<(Aabb, Mat4)> = (0..552)
         .map(|i: u32| {
-            // Deterministic hash-based position: use index to spread across ±80 square
+            // Deterministic hash-based position: use index to spread across ±160 square
             let hash = (i.wrapping_mul(73856093) ^ (i.wrapping_mul(19349663))) as f32;
             let normalized_hash = (hash.abs() % 1.0) * 2.0 - 1.0; // [-1, 1]
-            let x = normalized_hash * 80.0;
+            let x = normalized_hash * 160.0;
             let hash2 = (i.wrapping_mul(83492791)).wrapping_add(i << 16) as f32;
             let normalized_hash2 = (hash2.abs() % 1.0) * 2.0 - 1.0;
-            let z = normalized_hash2 * 80.0;
+            let z = normalized_hash2 * 160.0;
             let y = 0.0;
 
             let local_aabb = Aabb { min: Vec3::splat(-0.5), max: Vec3::splat(0.5) };

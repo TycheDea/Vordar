@@ -139,7 +139,7 @@ mod tests {
         let at_origin = Aabb { min: Vec3::splat(-1.0), max: Vec3::splat(1.0) };
         assert!(frustum.intersects(&at_origin), "cube at origin must be inside the fitted shadow volume");
 
-        let far = Vec3::new(300.0, 0.0, 0.0);
+        let far = Vec3::new(500.0, 0.0, 0.0);
         let outside = Aabb { min: far - Vec3::splat(80.0), max: far + Vec3::splat(80.0) };
         assert!(!frustum.intersects(&outside), "cube far outside the fitted shadow volume must be culled");
     }

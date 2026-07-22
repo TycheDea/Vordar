@@ -1,7 +1,7 @@
 // Shadow mapping: three concentric texel-snapped cascades for the sun.
-// The camera is a bounded orbit (radius 16–55) over compact zones; the near
-// cascades tighten around the focus for crisp contact shadows while the
-// outer cascade preserves full-orbit coverage. Receivers PCF-filter in the
+// The camera is a bounded orbit over compact zones; the near cascades
+// tighten around the focus for crisp contact shadows while the outer
+// cascade spans the max shadow distance. Receivers PCF-filter in the
 // geometry shaders via the shared camera bind group (bindings 2–4 — the
 // skinned pipeline already uses the default max of 4 bind groups, so
 // shadows can't have their own).
@@ -17,10 +17,14 @@ const DEPTH_RANGE: f32 = 400.0;
 /// sized off this constant.
 pub(crate) const CASCADE_COUNT: u32 = 3;
 
-/// Per-cascade half-extent, outermost last. The outer value (80) covers the
-/// max orbit radius (55) plus grounded-entity margin — today's single-
-/// cascade fit. Inner values tighten around the focus for denser texels.
-const CASCADE_HALF_EXTENTS: [f32; CASCADE_COUNT as usize] = [24.0, 48.0, 80.0];
+/// Per-cascade half-extent, outermost last. The outer value is the max
+/// shadow distance: it must reach the visible ground corners at the
+/// client's max orbit radius (CameraConfig 100 → ~120–165 m depending on
+/// projection mode and pitch). Pitch is free, so no extent covers every
+/// perspective view — the receiver fades to unshadowed at the outer edge
+/// (shadow_sample.wgsl) instead of popping. Inner values tighten around
+/// the focus for denser texels.
+const CASCADE_HALF_EXTENTS: [f32; CASCADE_COUNT as usize] = [24.0, 60.0, 160.0];
 
 /// Stride between cascades in the cast uniform buffer. Must be a multiple of
 /// `Limits::min_uniform_buffer_offset_alignment` (256 covers every wgpu
@@ -401,16 +405,18 @@ mod tests {
         let near = cascades[0].project_point3(target + Vec3::new(20.0, 0.0, 0.0));
         assert!(near.x.abs() <= 1.0 && near.y.abs() <= 1.0, "20u point must be inside cascade 0: {near:?}");
 
-        let far_point = target + Vec3::new(78.0, 0.0, 0.0);
+        // 150 u is the visible-ground-corner bound at max orbit radius 100 —
+        // the outer cascade must contain it or far shadows vanish at max zoom.
+        let far_point = target + Vec3::new(150.0, 0.0, 0.0);
         let far_in_outer = cascades[CASCADE_COUNT as usize - 1].project_point3(far_point);
         assert!(
             far_in_outer.x.abs() <= 1.0 && far_in_outer.y.abs() <= 1.0,
-            "78u point must be inside the outer cascade: {far_in_outer:?}"
+            "150u point must be inside the outer cascade: {far_in_outer:?}"
         );
         let far_in_near = cascades[0].project_point3(far_point);
         assert!(
             far_in_near.x.abs() > 1.0 || far_in_near.y.abs() > 1.0,
-            "78u point must be outside cascade 0: {far_in_near:?}"
+            "150u point must be outside cascade 0: {far_in_near:?}"
         );
     }
 }
