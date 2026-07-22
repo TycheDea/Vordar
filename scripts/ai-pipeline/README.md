@@ -544,8 +544,14 @@ out consistent) with silhouettes dilated 5 px so it paints material past
 the true edge; the decoded canvas is split into per-view images and
 reprojected into the atlas with facing weights, a depth-occlusion test,
 and silhouette edge padding, and island texels no view covered are
-Telea-inpainted from their surroundings. The ComfyUI server lifecycle
-lives entirely inside this stage (started headless, killed after).
+Telea-inpainted from their surroundings. Because coverage is purely
+geometric, the stage scores an azimuth/elevation candidate grid before
+generating anything and greedily adds up to 2 extra views (extra canvas)
+whenever one would newly cover ≥3% of the island — Text2Tex-style
+next-best-view, aimed at up/down-facing texels the 15°-elevation base
+views can't weight; the `--mr-mask` pass inherits the same picks. The
+ComfyUI server lifecycle lives entirely inside this stage (started
+headless, killed after).
 Per-canvas outputs and provenance manifests are cached under
 `<textured.glb dir>/multiview/`, so a killed run resumes without
 respending GPU. Normal and MR channels follow the same
