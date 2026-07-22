@@ -14,6 +14,10 @@
 #     stay valid
 #   - exports <clean stem>_hires.glb before decimating (A3.6's high-poly
 #     normal-bake source), then collapse-decimates to --tri-budget
+#   - xatlas-unwraps the decimated mesh into a single UV atlas; every
+#     prop_texture.py bake targets this layer, so the atlas stays stable
+#     across texture re-runs (the hires mesh needs no UVs — the normal
+#     bake is selected-to-active onto the clean mesh's layer)
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
 #     gen_prop.py's chained manifest
 #
@@ -32,6 +36,7 @@ from pathlib import Path
 
 import bpy
 import numpy as np
+import xatlas
 from mathutils import Matrix
 
 # Loose islands under 2% of the mesh's bbox diagonal (~4 cm on a 1.8 m
@@ -42,6 +47,11 @@ FRAGMENT_DIAG_FRACTION = 0.02
 # Ground-contact band: vertices within the bottom 2.5% of the target
 # height (~4.5 cm at 1.8 m) define the footprint the prop stands on.
 CONTACT_BAND_FRACTION = 0.025
+# UV atlas packing: resolution must match prop_texture's TEXTURE_SIZE so
+# the padding (island gutter) is real texels there; 4 px keeps islands
+# apart under the normal bake's margin=8 dilation.
+UV_ATLAS_RESOLUTION = 1024
+UV_ATLAS_PADDING_PX = 4
 
 
 def fail(msg):
@@ -68,6 +78,30 @@ def bbox_diag(objs):
 def export_glb(path):
     bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB",
                               export_yup=True)
+
+
+def unwrap_atlas(me):
+    """xatlas UV atlas on the clean mesh; returns (charts, utilization)."""
+    # xatlas preserves face and corner order, so uvs[out_idx] aligns with
+    # the loop sequence — but only for a pure-triangle mesh (loops are
+    # then exactly the flattened polygon vertex triples).
+    if len(me.loops) != 3 * len(me.polygons):
+        fail("clean mesh is not pure triangles — cannot unwrap")
+    idx = np.empty(len(me.loops), dtype=np.uint32)
+    me.polygons.foreach_get("vertices", idx)
+    atlas = xatlas.Atlas()
+    atlas.add_mesh(vert_coords(me).astype(np.float32), idx.reshape(-1, 3))
+    pack = xatlas.PackOptions()
+    pack.resolution = UV_ATLAS_RESOLUTION
+    pack.padding = UV_ATLAS_PADDING_PX
+    atlas.generate(pack_options=pack, verbose=False)
+    if atlas.atlas_count != 1:
+        fail(f"xatlas packed {atlas.atlas_count} atlases (expected 1)")
+    _, out_idx, uvs = atlas.get_mesh(0)
+    layer = me.uv_layers.new(name="atlas")
+    layer.uv.foreach_set("vector",
+                         uvs[out_idx.ravel()].astype(np.float32).ravel())
+    return int(atlas.chart_count), float(atlas.utilization)
 
 
 def reflect(points, normal, offset):
@@ -265,6 +299,7 @@ def main():
         co = vert_coords(me)
         me.transform(Matrix.Translation((0.0, 0.0, -float(co[:, 2].min()))))
 
+    uv_charts, uv_utilization = unwrap_atlas(me)
     export_glb(clean)
 
     co = vert_coords(me)
@@ -277,6 +312,8 @@ def main():
         "height_target": args.height,
         "clean_height": float(co[:, 2].max() - co[:, 2].min()),
         "clean_min_y": float(co[:, 2].min()),
+        "uv_charts": uv_charts,
+        "uv_utilization": round(uv_utilization, 4),
         "hires_glb": str(hires),
         "clean_glb": str(clean),
     }
