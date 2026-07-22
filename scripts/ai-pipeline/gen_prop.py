@@ -178,8 +178,7 @@ def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dic
 
 
 def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
-                  metallic: float, roughness: float,
-                  mr_mask: str, metal_roughness: float, azimuths: str) -> dict:
+                  metallic: float, roughness: float, azimuths: str) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -192,16 +191,10 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
                clean_glb, hires_glb, concept_rgba, textured_glb]
         if strategy != "projection":
             cmd += ["--strategy", strategy, "--subject", subject, "--seed", seed]
-        elif mr_mask is not None:
-            cmd += ["--seed", seed]
         if metallic is not None:
             cmd += ["--metallic", metallic]
         if roughness is not None:
             cmd += ["--roughness", roughness]
-        if mr_mask is not None:
-            cmd += ["--mr-mask", mr_mask]
-        if metal_roughness is not None:
-            cmd += ["--metal-roughness", metal_roughness]
         if azimuths is not None:
             cmd += ["--azimuths", azimuths]
         out = run_capture(cmd)
@@ -271,13 +264,10 @@ def main():
     parser.add_argument("--texture-strategy", choices=["projection", "multiview"], default="projection",
                         help="Basecolor strategy for prop_texture.py (multiview = ControlNet-depth retexture)")
     parser.add_argument("--metallic", type=float, default=None,
-                        help="Declared metallic for prop_texture.py (default 0; use 1 for metal props)")
+                        help="Declared metallic for prop_texture.py's projection strategy "
+                             "(default 0; multiview estimates per-texel MR)")
     parser.add_argument("--roughness", type=float, default=None,
-                        help="Declared roughness for prop_texture.py (default 0.8)")
-    parser.add_argument("--mr-mask", default=None, metavar="SUBJECT",
-                        help="Mask prompt for prop_texture.py's per-texel metallic-roughness pass")
-    parser.add_argument("--metal-roughness", type=float, default=None,
-                        help="Roughness for mask-classified metal texels (default 0.65)")
+                        help="Declared roughness for prop_texture.py's projection strategy (default 0.8)")
     parser.add_argument("--symmetrize", action="store_true",
                         help="Mirror one half of the cleaned mesh across its best-fit vertical plane")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
@@ -310,8 +300,7 @@ def main():
         manifest["cleanup"] = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
     if stop >= STAGES.index("texture"):
         manifest["texture"] = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                                            args.metallic, args.roughness, args.mr_mask,
-                                            args.metal_roughness, args.azimuths)
+                                            args.metallic, args.roughness, args.azimuths)
     if stop >= STAGES.index("preprocess"):
         manifest.update(stage_preprocess_bake(cand_dir))  # final.glb, needed by the turntable stage below
     if stop >= STAGES.index("turntable"):

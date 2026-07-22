@@ -549,13 +549,38 @@ geometric, the stage scores an azimuth/elevation candidate grid before
 generating anything and greedily adds up to 2 extra views (extra canvas)
 whenever one would newly cover ≥3% of the island — Text2Tex-style
 next-best-view, aimed at up/down-facing texels the 15°-elevation base
-views can't weight; the `--mr-mask` pass inherits the same picks. The
-ComfyUI server lifecycle lives entirely inside this stage (started
-headless, killed after).
-Per-canvas outputs and provenance manifests are cached under
-`<textured.glb dir>/multiview/`, so a killed run resumes without
-respending GPU. Normal and MR channels follow the same
-contract as the default strategy; the concept image is unused.
+views can't weight. The ComfyUI server lifecycle lives entirely inside
+this stage (started headless, killed after).
+
+The generated views are lit renders, so after generation each one is
+decomposed by MaterialAnything's material estimator (`prop_pbr.py`,
+subprocess in its own venv below) into a delit `albedo.png` and an
+`rm.png` (G=roughness, B=metallic), conditioned on a camera-space normal
+render of the same view. Both channel sets blend through the identical
+facing-weight machinery: the albedo blend is the exported basecolor (the
+lit `gen.png` is conditioning intermediate only) and the rm blend packs
+into a per-texel glTF `metallicRoughnessTexture` — the projection
+strategy's declared `--metallic`/`--roughness` scalars do not apply here.
+Per-canvas outputs, decomposed maps and provenance manifests are cached
+under `<textured.glb dir>/multiview/`, so a killed run resumes without
+respending GPU; the estimator is skipped when every view's maps exist.
+The normal map follows the same contract as the default strategy (real
+hires→clean bake — the estimator's bump head is discarded in its favor);
+the concept image is unused.
+
+**MaterialAnything estimator venv** (`C:\tools\MaterialAnything`, clone of
+`3DTopia/MaterialAnything` @ `be3d6b3`, MIT code; weights HF
+`xanderhuang/material_estimator`, Apache-2.0, ~4.3 GB). Its
+`diffusers==0.28.2` pin predates every other venv's, hence the isolation;
+`huggingface_hub<0.26` + `accelerate==0.31.0` are required companions
+(newer hub removed `cached_download`, which diffusers 0.28 imports):
+
+```
+py -3.11 -m venv C:\tools\MaterialAnything\venv
+C:\tools\MaterialAnything\venv\Scripts\python.exe -m pip install torch==2.7.1 torchvision --index-url https://download.pytorch.org/whl/cu128
+C:\tools\MaterialAnything\venv\Scripts\python.exe -m pip install diffusers==0.28.2 transformers==4.42.4 "huggingface_hub<0.26" accelerate==0.31.0 einops opencv-python safetensors Pillow numpy
+C:\tools\MaterialAnything\venv\Scripts\huggingface-cli.exe download xanderhuang/material_estimator --local-dir C:\tools\MaterialAnything\pretrained_models\material_estimator
+```
 
 **Writing `--subject` for this strategy — name every material's colour.**
 Z-Image runs at cfg 1, and unlike SDXL at cfg 7 it does not infer a material's

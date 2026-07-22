@@ -25,35 +25,33 @@
 #     is purely geometric, so before generating anything the stage
 #     greedily adds up to MV_EXTRA_MAX extra views (azimuth/elevation
 #     candidate grid, Text2Tex-style next-best-view) whenever one would
-#     newly cover >= MV_EXTRA_MIN_GAIN of the island; the --mr-mask pass
-#     inherits the same picks so both passes cover the same texels.
+#     newly cover >= MV_EXTRA_MIN_GAIN of the island.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
 #     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
-#   - MR defaults to two declared constants (--metallic/--roughness), carried
-#     by the glTF scalar factors rather than a map. --mr-mask escalates to a
-#     per-texel mask: a second depth-conditioned multiview pass renders the
-#     prop as a two-tone material-ID image (metal near-white, everything else
-#     near-black) through the same camera rig/blend machinery as the
-#     basecolor pass, and this stage smoothsteps that render's luma into
-#     metallic/roughness and packs them into a glTF metallicRoughnessTexture.
-#     Classifying material from the BASECOLOR value was tried and retired
-#     (A6.1, tasks/ai-pipeline/research/a6-1-mr-contract.md): luma conflates
-#     albedo, shading and material, so the dominant split in a dark render is
-#     lit-vs-shadowed, not iron-vs-wax. A dedicated mask render sidesteps
-#     that -- the generation prompt states the material split directly.
+#   - MR, projection strategy: two declared constants (--metallic/
+#     --roughness) carried by the glTF scalar factors rather than a map.
+#   - MR, multiview strategy: per-texel. Each generated view is decomposed
+#     by MaterialAnything's material estimator (prop_pbr.py, subprocess in
+#     its own venv) into a delit albedo and a roughness/metallic image,
+#     conditioned on a camera-space normal render of the same view; the
+#     albedo blend becomes the basecolor (the lit gen.png is conditioning
+#     intermediate only) and the rm blend packs into a glTF
+#     metallicRoughnessTexture. Classifying material from the BASECOLOR
+#     value was tried and retired (A6.1, tasks/ai-pipeline/research/
+#     a6-1-mr-contract.md): luma conflates albedo, shading and material.
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
 #     gen_prop.py's chained manifest.
 #
 # Usage: blender --background --python prop_texture.py -- \
 #            <clean.glb> <hires.glb> <concept.png> <textured.glb> \
 #            [--strategy projection|multiview] [--subject STR] [--seed N] \
-#            [--metallic F] [--roughness F] \
-#            [--mr-mask STR] [--metal-roughness F]
+#            [--metallic F] [--roughness F]
 
 import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -77,18 +75,16 @@ TEXTURE_SIZE = 1024
 # the +Y projection renders mirrored against the concept). The multiview
 # rig keeps the same convention: azimuth 0 is the -Y camera.
 FRONT_AXIS = "-Y"
-# Declared MR defaults: non-metal, matching every existing race model and the
+# Declared MR defaults (projection strategy only; multiview estimates
+# per-texel MR): non-metal, matching every existing race model and the
 # stone/wood/cloth props the art direction calls for. Metal props override.
 DEFAULT_METALLIC = 0.0
 DEFAULT_ROUGHNESS = 0.8
-# Roughness assigned to mask-classified metal texels (--mr-mask only).
-DEFAULT_METAL_ROUGHNESS = 0.65
-# Mask-pass classification band: a narrow smoothstep straddling the two-tone
-# render's midpoint, wide enough to absorb generation/blend noise near the
-# metal/non-metal boundary without misreading it as a third material.
-MR_MASK_SMOOTHSTEP_EDGES = (0.35, 0.65)
 
 MV_WORKFLOW = SCRIPT_DIR / "workflows" / "prop_multiview.json"
+# The MaterialAnything estimator runs in its own venv, not Blender's Python:
+# its diffusers pin (0.28.2) predates everything else in the pipeline.
+MA_PYTHON = Path(r"C:\tools\MaterialAnything") / "venv" / "Scripts" / "python.exe"
 
 
 MV_ELEVATION_DEG = 15.0
@@ -325,16 +321,28 @@ def mv_camera_rig(clean, specs):
     return [mv_view(*spec, rig) for spec in specs], rig
 
 
-def _depth_setup(clean, rig):
-    """Depth-ramp emission material (near=1, far=0) + shared ortho camera;
-    every view shares near/far because the rig is size-only."""
+def _ortho_camera(rig):
     scene = bpy.context.scene
     scene.render.resolution_x = scene.render.resolution_y = MV_RES
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "OPEN_EXR"
     scene.render.image_settings.color_depth = "32"
     near, far = rig["half"], 3.0 * rig["half"]
+    cam_data = bpy.data.cameras.new("mv_cam")
+    cam_data.type = "ORTHO"
+    cam_data.ortho_scale = rig["ortho_scale"]
+    cam_data.clip_start = near * 0.5
+    cam_data.clip_end = far * 2.0
+    cam_obj = bpy.data.objects.new("mv_cam", cam_data)
+    scene.collection.objects.link(cam_obj)
+    scene.camera = cam_obj
+    return cam_obj
 
+
+def _depth_setup(clean, rig):
+    """Depth-ramp emission material (near=1, far=0) + shared ortho camera;
+    every view shares near/far because the rig is size-only."""
+    near, far = rig["half"], 3.0 * rig["half"]
     tree = bake_material(clean)
     n_cam = tree.nodes.new("ShaderNodeCameraData")
     n_map = tree.nodes.new("ShaderNodeMapRange")
@@ -348,28 +356,48 @@ def _depth_setup(clean, rig):
     tree.links.new(n_cam.outputs["View Z Depth"], n_map.inputs["Value"])
     tree.links.new(n_map.outputs["Result"], n_emit.inputs["Color"])
     tree.links.new(n_emit.outputs["Emission"], n_out.inputs["Surface"])
-
-    cam_data = bpy.data.cameras.new("mv_cam")
-    cam_data.type = "ORTHO"
-    cam_data.ortho_scale = rig["ortho_scale"]
-    cam_data.clip_start = near * 0.5
-    cam_data.clip_end = far * 2.0
-    cam_obj = bpy.data.objects.new("mv_cam", cam_data)
-    scene.collection.objects.link(cam_obj)
-    scene.camera = cam_obj
-    return cam_obj
+    return _ortho_camera(rig)
 
 
-def _render_depth(cam_obj, v, exr_path):
+def _normal_setup(clean, rig):
+    """Camera-space normal emission material, encoded n*0.5+0.5 with +X
+    right / +Y up / +Z toward camera — the exact conditioning encoding the
+    MaterialAnything estimator was trained on (their pipeline builds it
+    from PyTorch3D view-space normals via a diag(-1,1,-1) remap; Blender's
+    camera space already has these axes, so a plain transform suffices)."""
+    tree = bake_material(clean)
+    n_geo = tree.nodes.new("ShaderNodeNewGeometry")
+    n_xform = tree.nodes.new("ShaderNodeVectorTransform")
+    n_xform.vector_type = "NORMAL"
+    n_xform.convert_from = "WORLD"
+    n_xform.convert_to = "CAMERA"
+    n_madd = tree.nodes.new("ShaderNodeVectorMath")
+    n_madd.operation = "MULTIPLY_ADD"
+    n_madd.inputs[1].default_value = (0.5, 0.5, 0.5)
+    n_madd.inputs[2].default_value = (0.5, 0.5, 0.5)
+    n_emit = tree.nodes.new("ShaderNodeEmission")
+    n_out = tree.nodes.new("ShaderNodeOutputMaterial")
+    tree.links.new(n_geo.outputs["Normal"], n_xform.inputs["Vector"])
+    tree.links.new(n_xform.outputs["Vector"], n_madd.inputs[0])
+    tree.links.new(n_madd.outputs["Vector"], n_emit.inputs["Color"])
+    tree.links.new(n_emit.outputs["Emission"], n_out.inputs["Surface"])
+    return _ortho_camera(rig)
+
+
+def _render_exr(cam_obj, v, exr_path):
     scene = bpy.context.scene
     cam_obj.location = Vector(v["cam"])
     cam_obj.rotation_euler = Vector(v["f"]).to_track_quat("-Z", "Y").to_euler()
     scene.render.filepath = str(exr_path)
     bpy.ops.render.render(write_still=True)
     exr = bpy.data.images.load(str(exr_path))
-    depth = img_array(exr)[:, :, 0].copy()
+    px = img_array(exr).copy()
     bpy.data.images.remove(exr)
-    return depth
+    return px
+
+
+def _render_depth(cam_obj, v, exr_path):
+    return _render_exr(cam_obj, v, exr_path)[:, :, 0]
 
 
 def render_depth_views(clean, hires, views, rig, work_dir, start=0):
@@ -398,6 +426,27 @@ def render_depth_views(clean, hires, views, rig, work_dir, start=0):
         bpy.data.images.remove(png)
     hires.hide_render = False
     return depths
+
+
+def render_normal_views(clean, hires, views, depths, rig, work_dir):
+    """Camera-space normal render + object mask per view, the estimator's
+    conditioning inputs: normal_<i>.png (linear n*0.5+0.5, white background
+    like upstream's renders) and mask_<i>.png (255 inside the silhouette).
+    Written top-down via cv2 for the PIL-side runner; img_array rows are
+    bottom-up, hence the flips."""
+    cam_obj = _normal_setup(clean, rig)
+    hires.hide_render = True
+    scratch = work_dir / "normal_render.exr"
+    for i, (v, depth) in enumerate(zip(views, depths)):
+        rgb = _render_exr(cam_obj, v, scratch)[:, :, :3]
+        obj = depth > 0.01
+        rgb[~obj] = 1.0
+        rgb8 = (np.clip(np.flipud(rgb), 0.0, 1.0) * 255.0).round().astype(np.uint8)
+        cv2.imwrite(str(work_dir / f"normal_{i}.png"), rgb8[:, :, ::-1])
+        cv2.imwrite(str(work_dir / f"mask_{i}.png"),
+                    np.flipud(obj).astype(np.uint8) * 255)
+    hires.hide_render = False
+    scratch.unlink(missing_ok=True)
 
 
 def view_pairs(n, n_extra=0):
@@ -645,16 +694,22 @@ def pick_extra_views(clean, hires, views, depths, rig, pos, nrm, island, work_di
     return extra_specs, extra_meta
 
 
-def blend_views(views, depths, rig, work_dir, pos, nrm, island):
-    """Facing-weighted, occlusion-tested blend of the generated views into
-    a flat (N, 4) sRGB basecolor array. Returns the array, the fractional
+def blend_views(views, depths, rig, work_dir, pos, nrm, island,
+                filename="albedo.png", srgb=True):
+    """Facing-weighted, occlusion-tested blend of one per-view image
+    channel set into a flat (N, 4) array. Returns the array, the fractional
     island coverage, and the per-texel covered mask (island texels that
     actually received blended weight; island holes are Telea-inpainted
-    from their surroundings, off-island texels keep a mean-color fill)."""
+    from their surroundings, off-island texels keep a mean-color fill).
+    srgb=False loads the per-view images as Non-Color data (rm maps):
+    Blender would otherwise linearize them on load, and the raw material
+    values must survive into the Non-Color atlas unchanged."""
     accum = np.zeros((pos.shape[0], 3))
     wsum = np.zeros(pos.shape[0])
     for i, v in enumerate(views):
-        gen_img = bpy.data.images.load(str(work_dir / f"view_{i}" / "gen.png"))
+        gen_img = bpy.data.images.load(str(work_dir / f"view_{i}" / filename))
+        if not srgb:
+            gen_img.colorspace_settings.name = "Non-Color"
         gen = img_array(gen_img)[:, :, :3].astype(np.float64)
         bpy.data.images.remove(gen_img)
         gen = pad_edges(gen, depths[i] > 0.01, MV_EDGE_PAD_PX)
@@ -684,7 +739,33 @@ def blend_views(views, depths, rig, work_dir, pos, nrm, island):
     return out, coverage, covered
 
 
-def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
+def estimate_materials(views, work_dir, seed):
+    """Decompose every view_<i>/gen.png into albedo.png + rm.png via the
+    MaterialAnything estimator subprocess (prop_pbr.py in its own venv,
+    run only when some output is missing — GPU work resumes like gen.png).
+    Its stdout is captured: gen_prop.py parses this stage's single
+    '{'-prefixed stats line, which a streamed child JSON line would break."""
+    missing = [i for i in range(len(views))
+               if not all((work_dir / f"view_{i}" / name).exists()
+                          for name in ("albedo.png", "rm.png"))]
+    if missing:
+        proc = subprocess.run(
+            [str(MA_PYTHON), str(SCRIPT_DIR / "prop_pbr.py"), str(work_dir),
+             "--views", str(len(views)), "--seed", str(seed)],
+            capture_output=True, text=True)
+        if proc.returncode != 0:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            fail("material estimator subprocess failed")
+    return json.loads((work_dir / "pbr_meta.json").read_text(encoding="utf-8"))
+
+
+def pbr_multiview(clean, hires, atlas, subject, seed, work_dir):
+    """Full per-texel PBR set from the multiview path: generate lit views,
+    decompose each into albedo + roughness/metallic, blend every channel
+    through the same facing-weight machinery. The albedo blend is the
+    basecolor (delit — the lit gen.png is conditioning intermediate only);
+    the rm blend packs into the glTF G=roughness/B=metallic layout, which
+    is the estimator's native output layout."""
     work_dir.mkdir(parents=True, exist_ok=True)
     views, rig = mv_camera_rig(clean, MV_VIEWS)
     pos, nrm, island = bake_geometry_atlas(clean, atlas, rig)
@@ -696,12 +777,24 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
         depths += render_depth_views(clean, hires, extra_views, rig, work_dir,
                                      start=len(views))
         views += extra_views
+    render_normal_views(clean, hires, views, depths, rig, work_dir)
     view_metas = generate_views(views, work_dir, subject, seed,
                                 n_extra=len(extra_specs))
-    base_px, coverage, covered = blend_views(views, depths, rig, work_dir, pos, nrm, island)
+    pbr_meta = estimate_materials(views, work_dir, seed)
+    base_px, coverage, covered = blend_views(views, depths, rig, work_dir,
+                                             pos, nrm, island)
+    rm_px, _, _ = blend_views(views, depths, rig, work_dir, pos, nrm, island,
+                              filename="rm.png", srgb=False)
 
     base_img = new_image("prop_base", srgb=True, fill=(0, 0, 0))
     base_img.pixels.foreach_set(base_px.ravel())
+    mr = np.zeros((pos.shape[0], 4), dtype=np.float32)
+    mr[:, 1] = rm_px[:, 1]  # estimator R channel dropped: glTF ignores it
+    mr[:, 2] = rm_px[:, 2]
+    mr[:, 3] = 1.0
+    mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
+    mr_img.pixels.foreach_set(mr.ravel())
+
     extras = {
         "strategy": "multiview_controlnet_depth",
         "front_axis": FRONT_AXIS,
@@ -710,58 +803,17 @@ def basecolor_multiview(clean, hires, atlas, subject, seed, work_dir):
         "render_resolution": MV_RES,
         "views": view_metas,
         "extra_views": extra_meta,
+        "pbr_estimator": pbr_meta,
         "weight_exponent": MV_WEIGHT_EXPONENT,
         "occlusion_eps": MV_OCCLUSION_EPS,
         "edge_pad_px": MV_EDGE_PAD_PX,
         "depth_dilate_px": MV_DEPTH_DILATE_PX,
         "blend_coverage": round(coverage, 4),
         "hole_texels": int((island & ~covered).sum()),
+        "metal_fraction": round(float((rm_px[island, 2] > 0.5).mean())
+                                if island.any() else 0.0, 4),
     }
-    return base_img, extras, extra_specs
-
-
-def mr_multiview(clean, hires, atlas, mask_subject, seed, work_dir, metal_roughness,
-                 roughness, extra_specs=()):
-    """Second multiview pass, independent cache from the basecolor one: same
-    camera rig/depth-conditioned generation/blend machinery, but the prompt
-    renders a two-tone material-ID image instead of the prop's basecolor.
-    It inherits the basecolor pass's extra view picks (extra_specs) instead
-    of re-scoring, so both passes cover the same texels — a texel with
-    basecolor must get a real material classification, not the dielectric
-    fallback below. The blend's luma smoothsteps into a per-texel metallic
-    mask; texels the blend never covered (see blend_views) default to fully
-    dielectric rather than inheriting its mean-color fill, which carries no
-    material meaning."""
-    work_dir.mkdir(parents=True, exist_ok=True)
-    views, rig = mv_camera_rig(clean, MV_VIEWS)
-    views += [mv_view(*spec, rig) for spec in extra_specs]
-    depths = render_depth_views(clean, hires, views, rig, work_dir)
-    view_metas = generate_views(views, work_dir, mask_subject, seed,
-                                n_extra=len(extra_specs))
-    pos, nrm, island = bake_geometry_atlas(clean, atlas, rig)
-    mask_px, coverage, covered = blend_views(views, depths, rig, work_dir, pos, nrm, island)
-
-    lo, hi = MR_MASK_SMOOTHSTEP_EDGES
-    lum = 0.2126 * mask_px[:, 0] + 0.7152 * mask_px[:, 1] + 0.0722 * mask_px[:, 2]
-    t = np.clip((lum - lo) / (hi - lo), 0.0, 1.0)
-    metallic = t * t * (3.0 - 2.0 * t)  # smoothstep: near-white mask = metal
-    metallic[~covered] = 0.0  # dielectric default, not the mean-color fill
-
-    mr = np.zeros((pos.shape[0], 4), dtype=np.float32)
-    mr[:, 1] = metal_roughness * metallic + roughness * (1.0 - metallic)
-    mr[:, 2] = metallic
-    mr[:, 3] = 1.0
-    mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
-    mr_img.pixels.foreach_set(mr.ravel())
-
-    extras = {
-        "mask_subject": mask_subject,
-        "workflow": MV_WORKFLOW.name,
-        "views": view_metas,
-        "blend_coverage": round(coverage, 4),
-        "metal_fraction": round(float((metallic[island] > 0.5).mean()) if island.any() else 0.0, 4),
-    }
-    return mr_img, extras
+    return base_img, mr_img, extras
 
 
 # ---------------------------------------------------------------------------
@@ -777,16 +829,12 @@ def main():
     parser.add_argument("--subject", help="Prompt substituted into the multiview workflow's {subject}")
     parser.add_argument("--seed", type=int, help="Base seed for the multiview passes")
     parser.add_argument("--metallic", type=float, default=DEFAULT_METALLIC,
-                        help="Declared metallic constant (default 0: stone/wood/cloth/skin)")
+                        help="Declared metallic constant, projection strategy only "
+                             "(default 0: stone/wood/cloth/skin); multiview estimates "
+                             "per-texel MR instead")
     parser.add_argument("--roughness", type=float, default=DEFAULT_ROUGHNESS,
-                        help="Declared roughness constant (default 0.8)")
-    parser.add_argument("--mr-mask", metavar="SUBJECT",
-                        help="Prompt for a second multiview pass rendering a two-tone "
-                             "metal/non-metal material-ID image; presence escalates MR "
-                             "from the declared scalar factors to a per-texel packed "
-                             "metallicRoughnessTexture")
-    parser.add_argument("--metal-roughness", type=float, default=DEFAULT_METAL_ROUGHNESS,
-                        help="Roughness assigned to mask-classified metal texels (default 0.65)")
+                        help="Declared roughness constant, projection strategy only "
+                             "(default 0.8)")
     parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
                         help="Multiview camera azimuths (default 0,90,180,270); "
                              "use oblique sides, e.g. 0,60,180,300, for planar props")
@@ -814,16 +862,16 @@ def main():
         fail("clean mesh carries no UV atlas — re-run prop_cleanup")
     atlas = me.uv_layers[0].name
 
-    # ---- basecolor, per strategy ----
-    extra_specs = []
+    # ---- basecolor (+ per-texel MR on the multiview path), per strategy ----
+    mr_img = None
     if args.strategy == "projection":
         base_img, extras = basecolor_projection(clean, atlas, args.concept_png)
     else:
         if not args.subject or args.seed is None:
             fail("--strategy multiview requires --subject and --seed")
         work_dir = Path(args.textured_glb).resolve().parent / "multiview"
-        base_img, extras, extra_specs = basecolor_multiview(clean, hires, atlas,
-                                                            args.subject, args.seed, work_dir)
+        base_img, mr_img, extras = pbr_multiview(clean, hires, atlas,
+                                                 args.subject, args.seed, work_dir)
     t_base = time.time()
 
     # ---- normal: real high-to-low bake from the hires mesh ----
@@ -839,25 +887,10 @@ def main():
                         uv_layer=atlas)
     t_normal = time.time()
 
-    # ---- MR mask: optional second multiview pass classifying per-texel
-    #      material identity (dead without --mr-mask) ----
-    mr_img = None
-    mr_mask_extras = None
-    if args.mr_mask:
-        if args.seed is None:
-            fail("--mr-mask requires --seed")
-        mr_work_dir = Path(args.textured_glb).resolve().parent / "multiview_mr"
-        mr_img, mr_mask_extras = mr_multiview(clean, hires, atlas, args.mr_mask, args.seed,
-                                              mr_work_dir, args.metal_roughness,
-                                              args.roughness, extra_specs)
-    t_mr = time.time()
-
     # ---- final material + export (hires dropped, images saved so the
     #      glTF exporter embeds them) ----
-    mr_stats = {"metallic": args.metallic, "roughness": args.roughness}
-    if mr_img is not None:
-        mr_stats["metal_roughness"] = args.metal_roughness
-        mr_stats["mr_mask"] = mr_mask_extras
+    mr_stats = ({} if mr_img is not None
+                else {"metallic": args.metallic, "roughness": args.roughness})
     tmpdir = tempfile.TemporaryDirectory()
     images_to_save = [(base_img, "base.png"), (normal_img, "normal.png")]
     if mr_img is not None:
@@ -913,8 +946,6 @@ def main():
         "normal_bake_s": round(t_normal - t_base, 1),
         "textured_glb": args.textured_glb,
     }
-    if mr_img is not None:
-        stats["mr_mask_bake_s"] = round(t_mr - t_normal, 1)
     print(json.dumps(stats))
 
 
