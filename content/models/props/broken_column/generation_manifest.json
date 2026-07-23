@@ -292,20 +292,21 @@
     "depth_dilate_px": 5,
     "blend_coverage": 0.4879,
     "hole_texels": 488399,
+    "dielectric": true,
     "metal_fraction": 0.0441,
     "texture_size": 1024,
-    "base_bake_s": 155.5,
+    "base_bake_s": 16.2,
     "normal_bake_s": 0.6,
     "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\column\\cand_0\\textured.glb",
-    "textured_glb_sha256": "642282a0572323f0edeff35a3d736743cc3aac8aa3353b3caf7d401c4f0a2a47"
+    "textured_glb_sha256": "83eca80bc380ec3a111d641f30352a834850e43fa4fef0962c305e181e77d868"
   },
   "preprocess": {
-    "textured_glb_bytes": 4902340,
-    "final_glb_bytes": 4902312
+    "textured_glb_bytes": 4497512,
+    "final_glb_bytes": 4497480
   },
   "bake": {
     "source": "final.glb",
-    "sha256": "8e584254a49076cab1514c8e3f9498cd5cdddf1b5c7e738ea81bcd43aa47c57e",
+    "sha256": "1fb8ae44058c56fa89c8b866f6915aefaf2d6637bbbb42c8d64dc798aba1c498",
     "images": [
       {
         "index": 0,
@@ -324,7 +325,7 @@
       }
     ]
   },
-  "final_glb_sha256": "8e584254a49076cab1514c8e3f9498cd5cdddf1b5c7e738ea81bcd43aa47c57e",
+  "final_glb_sha256": "1fb8ae44058c56fa89c8b866f6915aefaf2d6637bbbb42c8d64dc798aba1c498",
   "turntable": {
     "angles": 8,
     "size": "512x512",
