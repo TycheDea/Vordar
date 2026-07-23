@@ -1,7 +1,8 @@
-# Visual Quality Bar — Semi-Realistic Dark Fantasy
+# Visual Quality Bar — Semi-Realistic Religious Dark Fantasy
 
-The game's look is **semi-realistic dark fantasy** (Diablo IV / Lost Ark register):
-realistic proportions, PBR materials, moody desaturated world, warm accent light.
+The game's look is **Castilian/Andalusian religious dark fantasy** rendered
+semi-realistically (Diablo IV / Path of Exile 2 register): realistic proportions,
+PBR materials, sun-bleached and soot-darkened stone, warm candle and gilt accent light.
 This document is the quality bar every visual asset and renderer feature must meet.
 
 Rules have stable IDs (`VQ-xx`). **Machine-checked** rules name the test that
@@ -16,8 +17,9 @@ explicitly out of scope.
 
 ## A. Art direction (eyeball)
 
-- **VQ-A1** — Semi-realistic dark fantasy: realistic proportions, PBR materials,
-  moody desaturated palette with warm accent light (fire/ember/magic). No
+- **VQ-A1** — Semi-realistic religious dark fantasy: realistic proportions, PBR
+  materials, sun-bleached/soot-darkened desaturated stone palette, warm
+  candle/gilt accent light (votive flame, altarpiece gold, shrine glow). No
   flat-shaded or low-poly-stylized assets; no toon outlines.
   *Check:* sandbox screenshot review at each phase boundary.
 - **VQ-A2** — Every shipped surface is PBR-textured (albedo + normal + roughness
@@ -31,12 +33,17 @@ explicitly out of scope.
 - **VQ-A4** — Reserved color language (HSV, S/V are floats 0–1):
   | Role | Hue | Saturation | Value |
   |---|---|---|---|
-  | Player VFX (arcane) | 180°–280° (cyan→violet) | 0.5–1.0 | 0.7–1.0 (HDR boost via emissive) |
-  | Threat / telegraph | 0°–40° (red→orange) | 0.7–1.0 | 0.8–1.0 |
-  | Ambient world | any | ≤ 0.35 | ≤ 0.6 |
-  *Check:* eyeball; VFX RON defs cite the role they use.
-- **VQ-A5** — Lighting sells the theme: low sun/dusk HDRIs, depth fog, emissive
-  accents (portals, magic). Bright noon-neutral scenes are off-theme.
+  | Player VFX (votive) | 190°–230° (pale blue-white "cold flame") | 0.15–0.45 | 0.85–1.0 (HDR boost via emissive) |
+  | Environmental emissive (candle-gold) | 35°–50° (candle flame, gilt glint, shrine glow) | 0.55–0.85 | 0.75–1.0 (flames HDR via emissive) |
+  | Threat / telegraph | 350°–25° (crimson→red-orange, wraps 0°) | 0.7–1.0 | 0.8–1.0 |
+  | Ambient world | any; warm stone bias 20°–50° when chromatic | ≤ 0.35 | ≤ 0.6 |
+  Roles keep the legibility split: player = cool, threat = warm; candle-gold sits
+  ≥ 10° above the threat band and never telegraphs danger.
+  *Check:* eyeball; VFX RON defs cite the role they use. The numeric ranges are a
+  proposal — the user tunes them at the B1 phase-gate text review.
+- **VQ-A5** — Lighting sells the theme: low amber dusk over a dry plateau, depth
+  fog, votive-candle/shrine emissive accents (portals, altars, magic). Bright
+  noon-neutral scenes are off-theme.
   *Check:* eyeball per zone.
 
 ## B. Characters (machine-checked; enemy clauses deferred)
@@ -45,7 +52,7 @@ explicitly out of scope.
   minimum clip set idle/walk/run/attack/hit/death. *(Players: enforced now;
   enemies: deferred.)* SDF ShapeGroup is a dev fallback only — banned from
   shipped prefabs by content-lint, not by code deletion.
-  *Test:* `game/vordar-game/tests/content_lint.rs` (`races_render_as_rigged_meshes`).
+  *Test:* `game/vordar-game/tests/content_lint.rs` (`race_clips_exist_in_gltf`).
 - **VQ-B2** — Rigged assets: ≤ 64 joints (engine palette cap), height-normalized
   feet-on-ground, `forward_offset` documented in the race RON, ≤ 16 MB on disk.
   *Test:* `content_lint.rs` (`race_models_within_budgets`).
@@ -141,13 +148,14 @@ intersecting transparents and particle-vs-glass ordering remain approximate).
 
 Run at phase boundaries; the user eyeballs, never automated:
 
-1. **Theme read** (VQ-A1/A5): does the start zone read dark fantasy at a glance —
-   dusk sky, moody ambient, warm accents?
+1. **Theme read** (VQ-A1/A5): does the start zone read religious dark fantasy at
+   a glance — low amber dusk, sun-bleached/soot-darkened stone, candle-gold
+   accents?
 2. **Material read** (VQ-A2): walk close to ground/props — surfaces show normal
    detail and roughness variation, no flat plastic.
 3. **Cohesion** (VQ-A3): no asset looks like it came from a different game.
-4. **Color language** (VQ-A4): player VFX reads arcane cool; telegraphs read
-   threat red-orange instantly.
+4. **Color language** (VQ-A4): player VFX reads votive cool blue-white;
+   telegraphs read threat red-orange→crimson instantly.
 5. **Grounding** (VQ-D3): characters/props sit in the world (contact shadows), no
    floating.
 6. **Glow payoff** (VQ-C3/Phase 4): emissives bloom softly at dusk, no clipping halos.
@@ -156,7 +164,7 @@ Run at phase boundaries; the user eyeballs, never automated:
 9. **Horizon fog** (VQ-A5): in a fogged zone, look toward the horizon — sky and
    ground converge smoothly; horizon seam gone.
 10. **Accent light** (VQ-A1/A5): stand a character beside a portal at dusk —
-   the gate's cyan light spills onto the ground, both pillars, and the
+   the gate's candle-gold light spills onto the ground, both pillars, and the
    character, fading smoothly with distance (no hard edge at the light
    radius); the gate itself still blooms.
 11. **Height fog** (VQ-A1/A5): at dusk, low ground/hollows read hazier than
