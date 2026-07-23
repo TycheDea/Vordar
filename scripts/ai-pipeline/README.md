@@ -350,15 +350,15 @@ explicitly; `--sun none` skips injection entirely (for overcast/no-sun
 skies). Either way the output is **hard-clamped at 30000**:
 `EquirectImage::decode_hdr` converts f32→f16 on upload, and f16 tops out at
 65504 — 30000 keeps margin under that ceiling while already exceeding
-anything the engine visibly uses (kloppenheim's real 36416 peak sits above
-the clamp; evening_road's soft-sun peak is ~20).
+anything the engine visibly uses (kloppenheim's measured peak was 36416,
+above the clamp; evening_road's measured soft-sun peak was ~20).
 
-The highlight-expansion curve is calibrated against `cv2`-probed stats of
-the two committed CC0 references — `evening_road_01_puresky_2k.hdr`: peak
-20.1 / median 0.554; `kloppenheim_02_puresky_1k.hdr`: peak 36415.9 / median
-0.097 (full table in `tasks/ai-pipeline/a2.md`'s reference calibration
-section) — so a lit dusk sky lands near evening_road's register and a
-hard-sun sky lands near kloppenheim's.
+The highlight-expansion curve was calibrated against `cv2`-probed stats of
+two CC0 references, `evening_road_01_puresky_2k.hdr` (measured peak 20.1,
+median 0.554) and `kloppenheim_02_puresky_1k.hdr` (measured peak 36415.9,
+median 0.097) — full table in `tasks/ai-pipeline/a2.md`'s reference
+calibration section — so a lit dusk sky lands near evening_road's measured
+register and a hard-sun sky lands near kloppenheim's.
 
 Self-checks (any FAIL exits 1): exact 2048×1024, all values finite and
 ≥ 0, peak ≤ 30000, median in [0.02, 2.0], wrap-seam MAD ≤ 0.02. Writes
@@ -373,7 +373,7 @@ cargo run -p engine-renderer --release --features offscreen --bin turntable -- c
 ```
 
 `--hdri` is optional; omitting it renders under the hardcoded default
-(`evening_road_01_puresky_2k.hdr`). This is the engine-side gate for any
+(`castilian_plateau_dusk_2k.hdr`). This is the engine-side gate for any
 generated HDRI — the full `load_environment_hdr` → `decode_hdr` → f16
 upload → IBL bake → sky + lit render path, exercised end to end.
 

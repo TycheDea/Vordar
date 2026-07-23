@@ -8,15 +8,15 @@ use vordar_client::ground::{generate_ground, load_ground_material};
 
 #[test]
 fn zone_ground_renders_with_texture_variation() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/textures/ground/mud_leaves");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/textures/ground/cracked_earth");
     if !std::path::Path::new(dir).exists() {
         eprintln!("SKIP: ground texture set missing");
         return;
     }
 
     let material = load_ground_material(dir).expect("texture set loads");
-    // mud_leaves ships a .dds sidecar for every map slot: the finder must
-    // prefer it over the JPG source. Needs no GPU, so it's checked whether
+    // cracked_earth ships a .dds sidecar for every map slot: the finder must
+    // prefer it over the PNG source. Needs no GPU, so it's checked whether
     // or not the render below runs.
     let base_color_compressed = matches!(material.base_color_image, Some(TextureSource::Compressed(_)));
     let normal_compressed = matches!(material.normal_image, Some(TextureSource::Compressed(_)));
@@ -53,7 +53,7 @@ fn zone_ground_renders_with_texture_variation() {
         variance.sqrt()
     );
 
-    assert!(base_color_compressed, "diff_2k.dds exists in mud_leaves — base color should load Compressed");
-    assert!(normal_compressed, "nor_gl_2k.dds exists in mud_leaves — normal should load Compressed");
-    assert!(mr_compressed, "rough_2k_mr.dds exists in mud_leaves — metallic-roughness should load Compressed");
+    assert!(base_color_compressed, "diff_2048.dds exists in cracked_earth — base color should load Compressed");
+    assert!(normal_compressed, "nor_gl_2048.dds exists in cracked_earth — normal should load Compressed");
+    assert!(mr_compressed, "rough_2048_mr.dds exists in cracked_earth — metallic-roughness should load Compressed");
 }

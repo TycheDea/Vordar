@@ -42,7 +42,7 @@ fn asset_load_benches(c: &mut Criterion) {
     // Zone ground: load 3× 2k textures + mesh generation
     group.bench_function("zone_ground/decode_and_generate", |b| {
         b.iter(|| {
-            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../content/textures/ground/mud_leaves");
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../content/textures/ground/cracked_earth");
             let material = match ground::load_ground_material(black_box(dir)) {
                 Ok(m) => m,
                 Err(e) => panic!("load_ground_material failed: {e}"),

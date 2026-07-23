@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::exit;
 use vordar_client::ground::{generate_ground, load_ground_material};
 
-const HDRI: &str = "content/textures/env/evening_road_01_puresky_2k.hdr";
+const HDRI: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
 const GROUND_SIZE: f32 = 40.0;
 const GROUND_TILE: f32 = 7.0;
 
