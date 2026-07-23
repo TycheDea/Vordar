@@ -133,7 +133,7 @@ impl System for ZoneDressingSystem {
             ));
         }
 
-        // Scattered props (rocks, dead trees — silhouettes against the dusk).
+        // Scattered props (rocks, ruin stonework, cypresses — silhouettes against the dusk).
         for prop in &visuals.props {
             world.spawn((
                 Transform {

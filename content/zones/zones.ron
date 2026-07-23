@@ -14,8 +14,9 @@
             chapter: None,
             portals: [],
             // Theme pass (VQ-A5): dusk HDRI (the default env), depth fog,
-            // cracked-earth PBR ground, rock + dead-tree silhouettes. Props
-            // sit on the ground plane (y = -0.5), clear of spawn and portals.
+            // cracked-earth PBR ground, ruined chapel stonework and cypress
+            // silhouettes among the rocks. Props sit on the ground plane
+            // (y = -0.5), clear of spawn and portals.
             visuals: (
                 // Fog is the visible horizon (sky.wgsl blends to it at 0°
                 // elevation), so it must hold the HDRI's horizon register:
@@ -35,9 +36,25 @@
                     (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (14.0, -0.5, -19.0), scale: 3.0, yaw: 40.0),
                     (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-24.0, -0.5, 13.0), scale: 2.2, yaw: 205.0),
                     (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (-11.0, -0.5, 27.0), scale: 1.6, yaw: 118.0),
-                    (model: "content/models/props/dead_quiver_trunk/dead_quiver_trunk_1k.gltf", pos: (-30.0, -0.5, -24.0), scale: 1.4, yaw: 75.0),
                     (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (31.0, -0.5, 22.0),  scale: 1.8, yaw: 320.0),
-                    (model: "content/models/props/dead_quiver_trunk/dead_quiver_trunk_1k.gltf", pos: (40.0, -0.5, -35.0), scale: 1.7, yaw: 210.0),
+                    // Ruined chapel cluster — the mid-distance landmark southwest of spawn.
+                    (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (-26.0, -0.5, -34.0), scale: 1.0,  yaw: 40.0),
+                    (model: "content/models/props/broken_column/broken_column.glb",   pos: (-20.0, -0.5, -29.0), scale: 0.9,  yaw: 190.0),
+                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (-31.0, -0.5, -27.0), scale: 0.85, yaw: 210.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (-34.0, -0.5, -40.0), scale: 0.95, yaw: 300.0),
+                    // Wayside stones scattered at the play-radius edge.
+                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (12.0, -0.5, 36.0),   scale: 1.0,  yaw: 12.0),
+                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (50.0, -0.5, 36.0),   scale: 1.15, yaw: 290.0),
+                    (model: "content/models/props/broken_column/broken_column.glb",   pos: (-58.0, -0.5, 14.0),  scale: 1.0,  yaw: 305.0),
+                    // Cypress pairs — dusk silhouettes at the field edges.
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (-48.0, -0.5, 42.0),  scale: 1.0,  yaw: 20.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (-42.0, -0.5, 48.0),  scale: 0.85, yaw: 140.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (30.0, -0.5, -52.0),  scale: 1.1,  yaw: 75.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (36.0, -0.5, -46.0),  scale: 0.9,  yaw: 230.0),
+                    // Dead olive stumps in the mid field.
+                    (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (-16.0, -0.5, 18.0),  scale: 1.2,  yaw: 85.0),
+                    (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (24.0, -0.5, -24.0),  scale: 1.0,  yaw: 300.0),
+                    (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (-8.0, -0.5, -30.0),  scale: 0.9,  yaw: 160.0),
                     // Horizon landmarks out in the hills.
                     (model: "content/models/props/rock_face_01/rock_face_01_1k.gltf", pos: (-95.0, -0.5, -70.0), scale: 4.0, yaw: 15.0),
                     (model: "content/models/props/rock_face_01/rock_face_01_1k.gltf", pos: (80.0, -0.5, 105.0),  scale: 3.2, yaw: 250.0),
