@@ -41,11 +41,12 @@
                     // Ruined chapel cluster — the mid-distance landmark southwest of spawn.
                     (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (-26.0, -0.5, -34.0), scale: 1.0,  yaw: 40.0),
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-20.0, -0.5, -29.0), scale: 0.9,  yaw: 190.0),
-                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (-31.0, -0.5, -27.0), scale: 0.85, yaw: 210.0),
+                    // Small grave-marker cluster within the chapel ruins.
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-31.0, -0.5, -27.0), scale: 0.72, yaw: 210.0),
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-28.5, -0.5, -24.5), scale: 0.70, yaw: 45.0),
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-33.5, -0.5, -29.5), scale: 0.75, yaw: 320.0),
                     (model: "content/models/props/cypress/cypress.glb",               pos: (-34.0, -0.5, -40.0), scale: 0.95, yaw: 300.0),
-                    // Wayside stones scattered at the play-radius edge.
-                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (12.0, -0.5, 36.0),   scale: 1.0,  yaw: 12.0),
-                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (50.0, -0.5, 36.0),   scale: 1.15, yaw: 290.0),
+                    // Toppled column past the play-radius edge.
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-58.0, -0.5, 14.0),  scale: 1.0,  yaw: 305.0),
                     // Cypress pairs — dusk silhouettes at the field edges.
                     (model: "content/models/props/cypress/cypress.glb",               pos: (-48.0, -0.5, 42.0),  scale: 1.0,  yaw: 20.0),
@@ -93,9 +94,6 @@
                     // Toppled colonnade remnants edging the plaza.
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-3.0, -0.5, 14.0),  scale: 1.0,  yaw: 130.0),
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (15.0, -0.5, -17.0), scale: 0.85, yaw: 20.0),
-                    // Wayside crosses at the settlement bounds.
-                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (11.0, -0.5, 13.0),  scale: 1.0,  yaw: 300.0),
-                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (-7.0, -0.5, -19.0), scale: 1.1,  yaw: 75.0),
                     // Sparse dead stumps past the cobbles.
                     (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (-13.0, -0.5, 23.0), scale: 1.0,  yaw: 190.0),
                     (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (21.0, -0.5, 21.0),  scale: 0.9,  yaw: 340.0),
