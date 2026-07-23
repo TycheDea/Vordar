@@ -1,0 +1,21 @@
+{
+  "source": "chapel_arch.glb",
+  "sha256": "407ad0a8d9c0032245fdeb03980219d423e2ac843e82aee44f4b1a09bd318cc5",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    }
+  ]
+}

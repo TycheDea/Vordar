@@ -28,6 +28,11 @@ side — which models are allowed to generate anything that ships).
 | Worn cobble ground PBR set, 2k — `content/textures/ground/worn_cobble/` | Project-generated | StableMaterials (`gvecchio/StableMaterials`), prompt "worn cobblestone pavement of large rounded cobbles, fist-sized weathered stones, sun-bleached tops, soot-darkened deep joints, a few cracked flagstones", seed 1, + SDXL img2img upscale; full provenance in `content/textures/ground/worn_cobble/generation_manifest.json` | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL) — `Cleared` rows in the model ledger | With the project only |
 | Castilian Plateau Dusk HDRI, 2k — `content/textures/env/castilian_plateau_dusk_2k.hdr` | Project-generated | SDXL circular-x pano (`gen_pano_sdxl.py`) + `hdr_post.py` sun injection; full provenance in `castilian_plateau_dusk_2k.manifest.json` | CreativeML Open RAIL++-M (SDXL) — `Cleared` row in the model ledger | With the project only |
 | Iron candelabra shrine prop — `content/models/props/candelabra_shrine/` | Project-generated | SDXL concept + Hi3DGen geometry + Blender bake texturing via `gen_prop.py`; full provenance in `content/models/props/candelabra_shrine/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) — `Cleared` rows in the model ledger | With the project only |
+| Chapel arch prop — `content/models/props/chapel_arch/` | Project-generated | SDXL concept (prompt "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry", seed 0) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/chapel_arch/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
+| Broken column prop — `content/models/props/broken_column/` | Project-generated | SDXL concept (prompt "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections", seed 0) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/broken_column/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
+| Stone cross prop — `content/models/props/stone_cross/` | Project-generated | SDXL concept (prompt "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions", seed 1) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/stone_cross/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
+| Cypress tree prop — `content/models/props/cypress/` | Project-generated | SDXL concept (prompt "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background", seed 21) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture (T1 re-run, `--subject` adjusted toward the locked dark-dusty-green register) + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/cypress/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
+| Olive stump prop — `content/models/props/olive_stump/` | Project-generated | SDXL concept (prompt "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark", seed 0) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/olive_stump/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
 | MPFB2 parametric monk (A4 character fixture) — `content/models/characters/human_gen/` | Project-generated | MPFB2 2.0.17 parametric body (macros: gender 1.0, age 0.6, muscle 0.4, weight 0.35, caucasian) + CC0 `donitz_monk_robe`/`donitz_monk_robe_hood` (suits02 pack) + CC0 `old_caucasian_male` skin + CC0 low-poly brown eyes (MakeHuman system assets pack), rigged onto the canonical Mixamo skeleton (`content/source/characters/mixamo/Character.fbx`) via authored-weight transplant in Blender 5.2 headless (`char_mpfb.py`, run through `gen_character.py --mpfb`); full provenance in `content/models/characters/human_gen/generation_manifest.json` (`mode: "mpfb"` — parametric build, no prompt/seed) | GPLv3 (MPFB2 tool; outputs owner's, no program logic in exports) / CC0 1.0 (bundled MPFB2 assets) — `Cleared` rows in the model ledger; no NC tool anywhere in the path | With the project only |
 
 Notes:
@@ -51,6 +56,26 @@ Notes:
   projection-bake ceiling on thin-member-dominated geometry (accepted per A3.12's
   third-pass review); Strategy 2 (multiview ControlNet-depth retexture) is the named
   escalation if B3's art review wants true near-black iron.
+- **Chapel arch**: B3 product; placed by B3.6/B3.7. Shippable now — no NC tool
+  anywhere in the chain. Watch item from B3.4 review: metal_fraction 0.133 leaves
+  stray gold glints on the otherwise sun-bleached limestone (cosmetic, re-checked
+  at the B3.5 install eyeball).
+- **Broken column**: B3 product; placed by B3.6/B3.7. Shippable now — no NC tool
+  anywhere in the chain. Dielectric stone read (metal_fraction 0.044); crispness
+  marginal-pass per the B3.4 review.
+- **Stone cross**: B3 product; placed by B3.6/B3.7. Shippable now — no NC tool
+  anywhere in the chain. Strongest single prop of the B3 batch per the B3.4
+  review; minor cosmetic red bleed band at the base.
+- **Cypress**: B3 product; placed by B3.6/B3.7. Geometry is cand_21 unmodified
+  (the uncropped seed-21 draw, no curation block in its manifest); one T1
+  multiview re-run with an adjusted `--subject` corrected the delit albedo off
+  the original off-register lush spring green to a dusty desaturated olive-sage,
+  accepted at re-review (`tasks/ai-pipeline/b3.md` Decision log). Shippable
+  now — no NC tool anywhere in the chain.
+- **Olive stump**: B3 product; placed by B3.6/B3.7. Shippable now — no NC tool
+  anywhere in the chain. Watch item from B3.4 review: delit albedo carries
+  yellow contamination patches and red streak zones (reads as bark/soot at
+  game distance, re-checked at the B3.5 install eyeball).
 - **MPFB2 parametric monk**: A4 fixture only — proven in place against
   `content/races/human.ron` (lint pass + review renders) then held under
   `content/models/characters/human_gen/`, not wired into any race; the RON still

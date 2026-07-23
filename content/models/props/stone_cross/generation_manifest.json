@@ -1,0 +1,343 @@
+{
+  "subject": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions",
+  "seed": 1,
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cross\\cand_1",
+  "concept": {
+    "note": "no stats captured (concept_meta.json not found; output pre-existed this gen_prop.py run)",
+    "concept_png_sha256": "613f83ffa2e20eaf3e429b07b576cc0ad2e037258cb8e75639f8516cbe95556f"
+  },
+  "geometry": {
+    "model": "Stable-X/Hi3DGen",
+    "weights": {
+      "geometry": "Stable-X/trellis-normal-v0-1",
+      "normal": "Stable-X/yoso-normal-v1-8-1",
+      "birefnet": "ZhengPeng7/BiRefNet"
+    },
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cross\\cand_1\\concept.png",
+    "input_image_sha256": "613f83ffa2e20eaf3e429b07b576cc0ad2e037258cb8e75639f8516cbe95556f",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cross\\cand_1\\concept_rgba.png",
+    "concept_rgba_sha256": "2b35bb105669a36b04721766d8b436dff1ff72cf634f9aea293148ff46259523",
+    "seed": 1,
+    "steps": {
+      "sparse_structure_sampler": 50,
+      "slat_sampler": 6
+    },
+    "torch_version": "2.7.1+cu128",
+    "xformers_version": "0.0.31.post1",
+    "vertex_count": 340164,
+    "face_count": 680448,
+    "peak_vram_allocated_gb": 11.384233472,
+    "raw_glb_sha256": "1af3b1e3356317564c421b15750d02bc257d185f9ba8864ff9f6ae25f052f915"
+  },
+  "cleanup": {
+    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
+    "clean_glb_sha256": "130c318d96ccebdbe463b4a95086d0055921a525844750b87aca245324878b08",
+    "clean_hires_glb_sha256": "05c9c9f734623244d1fb7a1dcfa0479d23e4d929f7d314e2714764dbbfd16eb2"
+  },
+  "texture": {
+    "strategy": "multiview_controlnet_depth",
+    "front_axis": "-Y",
+    "workflow": "prop_multiview.json",
+    "subject": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions",
+    "render_resolution": 1024,
+    "views": [
+      {
+        "hint": "front view",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 100
+        },
+        "prompt_id": "2075c3c9-e718-411c-a08f-2ecc643306d7",
+        "prompts": {
+          "4": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "89c49fafd3b659bc014f13849736527bda935f5c2e0df573421986c5eff57def",
+        "gen_png_sha256": "2245f57f8a70f34d421a126d7f06de785a0cef7eaa6f04d95c8957e249c8c9fb"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 90.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 101
+        },
+        "prompt_id": "56c594aa-f935-446f-a16e-944d6410e659",
+        "prompts": {
+          "4": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "4f0da36b03b50bda82c615ac0901a9c8dc11b7d6cb81fe602fc2cf12c00971b4",
+        "gen_png_sha256": "cd8fb9fbe49f001fd86e31600652fb68eb8c74acf2c630d9cfe0920f3e515e79"
+      },
+      {
+        "hint": "back view",
+        "azimuth_deg": 180.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 100
+        },
+        "prompt_id": "2075c3c9-e718-411c-a08f-2ecc643306d7",
+        "prompts": {
+          "4": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "c70171fcbfc7a34158ad2fd970a408c0879ef66358998e96ed77f442a32a59ce",
+        "gen_png_sha256": "86fbc12dfd0d4800aa693f69ae7d35a4f744b8dd8789918b720114ed26e9d44a"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 270.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 101
+        },
+        "prompt_id": "56c594aa-f935-446f-a16e-944d6410e659",
+        "prompts": {
+          "4": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "49162fef705dc2f0da28940115912b32b026a5bfce9377ed7a94fb1508ccf35a",
+        "gen_png_sha256": "194acbb4ac07451a29d832f174524ed5e4e00419a81c7bf6c7d36eb88b61a424"
+      },
+      {
+        "hint": "three-quarter view, seen from below",
+        "azimuth_deg": 300,
+        "elevation_deg": -35.0,
+        "canvas": 2,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 102
+        },
+        "prompt_id": "94030015-88a4-4ef0-af8f-1b6baed519cd",
+        "prompts": {
+          "4": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions, three-quarter view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "d7c82fce6f7159fe45e66c3d2e73819b72138442e5683f23a21b1de4527b908e",
+        "gen_png_sha256": "0ac70aee3c3b3e04c1b8de26b56b91319058f7a340f0d26203212f995a1b5e1f"
+      }
+    ],
+    "extra_views": [
+      {
+        "hint": "three-quarter view, seen from below",
+        "azimuth_deg": 300,
+        "elevation_deg": -35.0,
+        "predicted_gain_texels": 33170,
+        "predicted_gain_frac": 0.0402
+      }
+    ],
+    "pbr_estimator": {
+      "model": "xanderhuang/material_estimator",
+      "steps": 50,
+      "resolution": 768,
+      "estimated_views": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "elapsed_s": 45.0,
+      "views": [
+        {
+          "seed": 1000,
+          "albedo_sha256": "18084a6a60564b90edfc26da96884de190f19ec01b558faa15f6d4bfc4f4ee36",
+          "rm_sha256": "04a0a2bbb172ef42550230ad8ca75077b1699b572a7749bc3415885ed1d01076"
+        },
+        {
+          "seed": 1001,
+          "albedo_sha256": "1e25ac9786349aa88be1f271426a17e4ee33b7ff980f5bc3e9df1747a9fedcf1",
+          "rm_sha256": "40bf20a049c97a2c66d92848d6f680ce97e801e45337b3e2942739cd49c3e287"
+        },
+        {
+          "seed": 1002,
+          "albedo_sha256": "5b44db2e50cd4c2c6885678587a5227ee541458b82c7befd4c55e153eec70085",
+          "rm_sha256": "3bcd022d5d8002279a30352dce2dfe30061bb35c896e33ed7cbcca39e02f81bc"
+        },
+        {
+          "seed": 1003,
+          "albedo_sha256": "71603128d7776d61788b7e1aaa6a804a175a6a1abec38e222a939bf085636ed0",
+          "rm_sha256": "b1c958bfa04aa6f64feda3fed89b17c7d1a347829d3697d422ebc039fa566a21"
+        },
+        {
+          "seed": 1004,
+          "albedo_sha256": "cfe8f428b269a4abfa541285e2763f31600e1f526c885641143b85009e1912c1",
+          "rm_sha256": "ba3a0b7c671b91778164e3811f991a185b848b4702ca053fe4cef6dc1a5d27cd"
+        }
+      ]
+    },
+    "weight_exponent": 2.0,
+    "occlusion_eps": 0.02,
+    "edge_pad_px": 8,
+    "depth_dilate_px": 5,
+    "blend_coverage": 0.5154,
+    "hole_texels": 400224,
+    "metal_fraction": 0.0047,
+    "texture_size": 1024,
+    "base_bake_s": 141.5,
+    "normal_bake_s": 0.5,
+    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cross\\cand_1\\textured.glb",
+    "textured_glb_sha256": "fc26049b545b558230a3dd6e52536804ed86b7af6cca3dc54cecead46d36d729"
+  },
+  "preprocess": {
+    "textured_glb_bytes": 4239980,
+    "final_glb_bytes": 4239956
+  },
+  "bake": {
+    "source": "final.glb",
+    "sha256": "baeaf4102a5cf8d9b20e9a09e9a142e28d8f78fc17dff7801ac107315803fb66",
+    "images": [
+      {
+        "index": 0,
+        "slot": "normal",
+        "file": "img0.dds"
+      },
+      {
+        "index": 1,
+        "slot": "base",
+        "file": "img1.dds"
+      },
+      {
+        "index": 2,
+        "slot": "mr",
+        "file": "img2.dds"
+      }
+    ]
+  },
+  "final_glb_sha256": "baeaf4102a5cf8d9b20e9a09e9a142e28d8f78fc17dff7801ac107315803fb66",
+  "turntable": {
+    "angles": 8,
+    "size": "512x512",
+    "contact_sheet": "contact_sheet.png",
+    "frames": [
+      "frame_00.png",
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png",
+      "frame_04.png",
+      "frame_05.png",
+      "frame_06.png",
+      "frame_07.png"
+    ]
+  }
+}

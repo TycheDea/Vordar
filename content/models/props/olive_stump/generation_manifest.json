@@ -1,0 +1,343 @@
+{
+  "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+  "seed": 0,
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0",
+  "concept": {
+    "note": "no stats captured (concept_meta.json not found; output pre-existed this gen_prop.py run)",
+    "concept_png_sha256": "ce23094ab36add2ada0a49d372967a756fe3090795bea482fa232835178e615b"
+  },
+  "geometry": {
+    "model": "Stable-X/Hi3DGen",
+    "weights": {
+      "geometry": "Stable-X/trellis-normal-v0-1",
+      "normal": "Stable-X/yoso-normal-v1-8-1",
+      "birefnet": "ZhengPeng7/BiRefNet"
+    },
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0\\concept.png",
+    "input_image_sha256": "ce23094ab36add2ada0a49d372967a756fe3090795bea482fa232835178e615b",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0\\concept_rgba.png",
+    "concept_rgba_sha256": "7964d190242b3c526f3b8f52279fb37b5f9a27f9a9709b3a06791b712af40fba",
+    "seed": 0,
+    "steps": {
+      "sparse_structure_sampler": 50,
+      "slat_sampler": 6
+    },
+    "torch_version": "2.7.1+cu128",
+    "xformers_version": "0.0.31.post1",
+    "vertex_count": 636662,
+    "face_count": 1273538,
+    "peak_vram_allocated_gb": 15.766702592,
+    "raw_glb_sha256": "740bf7364ef3a1a6a54c1553d5f68eb5a56a896d0808d75db7128142a7118022"
+  },
+  "cleanup": {
+    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
+    "clean_glb_sha256": "1ab82f6cf0fadb2d95cd91bb65b09c51467c39e6f34ef6202837380d14cad5cb",
+    "clean_hires_glb_sha256": "94606e771a0b817c4dcca6a4e6541f17087703e4eb2b34222eb05f7e19d7dd23"
+  },
+  "texture": {
+    "strategy": "multiview_controlnet_depth",
+    "front_axis": "-Y",
+    "workflow": "prop_multiview.json",
+    "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+    "render_resolution": 1024,
+    "views": [
+      {
+        "hint": "front view",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 0
+        },
+        "prompt_id": "01b470a3-8df9-494a-90b2-10da09a9baac",
+        "prompts": {
+          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "e394b8dabcb8c59f3d6e73acfeb114355a922b7234e3d5891bba99eb1a790ae5",
+        "gen_png_sha256": "12935807ba1207701f20e4cc2f01087151a814bd745d22c3f93cbe2954d749d0"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 90.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 1
+        },
+        "prompt_id": "10b4d39e-72b3-475a-a8cb-cfc5dff4cfb7",
+        "prompts": {
+          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "feec9c9cef72137e28ebe1dd11ac438f12318d55f351d62ab8156ddd5ad2e5a7",
+        "gen_png_sha256": "2ef1da18a710b7bdb8a6a794b4146f1c5b0f3d11e305f026d79c48acd9e624f3"
+      },
+      {
+        "hint": "back view",
+        "azimuth_deg": 180.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 0
+        },
+        "prompt_id": "01b470a3-8df9-494a-90b2-10da09a9baac",
+        "prompts": {
+          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "2f3d7363365ef0d8a37d225e298d05dde33a51bcdda1594cc053cfaf82e5c298",
+        "gen_png_sha256": "3b0c2d04f5cee43680f731b5e494c0ad0a48b8542d1ce303e55e3ca75e90b008"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 270.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 1
+        },
+        "prompt_id": "10b4d39e-72b3-475a-a8cb-cfc5dff4cfb7",
+        "prompts": {
+          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "282e59c7cdb74d7db02193e0b9a7719de23ab528fda7329d09a57ca09c5b7159",
+        "gen_png_sha256": "28f035c73d8e4e58bbf4a8a8dc0ec15e81bf2d86be2b0f78341f5a0602b02261"
+      },
+      {
+        "hint": "back view, seen from below",
+        "azimuth_deg": 210,
+        "elevation_deg": -35.0,
+        "canvas": 2,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 2
+        },
+        "prompt_id": "b7dce046-5689-4c77-aad5-c4947d93cc8f",
+        "prompts": {
+          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "d042cec1ad7fd1138c8c1efc31ffc5c0eba65688eb1299d5f25a798c4db85465",
+        "gen_png_sha256": "29b21e582089dbf57d027d9235efb527a524169fe5a5e83bc5d0a4ae5dab7370"
+      }
+    ],
+    "extra_views": [
+      {
+        "hint": "back view, seen from below",
+        "azimuth_deg": 210,
+        "elevation_deg": -35.0,
+        "predicted_gain_texels": 81046,
+        "predicted_gain_frac": 0.0842
+      }
+    ],
+    "pbr_estimator": {
+      "model": "xanderhuang/material_estimator",
+      "steps": 50,
+      "resolution": 768,
+      "estimated_views": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "elapsed_s": 49.4,
+      "views": [
+        {
+          "seed": 0,
+          "albedo_sha256": "8b379ffcd276cc50bbdf809da0f9410001f8996ea260c443b7b2f9993c0a4a6f",
+          "rm_sha256": "7b7ca71b8c7f481c34ffd007118b53b52ef1c0e1421e73eef4202f65cdc86347"
+        },
+        {
+          "seed": 1,
+          "albedo_sha256": "5106b78a6714dd64aa18008eb7a52242f5ab9a76f95646db8b9a74774dd94960",
+          "rm_sha256": "de297bd2bde65071513d380758b3639fdb56989f66155cbf2530b77e207e8abe"
+        },
+        {
+          "seed": 2,
+          "albedo_sha256": "e4fde07a11833f98473cc720e13c8c7709d4b1861662e4dfefa1ed7cf48116e3",
+          "rm_sha256": "64b6737f3db6a7880fd15eee6140a24bc77298aaaf5687a808c38e00682dce29"
+        },
+        {
+          "seed": 3,
+          "albedo_sha256": "44e61dd7ccfce0e0165643cbb77e0997239950e603f92a82cf3069c88696b76d",
+          "rm_sha256": "844602978ee916447ff7b9d2ac51a14f3f64c9f22b94eaf6f1f191ee7e3f1cf7"
+        },
+        {
+          "seed": 4,
+          "albedo_sha256": "49b177b479a28495404bd4c1d19807b8b1ae1162e88ebe8d8b60a0e874960bd1",
+          "rm_sha256": "3de48d4bc006de3a564fecfc72be9cb83a2b1ecd672139dd792a3a6949d8edc3"
+        }
+      ]
+    },
+    "weight_exponent": 2.0,
+    "occlusion_eps": 0.02,
+    "edge_pad_px": 8,
+    "depth_dilate_px": 5,
+    "blend_coverage": 0.5851,
+    "hole_texels": 399212,
+    "metal_fraction": 0.0148,
+    "texture_size": 1024,
+    "base_bake_s": 156.2,
+    "normal_bake_s": 0.7,
+    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0\\textured.glb",
+    "textured_glb_sha256": "ffd0468dfec1ec05561f2c5cb2e8fe31bd1a4feade61fc69636711068cad122e"
+  },
+  "preprocess": {
+    "textured_glb_bytes": 5309080,
+    "final_glb_bytes": 5309052
+  },
+  "bake": {
+    "source": "final.glb",
+    "sha256": "c713102a411f55243ce690734c8fa5f5481553acb7f59c5a1ea6ff837993ae18",
+    "images": [
+      {
+        "index": 0,
+        "slot": "normal",
+        "file": "img0.dds"
+      },
+      {
+        "index": 1,
+        "slot": "base",
+        "file": "img1.dds"
+      },
+      {
+        "index": 2,
+        "slot": "mr",
+        "file": "img2.dds"
+      }
+    ]
+  },
+  "final_glb_sha256": "c713102a411f55243ce690734c8fa5f5481553acb7f59c5a1ea6ff837993ae18",
+  "turntable": {
+    "angles": 8,
+    "size": "512x512",
+    "contact_sheet": "contact_sheet.png",
+    "frames": [
+      "frame_00.png",
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png",
+      "frame_04.png",
+      "frame_05.png",
+      "frame_06.png",
+      "frame_07.png"
+    ]
+  }
+}

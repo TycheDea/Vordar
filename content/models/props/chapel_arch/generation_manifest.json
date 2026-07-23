@@ -1,0 +1,343 @@
+{
+  "subject": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry",
+  "seed": 0,
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\arch\\cand_0",
+  "concept": {
+    "note": "no stats captured (concept_meta.json not found; output pre-existed this gen_prop.py run)",
+    "concept_png_sha256": "2bd695fea5ab253a2f9d465856d7c5dae9c62dbe70767f0ffd4099bc21dbaa47"
+  },
+  "geometry": {
+    "model": "Stable-X/Hi3DGen",
+    "weights": {
+      "geometry": "Stable-X/trellis-normal-v0-1",
+      "normal": "Stable-X/yoso-normal-v1-8-1",
+      "birefnet": "ZhengPeng7/BiRefNet"
+    },
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\arch\\cand_0\\concept.png",
+    "input_image_sha256": "2bd695fea5ab253a2f9d465856d7c5dae9c62dbe70767f0ffd4099bc21dbaa47",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\arch\\cand_0\\concept_rgba.png",
+    "concept_rgba_sha256": "c7461f92521bad3e0516f3e11ca83dd3b3bab2d202f7f2bb3707183bcc41a653",
+    "seed": 0,
+    "steps": {
+      "sparse_structure_sampler": 50,
+      "slat_sampler": 6
+    },
+    "torch_version": "2.7.1+cu128",
+    "xformers_version": "0.0.31.post1",
+    "vertex_count": 386819,
+    "face_count": 773908,
+    "peak_vram_allocated_gb": 11.606948864,
+    "raw_glb_sha256": "e62deae13faf88b03edb18f592ce8f173c3894279ccd53606133eb0e74a8bb6e"
+  },
+  "cleanup": {
+    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
+    "clean_glb_sha256": "7286ec2af2f88a744dfe4457dc070b4adcf3e685f979a599d08d9911a48f63bf",
+    "clean_hires_glb_sha256": "33b46a7a0100b1aee9d8cdcc24d732f31c078d1d6e9156340270213dfcc521d2"
+  },
+  "texture": {
+    "strategy": "multiview_controlnet_depth",
+    "front_axis": "-Y",
+    "workflow": "prop_multiview.json",
+    "subject": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry",
+    "render_resolution": 1024,
+    "views": [
+      {
+        "hint": "front view",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 0
+        },
+        "prompt_id": "d7943ae3-4ae9-46a6-9404-c8133bbf9f1a",
+        "prompts": {
+          "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "18615bff64c96ac02b2c6af550a4515413f5e303177c09a457d43314165d550c",
+        "gen_png_sha256": "345341a61383be95871fe6b6925c60370c040cc512559550707f932afc81ed7d"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 90.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 1
+        },
+        "prompt_id": "ef2dbd89-2f88-4b53-8268-94cf0dba099c",
+        "prompts": {
+          "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "3105c0f3b60d2161c91fadf456db2a8deeb2c30e81e38eb577d671a9485cea9f",
+        "gen_png_sha256": "d0aaf98ac97158b9c726c7e08d772cc973ed6d3e13fd8e765ece3f2af7015ec9"
+      },
+      {
+        "hint": "back view",
+        "azimuth_deg": 180.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 0
+        },
+        "prompt_id": "d7943ae3-4ae9-46a6-9404-c8133bbf9f1a",
+        "prompts": {
+          "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "4968071274793a16dbd622fcc2ed5d9e7a5ff5cf5cc2d9579e97c73da722f661",
+        "gen_png_sha256": "6f7b30298cb8dc56486e53a3f10552cd2621de3e54c105fabaa134cff7eeaa4a"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 270.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 1
+        },
+        "prompt_id": "ef2dbd89-2f88-4b53-8268-94cf0dba099c",
+        "prompts": {
+          "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "a1b154cfdaf80123cb9131383c1834c8ad6e4d43b178419bd8c581469d970ab3",
+        "gen_png_sha256": "876a4ef557125425a8f9ca193566adc706bf782ba948f2d1150e43fb102263c6"
+      },
+      {
+        "hint": "front view, seen from below",
+        "azimuth_deg": 0,
+        "elevation_deg": -35.0,
+        "canvas": 2,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 2
+        },
+        "prompt_id": "a26d6ef1-b4d6-48ca-8c6f-6eef44346f9c",
+        "prompts": {
+          "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, front view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "6926ad2e758803e17fcb2a84dc639a41537ad7cc7c44e10d1c3cc6d6ebe57d44",
+        "gen_png_sha256": "b52bb800db176a9d1b70bc57cde24b15287f4316a7b286cfb4a4ff33289b4274"
+      }
+    ],
+    "extra_views": [
+      {
+        "hint": "front view, seen from below",
+        "azimuth_deg": 0,
+        "elevation_deg": -35.0,
+        "predicted_gain_texels": 47921,
+        "predicted_gain_frac": 0.0484
+      }
+    ],
+    "pbr_estimator": {
+      "model": "xanderhuang/material_estimator",
+      "steps": 50,
+      "resolution": 768,
+      "estimated_views": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "elapsed_s": 49.5,
+      "views": [
+        {
+          "seed": 0,
+          "albedo_sha256": "32d3ec87703dbbfdf9c2594a81982399c3208c7153f709da09a9529a2855c068",
+          "rm_sha256": "06a632fd54f0a80442638927d4414db979d91d15feddc7a419878c7f6543f755"
+        },
+        {
+          "seed": 1,
+          "albedo_sha256": "db6f576d3efb132ed0d28c92e6a29fda4b52e64c3b43194cae5c1bda53c65383",
+          "rm_sha256": "42039f48e08a9fb4b206a7621637fcc77ddce054a8f339c144361e89abc48598"
+        },
+        {
+          "seed": 2,
+          "albedo_sha256": "626254e0c7796abf3ac589e0333f31432353d6f8663df3238e9307c8941aa33d",
+          "rm_sha256": "ad14ec8b74336299b499f6b09a52638f1099f950c8d25971583fde5f5ed0a756"
+        },
+        {
+          "seed": 3,
+          "albedo_sha256": "610ee9bfbfec3e70ef80e8a724a67ebb6512e6f95bec417b6541a297e8fd9ad8",
+          "rm_sha256": "1cafa1cf9e2fd36f9fb8848c6f1be8d26947f88974d52974ce21f087de18606e"
+        },
+        {
+          "seed": 4,
+          "albedo_sha256": "dc33b73aa070b4015744d2071e9548dff4f2a85ebacf9d70e756a1def900c4a1",
+          "rm_sha256": "18a93335ba345e9e4835353a9c7af67ce01ebe770fca466bbc43079db8f60783"
+        }
+      ]
+    },
+    "weight_exponent": 2.0,
+    "occlusion_eps": 0.02,
+    "edge_pad_px": 8,
+    "depth_dilate_px": 5,
+    "blend_coverage": 0.5389,
+    "hole_texels": 456621,
+    "metal_fraction": 0.1326,
+    "texture_size": 1024,
+    "base_bake_s": 153.2,
+    "normal_bake_s": 0.4,
+    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\arch\\cand_0\\textured.glb",
+    "textured_glb_sha256": "36831fcb1e9f76476fde9c1d0ea05155d0aeecb53c8990fe5f918baeab09ea10"
+  },
+  "preprocess": {
+    "textured_glb_bytes": 5245408,
+    "final_glb_bytes": 5245384
+  },
+  "bake": {
+    "source": "final.glb",
+    "sha256": "407ad0a8d9c0032245fdeb03980219d423e2ac843e82aee44f4b1a09bd318cc5",
+    "images": [
+      {
+        "index": 0,
+        "slot": "normal",
+        "file": "img0.dds"
+      },
+      {
+        "index": 1,
+        "slot": "base",
+        "file": "img1.dds"
+      },
+      {
+        "index": 2,
+        "slot": "mr",
+        "file": "img2.dds"
+      }
+    ]
+  },
+  "final_glb_sha256": "407ad0a8d9c0032245fdeb03980219d423e2ac843e82aee44f4b1a09bd318cc5",
+  "turntable": {
+    "angles": 8,
+    "size": "512x512",
+    "contact_sheet": "contact_sheet.png",
+    "frames": [
+      "frame_00.png",
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png",
+      "frame_04.png",
+      "frame_05.png",
+      "frame_06.png",
+      "frame_07.png"
+    ]
+  }
+}

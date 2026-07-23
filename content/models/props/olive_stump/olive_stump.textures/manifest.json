@@ -1,0 +1,21 @@
+{
+  "source": "olive_stump.glb",
+  "sha256": "c713102a411f55243ce690734c8fa5f5481553acb7f59c5a1ea6ff837993ae18",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    }
+  ]
+}

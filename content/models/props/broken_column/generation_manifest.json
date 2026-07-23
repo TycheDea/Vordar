@@ -1,0 +1,343 @@
+{
+  "subject": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections",
+  "seed": 0,
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\column\\cand_0",
+  "concept": {
+    "note": "no stats captured (concept_meta.json not found; output pre-existed this gen_prop.py run)",
+    "concept_png_sha256": "25e941df1ac297ecf90ec4a390674c5a2d8e27e7f2c8224981f5012c5af072b6"
+  },
+  "geometry": {
+    "model": "Stable-X/Hi3DGen",
+    "weights": {
+      "geometry": "Stable-X/trellis-normal-v0-1",
+      "normal": "Stable-X/yoso-normal-v1-8-1",
+      "birefnet": "ZhengPeng7/BiRefNet"
+    },
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\column\\cand_0\\concept.png",
+    "input_image_sha256": "25e941df1ac297ecf90ec4a390674c5a2d8e27e7f2c8224981f5012c5af072b6",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\column\\cand_0\\concept_rgba.png",
+    "concept_rgba_sha256": "9d57ee6824cd84ea319966788cb5a4d1b1d5c37b7135f3c203fff10b2f6d468b",
+    "seed": 0,
+    "steps": {
+      "sparse_structure_sampler": 50,
+      "slat_sampler": 6
+    },
+    "torch_version": "2.7.1+cu128",
+    "xformers_version": "0.0.31.post1",
+    "vertex_count": 482330,
+    "face_count": 964504,
+    "peak_vram_allocated_gb": 14.155580416,
+    "raw_glb_sha256": "abb2616fc033eb84a8f898878b1faee33178641a169bf3dfa818279a6518809e"
+  },
+  "cleanup": {
+    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
+    "clean_glb_sha256": "e5bc19ed141a8ec060b3f2787329a66ef3d78286e681c2648959a1bd52a7359b",
+    "clean_hires_glb_sha256": "dc3b0345e45eefd7692f2e1c91f58295545631613706fe50947e37e5ff4ef96d"
+  },
+  "texture": {
+    "strategy": "multiview_controlnet_depth",
+    "front_axis": "-Y",
+    "workflow": "prop_multiview.json",
+    "subject": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections",
+    "render_resolution": 1024,
+    "views": [
+      {
+        "hint": "front view",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 0
+        },
+        "prompt_id": "af91f573-a099-4bd5-91f2-e3a8f484370e",
+        "prompts": {
+          "4": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "a25e7a97b7e20be073b54498786755dcbb54d799b01f623689baa621e3103780",
+        "gen_png_sha256": "702ee5a1a49e62bca6ebbf376244031e939685243e3b60795c337237c32bd9bc"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 90.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 1
+        },
+        "prompt_id": "961a5696-4586-48f5-a362-bb4c509c9971",
+        "prompts": {
+          "4": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "7c5c5dfe20fbf50021dc8b373546e7fa9f5fe35df1c77681573f2c21b9cda177",
+        "gen_png_sha256": "4eb3eeaed7844efb75a9d5843a5275abcb354e2868eb2020f08061dcbeb61b55"
+      },
+      {
+        "hint": "back view",
+        "azimuth_deg": 180.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 0
+        },
+        "prompt_id": "af91f573-a099-4bd5-91f2-e3a8f484370e",
+        "prompts": {
+          "4": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "6be5342b6aa5e628defa4fa135ee83bcc76d9d6059cc84102610976ddadd9e90",
+        "gen_png_sha256": "02c80cea05b0a114ea97350ab58357fb09623fff6249d02072e2f3e2399c7557"
+      },
+      {
+        "hint": "side view",
+        "azimuth_deg": 270.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 1
+        },
+        "prompt_id": "961a5696-4586-48f5-a362-bb4c509c9971",
+        "prompts": {
+          "4": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "c0c9d018a1c75fbb6eecf0c8c7c60a29ad6680aad05d96a705e83557d078fbe9",
+        "gen_png_sha256": "13598b023a3ad7e71adf9bd206c73aece8cc84a778da0ee698304e2ec9eb7bd0"
+      },
+      {
+        "hint": "three-quarter view, seen from below",
+        "azimuth_deg": 60,
+        "elevation_deg": -35.0,
+        "canvas": 2,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 2
+        },
+        "prompt_id": "06c7d57d-0ad2-4db5-9f32-95a9d5a92aed",
+        "prompts": {
+          "4": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections, three-quarter view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": null
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": null
+          }
+        ],
+        "depth_png_sha256": "9e09a81e19230393f07243f95fe213f0cf7b5db012618839e5c854c94de3941b",
+        "gen_png_sha256": "689b144a00a0c928758e0834c9e18dcdb58883004c6fc3ca5032b8066760e32f"
+      }
+    ],
+    "extra_views": [
+      {
+        "hint": "three-quarter view, seen from below",
+        "azimuth_deg": 60,
+        "elevation_deg": -35.0,
+        "predicted_gain_texels": 45214,
+        "predicted_gain_frac": 0.0474
+      }
+    ],
+    "pbr_estimator": {
+      "model": "xanderhuang/material_estimator",
+      "steps": 50,
+      "resolution": 768,
+      "estimated_views": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "elapsed_s": 47.6,
+      "views": [
+        {
+          "seed": 0,
+          "albedo_sha256": "633feaca8f5e615f27ca717b5b553b93b48a9c60e319a6b89c660dc44931bb45",
+          "rm_sha256": "72672bf753bbe3ea6d20a69154f272c86d724b655dc5faa0bb2c2f3b13a0a7d7"
+        },
+        {
+          "seed": 1,
+          "albedo_sha256": "5d5b2137d7d0dc9da8a5e52ab2eb87e778bcd0e2cf53b19f9a0904492588385c",
+          "rm_sha256": "f64c55884979be8e069cff6035c874643cbfa06cea7a31c61b77c2e709edc507"
+        },
+        {
+          "seed": 2,
+          "albedo_sha256": "761521db80e381397b54ad9247f2093ad81164abc06009c51e827a71885ac8f7",
+          "rm_sha256": "fe22d7f2f81afe9ed108875825258c576696aebb339d2154604a073e10aa6f16"
+        },
+        {
+          "seed": 3,
+          "albedo_sha256": "6399182a9f8c1805e5ddf58aab107c38af4262a8e4f3cd9687115712630a84ca",
+          "rm_sha256": "cb0cf42d6a48aeb83d87816f3cc13422b99915891e9548c42d19d6b6336b3756"
+        },
+        {
+          "seed": 4,
+          "albedo_sha256": "e75c81567915d40b4c9c0b11d7f308fa038a07d064b172ebf800c8e4b83b5190",
+          "rm_sha256": "3706077712829a1fabad170eb38e06967d85c4a3957f3eba83acbbb745b84cc1"
+        }
+      ]
+    },
+    "weight_exponent": 2.0,
+    "occlusion_eps": 0.02,
+    "edge_pad_px": 8,
+    "depth_dilate_px": 5,
+    "blend_coverage": 0.4879,
+    "hole_texels": 488399,
+    "metal_fraction": 0.0441,
+    "texture_size": 1024,
+    "base_bake_s": 155.5,
+    "normal_bake_s": 0.6,
+    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\column\\cand_0\\textured.glb",
+    "textured_glb_sha256": "642282a0572323f0edeff35a3d736743cc3aac8aa3353b3caf7d401c4f0a2a47"
+  },
+  "preprocess": {
+    "textured_glb_bytes": 4902340,
+    "final_glb_bytes": 4902312
+  },
+  "bake": {
+    "source": "final.glb",
+    "sha256": "8e584254a49076cab1514c8e3f9498cd5cdddf1b5c7e738ea81bcd43aa47c57e",
+    "images": [
+      {
+        "index": 0,
+        "slot": "normal",
+        "file": "img0.dds"
+      },
+      {
+        "index": 1,
+        "slot": "base",
+        "file": "img1.dds"
+      },
+      {
+        "index": 2,
+        "slot": "mr",
+        "file": "img2.dds"
+      }
+    ]
+  },
+  "final_glb_sha256": "8e584254a49076cab1514c8e3f9498cd5cdddf1b5c7e738ea81bcd43aa47c57e",
+  "turntable": {
+    "angles": 8,
+    "size": "512x512",
+    "contact_sheet": "contact_sheet.png",
+    "frames": [
+      "frame_00.png",
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png",
+      "frame_04.png",
+      "frame_05.png",
+      "frame_06.png",
+      "frame_07.png"
+    ]
+  }
+}
