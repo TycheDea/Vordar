@@ -37,6 +37,13 @@ fn vtx_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 
 const PI: f32 = 3.14159265;
 
+// Convolution passes (irradiance, prefilter) clamp their base-cube samples so
+// the HDRI's baked sun disc — orders of magnitude above the rest of the sky —
+// doesn't double-count with the analytic key light or firefly the 256-sample
+// GGX prefilter. The visible-sky path (equirect_frag / the base cube) stays
+// unclamped so the sun disc still renders.
+const IBL_SOURCE_CLAMP: f32 = 25.0;
+
 /// World direction of a texel on cube face `face` at uv ∈ [0,1]² (wgpu/Vulkan
 /// face order +X −X +Y −Y +Z −Z).
 fn face_dir(face: u32, uv: vec2<f32>) -> vec3<f32> {
@@ -82,7 +89,7 @@ fn irradiance_frag(in: VertexOutput) -> @location(0) vec4<f32> {
             let dir = cos(phi) * sin(theta) * T
                     + sin(phi) * sin(theta) * B
                     + cos(theta) * N;
-            sum += textureSampleLevel(t_cube, s_src, dir, 0.0).rgb * cos(theta) * sin(theta);
+            sum += min(textureSampleLevel(t_cube, s_src, dir, 0.0).rgb, vec3<f32>(IBL_SOURCE_CLAMP)) * cos(theta) * sin(theta);
             count += 1.0;
         }
     }
@@ -134,7 +141,7 @@ fn prefilter_frag(in: VertexOutput) -> @location(0) vec4<f32> {
         let L  = normalize(2.0 * dot(V, H) * H - V);
         let NdotL = dot(N, L);
         if (NdotL > 0.0) {
-            sum += textureSampleLevel(t_cube, s_src, L, 0.0).rgb * NdotL;
+            sum += min(textureSampleLevel(t_cube, s_src, L, 0.0).rgb, vec3<f32>(IBL_SOURCE_CLAMP)) * NdotL;
             weight += NdotL;
         }
     }
