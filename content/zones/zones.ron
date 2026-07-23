@@ -8,11 +8,12 @@
     zones: [
         (
             name: "start",
-            // Texture-inspection sandbox state: no chapter (zero NPC spawns),
-            // no portals — the east zone and the statue are parked in git
-            // history until content work resumes.
+            // No chapter (zero NPC spawns): chapter content is the placeholder
+            // town/camp prefab set the pre-content foundation stage defers.
             chapter: None,
-            portals: [],
+            portals: [
+                (pos: (22.0, 0.0, 0.0), radius: 2.0, target_zone: "east", target_pos: (-16.0, 0.0, 0.0)),
+            ],
             // Theme pass (VQ-A5): dusk HDRI (the default env), depth fog,
             // cracked-earth PBR ground, ruined chapel stonework and cypress
             // silhouettes among the rocks. Props sit on the ground plane
@@ -58,6 +59,46 @@
                     // Horizon landmarks out in the hills.
                     (model: "content/models/props/rock_face_01/rock_face_01_1k.gltf", pos: (-95.0, -0.5, -70.0), scale: 4.0, yaw: 15.0),
                     (model: "content/models/props/rock_face_01/rock_face_01_1k.gltf", pos: (80.0, -0.5, 105.0),  scale: 3.2, yaw: 250.0),
+                ],
+            ),
+        ),
+        (
+            name: "east",
+            // No chapter (zero NPC spawns): same deferral as start — the
+            // Emberwood town/camp content is not dressing.
+            chapter: None,
+            portals: [
+                (pos: (-22.0, 0.0, 0.0), radius: 2.0, target_zone: "start", target_pos: (16.0, 0.0, 0.0)),
+            ],
+            // Emberwood Rest: a worn-cobble settlement square under the same
+            // dusk sky — drier, warmer haze, sparser dressing than start.
+            // Props sit on the ground plane (y = -0.5), clear of the portal
+            // corridor on the west side.
+            visuals: (
+                // Fog is the visible horizon here too: same measured HDRI
+                // band anchor as start ((3.40, 1.09, 0.42) linear), the amber
+                // ratio warmed by the parked zone pair's channel tilt at
+                // near-start magnitude so the seam still reads as one sky.
+                fog_color: (2.3, 0.69, 0.22),
+                fog_density: 0.004,
+                fog_height: 0.0,
+                fog_height_falloff: 0.12,
+                ground: Some((texture_dir: "content/textures/ground/worn_cobble", tile: 7.0)),
+                props: [
+                    // Shrine pair framing the square's centre.
+                    (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (5.0, -0.5, -6.0), scale: 1.0, yaw: 205.0),
+                    (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (8.0, -0.5, 6.0),  scale: 1.0, yaw: 30.0),
+                    // Ruined gate fragment at the square's far corner.
+                    (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (27.0, -0.5, -13.0), scale: 1.0,  yaw: 250.0),
+                    // Toppled colonnade remnants edging the plaza.
+                    (model: "content/models/props/broken_column/broken_column.glb",   pos: (-3.0, -0.5, 14.0),  scale: 1.0,  yaw: 130.0),
+                    (model: "content/models/props/broken_column/broken_column.glb",   pos: (15.0, -0.5, -17.0), scale: 0.85, yaw: 20.0),
+                    // Wayside crosses at the settlement bounds.
+                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (11.0, -0.5, 13.0),  scale: 1.0,  yaw: 300.0),
+                    (model: "content/models/props/stone_cross/stone_cross.glb",       pos: (-7.0, -0.5, -19.0), scale: 1.1,  yaw: 75.0),
+                    // Sparse dead stumps past the cobbles.
+                    (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (-13.0, -0.5, 23.0), scale: 1.0,  yaw: 190.0),
+                    (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (21.0, -0.5, 21.0),  scale: 0.9,  yaw: 340.0),
                 ],
             ),
         ),

@@ -46,10 +46,9 @@ Notes:
 - **Castilian Plateau Dusk**: shippable now — the bake-off winner (Path 3,
   `gen_pano_sdxl.py`) carries no license condition, unlike the sdxl_360
   runner-up-path candidate.
-- **Worn cobble ground PBR set**: B2 product; held for Phase B3's east-zone
-  dressing — committed unreferenced, no zone points at it yet. Shippable
-  now — same StableMaterials + SDXL path as cracked_earth, no NC tool
-  anywhere in the chain.
+- **Worn cobble ground PBR set**: B2 product; east-zone ground, placed B3.
+  Shippable now — same StableMaterials + SDXL path as cracked_earth, no NC
+  tool anywhere in the chain.
 - **Candelabra shrine**: shippable now — no NC tool touched the production path
   (strict ruling 2026-07-19 satisfied). Known-look caveat: thin members (posts,
   scroll arms) render lighter pewter than the concept's dark iron — Strategy 1's
