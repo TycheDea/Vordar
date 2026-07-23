@@ -1,11 +1,11 @@
-// Ravager — melee DPS, Physical (CHARACTER-SYSTEM.md): rage-trance duelist,
+// Ravager — melee DPS, Physical: a penitent-fury flagellant duelist,
 // dual-wielding fury that trades defense for relentless pressure.
 // Authored ability order = action-bar slot order: 0 = LMB, 1 = Q, 2 = E.
 // Cast times are 60 Hz tick multiples so a dash lands exactly on its hit test.
 //
 // Outfit: dark pauldrons, twin blades at the hands, and an ember-red rage
-// sigil at the chest (rhymes with the wayfarer's calm cyan crystal). The
-// right blade is the cast-swing shape.
+// sigil at the chest (rhymes with the pilgrim votive-bearer's calm cyan
+// crystal). The right blade is the cast-swing shape.
 (
     abilities: [
         // The bread-and-butter strike: fast, short, centered on the blades.
@@ -71,7 +71,7 @@
         swing_index: Some(2),
         swing_arc: (0.12, 0.30, 0.40),
     ),
-    // Skinned-race tint (the ravager): an ember-red rage cast over the mesh,
-    // rhyming with the chest sigil. Ignored by SDF races.
+    // Skinned-race tint (the penitent-fury): an ember-red rage cast over the
+    // mesh, rhyming with the chest sigil. Ignored by SDF races.
     tint: Some((1.0, 0.55, 0.48)),
 )

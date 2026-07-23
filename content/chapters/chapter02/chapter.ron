@@ -23,7 +23,7 @@
         (prefab: "grunt",    center: (8.0, 0.0, 28.0),   radius: 4.0, count: 4, respawn_seconds: 15.0),
         // Brigands ambush the south road.
         (prefab: "brigand",  center: (10.0, 0.0, -27.0), radius: 5.0, count: 3, respawn_seconds: 20.0),
-        // Mossbacks graze the far east fields — harmless until poked.
+        // Mossbacks graze the far east scrub — harmless until poked.
         (prefab: "mossback", center: (30.0, 0.0, 10.0),  radius: 4.0, count: 3, respawn_seconds: 20.0),
     ],
 )

@@ -1,4 +1,5 @@
-// Dwarf race — short, wide, stout; mountain-forged and Physical-leaning.
+// Dwarf race — short, wide, stout; a crypt-mason, keeper of ossuaries and
+// reliquary vaults, Physical-leaning.
 // Phase C: renders as the CC0 KayKit "Barbarian" (content/models/dwarf.glb).
 // The SDF `body` (with its braided-beard silhouette) is the pre-Phase-C
 // fallback; the mesh branch ignores it. Clip names read from the asset.

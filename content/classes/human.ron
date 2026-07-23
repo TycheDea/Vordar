@@ -2,9 +2,9 @@
 // const (numbers unchanged). Authored ability order is action-bar slot order:
 // slot 0 = LMB (bolt), slot 1 = Q (blast).
 //
-// Outfit (the wayfarer): teal traveler's cloak + the floating cyan focus
-// crystal at the shoulder — the crystal is the weapon (bolts share its
-// color), so it's what swings on a cast.
+// Outfit (the pilgrim votive-bearer): teal traveler's cloak + the floating
+// cyan focus crystal at the shoulder — the crystal is the weapon (bolts
+// share its color), so it's what swings on a cast.
 (
     abilities: [
         (
@@ -46,7 +46,8 @@
         swing_index: Some(1),
         swing_arc: (0.15, 0.20, 0.30),
     ),
-    // Skinned-race tint (the wayfarer): a cool steel-cyan cast, rhyming with
-    // the focus crystal. Ignored by SDF races (they dress via `outfit`).
+    // Skinned-race tint (the pilgrim votive-bearer): a cool steel-cyan cast,
+    // rhyming with the focus crystal. Ignored by SDF races (they dress via
+    // `outfit`).
     tint: Some((0.66, 0.80, 1.0)),
 )

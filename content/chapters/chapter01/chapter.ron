@@ -11,7 +11,7 @@
     name: "Chapter 1 — First Field",
     initial_spawns: [],
     camps: [
-        // North-east meadow pack — the first fight most players pick.
+        // North-east olive-scrub pack — the first fight most players pick.
         (prefab: "grunt",      center: (12.0, 0.0, 10.0),   radius: 4.0, count: 4, respawn_seconds: 12.0),
         // South-west pack, slightly bigger.
         (prefab: "grunt",      center: (-14.0, 0.0, -10.0), radius: 5.0, count: 5, respawn_seconds: 12.0),

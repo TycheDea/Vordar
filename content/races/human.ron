@@ -1,4 +1,5 @@
-// Human race. Phase 5: the VRoid base body auto-rigged by Mixamo
+// Human race — the penitent wayfarer, a road-worn pilgrim. Phase 5: the
+// VRoid base body auto-rigged by Mixamo
 // (content/models/human.glb — built by scripts/asset-pipeline/mixamo_to_glb.py;
 // scale + ground offset baked onto its armature, Mixamo clip library merged).
 // The SDF `body` below is the pre-Phase-C silhouette, kept as a fallback if
