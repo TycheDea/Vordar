@@ -45,3 +45,5 @@ half  = { version = "2", features = ["bytemuck"] }
 # it on for normal (non-test) builds — same pattern as vordar-server's
 # bench-internals.
 engine-renderer = { path = ".", features = ["offscreen"] }
+# Mean-FLIP perceptual image comparison for tests/golden.rs.
+nv-flip = "0.1.2"
