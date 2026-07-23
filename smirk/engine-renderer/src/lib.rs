@@ -73,20 +73,21 @@ impl Plugin for RenderPlugin {
     }
 }
 
-// Guards build.rs's shader preprocessing: each geometry shader must still
+// Guards build.rs's shader preprocessing: each preprocessed shader must still
 // parse as valid WGSL after snippet/const resolution, and the shadow texel
 // constant must come from shadow::SHADOW_SIZE via build.rs rather than a
 // hardcoded copy (checked by absence of the raw "2048" literal).
 #[cfg(test)]
 mod generated_shader_tests {
     #[test]
-    fn geometry_shaders_parse_and_carry_no_hardcoded_shadow_size() {
+    fn preprocessed_shaders_parse_and_carry_no_hardcoded_shadow_size() {
         let generated = [
             include_str!(concat!(env!("OUT_DIR"), "/shader.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/mesh_shader.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/skinned_mesh_shader.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/depth_prepass.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/ssao.wgsl")),
+            include_str!(concat!(env!("OUT_DIR"), "/sky.wgsl")),
         ];
         for src in generated {
             wgpu::naga::front::wgsl::parse_str(src).expect("generated shader must parse as valid WGSL");
