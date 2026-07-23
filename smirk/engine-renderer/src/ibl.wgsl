@@ -151,9 +151,9 @@ fn prefilter_frag(in: VertexOutput) -> @location(0) vec4<f32> {
 // ── split-sum BRDF LUT ───────────────────────────────────────────────────────
 
 fn g_smith_ibl(NdotV: f32, NdotL: f32, roughness: f32) -> f32 {
-    // k for IBL: a²/2 (Karis).
+    // k for IBL: k = α/2, α = roughness² (Karis).
     let a = roughness * roughness;
-    let k = a * a / 2.0;
+    let k = a / 2.0;
     let gv = NdotV / (NdotV * (1.0 - k) + k);
     let gl = NdotL / (NdotL * (1.0 - k) + k);
     return gv * gl;
