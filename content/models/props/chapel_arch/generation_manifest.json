@@ -39,7 +39,7 @@
     "front_axis": "-Y",
     "workflow": "prop_multiview.json",
     "subject": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry",
-    "render_resolution": 1024,
+    "render_resolution": 1536,
     "views": [
       {
         "hint": "front view",
@@ -50,7 +50,7 @@
         "seeds": {
           "11": 0
         },
-        "prompt_id": "d7943ae3-4ae9-46a6-9404-c8133bbf9f1a",
+        "prompt_id": "88d9eaa8-8139-4577-9c7d-53db19849132",
         "prompts": {
           "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -77,8 +77,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "18615bff64c96ac02b2c6af550a4515413f5e303177c09a457d43314165d550c",
-        "gen_png_sha256": "345341a61383be95871fe6b6925c60370c040cc512559550707f932afc81ed7d"
+        "depth_png_sha256": "ff52b97ce9baa9d8c8c119889209ac5008ff7361c7c26f58e2df3e9ea697dd5c",
+        "gen_png_sha256": "d4b754e8cbd95393ae970096a56cb68c79d83fe09fa2887702271fc301193a69"
       },
       {
         "hint": "side view",
@@ -89,7 +89,7 @@
         "seeds": {
           "11": 1
         },
-        "prompt_id": "ef2dbd89-2f88-4b53-8268-94cf0dba099c",
+        "prompt_id": "0f93f405-316d-4dba-99f0-a9064557b211",
         "prompts": {
           "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -116,8 +116,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "3105c0f3b60d2161c91fadf456db2a8deeb2c30e81e38eb577d671a9485cea9f",
-        "gen_png_sha256": "d0aaf98ac97158b9c726c7e08d772cc973ed6d3e13fd8e765ece3f2af7015ec9"
+        "depth_png_sha256": "bff18a1c8e20084abc9c871c1dc9cad05a4100061ffcd1c54d428fc2b48ea906",
+        "gen_png_sha256": "d11f92edebaca347c4282348c785e10ebc30a6edc766374c9bb4ae1650df7342"
       },
       {
         "hint": "back view",
@@ -128,7 +128,7 @@
         "seeds": {
           "11": 0
         },
-        "prompt_id": "d7943ae3-4ae9-46a6-9404-c8133bbf9f1a",
+        "prompt_id": "88d9eaa8-8139-4577-9c7d-53db19849132",
         "prompts": {
           "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -155,8 +155,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "4968071274793a16dbd622fcc2ed5d9e7a5ff5cf5cc2d9579e97c73da722f661",
-        "gen_png_sha256": "6f7b30298cb8dc56486e53a3f10552cd2621de3e54c105fabaa134cff7eeaa4a"
+        "depth_png_sha256": "2f21e7eca73669623800f87095fb151bfaad4ac835e4d05ab2ef400a17169360",
+        "gen_png_sha256": "54e2a26715cc87f84371180b76e08d13288592b63a0381576c05cf81234b3298"
       },
       {
         "hint": "side view",
@@ -167,7 +167,7 @@
         "seeds": {
           "11": 1
         },
-        "prompt_id": "ef2dbd89-2f88-4b53-8268-94cf0dba099c",
+        "prompt_id": "0f93f405-316d-4dba-99f0-a9064557b211",
         "prompts": {
           "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -194,8 +194,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "a1b154cfdaf80123cb9131383c1834c8ad6e4d43b178419bd8c581469d970ab3",
-        "gen_png_sha256": "876a4ef557125425a8f9ca193566adc706bf782ba948f2d1150e43fb102263c6"
+        "depth_png_sha256": "b0d0e17f958a44c760d411e496e42035b78932b45ffe24ee07ab637a2c029b2a",
+        "gen_png_sha256": "65783c75ccb3468b7512257fe9cedf5f940a711f9d9c13404bbdbc4d0f074528"
       },
       {
         "hint": "front view, seen from below",
@@ -206,7 +206,7 @@
         "seeds": {
           "11": 2
         },
-        "prompt_id": "a26d6ef1-b4d6-48ca-8c6f-6eef44346f9c",
+        "prompt_id": "8fb62e3f-e953-42e2-bb02-ed433f4b8755",
         "prompts": {
           "4": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry, front view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -233,8 +233,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "6926ad2e758803e17fcb2a84dc639a41537ad7cc7c44e10d1c3cc6d6ebe57d44",
-        "gen_png_sha256": "b52bb800db176a9d1b70bc57cde24b15287f4316a7b286cfb4a4ff33289b4274"
+        "depth_png_sha256": "31bd1d43aa9453eaca7449ff608f05313c22755bd2c70d44e6f3d8ffb9c05cdd",
+        "gen_png_sha256": "8767e2764c1e07e146df21c05b6a62881df33eb6cf265b69ba3513607c46ce85"
       }
     ],
     "extra_views": [
@@ -242,8 +242,8 @@
         "hint": "front view, seen from below",
         "azimuth_deg": 0,
         "elevation_deg": -35.0,
-        "predicted_gain_texels": 47921,
-        "predicted_gain_frac": 0.0484
+        "predicted_gain_texels": 141427,
+        "predicted_gain_frac": 0.0529
       }
     ],
     "pbr_estimator": {
@@ -257,32 +257,32 @@
         3,
         4
       ],
-      "elapsed_s": 49.5,
+      "elapsed_s": 44.6,
       "views": [
         {
           "seed": 0,
-          "albedo_sha256": "32d3ec87703dbbfdf9c2594a81982399c3208c7153f709da09a9529a2855c068",
-          "rm_sha256": "06a632fd54f0a80442638927d4414db979d91d15feddc7a419878c7f6543f755"
+          "albedo_sha256": "5673b6386d8ad2f9cfc2d2d92ab41c6ef62918a2ba72a94c29afc320320a5d21",
+          "rm_sha256": "6d6b5fed628c866df45ec423934b16740bd5897c5005712afe36edc5b13823df"
         },
         {
           "seed": 1,
-          "albedo_sha256": "db6f576d3efb132ed0d28c92e6a29fda4b52e64c3b43194cae5c1bda53c65383",
-          "rm_sha256": "42039f48e08a9fb4b206a7621637fcc77ddce054a8f339c144361e89abc48598"
+          "albedo_sha256": "d0919ece9732fe260cc41ef5f427eba98bdefb6c6bd9ee409c8dd83cb4c99d11",
+          "rm_sha256": "e092812724a60e38cf521943328b27616f6c4863ca6eabaa8b357d2e804ed449"
         },
         {
           "seed": 2,
-          "albedo_sha256": "626254e0c7796abf3ac589e0333f31432353d6f8663df3238e9307c8941aa33d",
-          "rm_sha256": "ad14ec8b74336299b499f6b09a52638f1099f950c8d25971583fde5f5ed0a756"
+          "albedo_sha256": "2252465a48955990ca97cf2c63cef307032f066623af1a729f93d8f5931ce805",
+          "rm_sha256": "eec69ca61c75f923a244f6579a60fb625ca291860b8ac6e2396de4a7445cfa36"
         },
         {
           "seed": 3,
-          "albedo_sha256": "610ee9bfbfec3e70ef80e8a724a67ebb6512e6f95bec417b6541a297e8fd9ad8",
-          "rm_sha256": "1cafa1cf9e2fd36f9fb8848c6f1be8d26947f88974d52974ce21f087de18606e"
+          "albedo_sha256": "eb46b6bf84b86d11b22d3b3b058eb760ff3ad54c6c7d0f59edd1777b932cc359",
+          "rm_sha256": "f5a67f38a05c22a4768ac64e22dd51acc70fe1a99dbb02e3ae50b370657e7d0b"
         },
         {
           "seed": 4,
-          "albedo_sha256": "dc33b73aa070b4015744d2071e9548dff4f2a85ebacf9d70e756a1def900c4a1",
-          "rm_sha256": "18a93335ba345e9e4835353a9c7af67ce01ebe770fca466bbc43079db8f60783"
+          "albedo_sha256": "c88df94251ad2340b26bd54aeb3400eb5689439c2f1332baa90751ae43794c9c",
+          "rm_sha256": "42080a906558d3caa846ee111ed5b9db806dfe1bd8638efc3021e182718b9c22"
         }
       ]
     },
@@ -290,22 +290,23 @@
     "occlusion_eps": 0.02,
     "edge_pad_px": 8,
     "depth_dilate_px": 5,
-    "blend_coverage": 0.5389,
-    "hole_texels": 456621,
-    "metal_fraction": 0.1326,
-    "texture_size": 1024,
-    "base_bake_s": 153.2,
-    "normal_bake_s": 0.4,
+    "blend_coverage": 0.5504,
+    "hole_texels": 1202912,
+    "dielectric": true,
+    "metal_fraction": 0.1221,
+    "texture_size": 2048,
+    "base_bake_s": 284.5,
+    "normal_bake_s": 1.1,
     "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\arch\\cand_0\\textured.glb",
-    "textured_glb_sha256": "36831fcb1e9f76476fde9c1d0ea05155d0aeecb53c8990fe5f918baeab09ea10"
+    "textured_glb_sha256": "7c6095490906038dc81b44e7f4e64517aed8e11d1d8aed83be5bb2afb357e122"
   },
   "preprocess": {
-    "textured_glb_bytes": 5245408,
-    "final_glb_bytes": 5245384
+    "textured_glb_bytes": 12036184,
+    "final_glb_bytes": 12036160
   },
   "bake": {
     "source": "final.glb",
-    "sha256": "407ad0a8d9c0032245fdeb03980219d423e2ac843e82aee44f4b1a09bd318cc5",
+    "sha256": "44080ae1711fc885170474f237eb559a20e12fd92b5e9046af46eb7da3be80fb",
     "images": [
       {
         "index": 0,
@@ -324,7 +325,7 @@
       }
     ]
   },
-  "final_glb_sha256": "407ad0a8d9c0032245fdeb03980219d423e2ac843e82aee44f4b1a09bd318cc5",
+  "final_glb_sha256": "44080ae1711fc885170474f237eb559a20e12fd92b5e9046af46eb7da3be80fb",
   "turntable": {
     "angles": 8,
     "size": "512x512",

@@ -39,7 +39,7 @@
     "front_axis": "-Y",
     "workflow": "prop_multiview.json",
     "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
-    "render_resolution": 1024,
+    "render_resolution": 1536,
     "views": [
       {
         "hint": "front view",
@@ -50,7 +50,7 @@
         "seeds": {
           "11": 2100
         },
-        "prompt_id": "bc593f26-d8a8-41c1-9980-1a8825e34d58",
+        "prompt_id": "c743d697-0a6d-4fce-9cc0-f45327e23a0a",
         "prompts": {
           "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -77,8 +77,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "89fc641cfe4fad7ce0c1cc174fab34123964b08a0275ac5ed1312c8f14ab6bdd",
-        "gen_png_sha256": "45982587b534be390dc641f09bbfceb684d3646cba4eafb18e2981ffc9dd4fc7"
+        "depth_png_sha256": "e92760dd6139a2ae989fa74b9dfa8d6dd28fbe041ce375098865a5e4fcbc1626",
+        "gen_png_sha256": "328fb6680bc013ff9e27b98214669385df358e656658c7eac6e5a07868388e26"
       },
       {
         "hint": "side view",
@@ -89,7 +89,7 @@
         "seeds": {
           "11": 2101
         },
-        "prompt_id": "b9197b75-d6f8-4f34-b44b-d0ab58b385c9",
+        "prompt_id": "28e6b9af-d933-4ed9-b812-c2929a72936a",
         "prompts": {
           "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -116,8 +116,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "21f6df6a625fc8a25fd5e5455a95da59b5dcc2f4241c863f3755e766aec8186d",
-        "gen_png_sha256": "0ff61fc9db61df6b3629521e42839da255a42955e2e503171eb327c7451e0a3b"
+        "depth_png_sha256": "41750eddc052182061fd52fcc7f673982ce1b6e7b117e7e434b62c230ba9a89a",
+        "gen_png_sha256": "cfb9b1470859964254b76229dbd341877d124b734f967e8ff92b848f50235524"
       },
       {
         "hint": "back view",
@@ -128,7 +128,7 @@
         "seeds": {
           "11": 2100
         },
-        "prompt_id": "bc593f26-d8a8-41c1-9980-1a8825e34d58",
+        "prompt_id": "c743d697-0a6d-4fce-9cc0-f45327e23a0a",
         "prompts": {
           "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -155,8 +155,8 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "bfb60f90bda24ef904ef7699a3ce01a965574649d477d1df524fab91c49c921b",
-        "gen_png_sha256": "035bfca818a3fc3f27eede974ee120416b97cf3c7b4511d32310414e2048ecfc"
+        "depth_png_sha256": "c817408501d1e2b111df4835cc7cd2c7001eb4361a7491a1e54fbf204883a171",
+        "gen_png_sha256": "b591e19fe14a24f8b00b1ef51b6fe21ae76490e6d80e5e4a6c250d025d1cf554"
       },
       {
         "hint": "side view",
@@ -167,7 +167,7 @@
         "seeds": {
           "11": 2101
         },
-        "prompt_id": "b9197b75-d6f8-4f34-b44b-d0ab58b385c9",
+        "prompt_id": "28e6b9af-d933-4ed9-b812-c2929a72936a",
         "prompts": {
           "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
@@ -194,21 +194,21 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "29284b2e6dfc51e3e69d37b41ddb845123709fb109ccad1433fe71db0dcabe0d",
-        "gen_png_sha256": "eb79adacb0cb3c0d772cd79c5e87e3347ce36b869394beaabcd0346299b12763"
+        "depth_png_sha256": "ca3d97bba56476915e93151c4cefd67ba3c082fb92a9a2e9c2be3b37590623bb",
+        "gen_png_sha256": "3c580ae348f65cbaf929b9a86e5e1d967a927ccbedbfc8c4c497c7129cd75dd9"
       },
       {
-        "hint": "three-quarter view, seen from below",
-        "azimuth_deg": 240,
+        "hint": "front view, seen from below",
+        "azimuth_deg": 330,
         "elevation_deg": -35.0,
         "canvas": 2,
         "canvas_slot": 0,
         "seeds": {
           "11": 2102
         },
-        "prompt_id": "04bb3de8-231d-4e8f-8c28-023e438ecdb0",
+        "prompt_id": "505b29ab-6652-42dc-972a-b5c6ca206b1a",
         "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: three-quarter view, seen from below, right: three-quarter view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, seen from below, right: back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
         "models": [
           {
@@ -233,21 +233,21 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "4d342c4a3d205259cbf583f0f7cc3c112e338ea6bdcf4ef2ff90cf72aab88f7e",
-        "gen_png_sha256": "5d7fd58806ef6060307fef42182a5addca81e13f48e67882c38a605e284cb915"
+        "depth_png_sha256": "cea3612ac656351a02970b33596a4bbd184cc6163bb48e4210f9f2d951399064",
+        "gen_png_sha256": "10d2f8e6d395ad5504ace6245953784b6100a1e55af81496a0c24aff4204481d"
       },
       {
-        "hint": "three-quarter view, seen from below",
-        "azimuth_deg": 120,
+        "hint": "back view, seen from below",
+        "azimuth_deg": 150,
         "elevation_deg": -35.0,
         "canvas": 2,
         "canvas_slot": 1,
         "seeds": {
           "11": 2102
         },
-        "prompt_id": "04bb3de8-231d-4e8f-8c28-023e438ecdb0",
+        "prompt_id": "505b29ab-6652-42dc-972a-b5c6ca206b1a",
         "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: three-quarter view, seen from below, right: three-quarter view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, seen from below, right: back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
         },
         "models": [
           {
@@ -272,24 +272,24 @@
             "sha256": null
           }
         ],
-        "depth_png_sha256": "f482daa135af3d843ae3b934442e224339cdc52a347c666f498464e43343a166",
-        "gen_png_sha256": "615ae7ad6b8eda31edfdba13ab9290025bd1770262e92eb2f1def7c99c611a26"
+        "depth_png_sha256": "3995c74aaf452c6382f6f74b4ee2bd7d8fa91c78c958effe518c6ada43222902",
+        "gen_png_sha256": "e46165287dceebeb326d9f57ff0f7627551103eae7fb407b5ce6075df4de191f"
       }
     ],
     "extra_views": [
       {
-        "hint": "three-quarter view, seen from below",
-        "azimuth_deg": 240,
+        "hint": "front view, seen from below",
+        "azimuth_deg": 330,
         "elevation_deg": -35.0,
-        "predicted_gain_texels": 72364,
-        "predicted_gain_frac": 0.0707
+        "predicted_gain_texels": 199377,
+        "predicted_gain_frac": 0.0776
       },
       {
-        "hint": "three-quarter view, seen from below",
-        "azimuth_deg": 120,
+        "hint": "back view, seen from below",
+        "azimuth_deg": 150,
         "elevation_deg": -35.0,
-        "predicted_gain_texels": 49780,
-        "predicted_gain_frac": 0.0486
+        "predicted_gain_texels": 139947,
+        "predicted_gain_frac": 0.0545
       }
     ],
     "pbr_estimator": {
@@ -304,37 +304,37 @@
         4,
         5
       ],
-      "elapsed_s": 50.6,
+      "elapsed_s": 49.8,
       "views": [
         {
           "seed": 21000,
-          "albedo_sha256": "e78380e73cf2a1b1f562d8695960b465994c6941e0c4b8a1e45d917df074930c",
-          "rm_sha256": "fc51b939abeb89a9cdd091c5b87fd75c065992cabdb3c5fa96ea18568f64b2fe"
+          "albedo_sha256": "f6b43f50110d041e054c149a2253d22e632721d1a2a46a037d3030a52a5df6f5",
+          "rm_sha256": "cd68bd18e46ee9e6d37563d8c4d389a4413860fb56a63f9539404ea0de82d904"
         },
         {
           "seed": 21001,
-          "albedo_sha256": "9dcd4910690241705d9d8e5736bda8a15c07f5ca41de968a31bc217e82a19b1b",
-          "rm_sha256": "f2d66f10bbc415590d5b3196b0bd3db85d0c1cab663fce8e540c0e1c4337272a"
+          "albedo_sha256": "81a23ec6b8aef5c6f06d15a7945837fb00b3fca7a76173974f436455f4f7622e",
+          "rm_sha256": "ba55bc2c8ac4f420e7047e846538a91098184b04a704c16c726bf4edd914b465"
         },
         {
           "seed": 21002,
-          "albedo_sha256": "08799fc3b788236132645a0efdf0c981b2220fe9b86f85b34ffd8ee4fd199dca",
-          "rm_sha256": "8f0991cb862e346a27e9ce5afcc35cb20ea8288bfc41037f08ddedbfbbd10ca6"
+          "albedo_sha256": "7de554c39f4740082ad395b3f5b6a989c6f73730e66c7433296276ae2abe5a3b",
+          "rm_sha256": "6c0f17fb0aa6e7d1b3726110db66385d65c9ecced9450bbf2e653aa315eeca16"
         },
         {
           "seed": 21003,
-          "albedo_sha256": "fdbc9b6b80b5358e4529f72d472ca5d9e08af9a15007946fa3d02c6c4f57a008",
-          "rm_sha256": "ce942971493f57f0e832221c017f3776d10b922a7d6680fadcf6554a5b7d6482"
+          "albedo_sha256": "43c2390a824e96f2766edf6c8e8b2bd5f61e733979cec99490847264ca4b9266",
+          "rm_sha256": "500c551b2e86b535b6f86631093e3366fc9dffc3b9a3bd351c292c82901c47bb"
         },
         {
           "seed": 21004,
-          "albedo_sha256": "310978813c049e3a908a2776009b42703041f05eb7911989edc85910ed951521",
-          "rm_sha256": "4f858ee54f51f8efdb53c6830a67c283237a78c8f689db2f76d85a67c34a03ee"
+          "albedo_sha256": "70d6af5323651d134ac68a9fa32049b9df415f161f4bc358b8b6ce8f56b25646",
+          "rm_sha256": "c207a49cda80c558733ebcbcd87bbb93abfe239d4cc1fc0beb0eecd4c2e59c7e"
         },
         {
           "seed": 21005,
-          "albedo_sha256": "4cc39c9545a7778e673d1a58bb95663fc198afd11b4de21070fb4c94607ab8da",
-          "rm_sha256": "3de6813165e71ccd898f7e0953473b91dfd2ec541e50655f61a53011169219d3"
+          "albedo_sha256": "dd063723c2065091286f21971758570bf8babae958137607b442925019531606",
+          "rm_sha256": "85e9219441c56ff5f2ded143878b2d58e850abdac6ea590d1a75ffdbbfb237c6"
         }
       ]
     },
@@ -342,22 +342,23 @@
     "occlusion_eps": 0.02,
     "edge_pad_px": 8,
     "depth_dilate_px": 5,
-    "blend_coverage": 0.7101,
-    "hole_texels": 296857,
-    "metal_fraction": 0.0091,
-    "texture_size": 1024,
-    "base_bake_s": 155.5,
-    "normal_bake_s": 0.3,
+    "blend_coverage": 0.7623,
+    "hole_texels": 610510,
+    "dielectric": true,
+    "metal_fraction": 0.0304,
+    "texture_size": 2048,
+    "base_bake_s": 319.5,
+    "normal_bake_s": 0.9,
     "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cypress\\cand_21\\textured.glb",
-    "textured_glb_sha256": "09ef237011fb52653d5a8dfb0c97001b029def9f814f3e89ec9f643b9dba418b"
+    "textured_glb_sha256": "e94bc8ea3e6ece18c817bb7f7b9e35e2953ce771c2de2d245b58f25f7a68b5bc"
   },
   "preprocess": {
-    "textured_glb_bytes": 5826972,
-    "final_glb_bytes": 5826944
+    "textured_glb_bytes": 13917024,
+    "final_glb_bytes": 13917000
   },
   "bake": {
     "source": "final.glb",
-    "sha256": "e45f17afa36e62667f9cc9df0e7dd9eca73246e0c56a76c28c873dba3c9b5f07",
+    "sha256": "6fa1865fe8431fbaf214fc94e58a0f879a2dfdd868f94aa55b360f1f5149cd12",
     "images": [
       {
         "index": 0,
@@ -376,7 +377,7 @@
       }
     ]
   },
-  "final_glb_sha256": "e45f17afa36e62667f9cc9df0e7dd9eca73246e0c56a76c28c873dba3c9b5f07",
+  "final_glb_sha256": "6fa1865fe8431fbaf214fc94e58a0f879a2dfdd868f94aa55b360f1f5149cd12",
   "turntable": {
     "angles": 8,
     "size": "512x512",
