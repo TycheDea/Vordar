@@ -1,0 +1,26 @@
+{
+  "source": "human_gen.glb",
+  "sha256": "c100c2f44349df597eddc583f8126f43d7fd0744db1ee2c88eda730116a9d414",
+  "images": [
+    {
+      "index": 0,
+      "slot": "base",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "normal",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "base",
+      "file": "img2.dds"
+    },
+    {
+      "index": 3,
+      "slot": "base",
+      "file": "img3.dds"
+    }
+  ]
+}

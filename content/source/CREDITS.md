@@ -29,6 +29,7 @@ side — which models are allowed to generate anything that ships).
 | Cracked earth ground PBR set, 2k — `content/textures/ground/cracked_earth/` | Project-generated | StableMaterials (`gvecchio/StableMaterials`) + SDXL img2img upscale; full provenance in `content/textures/ground/cracked_earth/generation_manifest.json` | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL) — `Cleared` rows in the model ledger | With the project only |
 | Castilian Plateau Dusk HDRI, 2k — `content/textures/env/castilian_plateau_dusk_2k.hdr` | Project-generated | SDXL circular-x pano (`gen_pano_sdxl.py`) + `hdr_post.py` sun injection; full provenance in `castilian_plateau_dusk_2k.manifest.json` | CreativeML Open RAIL++-M (SDXL) — `Cleared` row in the model ledger | With the project only |
 | Iron candelabra shrine prop — `content/models/props/candelabra_shrine/` | Project-generated | SDXL concept + Hi3DGen geometry + Blender bake texturing via `gen_prop.py`; full provenance in `content/models/props/candelabra_shrine/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) — `Cleared` rows in the model ledger | With the project only |
+| MPFB2 parametric monk (A4 character fixture) — `content/models/characters/human_gen/` | Project-generated | MPFB2 2.0.17 parametric body (macros: gender 1.0, age 0.6, muscle 0.4, weight 0.35, caucasian) + CC0 `donitz_monk_robe`/`donitz_monk_robe_hood` (suits02 pack) + CC0 `old_caucasian_male` skin + CC0 low-poly brown eyes (MakeHuman system assets pack), rigged onto the canonical Mixamo skeleton (`content/source/characters/mixamo/Character.fbx`) via authored-weight transplant in Blender 5.2 headless (`char_mpfb.py`, run through `gen_character.py --mpfb`); full provenance in `content/models/characters/human_gen/generation_manifest.json` (`mode: "mpfb"` — parametric build, no prompt/seed) | GPLv3 (MPFB2 tool; outputs owner's, no program logic in exports) / CC0 1.0 (bundled MPFB2 assets) — `Cleared` rows in the model ledger; no NC tool anywhere in the path | With the project only |
 
 Notes:
 
@@ -47,6 +48,15 @@ Notes:
   projection-bake ceiling on thin-member-dominated geometry (accepted per A3.12's
   third-pass review); Strategy 2 (multiview ControlNet-depth retexture) is the named
   escalation if B3's art review wants true near-black iron.
+- **MPFB2 parametric monk**: A4 fixture only — proven in place against
+  `content/races/human.ron` (lint pass + review renders) then held under
+  `content/models/characters/human_gen/`, not wired into any race; the RON still
+  points at the shipped `human.glb`. Held for Phase B4's character swap. Shippable
+  now — no NC tool anywhere in the path (A4.C2 ledger rows). Accepted caveats from
+  the 2026-07-23 user ruling: elbow area visibly shrinks during arm flexion
+  (undiagnosed; iteration backlog, not blocking); robe textures held at 1024²
+  (2048² measured 18,972,860 B against the 16 MB budget — the two 4096² robe source
+  PNGs dominate — revisit if the robe weave reads soft).
 
 ## AI pipeline models (governance ledger)
 
