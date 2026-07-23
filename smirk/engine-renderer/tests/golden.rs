@@ -18,10 +18,12 @@ use std::path::{Path, PathBuf};
 const W: u32 = 512;
 const H: u32 = 512;
 
-// Calibration task tightens these next — do not tighten from this harness.
-const SDF_COMPOSITE_THRESHOLD: f32 = 0.05;
-const HELMET_THRESHOLD:        f32 = 0.05;
-const HUMAN_THRESHOLD:         f32 = 0.05;
+// Thresholds sit ~10x above this workstation's measured frame-to-frame noise
+// floor per scene, floored at a minimum so a zero-noise measurement doesn't
+// zero out the tolerance band.
+const SDF_COMPOSITE_THRESHOLD: f32 = 0.01;
+const HELMET_THRESHOLD:        f32 = 0.01;
+const HUMAN_THRESHOLD:         f32 = 0.01;
 
 fn renderer_or_skip() -> Option<OffscreenRenderer> {
     let r = OffscreenRenderer::new(W as f32 / H as f32);
