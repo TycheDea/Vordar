@@ -26,8 +26,8 @@ pub struct CurrentZone(pub String);
 /// Ground palette per zone — each zone should read as a different place.
 fn zone_palette(zone: &str) -> Vec3 {
     match zone {
-        "start" => Vec3::new(0.30, 0.42, 0.22), // meadow green
-        "east" => Vec3::new(0.46, 0.40, 0.30),  // Emberwood Rest: warm packed-earth plaza
+        "start" => Vec3::new(0.55, 0.43, 0.35), // dry cracked earth (kept set's albedo hue)
+        "east" => Vec3::new(0.44, 0.44, 0.45),  // Emberwood Rest: worn-cobble plaza (grey-mauve)
         _ => Vec3::new(0.32, 0.32, 0.34),       // unknown: slate
     }
 }
@@ -71,7 +71,7 @@ impl System for ZoneDressingSystem {
             visuals
                 .env
                 .as_deref()
-                .unwrap_or("content/textures/env/evening_road_01_puresky_2k.hdr"),
+                .unwrap_or("content/textures/env/castilian_plateau_dusk_2k.hdr"),
             resources,
         );
         engine_renderer::set_fog(visuals.fog_color, visuals.fog_density, resources);
