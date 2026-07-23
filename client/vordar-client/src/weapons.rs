@@ -28,8 +28,7 @@ const SHIELD_KEY: &str = "weapon:shield";
 pub struct WeaponAttachment {
     pub owner: Entity,
     pub bone:  &'static str,
-    /// Grip-alignment tuning knob, composed onto the socket matrix. Identity
-    /// until the feel-check says otherwise.
+    /// Grip-alignment tuning knob, composed onto the socket matrix.
     pub local: Mat4,
 }
 
@@ -105,6 +104,27 @@ fn primitive(parts: &[(Vec3, Vec3)], color: [f32; 4], metallic: f32, roughness: 
 const STEEL: ([f32; 4], f32, f32) = ([0.55, 0.56, 0.58, 1.0], 0.85, 0.35);
 const WOOD:  ([f32; 4], f32, f32) = ([0.24, 0.15, 0.08, 1.0], 0.0, 0.8);
 
+/// Grip correction for `SWORD_KEY` riding `handslot.r`. `sword_mesh`'s blade
+/// broad face is its local Z, which identity leaves riding `handslot.r`'s
+/// own local Z — near world-vertical in the idle pose, laying the blade flat
+/// (edge horizontal). Rolling 90° about the blade's own length (local Y)
+/// swaps the broad face onto `handslot.r`'s local X instead, standing the
+/// edge upright.
+pub fn sword_grip_local() -> Mat4 {
+    Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)
+}
+
+/// Grip correction for `SHIELD_KEY` riding `handslot.l`. `shield_mesh`'s face
+/// normal is its local Z and its tall axis is local Y; identity rides
+/// `handslot.l`'s local Z (near world-vertical) and local Y (near-horizontal),
+/// facing the shield at the floor with its tall axis sideways. Cycling
+/// X→Y→Z→X moves the face onto `handslot.l`'s near-horizontal local X (facing
+/// outward) and the tall axis onto its near-vertical local Z (standing
+/// upright).
+pub fn shield_grip_local() -> Mat4 {
+    Mat4::from_cols(Vec3::Y.extend(0.0), Vec3::Z.extend(0.0), Vec3::X.extend(0.0), glam::Vec4::W)
+}
+
 /// Arming sword, grip at the origin, blade along +Y (socket bones point +Y
 /// along the hand bone). ~1.1 m overall for the 1.75 m body.
 pub fn sword_mesh() -> MeshData {
@@ -167,11 +187,14 @@ impl System for WeaponAttachSystem {
                 .map(|(e, _)| e)
                 .collect();
             for owner in unarmed {
-                for (key, bone) in [(SWORD_KEY, "handslot.r"), (SHIELD_KEY, "handslot.l")] {
+                for (key, bone, local) in [
+                    (SWORD_KEY, "handslot.r", sword_grip_local()),
+                    (SHIELD_KEY, "handslot.l", shield_grip_local()),
+                ] {
                     world.spawn((
                         Transform::default(),
                         RenderMesh { asset: key.into(), tint: Vec3::ONE },
-                        WeaponAttachment { owner, bone, local: Mat4::IDENTITY },
+                        WeaponAttachment { owner, bone, local },
                         HudHidden,
                     ));
                 }
