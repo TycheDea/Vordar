@@ -53,6 +53,8 @@ wgpu            = { workspace = true }
 image           = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
+# egui 0.34-matched: wgpu-backed offscreen rendering + PNG snapshot compare.
+egui_kittest = { version = "0.34", features = ["wgpu", "snapshot"] }
 # engine-renderer's offscreen module is feature-gated — enable it here so
 # this test build sees it without shipping it in vordar.
 engine-renderer = { path = "../../smirk/engine-renderer", features = ["offscreen"] }
