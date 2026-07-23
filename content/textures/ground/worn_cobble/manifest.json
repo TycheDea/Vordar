@@ -1,0 +1,23 @@
+{
+  "source": "b2-cobble-candidate2",
+  "images": [
+    {
+      "slot": "diff",
+      "file": "diff_2048.dds",
+      "source": "diff_2048.png",
+      "sha256": "efb10a3007ececb879cb47e5bad2c3c0437718417574faeb6c1af2e297b4cef8"
+    },
+    {
+      "slot": "normal",
+      "file": "nor_gl_2048.dds",
+      "source": "nor_gl_2048.png",
+      "sha256": "4782d9dfe0d13584854beab7fef9c42cda39509518ef99aa9789ca59defab3f9"
+    },
+    {
+      "slot": "mr",
+      "file": "rough_2048_mr.dds",
+      "source": "rough_2048.png",
+      "sha256": "321613a5c2e09a0d1358ed13038f6c0a7735aa1ebc4cb290b1066db47711eecd"
+    }
+  ]
+}

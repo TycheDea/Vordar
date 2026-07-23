@@ -1,0 +1,32 @@
+{
+  "model": "gvecchio/StableMaterials",
+  "prompt": "worn cobblestone pavement of large rounded cobbles, fist-sized weathered stones, sun-bleached tops, soot-darkened deep joints, a few cracked flagstones",
+  "seed": 1,
+  "size": 2048,
+  "native_generation_size": 512,
+  "upscale_hops": [
+    1024,
+    2048
+  ],
+  "upscale_model": "stabilityai/stable-diffusion-xl-base-1.0",
+  "guidance_scale": 10.0,
+  "num_inference_steps": 50,
+  "tiling_check": {
+    "threshold": 20.0,
+    "strip_px": 8,
+    "metrics": {
+      "diff": {
+        "left_right": 3.3019612630208335,
+        "top_bottom": 2.84844970703125
+      },
+      "nor_gl": {
+        "left_right": 2.9799601236979165,
+        "top_bottom": 3.4654337565104165
+      },
+      "rough": {
+        "left_right": 1.8306884765625,
+        "top_bottom": 2.24127197265625
+      }
+    }
+  }
+}

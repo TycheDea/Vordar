@@ -27,6 +27,7 @@ side — which models are allowed to generate anything that ships).
 | Rock 07, Rock 09, Rock Face 01, Dead Quiver Trunk models, 1k — `content/models/props/` | Rico Cilliers / Dimitrios Savva (Poly Haven) | https://polyhaven.com/models | CC0 | Yes |
 | "Human - Male_" VRoid character — `content/models/statue_vroid.glb`, origin of the `human.glb` player body | Project owner (VRoid Studio) | Authored in VRoid Studio (output belongs to its creator, commercial use allowed) | Owner's asset | With the project only |
 | Cracked earth ground PBR set, 2k — `content/textures/ground/cracked_earth/` | Project-generated | StableMaterials (`gvecchio/StableMaterials`) + SDXL img2img upscale; full provenance in `content/textures/ground/cracked_earth/generation_manifest.json` | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL) — `Cleared` rows in the model ledger | With the project only |
+| Worn cobble ground PBR set, 2k — `content/textures/ground/worn_cobble/` | Project-generated | StableMaterials (`gvecchio/StableMaterials`), prompt "worn cobblestone pavement of large rounded cobbles, fist-sized weathered stones, sun-bleached tops, soot-darkened deep joints, a few cracked flagstones", seed 1, + SDXL img2img upscale; full provenance in `content/textures/ground/worn_cobble/generation_manifest.json` | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL) — `Cleared` rows in the model ledger | With the project only |
 | Castilian Plateau Dusk HDRI, 2k — `content/textures/env/castilian_plateau_dusk_2k.hdr` | Project-generated | SDXL circular-x pano (`gen_pano_sdxl.py`) + `hdr_post.py` sun injection; full provenance in `castilian_plateau_dusk_2k.manifest.json` | CreativeML Open RAIL++-M (SDXL) — `Cleared` row in the model ledger | With the project only |
 | Iron candelabra shrine prop — `content/models/props/candelabra_shrine/` | Project-generated | SDXL concept + Hi3DGen geometry + Blender bake texturing via `gen_prop.py`; full provenance in `content/models/props/candelabra_shrine/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) — `Cleared` rows in the model ledger | With the project only |
 | MPFB2 parametric monk (A4 character fixture) — `content/models/characters/human_gen/` | Project-generated | MPFB2 2.0.17 parametric body (macros: gender 1.0, age 0.6, muscle 0.4, weight 0.35, caucasian) + CC0 `donitz_monk_robe`/`donitz_monk_robe_hood` (suits02 pack) + CC0 `old_caucasian_male` skin + CC0 low-poly brown eyes (MakeHuman system assets pack), rigged onto the canonical Mixamo skeleton (`content/source/characters/mixamo/Character.fbx`) via authored-weight transplant in Blender 5.2 headless (`char_mpfb.py`, run through `gen_character.py --mpfb`); full provenance in `content/models/characters/human_gen/generation_manifest.json` (`mode: "mpfb"` — parametric build, no prompt/seed) | GPLv3 (MPFB2 tool; outputs owner's, no program logic in exports) / CC0 1.0 (bundled MPFB2 assets) — `Cleared` rows in the model ledger; no NC tool anywhere in the path | With the project only |
@@ -42,6 +43,10 @@ Notes:
 - **Castilian Plateau Dusk**: shippable now — the bake-off winner (Path 3,
   `gen_pano_sdxl.py`) carries no license condition, unlike the sdxl_360
   runner-up-path candidate.
+- **Worn cobble ground PBR set**: B2 product; held for Phase B3's east-zone
+  dressing — committed unreferenced, no zone points at it yet. Shippable
+  now — same StableMaterials + SDXL path as cracked_earth, no NC tool
+  anywhere in the chain.
 - **Candelabra shrine**: shippable now — no NC tool touched the production path
   (strict ruling 2026-07-19 satisfied). Known-look caveat: thin members (posts,
   scroll arms) render lighter pewter than the concept's dark iron — Strategy 1's
