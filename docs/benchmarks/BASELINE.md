@@ -54,6 +54,29 @@ CLI if you have a license.
 Criterion's raw baselines live in `target/criterion` (gitignored); this file is
 the durable record. Update it after any change that moves a number.
 
+## Regression gate
+
+`scripts/bench-gate.ps1` wraps the `--baseline main` comparison into a pass/fail
+check: it runs one bench target against the saved `main` baseline, reads
+criterion's per-bench `change/estimates.json` (`mean.point_estimate` as the
+relative change) for every bench instance the run touched, prints a table, and
+exits 1 if any bench's mean regressed by more than `-Threshold` (default 0.10).
+Both the baseline save and the gate run need a quiet box: measured run-to-run
+noise reaches ±25% with a game hogging CPU in the background, which swamps the
+10% threshold in either direction.
+
+```powershell
+# Save/refresh the baseline before first use, or after an accepted perf change:
+cargo bench -p vordar-benches --bench snapshot -- --save-baseline main
+
+# Gate a bench target against it:
+powershell scripts/bench-gate.ps1 -Bench snapshot -Threshold 0.10
+```
+
+Each run appends one line to `docs/benchmarks/gate-log.txt` (date, bench, max
+delta, whether it fired) — a durable history of gate runs, since the criterion
+baselines themselves are gitignored.
+
 ## Machine
 
 | | |

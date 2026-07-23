@@ -1,0 +1,1 @@
+2026-07-23, snapshot, max-delta 0.047, fired n
