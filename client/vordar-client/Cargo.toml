@@ -35,6 +35,11 @@ name = "gear_render"
 path = "src/bin/gear_render.rs"
 required-features = ["offscreen"]
 
+[[bin]]
+name = "zone_review"
+path = "src/bin/zone_review.rs"
+required-features = ["offscreen"]
+
 [dependencies]
 engine-core     = { path = "../../smirk/engine-core" }
 engine-app      = { path = "../../smirk/engine-app" }

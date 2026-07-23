@@ -29,8 +29,10 @@ pub struct CurrentZone(pub String);
 // equirect_frag: u = atan2(d.z, d.x)/2π + 0.5, v = acos(d.y)/π) maps that
 // sun texel to this world vector — pointing TOWARD the visible disc, per
 // set_light's convention. Color is the manifest tint at dusk key intensity 1.5.
-const SUN_DIR: Vec3 = Vec3::new(0.11897, 0.13917, 0.98309);
-const SUN_COLOR: Vec3 = Vec3::new(1.5, 1.38, 1.2);
+// Public: zone_review (offscreen bin) reuses these to match this exact key
+// light rather than re-deriving them.
+pub const SUN_DIR: Vec3 = Vec3::new(0.11897, 0.13917, 0.98309);
+pub const SUN_COLOR: Vec3 = Vec3::new(1.5, 1.38, 1.2);
 
 /// Ground palette per zone — each zone should read as a different place.
 fn zone_palette(zone: &str) -> Vec3 {

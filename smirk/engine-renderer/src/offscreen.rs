@@ -458,6 +458,18 @@ impl OffscreenRenderer {
         self.camera_eye = camera.eye();
     }
 
+    /// Places the camera at an explicit eye/target pair — the only framing
+    /// control with no automatic AABB fitting, for shots whose absolute
+    /// metric distance matters (e.g. a fixed-distance close-up) rather than
+    /// "frame this bounding box" (`set_camera_turntable`'s job).
+    pub fn set_camera_lookat(&mut self, eye: Vec3, target: Vec3) {
+        let mut camera = Camera::new(self.aspect);
+        camera.look_at(eye, target);
+        let cam_uniform = CameraUniform::from_camera(&camera, (0, 0));
+        self.gpu.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[cam_uniform]));
+        self.camera_eye = eye;
+    }
+
     /// Swap in a real baked HDRI environment decoded from a Radiance .hdr on
     /// disk. Set `draw_sky` to make it the visible background.
     pub fn load_environment_hdr(&mut self, path: &str) -> Result<(), String> {

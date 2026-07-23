@@ -108,6 +108,16 @@ impl Camera {
         self.recompute_eye();
     }
 
+    /// Places eye/target directly, bypassing the orbit-sphere model —
+    /// `radius`/`angle`/`pitch` are left stale and unused, since
+    /// `build_view_projection_matrix` and `basis` read `eye`/`target` only.
+    /// For shots whose framing needs an exact metric distance (fit_bounds
+    /// derives radius from the AABB, not a caller-chosen number).
+    pub(crate) fn look_at(&mut self, eye: glam::Vec3, target: glam::Vec3) {
+        self.eye = eye;
+        self.target = target;
+    }
+
     /// Advance to the next projection mode and snap pitch/yaw to canonical values.
     pub(crate) fn cycle_projection(&mut self) {
         self.mode = match self.mode {
