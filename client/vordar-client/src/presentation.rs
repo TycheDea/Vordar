@@ -23,6 +23,15 @@ pub struct ZoneDressing;
 /// the Redirect handler online (the sandbox never changes it).
 pub struct CurrentZone(pub String);
 
+// Directional key matched to the sun baked into the default HDRI
+// (castilian_plateau_dusk_2k.manifest.json: azimuth 263.1°, elevation 8.0°,
+// tint (1.0, 0.92, 0.8)). Inverting the engine's equirect sampling (ibl.wgsl
+// equirect_frag: u = atan2(d.z, d.x)/2π + 0.5, v = acos(d.y)/π) maps that
+// sun texel to this world vector — pointing TOWARD the visible disc, per
+// set_light's convention. Color is the manifest tint at dusk key intensity 1.5.
+const SUN_DIR: Vec3 = Vec3::new(0.11897, 0.13917, 0.98309);
+const SUN_COLOR: Vec3 = Vec3::new(1.5, 1.38, 1.2);
+
 /// Ground palette per zone — each zone should read as a different place.
 fn zone_palette(zone: &str) -> Vec3 {
     match zone {
@@ -76,6 +85,7 @@ impl System for ZoneDressingSystem {
         );
         engine_renderer::set_fog(visuals.fog_color, visuals.fog_density, resources);
         engine_renderer::set_fog_height(visuals.fog_height, visuals.fog_height_falloff, resources);
+        engine_renderer::set_light(SUN_DIR, SUN_COLOR, 1.0, resources);
 
         // Tear down the previous zone's scenery.
         let old: Vec<Entity> = world.query::<(Entity, &ZoneDressing)>().iter().map(|(e, _)| e).collect();
