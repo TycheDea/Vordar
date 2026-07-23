@@ -1,19 +1,19 @@
 // Portal monument — client-local dressing spawned at each zone exit (from
-// zones.ron). Two weathered pillars, a lintel, a humming cyan gate, and a
+// zones.ron). Two weathered pillars, a lintel, a candle-gold gate, and a
 // flat glowing ring on the ground showing the actual trigger radius (r=2).
 // Never spawned by the server; purely presentation.
 (
     components: {
         "Transform":  (),
         "ShapeGroup": (shapes: [
-            (shape: Cylinder, offset: (1.3, 0.55, 0.0),  scale: (0.28, 1.1, 0.28), color: (0.45, 0.45, 0.50)),
-            (shape: Cylinder, offset: (-1.3, 0.55, 0.0), scale: (0.28, 1.1, 0.28), color: (0.45, 0.45, 0.50)),
-            (shape: RoundedBox(corner_radius: 0.1), offset: (0.0, 1.75, 0.0), scale: (1.6, 0.22, 0.3), color: (0.38, 0.38, 0.44)),
+            (shape: Cylinder, offset: (1.3, 0.55, 0.0),  scale: (0.28, 1.1, 0.28), color: (0.50, 0.47, 0.43)),
+            (shape: Cylinder, offset: (-1.3, 0.55, 0.0), scale: (0.28, 1.1, 0.28), color: (0.50, 0.47, 0.43)),
+            (shape: RoundedBox(corner_radius: 0.1), offset: (0.0, 1.75, 0.0), scale: (1.6, 0.22, 0.3), color: (0.44, 0.41, 0.37)),
             // Color components above 1.0 are HDR emissive (VQ-C3): the gate
             // hums and blooms at dusk, the trigger ring glows softer.
-            (shape: Diamond,  offset: (0.0, 0.8, 0.0),   scale: (0.5, 0.9, 0.12), color: (0.9, 2.85, 3.0)),
-            (shape: Cylinder, offset: (0.0, -0.45, 0.0), scale: (4.0, 0.08, 4.0), color: (0.5, 1.5, 1.7)),
+            (shape: Diamond,  offset: (0.0, 0.8, 0.0),   scale: (0.5, 0.9, 0.12), color: (3.0, 2.37, 0.9)),
+            (shape: Cylinder, offset: (0.0, -0.45, 0.0), scale: (4.0, 0.08, 4.0), color: (1.7, 1.34, 0.5)),
         ]),
-        "PointLight": (color: (0.30, 0.95, 1.05), intensity: 8.0, radius: 9.0, offset: (0.0, 0.8, 0.0), flicker: 0.15),
+        "PointLight": (color: (1.05, 0.825, 0.3), intensity: 8.0, radius: 9.0, offset: (0.0, 0.8, 0.0), flicker: 0.15),
     },
 )

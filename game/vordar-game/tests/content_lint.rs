@@ -244,7 +244,7 @@ fn portal_prefab_emits_light() {
         .expect("portal entity must have a PointLight component");
 
     assert!(light.radius > 0.0, "portal PointLight must have positive radius");
-    assert!(light.color.z > light.color.x, "portal PointLight must have cool hue (blue > red)");
+    assert!(light.color.x > light.color.z, "portal PointLight must have candle-gold (red > blue)");
 }
 
 /// VQ-C5: character material maps within dimension cap (2048²).
