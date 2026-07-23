@@ -520,7 +520,7 @@ exit non-zero rather than patch silently.
 **3. `prop_texture.py`** — Blender headless texture bake:
 
 ```
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metallic F] [--roughness F]
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metallic F] [--roughness F] [--dielectric]
 ```
 
 Default strategy: **Blender projection bake** — concept image
@@ -568,6 +568,15 @@ The normal map follows the same contract as the default strategy (real
 hires→clean bake — the estimator's bump head is discarded in its favor);
 the concept image is unused.
 
+**`--dielectric`** zeroes the blended metallic channel post-blend. The
+estimator has no material-class prior, so it can read specular highlights
+on stone/wood/foliage as stray metal (measured: cypress cand_31
+`metal_fraction` 0.403, a crumpled-gold-foil read on foliage that should be
+dielectric). Explicit opt-in per run, not a default — metal prop classes
+(the candelabra's iron) legitimately need the estimated channel. `--metallic`/
+`--roughness` (projection strategy) are unaffected; this only touches the
+multiview per-texel path.
+
 **MaterialAnything estimator venv** (`C:\tools\MaterialAnything`, clone of
 `3DTopia/MaterialAnything` @ `be3d6b3`, MIT code; weights HF
 `xanderhuang/material_estimator`, Apache-2.0, ~4.3 GB). Its
@@ -605,10 +614,18 @@ Then the existing DDS bake, reused as-is (no new bake code):
 node scripts/asset-pipeline/bake_textures.mjs gltf <final.glb>
 ```
 
+Its `mr`/`ao`/`normal` slots pass `--ignore-srgb` to texconv: Blender's PNG
+writer stamps an sRGB+gAMA+cHRM chunk on every image it saves regardless of
+the image's own Non-Color tag, and texconv's WIC reader honors that chunk
+over the requested output format, so converting to BC7_UNORM/BC5_UNORM
+without the flag silently applied a real sRGB decode to already-linear mr/
+normal data (measured: roughness mean 0.55 raw → 0.26 installed, matching
+the sRGB EOTF at that value).
+
 **5. `gen_prop.py`** — chain assembly, one candidate per invocation:
 
 ```
-python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metallic F] [--roughness F]
+python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metallic F] [--roughness F] [--dielectric]
 ```
 
 Runs concept → geometry → cleanup → texture → preprocess+bake → turntable →

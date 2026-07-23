@@ -178,7 +178,7 @@ def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dic
 
 
 def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
-                  metallic: float, roughness: float, azimuths: str) -> dict:
+                  metallic: float, roughness: float, azimuths: str, dielectric: bool) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -197,6 +197,8 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
             cmd += ["--roughness", roughness]
         if azimuths is not None:
             cmd += ["--azimuths", azimuths]
+        if dielectric:
+            cmd += ["--dielectric"]
         out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
@@ -274,6 +276,11 @@ def main():
                         help="Half to mirror in prop_cleanup.py's plane-aligned frame")
     parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
                         help="Multiview camera azimuths for prop_texture.py")
+    parser.add_argument("--dielectric", action="store_true",
+                        help="Multiview strategy only: zero the estimated metallic "
+                             "channel post-blend (prop_texture.py --dielectric). "
+                             "Explicit opt-in for prop classes declared non-metal "
+                             "(stone/wood/foliage) -- omit for metal classes.")
     parser.add_argument("--through", choices=STAGES, default="turntable",
                         help="Stop after this stage (batch triage: --through cleanup "
                              "sweeps geometry seeds without paying for texturing)")
@@ -300,7 +307,7 @@ def main():
         manifest["cleanup"] = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
     if stop >= STAGES.index("texture"):
         manifest["texture"] = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                                            args.metallic, args.roughness, args.azimuths)
+                                            args.metallic, args.roughness, args.azimuths, args.dielectric)
     if stop >= STAGES.index("preprocess"):
         manifest.update(stage_preprocess_bake(cand_dir))  # final.glb, needed by the turntable stage below
     if stop >= STAGES.index("turntable"):

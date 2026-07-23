@@ -45,7 +45,7 @@
 # Usage: blender --background --python prop_texture.py -- \
 #            <clean.glb> <hires.glb> <concept.png> <textured.glb> \
 #            [--strategy projection|multiview] [--subject STR] [--seed N] \
-#            [--metallic F] [--roughness F]
+#            [--metallic F] [--roughness F] [--dielectric]
 
 import argparse
 import hashlib
@@ -759,13 +759,16 @@ def estimate_materials(views, work_dir, seed):
     return json.loads((work_dir / "pbr_meta.json").read_text(encoding="utf-8"))
 
 
-def pbr_multiview(clean, hires, atlas, subject, seed, work_dir):
+def pbr_multiview(clean, hires, atlas, subject, seed, work_dir, dielectric=False):
     """Full per-texel PBR set from the multiview path: generate lit views,
     decompose each into albedo + roughness/metallic, blend every channel
     through the same facing-weight machinery. The albedo blend is the
     basecolor (delit — the lit gen.png is conditioning intermediate only);
     the rm blend packs into the glTF G=roughness/B=metallic layout, which
-    is the estimator's native output layout."""
+    is the estimator's native output layout. dielectric=True zeroes the
+    blended metallic channel post-blend: the estimator has no material-class
+    prior, so it can read specular highlights on stone/wood/foliage as
+    stray metal (measured: cypress cand_31 metal_fraction 0.403)."""
     work_dir.mkdir(parents=True, exist_ok=True)
     views, rig = mv_camera_rig(clean, MV_VIEWS)
     pos, nrm, island = bake_geometry_atlas(clean, atlas, rig)
@@ -790,7 +793,7 @@ def pbr_multiview(clean, hires, atlas, subject, seed, work_dir):
     base_img.pixels.foreach_set(base_px.ravel())
     mr = np.zeros((pos.shape[0], 4), dtype=np.float32)
     mr[:, 1] = rm_px[:, 1]  # estimator R channel dropped: glTF ignores it
-    mr[:, 2] = rm_px[:, 2]
+    mr[:, 2] = 0.0 if dielectric else rm_px[:, 2]
     mr[:, 3] = 1.0
     mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
     mr_img.pixels.foreach_set(mr.ravel())
@@ -810,6 +813,7 @@ def pbr_multiview(clean, hires, atlas, subject, seed, work_dir):
         "depth_dilate_px": MV_DEPTH_DILATE_PX,
         "blend_coverage": round(coverage, 4),
         "hole_texels": int((island & ~covered).sum()),
+        "dielectric": dielectric,
         "metal_fraction": round(float((rm_px[island, 2] > 0.5).mean())
                                 if island.any() else 0.0, 4),
     }
@@ -838,6 +842,12 @@ def main():
     parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
                         help="Multiview camera azimuths (default 0,90,180,270); "
                              "use oblique sides, e.g. 0,60,180,300, for planar props")
+    parser.add_argument("--dielectric", action="store_true",
+                        help="Multiview strategy only: zero the estimated metallic "
+                             "channel post-blend. Explicit opt-in per run for prop "
+                             "classes declared non-metal (stone/wood/foliage) -- the "
+                             "estimator has no material-class prior and can read "
+                             "specular highlights as stray metal.")
     args = parser.parse_args(argv)
 
     if args.azimuths is not None:
@@ -870,8 +880,8 @@ def main():
         if not args.subject or args.seed is None:
             fail("--strategy multiview requires --subject and --seed")
         work_dir = Path(args.textured_glb).resolve().parent / "multiview"
-        base_img, mr_img, extras = pbr_multiview(clean, hires, atlas,
-                                                 args.subject, args.seed, work_dir)
+        base_img, mr_img, extras = pbr_multiview(clean, hires, atlas, args.subject,
+                                                 args.seed, work_dir, args.dielectric)
     t_base = time.time()
 
     # ---- normal: real high-to-low bake from the hires mesh ----

@@ -51,12 +51,19 @@ function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
 }
 
+// Blender's PNG writer stamps an sRGB+gAMA+cHRM chunk on every image it
+// saves, including Non-Color (linear) data -- the chunk lies about mr/ao/
+// normal source PNGs. texconv's WIC reader honors that chunk regardless of
+// the requested output format, so converting to a non-_SRGB DXGI format
+// (BC7_UNORM, BC5_UNORM) silently applies a real sRGB->linear decode to
+// already-linear bytes unless --ignore-srgb tells it to trust the requested
+// format instead of the file's metadata.
 const SLOT_FLAGS = {
   base: ["-f", "BC7_UNORM_SRGB", "-srgb", "-m", "0", "-dx10", "-y"],
   emissive: ["-f", "BC7_UNORM_SRGB", "-srgb", "-m", "0", "-dx10", "-y"],
-  mr: ["-f", "BC7_UNORM", "-m", "0", "-dx10", "-y"],
-  ao: ["-f", "BC7_UNORM", "-m", "0", "-dx10", "-y"],
-  normal: ["-f", "BC5_UNORM", "-m", "0", "-dx10", "-y"],
+  mr: ["-f", "BC7_UNORM", "-m", "0", "-dx10", "-y", "--ignore-srgb"],
+  ao: ["-f", "BC7_UNORM", "-m", "0", "-dx10", "-y", "--ignore-srgb"],
+  normal: ["-f", "BC5_UNORM", "-m", "0", "-dx10", "-y", "--ignore-srgb"],
 };
 const SLOT_CLASS = { base: "srgb", emissive: "srgb", mr: "linear", ao: "linear", normal: "normal" };
 const SLOT_PRIORITY = ["base", "mr", "normal", "emissive", "ao"];
