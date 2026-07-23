@@ -21,6 +21,9 @@ pub enum ProjectionMode {
     TopDown,    // orthographic + straight down
 }
 
+/// World-space floor for the camera eye — the ground plane `unproject_to_ground` assumes.
+const MIN_EYE_Y: f32 = 0.0;
+
 pub(crate) struct Camera {
     eye: glam::Vec3,
     pub(crate) target: glam::Vec3,
@@ -130,7 +133,9 @@ impl Camera {
     fn recompute_eye(&mut self) {
         self.eye.x = self.target.x + self.radius * self.angle.cos() * self.pitch.cos();
         self.eye.z = self.target.z + self.radius * self.angle.sin() * self.pitch.cos();
-        self.eye.y = self.target.y + self.radius * self.pitch.sin();
+        // Floored at the ground plane (also assumed by unproject_to_ground) so
+        // pitching down at any zoom level can't put the eye underground.
+        self.eye.y = (self.target.y + self.radius * self.pitch.sin()).max(MIN_EYE_Y);
     }
 
     /// The camera's world-space eye position.
@@ -423,5 +428,25 @@ mod tests {
         let (right, up) = cam.basis();
         assert!(right.abs_diff_eq(glam::Vec3::X, 1e-3), "right = +X, got {right}");
         assert!(up.abs_diff_eq(glam::Vec3::NEG_Z, 1e-3), "up = -Z, got {up}");
+    }
+
+    #[test]
+    fn eye_never_dips_below_ground_across_pitch_and_zoom_extremes() {
+        let (min_radius, max_radius) = (4.0_f32, 100.0_f32);
+        for &radius in &[min_radius, 10.0, 34.0, max_radius] {
+            let mut cam = Camera::new(16.0 / 9.0);
+            cam.zoom(radius - cam.radius, min_radius, max_radius);
+            // Walk pitch from clamp extreme to clamp extreme in small steps,
+            // checking every step — not just the endpoints — the way holding
+            // an arrow key actually drives it.
+            for _ in 0..600 {
+                cam.orbit(0.0, -0.01);
+                assert!(cam.eye.y >= 0.0, "radius={radius} pitch={} eye.y={}", cam.pitch, cam.eye.y);
+            }
+            for _ in 0..600 {
+                cam.orbit(0.0, 0.01);
+                assert!(cam.eye.y >= 0.0, "radius={radius} pitch={} eye.y={}", cam.pitch, cam.eye.y);
+            }
+        }
     }
 }
