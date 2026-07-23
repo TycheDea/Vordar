@@ -640,7 +640,104 @@ bake on thin-member-dominated props, ruled tolerable at game camera distance
 for this fixture; Strategy 2 (SDXL multi-view retexture) is the evidenced
 escalation if a later art review rejects it.
 
-## Character auto-skinning (SkinTokens, Phase A4)
+## Character generation (Phase A4)
+
+Image → 3D character pipeline: the same concept → Hi3DGen-geometry →
+Blender-texture chain as Phase A3, extended with a rig stage that puts the
+canonical Mixamo skeleton and its 10-action clip library onto the generated
+mesh. A parametric CC0 route (MPFB2) shares the same rig/preprocess/bake/
+review tail and is the current fixture winner. Full task-by-task record,
+the texture-strategy ruling, the rig-gate failure/fix history, and the
+decision-gate log live in `tasks/ai-pipeline/a4.md`.
+
+### Rig design: transplant, not generate
+
+The skeleton is never generated — it's fixed by architecture. Every
+candidate gets the canonical `content/source/characters/mixamo/Character.fbx`
+armature (Mixamo bone names, the rest pose the clip library animates
+against) transplanted onto it; "rigging" reduces to fitting that armature
+to the mesh and predicting skin weights over it, never inventing new
+joints. UniRig was rejected as the auto-rigger: it predicts an arbitrary
+skeleton per mesh with no template/retarget path, so its output can't play
+the existing clips at all (evidence, the full rigging-candidate research,
+and the contingency ladder: `tasks/ai-pipeline/a4.md`).
+
+**Units invariant:** the imported armature's own object transform (FBX cm
+scale) is never touched by any rig script — only the MESH moves into the
+armature's space, by scale + translation. `client/vordar-client/src/
+weapons.rs:204`'s socket matrix bakes exactly that cm→m scale; applying or
+clearing the armature transform breaks weapon sockets silently.
+
+**VRAM sequencing:** Hi3DGen peaks 11.4–11.5 GiB of 12 (A3/A4-measured) —
+ComfyUI must be fully stopped before any geometry stage runs.
+`gen_character.py` (below) owns this by construction: the concept stage and
+the multiview texture stage each start and stop their own headless ComfyUI
+server, so it's never up while Hi3DGen runs; the SkinTokens skin step also
+uses the GPU (3.7 GiB peak) but never overlaps either.
+
+### Pose kit + conditioning image
+
+Committed: `scripts/ai-pipeline/assets/tpose_openpose.png` (+
+`tpose_openpose.json` sidecar recording the figure's projected pixel
+height) — a deterministic OpenPose-format 18-keypoint stick figure,
+orthographically projected from `Character.fbx`'s own T-pose joint
+positions. `char_concept.json`'s `LoadImage` node loads it and
+`ControlNetApplyAdvanced` (strength ~0.8,
+`xinsir/controlnet-openpose-sdxl-1.0`) locks every concept generation to
+the canonical skeleton's proportions and rest pose — the fit in the rig
+stage is then a near-rigid alignment, not a deformation solve. The
+one-shot Blender-headless + Python probe that produced this asset (imports
+`Character.fbx`, asserts the 65 `mixamorig:`-prefixed bones, projects the
+stick figure) is not kept in the tree; only its frozen output ships.
+
+### Concept, geometry, cleanup, texture — the A3 chain, character-tuned
+
+`prop_hi3dgen.py` and `prop_cleanup.py` (above) run unchanged on
+characters; the concept stage substitutes `char_concept.json`
+(openpose-conditioned) for `prop_concept.json`. Cleanup targets `--height
+1.744 --tri-budget 30000` (double the prop budget; no VQ triangle clause
+exists, chosen under the 16 MB / 64-joint caps).
+
+`prop_texture.py`'s strategy is fixed to `--strategy multiview` for every
+character (A4.6 ruling): projection mirrors the concept's face through
+onto the back of the hood, which disqualifies it on any character.
+Multiview's per-view MaterialAnything decomposition (above) estimates
+roughness/metallic per texel from the generated views — the same
+machinery props use, not a character-specific mode; there is no
+character-only `--mr` flag. The constant-dielectric contract (`metallic
+0.0 / roughness 0.8`, matching every existing race model) applies directly
+where a scalar is set rather than estimated: `prop_texture.py`'s own
+`--metallic`/`--roughness` projection-strategy defaults, and the MPFB
+route's authored materials (below).
+
+### `char_rig.py` — skeleton transplant + fit + weight adoption (Blender 5.2 headless)
+
+```
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/char_rig.py -- fit <textured.glb> <Character.fbx> <fit.glb>
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/char_rig.py -- finish <textured.glb> <Character.fbx> <skinned.glb> <clips_dir> <out.glb> [--height M]
+```
+
+Two subcommands bracket SkinTokens' skin prediction (below). `fit`:
+imports `Character.fbx`, keeps its armature exactly as imported, deletes
+its meshes, imports the textured glb, fits the mesh into the armature's
+space (uniform scale + translation from the skeleton's own T-pose
+landmarks — crown/ground/hips/shoulder-span), prunes fingers, adds the
+`handslot.r`/`handslot.l`/`head` socket bones, rigid-binds every vertex to
+its nearest deform-bone segment (the minimal valid skin SkinTokens' input
+shape needs), and exports `fit.glb`. `finish`: rebuilds the same scene from
+the same inputs — not from `fit.glb` itself, since a glTF round-trip of the
+armature object transform would break the units invariant above — adopts
+SkinTokens' predicted weights under canonical bone names (matched by
+descending both hierarchies in lockstep, not by nearest position: the
+tokenizer's ~5 cm quantization error exceeds some bone spacings), trims the
+three Mixamo end bones, runs the rig-quality gate (weightless-vertex
+fraction over 0.5% is a structural failure, exits non-zero with the
+numbers — never patched silently), then the shared `mixamo_rig.py`
+machinery: clip stash, height/ground bake, glb export. Bone-heat solving
+and its solver-warning gate are gone from this path entirely — SkinTokens
+predicts every weight.
+
+### Character auto-skinning (SkinTokens)
 
 Install location: `C:\tools\SkinTokens\SkinTokens` —
 `VAST-AI-Research/SkinTokens`, UniRig's successor (code MIT; weights MIT at
@@ -651,28 +748,59 @@ fetched by the repo's `download.py`). Venv: `C:\tools\SkinTokens\venv`
 flash-attn is hardcoded in their model code, no config escape — plus
 `scipy`, which their `requirements.txt` omits).
 
-### `char_skin.py` — skin-only weight prediction (SkinTokens venv)
+**`char_skin.py`** — skin-only weight prediction (SkinTokens venv):
 
 ```
 C:\tools\SkinTokens\venv\Scripts\python.exe scripts\ai-pipeline\char_skin.py <fit.glb> --out <skinned.glb> [--seed N]
 ```
 
 Run with `cwd=C:\tools\SkinTokens\SkinTokens` (checkpoint path and their
-`bpy_server.py` resolve from there). Predicts skin weights for fit.glb's
-mesh over the canonical Mixamo-standard skeleton it carries and transfers
-them onto that same textured mesh. SkinTokens ships no seed control
-(sampling generation), so the wrapper seeds torch/numpy/random itself and
-records the seed in its JSON stats line. 3.7 GiB peak VRAM measured
-(`num_beams` fixed at 4, the validated 12 GB setting).
+`bpy_server.py` resolve from there). Predicts skin weights for `fit.glb`'s
+mesh over the canonical skeleton it carries and transfers them onto that
+same textured mesh. SkinTokens ships no seed control (sampling
+generation), so the wrapper seeds torch/numpy/random itself and records
+the seed in its JSON stats line. 3.7 GiB peak VRAM measured (`num_beams`
+fixed at 4, the validated 12 GB setting).
 
-This is step 2 of `gen_character.py`'s rig stage: `char_rig.py fit`
-(skeleton transplant + mesh fit + rigid bind → `fit.glb`) → `char_skin.py`
-(→ `skinned.glb`, generic re-emitted bone names) → `char_rig.py finish`
-(canonical names recovered by lockstep hierarchy descent, weights adopted,
-Mixamo end bones trimmed, rig-quality gate, clips/height/export). The
-round-trip through their tokenizer drops non-deforming leaf bones
-variably and quantizes joint positions (~5 cm at human scale), which is
-why finish matches joints structurally rather than by nearest position.
+### `preprocess_prop.mjs` — character caps
+
+`--max-bytes N` and `--max-dim N` (both optional; defaults are the prop
+caps, 8 MB / 1024) let the character chain raise the byte ceiling to
+VQ-B2's 16 MB while keeping textures at 1024: `--max-bytes 16777216`. The
+MPFB route also passes `--max-dim 1024` explicitly — at 2048 its two
+4096² robe source textures push `final.glb` to ~19 MB, over the cap.
+
+### `gen_character.py` — chain assembly
+
+```
+python scripts/ai-pipeline/gen_character.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--height M]
+python scripts/ai-pipeline/gen_character.py --mpfb --out <dir> [--height M]
+```
+
+One invocation = one candidate, resumable stage by stage exactly like
+`gen_prop.py`. The default (AI) chain: concept → geometry → cleanup →
+texture (multiview, always) → rig (`char_rig.py fit` → `char_skin.py` →
+`char_rig.py finish`) → preprocess+bake → review renders → chained
+`generation_manifest.json`, landing under `<out>/cand_<seed>/`. `--mpfb`
+swaps the first five stages for the parametric `char_mpfb.py` body (below;
+the parser rejects a subject, `--seed`, or `--skip-concept` in this mode)
+and lands under `<out>/cand_mpfb/`, with the manifest carrying `"mode":
+"mpfb"` and no AI-chain keys. Both modes share the review stage: a static
+8-angle turntable plus three animated sheets (`--clip walk`, `--clip
+idle`, `--clip attack_slash`, default sample times).
+
+### `turntable --clip <name> [--times t0,t1,…]` — animated review renders
+
+```
+cargo run -p engine-renderer --release --features offscreen --bin turntable -- <glb> --out <dir> --clip <name> [--times t0,t1,...] --size WxH [--hdri <path>]
+```
+
+Extends the static `--angles N` mode (above): holds a fixed 3/4-view
+camera and samples the named clip instead of flattening to bind pose —
+`--times` (comma-separated seconds) defaults to 5 evenly spaced samples
+across the clip's duration. Exactly one of `--angles`/`--clip` is
+required. This is what `gen_character.py`'s review stage and the fixture's
+placement-proof renders use for the walk/idle/attack_slash sheets.
 
 ### MPFB2 (parametric CC0 body — `char_mpfb.py`, `--mpfb` mode)
 
@@ -700,10 +828,23 @@ Module import name is `bl_ext.user_default.mpfb` — a bare `import mpfb`
 fails; scripts resolve the package by scanning `sys.modules` for a name
 ending in `.mpfb` (`char_mpfb.py`'s `resolve_mpfb()`).
 
-`gen_character.py --mpfb --out <dir>` builds the parametric MPFB2 monk
-(CC0 body + donitz monk robe/hood/eyes, MPFB's artist-authored mixamorig
-weights bound to the transplanted canonical armature by `char_mpfb.py` —
-no concept/geometry/texture/SkinTokens stages, no subject/seed, CPU-only
-~10 s) into `<out>/cand_mpfb/`, then the shared preprocess (`--max-dim
-1024` — the robe's 4096² sources exceed the 16 MB model cap at 2048) /
-DDS bake / turntable review stages.
+`char_mpfb.py` builds the parametric MPFB2 monk — CC0 base body + the
+`donitz_monk_robe`/`donitz_monk_robe_hood` garments + CC0 eyes +
+`old_caucasian_male` skin — then brings it to the canonical T-pose and
+binds it to the transplanted `Character.fbx` armature by MPFB's own
+artist-authored, name-matched vertex groups: no bone-heat, no weight
+prediction, no AI model of any kind on this route. `gen_character.py
+--mpfb --out <dir>` runs it (no concept/geometry/texture/SkinTokens
+stages, no subject/seed, CPU-only ~10 s) into `<out>/cand_mpfb/`, then the
+shared preprocess/DDS-bake/turntable-review stages.
+
+### Fixture
+
+`content/models/characters/human_gen/` — the MPFB2 monk (`cand_mpfb/
+final.glb`), installed as the Phase A4 fixture and held for Phase B4's
+race swap; not wired into `content/races/human.ron`, which reverted to
+the incumbent `human.glb` after the placement-proof lint run. Full
+candidate history (the generative chain's candidate batch, the rig-gate
+failure/fix pass, the TRELLIS baseline, and the user's decision-gate
+ruling that selected the MPFB route): `tasks/ai-pipeline/a4.md` →
+"Decision log".
