@@ -568,6 +568,22 @@ The normal map follows the same contract as the default strategy (real
 hires→clean bake — the estimator's bump head is discarded in its favor);
 the concept image is unused.
 
+**`--view-res N`** raises the per-view depth/normal render and SDXL/ControlNet
+generation resolution (default 1024) independently of the MaterialAnything
+estimator's input, which stays pinned at 768×768 either way: `prop_pbr.py`
+downscales each generated view to 768 for the estimator call and upscales its
+albedo/rm output back to the view's own resolution (`full_res = gen.size`) —
+that split is unconditional, not gated by this flag. Raising `--view-res`
+only sharpens the source imagery blended into the atlas; it does not change
+`TEXTURE_SIZE` (the atlas's own baked resolution, a separate constant).
+
+**`--texture-size N`** raises `TEXTURE_SIZE` (default 1024), the pixel
+resolution every basecolor/normal/MR image is baked at. Independent of
+`prop_cleanup.py`'s xatlas packing: the mesh's UVs are resolution-independent
+0–1 floats, so a `--texture-size` above the resolution the atlas was packed
+for is safe (island gutters only grow) and re-running cleanup is not needed
+to raise it.
+
 **`--dielectric`** zeroes the blended metallic channel post-blend. The
 estimator has no material-class prior, so it can read specular highlights
 on stone/wood/foliage as stray metal (measured: cypress cand_31
@@ -644,6 +660,13 @@ server lifecycle (`comfy_run.server()`): the concept stage and
 server and stop it before returning, so the chain runs unattended and the
 rule holds by construction. An already-running external server is refused,
 not reused — the chain can't stop somebody else's server before geometry.
+
+`--view-res`/`--texture-size` thread straight through to `prop_texture.py`
+(above). `--max-dim`/`--max-bytes` thread through to `preprocess_prop.mjs`'s
+own flags (character-chain precedent below) — raise `--max-dim` alongside
+`--texture-size`, or the default 1024 resize cap silently downscales the
+bake back down during preprocessing regardless of what `--texture-size`
+baked.
 
 ### Fixture
 

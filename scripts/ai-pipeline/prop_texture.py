@@ -88,6 +88,11 @@ MA_PYTHON = Path(r"C:\tools\MaterialAnything") / "venv" / "Scripts" / "python.ex
 
 
 MV_ELEVATION_DEG = 15.0
+# Two-resolution contract: MV_RES sets the ortho depth/normal renders and the
+# SDXL/ControlNet generation canvas (sharper source imagery baked into the
+# atlas); prop_pbr.py's estimator always downscales its input to EST_RES=768
+# (its pinned training resolution) and upscales the result back to MV_RES, so
+# raising MV_RES never touches the estimator's fixed input size.
 
 
 def view_hint(az_deg, el_deg=MV_ELEVATION_DEG):
@@ -224,7 +229,13 @@ def project_uvs(me, bbox_uv):
     return layer
 
 
-def new_image(name, srgb, fill, float_buffer=False, size=TEXTURE_SIZE):
+def new_image(name, srgb, fill, float_buffer=False, size=None):
+    # size=None (not size=TEXTURE_SIZE): a literal default binds to
+    # TEXTURE_SIZE's value at module-load time and would stay 1024 even
+    # after --texture-size reassigns the global, since every call site
+    # below omits size and relies on this default reacting to the override.
+    if size is None:
+        size = TEXTURE_SIZE
     img = bpy.data.images.new(name, size, size, alpha=False, float_buffer=float_buffer)
     img.colorspace_settings.name = "sRGB" if srgb else "Non-Color"
     img.generated_color = (*fill, 1.0)
@@ -842,6 +853,18 @@ def main():
     parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
                         help="Multiview camera azimuths (default 0,90,180,270); "
                              "use oblique sides, e.g. 0,60,180,300, for planar props")
+    parser.add_argument("--view-res", type=int, default=None,
+                        help="Multiview strategy only: per-view depth/normal render and "
+                             "SDXL/ControlNet generation resolution (default 1024). The "
+                             "MaterialAnything estimator's input stays pinned at 768x768 "
+                             "regardless (prop_pbr.py downscales/upscales around it) -- "
+                             "this only sharpens the source imagery blended into the atlas.")
+    parser.add_argument("--texture-size", type=int, default=None,
+                        help="Atlas bake resolution for basecolor/normal/MR (default 1024, "
+                             "TEXTURE_SIZE). A value above the resolution prop_cleanup.py's "
+                             "xatlas packed the atlas for is safe -- island gutters only grow, "
+                             "never shrink -- so re-running cleanup is not required to raise "
+                             "this.")
     parser.add_argument("--dielectric", action="store_true",
                         help="Multiview strategy only: zero the estimated metallic "
                              "channel post-blend. Explicit opt-in per run for prop "
@@ -854,6 +877,12 @@ def main():
         global MV_VIEWS
         MV_VIEWS = [(view_hint(a), a, MV_ELEVATION_DEG)
                     for a in (float(s) for s in args.azimuths.split(","))]
+    if args.view_res is not None:
+        global MV_RES
+        MV_RES = args.view_res
+    if args.texture_size is not None:
+        global TEXTURE_SIZE
+        TEXTURE_SIZE = args.texture_size
 
     t0 = time.time()
     bpy.ops.wm.read_factory_settings(use_empty=True)

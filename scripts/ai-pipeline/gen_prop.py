@@ -178,7 +178,8 @@ def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dic
 
 
 def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
-                  metallic: float, roughness: float, azimuths: str, dielectric: bool) -> dict:
+                  metallic: float, roughness: float, azimuths: str, dielectric: bool,
+                  view_res: int, texture_size: int) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -197,6 +198,10 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
             cmd += ["--roughness", roughness]
         if azimuths is not None:
             cmd += ["--azimuths", azimuths]
+        if view_res is not None:
+            cmd += ["--view-res", view_res]
+        if texture_size is not None:
+            cmd += ["--texture-size", texture_size]
         if dielectric:
             cmd += ["--dielectric"]
         out = run_capture(cmd)
@@ -207,7 +212,7 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
     return meta
 
 
-def stage_preprocess_bake(cand_dir: Path) -> dict:
+def stage_preprocess_bake(cand_dir: Path, max_dim: int = None, max_bytes: int = None) -> dict:
     textured_glb = cand_dir / "textured.glb"
     final_glb = cand_dir / "final.glb"
     bake_manifest = cand_dir / "final.textures" / "manifest.json"
@@ -217,7 +222,12 @@ def stage_preprocess_bake(cand_dir: Path) -> dict:
         print(f"preprocess: skip (exists) -> {final_glb}")
     else:
         preprocess_stats = {"textured_glb_bytes": textured_glb.stat().st_size}
-        run(["node", PREPROCESS_PROP_MJS, textured_glb, final_glb])
+        cmd = ["node", PREPROCESS_PROP_MJS, textured_glb, final_glb]
+        if max_dim is not None:
+            cmd += ["--max-dim", max_dim]
+        if max_bytes is not None:
+            cmd += ["--max-bytes", max_bytes]
+        run(cmd)
         preprocess_stats["final_glb_bytes"] = final_glb.stat().st_size
         meta_path.write_text(json.dumps(preprocess_stats, indent=2), encoding="utf-8")
         print(f"preprocess: generated -> {final_glb}")
@@ -276,6 +286,22 @@ def main():
                         help="Half to mirror in prop_cleanup.py's plane-aligned frame")
     parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
                         help="Multiview camera azimuths for prop_texture.py")
+    parser.add_argument("--view-res", type=int, default=None,
+                        help="Multiview strategy only: prop_texture.py's per-view depth/"
+                             "normal render and SDXL/ControlNet generation resolution "
+                             "(default 1024; the MaterialAnything estimator's input stays "
+                             "pinned at 768x768 regardless)")
+    parser.add_argument("--texture-size", type=int, default=None,
+                        help="prop_texture.py's atlas bake resolution (default 1024); "
+                             "safe to raise without re-running cleanup (island gutters "
+                             "only grow)")
+    parser.add_argument("--max-dim", type=int, default=None,
+                        help="preprocess_prop.mjs's texture resize cap (default 1024) -- "
+                             "raise alongside --texture-size, or the preprocess stage "
+                             "silently downscales the bake back down")
+    parser.add_argument("--max-bytes", type=int, default=None,
+                        help="preprocess_prop.mjs's final.glb size assert (default 8 MB, "
+                             "the prop cap)")
     parser.add_argument("--dielectric", action="store_true",
                         help="Multiview strategy only: zero the estimated metallic "
                              "channel post-blend (prop_texture.py --dielectric). "
@@ -307,9 +333,11 @@ def main():
         manifest["cleanup"] = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
     if stop >= STAGES.index("texture"):
         manifest["texture"] = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                                            args.metallic, args.roughness, args.azimuths, args.dielectric)
+                                            args.metallic, args.roughness, args.azimuths, args.dielectric,
+                                            args.view_res, args.texture_size)
     if stop >= STAGES.index("preprocess"):
-        manifest.update(stage_preprocess_bake(cand_dir))  # final.glb, needed by the turntable stage below
+        # final.glb, needed by the turntable stage below
+        manifest.update(stage_preprocess_bake(cand_dir, args.max_dim, args.max_bytes))
     if stop >= STAGES.index("turntable"):
         manifest["turntable"] = stage_turntable(cand_dir)
     manifest_path = cand_dir / "generation_manifest.json"
