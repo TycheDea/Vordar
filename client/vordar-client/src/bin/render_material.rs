@@ -19,11 +19,12 @@ struct Args {
     out:    String,
     angles: u32,
     size:   (u32, u32),
+    hdri:   String,
 }
 
 fn usage(msg: &str) -> ! {
     eprintln!("render_material: {msg}");
-    eprintln!("usage: render_material <texture-dir> --out <dir> [--angles N] [--size WxH]");
+    eprintln!("usage: render_material <texture-dir> --out <dir> [--angles N] [--size WxH] [--hdri <path>]");
     exit(2);
 }
 
@@ -33,19 +34,22 @@ fn parse_size(s: &str) -> Option<(u32, u32)> {
 }
 
 fn parse_args() -> Args {
-    let (mut dir, mut out, mut angles, mut size) = (None, None, 4u32, (512u32, 512u32));
+    let (mut dir, mut out, mut angles, mut size, mut hdri) = (None, None, 4u32, (512u32, 512u32), None);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--out"    => out = it.next(),
             "--angles" => angles = it.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| usage("--angles needs a positive integer")),
             "--size"   => size = it.next().as_deref().and_then(parse_size).unwrap_or_else(|| usage("--size needs WxH")),
+            "--hdri"   => hdri = it.next(),
             _ if a.starts_with("--") => usage(&format!("unknown flag {a}")),
             _ => dir = Some(a),
         }
     }
     match (dir, out) {
-        (Some(dir), Some(out)) if angles > 0 => Args { dir, out, angles, size },
+        (Some(dir), Some(out)) if angles > 0 => {
+            Args { dir, out, angles, size, hdri: hdri.unwrap_or_else(|| HDRI.to_string()) }
+        }
         _ => usage("required: <texture-dir> --out <dir>"),
     }
 }
@@ -76,8 +80,8 @@ fn main() {
         eprintln!("render_material: adapter lacks TEXTURE_COMPRESSION_BC (ground sets ship BC7 .dds)");
         exit(1);
     }
-    if let Err(e) = r.load_environment_hdr(HDRI) {
-        eprintln!("render_material: failed to load HDRI {HDRI}: {e}");
+    if let Err(e) = r.load_environment_hdr(&args.hdri) {
+        eprintln!("render_material: failed to load HDRI {}: {e}", args.hdri);
         exit(1);
     }
     r.draw_sky = true;
