@@ -8,7 +8,7 @@
 use engine_renderer::instance::SdfInstance;
 use engine_renderer::mesh::{load_gltf_data, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData, TextureSource};
 use engine_renderer::offscreen::{
-    create_mipped_rgba8, read_texture_mip, HeadlessGpu, OffscreenRenderer, TestLight, TestPointLight,
+    create_mipped_rgba8, read_texture_mip, DebugChannel, HeadlessGpu, OffscreenRenderer, TestLight, TestPointLight,
 };
 use std::ops::Range;
 use engine_renderer::texture::parse_dds;
@@ -48,6 +48,28 @@ fn luminance(p: &[u8]) -> f64 {
 fn channel_mean(pixels: &[u8], channel: usize) -> f64 {
     let sum: u64 = pixels.iter().skip(channel).step_by(4).map(|&v| v as u64).sum();
     sum as f64 / (pixels.len() / 4) as f64
+}
+
+/// Linear-light equivalent of a byte, on the same 0..255 scale, undoing the
+/// sRGB OETF (IEC 61966-2-1) that the offscreen target now bakes in so it
+/// matches the live swapchain's hardware encode. Assertions about physical
+/// light — a ratio between samples, a "this is essentially black" floor —
+/// read perceptual bytes off that target; decode back to this scale before
+/// reasoning about them.
+fn linear(byte: u8) -> f64 {
+    let c = byte as f64 / 255.0;
+    (if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }) * 255.0
+}
+
+/// `channel_mean`, decoded to linear light first.
+fn channel_mean_linear(pixels: &[u8], channel: usize) -> f64 {
+    let sum: f64 = pixels.iter().skip(channel).step_by(4).map(|&v| linear(v)).sum();
+    sum / (pixels.len() / 4) as f64
+}
+
+/// `pixels` with every byte replaced by its `linear`-decoded equivalent.
+fn linearize(pixels: &[u8]) -> Vec<u8> {
+    pixels.iter().map(|&b| linear(b).round() as u8).collect()
 }
 
 /// True if every pixel within `rows` (row-major, `width` px wide, 4
@@ -611,7 +633,7 @@ fn blend_material_blends_instead_of_cutout() {
     r.render_mesh(&target, data, wgpu::Color::BLACK);
     let pixels = r.read(&target);
 
-    let (r_mean, g_mean) = (channel_mean(&pixels, 0), channel_mean(&pixels, 1));
+    let (r_mean, g_mean) = (channel_mean_linear(&pixels, 0), channel_mean_linear(&pixels, 1));
     assert!(
         g_mean > 25.0,
         "white layer must show through the glass (not an opaque cutout), g_mean={g_mean:.1}"
@@ -830,7 +852,7 @@ fn bloom_threshold_is_display_referred_after_exposure() {
     };
     let halo_count = |with: &[u8], without: &[u8]| {
         with.chunks_exact(4).zip(without.chunks_exact(4))
-            .filter(|(a, b)| a[1] > 6 && b[1] <= 2)
+            .filter(|(a, b)| linear(a[1]) > 6.0 && linear(b[1]) <= 2.0)
             .count()
     };
 
@@ -1001,7 +1023,7 @@ fn sky_fog_blends_toward_horizon_and_stays_bit_stable_at_zero_density() {
     );
     let zenith_band = 0..(H * 15 / 100);
     assert!(
-        rows_close(&high_density, &zero_density, W, zenith_band, 18),
+        rows_close(&linearize(&high_density), &linearize(&zero_density), W, zenith_band, 18),
         "near-zenith rows must stay close to the unfogged sky"
     );
 }
@@ -1093,6 +1115,15 @@ fn mean_luminance(pixels: &[u8]) -> f64 {
     pixels.chunks_exact(4).map(luminance).sum::<f64>() / (pixels.len() / 4) as f64
 }
 
+/// `mean_luminance`, decoded to linear light first (per-pixel decode has to
+/// happen before averaging, not after, so this can't reuse byte-space
+/// `luminance`).
+fn mean_luminance_linear(pixels: &[u8]) -> f64 {
+    pixels.chunks_exact(4)
+        .map(|p| 0.2126 * linear(p[0]) + 0.7152 * linear(p[1]) + 0.0722 * linear(p[2]))
+        .sum::<f64>() / (pixels.len() / 4) as f64
+}
+
 /// A point light brightens an otherwise-unlit ground plane, falls off
 /// monotonically as it moves farther from the surface, has no effect once its
 /// own position sits outside its radius, and carries its color through.
@@ -1116,10 +1147,10 @@ fn point_light_brightens_falls_off_and_carries_color() {
         radius:    30.0,
     };
 
-    let unlit_mean = mean_luminance(&render(&[]));
+    let unlit_mean = mean_luminance_linear(&render(&[]));
 
     let lit_2 = render(&[light_at(2.0)]);
-    let lit_2_mean = mean_luminance(&lit_2);
+    let lit_2_mean = mean_luminance_linear(&lit_2);
     // ACES tonemap compresses the raw ratio; measured ~4-8x at these
     // parameters, well above the 4x floor.
     assert!(
@@ -1127,14 +1158,14 @@ fn point_light_brightens_falls_off_and_carries_color() {
         "point light must brighten the ground clearly: unlit={unlit_mean:.2} lit={lit_2_mean:.2}"
     );
 
-    let lit_6_mean = mean_luminance(&render(&[light_at(6.0)]));
-    let lit_12_mean = mean_luminance(&render(&[light_at(12.0)]));
+    let lit_6_mean = mean_luminance_linear(&render(&[light_at(6.0)]));
+    let lit_12_mean = mean_luminance_linear(&render(&[light_at(12.0)]));
     assert!(
         lit_2_mean > lit_6_mean && lit_6_mean > lit_12_mean,
         "luminance must fall off monotonically with distance: h2={lit_2_mean:.2} h6={lit_6_mean:.2} h12={lit_12_mean:.2}"
     );
 
-    let out_of_radius_mean = mean_luminance(&render(&[TestPointLight {
+    let out_of_radius_mean = mean_luminance_linear(&render(&[TestPointLight {
         position:  Vec3::new(0.0, 2.0, 0.0),
         color:     cyan,
         intensity: 30.0,
@@ -1299,4 +1330,31 @@ fn ssao_darkens_final_image_crease_vs_open_ground() {
         (open_on - open_off).abs() < 0.05 * open_off,
         "open ground far from any occluder must stay within noise: off={open_off:.1} on={open_on:.1}"
     );
+}
+
+/// Proves the debug-channel path end to end: uniform → shader switch → HDR
+/// target → tonemap passthrough → `Rgba8Unorm` readback. With no transfer
+/// function in that path, `byte = round(255 * value)` is an exact identity,
+/// so a material's `roughness_factor: 0.6` must read back as G = 153 (±2 for
+/// rounding/driver noise) at the quad's center. If this drifts, no debug
+/// channel downstream can be trusted.
+#[test]
+fn debug_channel_roughness_reads_back_as_exact_byte() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_uniform_environment([1.0, 1.0, 1.0]);
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+    r.set_debug_channel(DebugChannel::Roughness);
+
+    let material = MaterialData {
+        roughness_factor: 0.6,
+        metallic_factor:  0.0,
+        ..Default::default()
+    };
+    let target = r.target(W, H);
+    r.render_mesh(&target, camera_filling_quad(material), wgpu::Color::BLACK);
+    let pixels = r.read(&target);
+
+    let center = ((H / 2 * W + W / 2) * 4) as usize;
+    let g = pixels[center + 1] as i32;
+    assert!((g - 153).abs() <= 2, "center G byte must be 153 ± 2, got {g}");
 }

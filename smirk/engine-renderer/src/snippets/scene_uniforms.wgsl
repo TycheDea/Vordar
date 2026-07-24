@@ -29,7 +29,7 @@ struct LightUniform {
     point_count: u32,
     fog_height:         f32,
     fog_height_falloff: f32,
-    _pad1:              u32,
+    debug_mode:         u32,
     points:      array<PointLight, MAX_POINT_LIGHTS>,
 }
 @group(0) @binding(1)

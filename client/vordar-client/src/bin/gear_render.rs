@@ -1,13 +1,12 @@
 // gear_render: turntable a skinned character glb with the procedural
 // sword+shield from weapons.rs riding its hand sockets — a vision-review
 // render for WeaponAttachment::local grip tuning, mirroring turntable.rs's
-// shape one crate over (its skin_to_pose is duplicated here for the same
-// reason golden.rs duplicates it: a bin can't reach a sibling crate's bin).
+// shape one crate over.
 
-use engine_renderer::anim::{global_transforms, joint_matrices, sample_pose, LocalTransform};
-use engine_renderer::mesh::{load_gltf_data, MaterialData, MeshData, PrimitiveData};
+use engine_renderer::anim::{global_transforms, sample_pose};
+use engine_renderer::mesh::{load_gltf_data, MeshData, PrimitiveData};
 use engine_renderer::offscreen::OffscreenRenderer;
-use engine_renderer::MeshVertex;
+use engine_renderer::review;
 use glam::{Mat4, Vec3};
 use image::RgbaImage;
 use std::path::Path;
@@ -71,36 +70,6 @@ fn parse_args() -> Args {
     }
 }
 
-/// Replace every skinned vertex with the pose-weighted sum over its joints,
-/// then drop the skeleton so the static mesh path draws it.
-fn skin_to_pose(data: &mut MeshData, pose: &[LocalTransform]) {
-    let Some(skel) = data.skeleton.as_ref() else { return };
-    let mats = joint_matrices(skel, pose);
-    for prim in &mut data.primitives {
-        let Some(skin) = prim.skin.take() else { continue };
-        for (v, s) in prim.vertices.iter_mut().zip(&skin) {
-            let pos = Vec3::from_array(v.position);
-            let nrm = Vec3::from_array(v.normal);
-            let tan = Vec3::new(v.tangent[0], v.tangent[1], v.tangent[2]);
-            let (mut p, mut n, mut t) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
-            for (&j, &w) in s.joints.iter().zip(&s.weights) {
-                if w > 0.0 {
-                    let m = mats[j as usize];
-                    p += m.transform_point3(pos) * w;
-                    n += m.transform_vector3(nrm) * w;
-                    t += m.transform_vector3(tan) * w;
-                }
-            }
-            v.position = p.to_array();
-            v.normal = n.normalize_or_zero().to_array();
-            let tn = t.normalize_or_zero();
-            v.tangent = [tn.x, tn.y, tn.z, v.tangent[3]];
-        }
-    }
-    data.skeleton = None;
-    data.clips = Vec::new();
-}
-
 /// Rigidly place a static (unskinned) weapon mesh's primitives into world
 /// space, matching WeaponAttachSystem's socket-follow: rotation + translation
 /// only, scale dropped.
@@ -122,37 +91,6 @@ fn place_rigid(mesh: MeshData, world: Mat4) -> Vec<PrimitiveData> {
             prim
         })
         .collect()
-}
-
-/// World-space bounds over every vertex of the mesh.
-fn aabb(data: &MeshData) -> (Vec3, Vec3) {
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for v in data.primitives.iter().flat_map(|p| p.vertices.iter()) {
-        let pos = Vec3::from_array(v.position);
-        min = min.min(pos);
-        max = max.max(pos);
-    }
-    (min, max)
-}
-
-/// A grey ground quad at `y`, spanning ±GROUND_EXTENT, normal +Y.
-fn ground_quad(y: f32) -> PrimitiveData {
-    let e = GROUND_EXTENT;
-    let v = |x: f32, z: f32, u: f32, w: f32| MeshVertex {
-        position: [x, y, z], normal: [0.0, 1.0, 0.0], uv: [u, w], tangent: [1.0, 0.0, 0.0, 1.0],
-    };
-    PrimitiveData {
-        vertices: vec![v(-e, -e, 0.0, 0.0), v(e, -e, 1.0, 0.0), v(e, e, 1.0, 1.0), v(-e, e, 0.0, 1.0)],
-        indices:  vec![0, 2, 1, 0, 3, 2],
-        material: MaterialData {
-            base_color_factor: [0.5, 0.5, 0.5, 1.0],
-            roughness_factor:  0.9,
-            metallic_factor:   0.0,
-            ..Default::default()
-        },
-        skin: None,
-    }
 }
 
 /// Character + sword + shield at one posed instant, world-space, gear glued
@@ -180,24 +118,10 @@ fn build_scene(glb: &str, clip_time: Option<(&str, f32)>) -> MeshData {
     let sword_world = socket("handslot.r") * sword_grip_local();
     let shield_world = socket("handslot.l") * shield_grip_local();
 
-    skin_to_pose(&mut data, &pose);
+    review::skin_to_pose(&mut data, &pose);
     data.primitives.extend(place_rigid(sword_mesh(), sword_world));
     data.primitives.extend(place_rigid(shield_mesh(), shield_world));
     data
-}
-
-/// Lay the frames out in a near-square grid, one cell per frame.
-fn contact_sheet(frames: &[RgbaImage], w: u32, h: u32) -> RgbaImage {
-    let n = frames.len() as u32;
-    let cols = (n as f64).sqrt().ceil() as u32;
-    let rows = n.div_ceil(cols);
-    let mut sheet = RgbaImage::from_pixel(cols * w, rows * h, image::Rgba([0, 0, 0, 255]));
-    for (i, frame) in frames.iter().enumerate() {
-        let x = (i as u32 % cols) * w;
-        let y = (i as u32 / cols) * h;
-        image::imageops::replace(&mut sheet, frame, x as i64, y as i64);
-    }
-    sheet
 }
 
 fn main() {
@@ -221,7 +145,7 @@ fn main() {
     }
 
     let clip_time = args.clip.as_deref().map(|name| (name, args.time));
-    let (fmin, fmax) = aabb(&build_scene(&args.glb, clip_time));
+    let (fmin, fmax) = review::aabb(&build_scene(&args.glb, clip_time).primitives);
 
     let mut frames: Vec<RgbaImage> = Vec::with_capacity(args.angles as usize);
     for i in 0..args.angles {
@@ -231,7 +155,7 @@ fn main() {
             std::f32::consts::TAU * i as f32 / args.angles as f32
         };
         let mut scene = build_scene(&args.glb, clip_time);
-        scene.primitives.push(ground_quad(fmin.y));
+        scene.primitives.push(review::ground_quad(fmin.y, GROUND_EXTENT));
         r.set_camera_turntable(fmin, fmax, yaw);
         let target = r.target(w, h);
         r.render_mesh(&target, scene, wgpu::Color::BLACK);
@@ -245,7 +169,7 @@ fn main() {
         frames.push(img);
     }
 
-    let sheet = contact_sheet(&frames, w, h);
+    let sheet = review::contact_sheet(&frames, (w, h));
     let sheet_path = out.join("contact_sheet.png");
     if let Err(e) = sheet.save(&sheet_path) {
         eprintln!("gear_render: cannot write {}: {e}", sheet_path.display());

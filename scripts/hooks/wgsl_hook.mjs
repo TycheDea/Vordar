@@ -13,7 +13,6 @@ const STANDALONE = new Set([
   'mipgen.wgsl',
   'particle_shader.wgsl',
   'shadow.wgsl',
-  'tonemap.wgsl',
 ]);
 
 function main() {

@@ -5,6 +5,7 @@
 // between frames.
 
 use engine_renderer::offscreen::OffscreenRenderer;
+use engine_renderer::review;
 use image::RgbaImage;
 use std::path::Path;
 use std::process::exit;
@@ -54,20 +55,6 @@ fn parse_args() -> Args {
     }
 }
 
-/// Lay the frames out in a near-square grid, one cell per frame.
-fn contact_sheet(frames: &[RgbaImage], w: u32, h: u32) -> RgbaImage {
-    let n = frames.len() as u32;
-    let cols = (n as f64).sqrt().ceil() as u32;
-    let rows = n.div_ceil(cols);
-    let mut sheet = RgbaImage::from_pixel(cols * w, rows * h, image::Rgba([0, 0, 0, 255]));
-    for (i, frame) in frames.iter().enumerate() {
-        let x = (i as u32 % cols) * w;
-        let y = (i as u32 / cols) * h;
-        image::imageops::replace(&mut sheet, frame, x as i64, y as i64);
-    }
-    sheet
-}
-
 fn main() {
     let args = parse_args();
     let (w, h) = args.size;
@@ -115,7 +102,7 @@ fn main() {
         frames.push(img);
     }
 
-    let sheet = contact_sheet(&frames, w, h);
+    let sheet = review::contact_sheet(&frames, (w, h));
     let sheet_path = out.join("contact_sheet.png");
     if let Err(e) = sheet.save(&sheet_path) {
         eprintln!("render_material: cannot write {}: {e}", sheet_path.display());

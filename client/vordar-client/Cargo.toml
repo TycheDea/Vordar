@@ -41,6 +41,11 @@ name = "zone_review"
 path = "src/bin/zone_review.rs"
 required-features = ["offscreen"]
 
+[[bin]]
+name = "asset_inspect"
+path = "src/bin/asset_inspect.rs"
+required-features = ["offscreen"]
+
 [dependencies]
 engine-core     = { path = "../../smirk/engine-core" }
 engine-app      = { path = "../../smirk/engine-app" }

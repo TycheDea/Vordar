@@ -1,6 +1,7 @@
 // Preprocesses the three geometry shaders (shader.wgsl, mesh_shader.wgsl,
-// skinned_mesh_shader.wgsl), the sky shader (sky.wgsl), and the depth
-// prepass/SSAO shaders (depth_prepass.wgsl, ssao.wgsl):
+// skinned_mesh_shader.wgsl), the sky shader (sky.wgsl), the depth
+// prepass/SSAO shaders (depth_prepass.wgsl, ssao.wgsl), and the tonemap
+// shader (tonemap.wgsl):
 // `//#include "snippets/x.wgsl"` lines splice in the shared PBR/shadow/uniform
 // snippets, `//#const NAME` markers become `const NAME: f32 = ...;`
 // declarations whose values are read straight out of shadow.rs / ibl.rs so
@@ -13,11 +14,11 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-const PREPROCESSED_SHADERS: [&str; 6] = [
+const PREPROCESSED_SHADERS: [&str; 7] = [
     "shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl", "sky.wgsl",
-    "depth_prepass.wgsl", "ssao.wgsl",
+    "depth_prepass.wgsl", "ssao.wgsl", "tonemap.wgsl",
 ];
-const SNIPPETS: [&str; 4] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl", "fog.wgsl"];
+const SNIPPETS: [&str; 6] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl", "fog.wgsl", "debug_channel.wgsl", "srgb_oetf.wgsl"];
 
 fn main() {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR set by cargo");

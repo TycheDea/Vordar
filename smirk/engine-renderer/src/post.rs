@@ -76,11 +76,16 @@ pub(crate) struct TonemapPass {
     bind_group:      Option<wgpu::BindGroup>,
     exposure:        f32,
     bloom_intensity: f32,
+    passthrough:     bool,
+    encode:          bool,
 }
 
 impl TonemapPass {
     pub(crate) fn new(device: &Device, output_format: TextureFormat) -> Self {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("tonemap.wgsl"));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("tonemap.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/tonemap.wgsl")).into()),
+        });
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label:   Some("Tonemap BGL"),
             entries: &[
@@ -172,6 +177,11 @@ impl TonemapPass {
             bind_group:      None,
             exposure:        1.0,
             bloom_intensity: 0.12,
+            passthrough:     false,
+            // The live path picks an sRGB swapchain view, which encodes in
+            // hardware; only a plain-format offscreen target needs the WGSL
+            // OETF, so this is decided once, here, from the target format.
+            encode:          !output_format.is_srgb(),
         }
     }
 
@@ -212,10 +222,21 @@ impl TonemapPass {
         self.upload_params(queue);
     }
 
+    #[cfg(feature = "offscreen")]
+    pub(crate) fn set_passthrough(&mut self, queue: &Queue, on: bool) {
+        self.passthrough = on;
+        self.upload_params(queue);
+    }
+
     fn upload_params(&self, queue: &Queue) {
         queue.write_buffer(
             &self.exposure_buffer, 0,
-            bytemuck::cast_slice(&[self.exposure, self.bloom_intensity, 0.0, 0.0]),
+            bytemuck::cast_slice(&[
+                self.exposure,
+                self.bloom_intensity,
+                self.passthrough as u32 as f32,
+                self.encode as u32 as f32,
+            ]),
         );
     }
 

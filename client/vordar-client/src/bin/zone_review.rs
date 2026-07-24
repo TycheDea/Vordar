@@ -6,14 +6,12 @@
 // destination lighting) cleared five props that then failed the in-game
 // feel-check on exactly the axes this tool now captures — see
 // tasks/lessons/2026-07-23-review-in-engine-at-gameplay-framing.md. Mirrors
-// gear_render.rs/turntable.rs's offscreen-harness pattern one crate over;
-// `skin_to_pose` is duplicated here for the same reason those duplicate it —
-// a bin can't reach a sibling crate's bin.
+// gear_render.rs/turntable.rs's offscreen-harness pattern one crate over.
 
 use engine_renderer::anim::LocalTransform;
-use engine_renderer::mesh::{load_gltf_data, MaterialData, MeshData, PrimitiveData};
+use engine_renderer::mesh::{load_gltf_data, MeshData, PrimitiveData};
 use engine_renderer::offscreen::{OffscreenRenderer, TestLight};
-use engine_renderer::MeshVertex;
+use engine_renderer::review;
 use glam::{Mat4, Quat, Vec3};
 use image::RgbaImage;
 use std::collections::{BTreeMap, HashSet};
@@ -168,18 +166,6 @@ fn place(mesh: MeshData, world: Mat4) -> Vec<PrimitiveData> {
     }).collect()
 }
 
-/// World-space bounds over every vertex across `prims`.
-fn aabb(prims: &[PrimitiveData]) -> (Vec3, Vec3) {
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for v in prims.iter().flat_map(|p| p.vertices.iter()) {
-        let pos = Vec3::from_array(v.position);
-        min = min.min(pos);
-        max = max.max(pos);
-    }
-    (min, max)
-}
-
 /// Single-linkage clusters of placements within `CLUSTER_RADIUS` (XZ
 /// distance) of another member, singletons dropped — a "cluster" of one is
 /// already fully covered by the wide shot (in-context) and that model's
@@ -216,26 +202,11 @@ fn cluster_props(props: &[PropInstance]) -> Vec<Vec<&PropInstance>> {
 
 // ── Ground + player ──────────────────────────────────────────────────────
 
-/// A grey ground quad at `y` — mirrors gear_render.rs's fallback; unused by
-/// either shipped zone (both author a `ground` set) but keeps a missing one
-/// from panicking here.
-fn flat_ground_quad(y: f32) -> PrimitiveData {
-    const E: f32 = 100.0;
-    let v = |x: f32, z: f32, u: f32, w: f32| MeshVertex {
-        position: [x, y, z], normal: [0.0, 1.0, 0.0], uv: [u, w], tangent: [1.0, 0.0, 0.0, 1.0],
-    };
-    PrimitiveData {
-        vertices: vec![v(-E, -E, 0.0, 0.0), v(E, -E, 1.0, 0.0), v(E, E, 1.0, 1.0), v(-E, E, 0.0, 1.0)],
-        indices:  vec![0, 2, 1, 0, 3, 2],
-        material: MaterialData {
-            base_color_factor: [0.5, 0.5, 0.5, 1.0],
-            roughness_factor:  0.9,
-            metallic_factor:   0.0,
-            ..Default::default()
-        },
-        skin: None,
-    }
-}
+/// Flat ground fallback extent — unused by either shipped zone (both author
+/// a `ground` set) but keeps a missing one from panicking here. Wider than
+/// turntable.rs/gear_render.rs's GROUND_EXTENT (single-prop framing); this
+/// one has to cover a whole zone.
+const GROUND_EXTENT: f32 = 100.0;
 
 /// The zone's real ground mesh (heightmap grid + tiling PBR set) — the exact
 /// same `generate_ground`/`load_ground_material` call ZoneDressingSystem
@@ -246,41 +217,8 @@ fn build_ground(visuals: &ZoneVisuals) -> Vec<PrimitiveData> {
             let material = load_ground_material(&g.texture_dir).unwrap_or_else(|e| die(format!("ground: {e}")));
             generate_ground(g.size, g.tile, material).primitives
         }
-        None => vec![flat_ground_quad(GROUND_TOP_Y)],
+        None => vec![review::ground_quad(GROUND_TOP_Y, GROUND_EXTENT)],
     }
-}
-
-/// Replace every skinned vertex with the pose-weighted sum over its joints,
-/// then drop the skeleton so the static mesh path draws it — same as
-/// gear_render.rs's `skin_to_pose` (see module header for why it's
-/// duplicated rather than shared).
-fn skin_to_pose(data: &mut MeshData, pose: &[LocalTransform]) {
-    let mats = engine_renderer::anim::joint_matrices(
-        data.skeleton.as_ref().expect("player model is skinned"), pose,
-    );
-    for prim in &mut data.primitives {
-        let Some(skin) = prim.skin.take() else { continue };
-        for (v, s) in prim.vertices.iter_mut().zip(&skin) {
-            let pos = Vec3::from_array(v.position);
-            let nrm = Vec3::from_array(v.normal);
-            let tan = Vec3::new(v.tangent[0], v.tangent[1], v.tangent[2]);
-            let (mut p, mut n, mut t) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
-            for (&j, &w) in s.joints.iter().zip(&s.weights) {
-                if w > 0.0 {
-                    let m = mats[j as usize];
-                    p += m.transform_point3(pos) * w;
-                    n += m.transform_vector3(nrm) * w;
-                    t += m.transform_vector3(tan) * w;
-                }
-            }
-            v.position = p.to_array();
-            v.normal = n.normalize_or_zero().to_array();
-            let tn = t.normalize_or_zero();
-            v.tangent = [tn.x, tn.y, tn.z, v.tangent[3]];
-        }
-    }
-    data.skeleton = None;
-    data.clips = Vec::new();
 }
 
 /// The player model in its rest pose, translated to `pos` (no rotation —
@@ -290,7 +228,7 @@ fn player_prims_at(pos: Vec3) -> Vec<PrimitiveData> {
     let mut data = load_gltf_data(PLAYER_GLB).unwrap_or_else(|e| die(format!("player {PLAYER_GLB}: {e}")));
     let skel = data.skeleton.as_ref().unwrap_or_else(|| die(format!("{PLAYER_GLB}: no skeleton")));
     let pose: Vec<LocalTransform> = skel.joints.iter().map(|j| j.rest).collect();
-    skin_to_pose(&mut data, &pose);
+    review::skin_to_pose(&mut data, &pose);
     place(data, Mat4::from_translation(pos))
 }
 
@@ -313,14 +251,14 @@ fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropIn
     for p in props {
         let placed = place(load_prop_mesh(&p.model), transform_for(p));
         if (p.pos.x * p.pos.x + p.pos.z * p.pos.z).sqrt() <= WIDE_RADIUS {
-            let (pmin, pmax) = aabb(&placed);
+            let (pmin, pmax) = review::aabb(&placed);
             near_min = near_min.min(pmin);
             near_max = near_max.max(pmax);
         }
         prims.extend(placed);
     }
     if !near_min.x.is_finite() {
-        let (a, b) = aabb(&prims); // no prop within WIDE_RADIUS: fall back to everything
+        let (a, b) = review::aabb(&prims); // no prop within WIDE_RADIUS: fall back to everything
         near_min = a;
         near_max = b;
     }
@@ -340,7 +278,7 @@ fn render_mid(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, cluster: &[&Prop
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     for p in cluster {
         let placed = place(load_prop_mesh(&p.model), transform_for(p));
-        let (pmin, pmax) = aabb(&placed);
+        let (pmin, pmax) = review::aabb(&placed);
         min = min.min(pmin);
         max = max.max(pmax);
         prims.extend(placed);
@@ -358,7 +296,7 @@ fn render_mid(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, cluster: &[&Prop
 /// player standing beside it for scale.
 fn render_close(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, prop: &PropInstance, w: u32, h: u32) -> RgbaImage {
     let prop_prims = place(load_prop_mesh(&prop.model), transform_for(prop));
-    let (pmin, pmax) = aabb(&prop_prims);
+    let (pmin, pmax) = review::aabb(&prop_prims);
     let center = Vec3::new((pmin.x + pmax.x) * 0.5, 0.0, (pmin.z + pmax.z) * 0.5);
 
     // Horizontal approach direction the camera looks along. Aiming at the
@@ -401,23 +339,6 @@ fn render_close(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, prop: &PropIns
     prims.extend(player_prims_at(player_pos));
     prims.extend(build_ground(visuals));
     render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)
-}
-
-/// Thumbnail grid of every shot — full-res tiling would make a sheet too
-/// large to eyeball (see THUMB).
-fn contact_sheet(frames: &[RgbaImage]) -> RgbaImage {
-    let n = frames.len() as u32;
-    let cols = (n as f64).sqrt().ceil() as u32;
-    let rows = n.div_ceil(cols);
-    let (tw, th) = THUMB;
-    let mut sheet = RgbaImage::from_pixel(cols * tw, rows * th, image::Rgba([0, 0, 0, 255]));
-    for (i, frame) in frames.iter().enumerate() {
-        let thumb = image::imageops::resize(frame, tw, th, image::imageops::FilterType::Triangle);
-        let x = (i as u32 % cols) * tw;
-        let y = (i as u32 / cols) * th;
-        image::imageops::replace(&mut sheet, &thumb, x as i64, y as i64);
-    }
-    sheet
 }
 
 fn save(img: &RgbaImage, path: &Path) {
@@ -483,7 +404,7 @@ fn main() {
         }
     }
 
-    let sheet = contact_sheet(&sheet_frames);
+    let sheet = review::contact_sheet(&sheet_frames, THUMB);
     save(&sheet, &out.join("contact_sheet.png"));
 
     println!(

@@ -18,6 +18,8 @@ pub(crate) mod mipgen;
 #[cfg(feature = "offscreen")]
 pub mod offscreen;
 pub mod particle_pipeline;
+#[cfg(feature = "offscreen")]
+pub mod review;
 pub(crate) mod post;
 pub(crate) mod shadow;
 pub(crate) mod sky;
@@ -88,6 +90,7 @@ mod generated_shader_tests {
             include_str!(concat!(env!("OUT_DIR"), "/depth_prepass.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/ssao.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/sky.wgsl")),
+            include_str!(concat!(env!("OUT_DIR"), "/tonemap.wgsl")),
         ];
         for src in generated {
             wgpu::naga::front::wgsl::parse_str(src).expect("generated shader must parse as valid WGSL");

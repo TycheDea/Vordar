@@ -1,15 +1,20 @@
 // HDR → LDR tonemap: fullscreen pass sampling the resolved
 // Rgba16Float scene, ACES-fitted curve (Narkowicz) with an exposure uniform.
-// Output lands on the sRGB swapchain, which handles the transfer encode.
+// `post.encode` decides the transfer function: an sRGB swapchain view does
+// its own hardware encode (encode = 0), while a plain-format offscreen
+// target needs it done here (encode = 1). `post.passthrough` bypasses ACES
+// and encode entirely, for debug channels that must read back as raw values.
+
+//#include "snippets/srgb_oetf.wgsl"
 
 @group(0) @binding(0) var t_hdr: texture_2d<f32>;
 @group(0) @binding(1) var s_hdr: sampler;
 
 struct PostParams {
-    exposure: f32,
-    bloom:    f32, // bloom intensity (0 = off)
-    _pad0:    f32,
-    _pad1:    f32,
+    exposure:    f32,
+    bloom:       f32, // bloom intensity (0 = off)
+    passthrough: f32, // > 0.5: skip ACES + encode, return the HDR sample as-is
+    encode:      f32, // > 0.5: apply the sRGB OETF (offscreen targets only)
 }
 @group(0) @binding(2) var<uniform> post: PostParams;
 @group(0) @binding(3) var t_bloom: texture_2d<f32>;
@@ -40,9 +45,16 @@ fn aces(x: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let hdr   = textureSample(t_hdr, s_hdr, in.uv).rgb;
+    let scene = textureSample(t_hdr, s_hdr, in.uv);
+    if post.passthrough > 0.5 {
+        return scene;
+    }
     // Bloom is already display-referred (bloom.wgsl's prefilter applies
     // exposure before thresholding) — only hdr needs it here.
     let bloom = textureSample(t_bloom, s_hdr, in.uv).rgb * post.bloom;
-    return vec4<f32>(aces(hdr * post.exposure + bloom), 1.0);
+    let c = aces(scene.rgb * post.exposure + bloom);
+    if post.encode > 0.5 {
+        return vec4<f32>(srgb_oetf(c), scene.a);
+    }
+    return vec4<f32>(c, scene.a);
 }

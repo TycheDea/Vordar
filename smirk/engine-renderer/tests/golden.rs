@@ -7,11 +7,11 @@
 // regeneration ONLY via UPDATE_GOLDENS=1 by the user or an explicitly
 // instructed session — automated workers must never regenerate.
 
-use engine_renderer::anim::{joint_matrices, sample_pose, LocalTransform};
+use engine_renderer::anim::sample_pose;
 use engine_renderer::instance::SdfInstance;
-use engine_renderer::mesh::{load_gltf_data, MaterialData, MeshData, PrimitiveData};
+use engine_renderer::mesh::load_gltf_data;
 use engine_renderer::offscreen::{OffscreenRenderer, TestLight, TestPointLight};
-use engine_renderer::MeshVertex;
+use engine_renderer::review;
 use glam::{Mat4, Quat, Vec3};
 use std::path::{Path, PathBuf};
 
@@ -103,38 +103,6 @@ fn sdf_box(scale: Vec3, position: Vec3, color: [f32; 3]) -> SdfInstance {
 const THREE_QUARTER_YAW: f32 = std::f32::consts::TAU / 8.0;
 const GROUND_EXTENT: f32 = 40.0;
 
-/// World-space bounds over every vertex of the mesh — camera framing input.
-fn mesh_aabb(data: &MeshData) -> (Vec3, Vec3) {
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for v in data.primitives.iter().flat_map(|p| p.vertices.iter()) {
-        let pos = Vec3::from_array(v.position);
-        min = min.min(pos);
-        max = max.max(pos);
-    }
-    (min, max)
-}
-
-/// A grey ground quad at `y`, spanning ±GROUND_EXTENT, normal +Y — mirrors the
-/// turntable bin's framing so helmet/human goldens match its contact sheets.
-fn ground_quad(y: f32) -> PrimitiveData {
-    let e = GROUND_EXTENT;
-    let v = |x: f32, z: f32, u: f32, w: f32| MeshVertex {
-        position: [x, y, z], normal: [0.0, 1.0, 0.0], uv: [u, w], tangent: [1.0, 0.0, 0.0, 1.0],
-    };
-    PrimitiveData {
-        vertices: vec![v(-e, -e, 0.0, 0.0), v(e, -e, 1.0, 0.0), v(e, e, 1.0, 1.0), v(-e, e, 0.0, 1.0)],
-        indices:  vec![0, 2, 1, 0, 3, 2],
-        material: MaterialData {
-            base_color_factor: [0.5, 0.5, 0.5, 1.0],
-            roughness_factor:  0.9,
-            metallic_factor:   0.0,
-            ..Default::default()
-        },
-        skin: None,
-    }
-}
-
 // ── Scene 1: procedural SDF composite ───────────────────────────────────────
 
 /// Shadow caster + ground-contact box + HDR-bright box under a sun + point
@@ -185,8 +153,8 @@ fn golden_helmet_ibl() {
     r.draw_sky = true;
 
     let mut data = load_gltf_data(helmet).expect("helmet parses");
-    let (min, max) = mesh_aabb(&data);
-    data.primitives.push(ground_quad(min.y));
+    let (min, max) = review::aabb(&data.primitives);
+    data.primitives.push(review::ground_quad(min.y, GROUND_EXTENT));
     r.set_camera_turntable(min, max, THREE_QUARTER_YAW);
 
     let target = r.target(W, H);
@@ -197,37 +165,6 @@ fn golden_helmet_ibl() {
 }
 
 // ── Scene 3: CPU-skinned human at a fixed clip time ─────────────────────────
-
-/// Replace every skinned vertex with the pose-weighted sum over its joints,
-/// then drop the skeleton so the static mesh path draws it — same as
-/// turntable.rs's `skin_to_pose`, duplicated here since integration tests
-/// can't reach a sibling bin target.
-fn skin_to_pose(data: &mut MeshData, pose: &[LocalTransform]) {
-    let mats = joint_matrices(data.skeleton.as_ref().expect("human is skinned"), pose);
-    for prim in &mut data.primitives {
-        let Some(skin) = prim.skin.take() else { continue };
-        for (v, s) in prim.vertices.iter_mut().zip(&skin) {
-            let pos = Vec3::from_array(v.position);
-            let nrm = Vec3::from_array(v.normal);
-            let tan = Vec3::new(v.tangent[0], v.tangent[1], v.tangent[2]);
-            let (mut p, mut n, mut t) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
-            for (&j, &w) in s.joints.iter().zip(&s.weights) {
-                if w > 0.0 {
-                    let m = mats[j as usize];
-                    p += m.transform_point3(pos) * w;
-                    n += m.transform_vector3(nrm) * w;
-                    t += m.transform_vector3(tan) * w;
-                }
-            }
-            v.position = p.to_array();
-            v.normal = n.normalize_or_zero().to_array();
-            let tn = t.normalize_or_zero();
-            v.tangent = [tn.x, tn.y, tn.z, v.tangent[3]];
-        }
-    }
-    data.skeleton = None;
-    data.clips = Vec::new();
-}
 
 #[test]
 fn golden_skinned_human() {
@@ -241,10 +178,10 @@ fn golden_skinned_human() {
     let mut data = load_gltf_data(path).expect("human parses");
     let clip = data.clips.iter().find(|c| c.name == "walk").expect("walk clip present");
     let pose = sample_pose(data.skeleton.as_ref().expect("human is skinned"), clip, clip.duration * 0.4);
-    skin_to_pose(&mut data, &pose);
+    review::skin_to_pose(&mut data, &pose);
 
-    let (min, max) = mesh_aabb(&data);
-    data.primitives.push(ground_quad(min.y));
+    let (min, max) = review::aabb(&data.primitives);
+    data.primitives.push(review::ground_quad(min.y, GROUND_EXTENT));
     r.set_camera_turntable(min, max, THREE_QUARTER_YAW);
 
     let target = r.target(W, H);

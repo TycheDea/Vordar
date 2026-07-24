@@ -125,6 +125,32 @@ pub struct TestPointLight {
     pub radius:    f32,
 }
 
+/// Selects the shading input `mesh_shader`/`skinned_mesh_shader` isolate as
+/// the frame's output — an enum rather than a raw `debug_mode` u32 so no
+/// caller can pass a value the shader's switch doesn't handle.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DebugChannel {
+    Beauty,
+    Albedo,
+    Roughness,
+    Metallic,
+    Normal,
+    Occlusion,
+}
+
+impl DebugChannel {
+    fn mode(self) -> u32 {
+        match self {
+            DebugChannel::Beauty    => 0,
+            DebugChannel::Albedo    => 1,
+            DebugChannel::Roughness => 2,
+            DebugChannel::Metallic  => 3,
+            DebugChannel::Normal    => 4,
+            DebugChannel::Occlusion => 5,
+        }
+    }
+}
+
 /// The full offscreen scene renderer: real pipeline factories, a swappable
 /// IBL environment, and the ACES tonemap — the same frame composition as
 /// RendererState, minus the window.
@@ -489,6 +515,16 @@ impl OffscreenRenderer {
         self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
     }
 
+    /// Switches the geometry shaders' output to one isolated shading input
+    /// (`DebugChannel::Beauty` restores the shipped path) and puts the
+    /// tonemap pass in passthrough for anything else, so the readback is the
+    /// raw value rather than an ACES/exposure-transformed one.
+    pub fn set_debug_channel(&mut self, channel: DebugChannel) {
+        self.light_state.debug_mode = channel.mode();
+        self.gpu.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[self.light_state]));
+        self.tonemap.set_passthrough(&self.gpu.queue, channel != DebugChannel::Beauty);
+    }
+
     /// Sets up to `MAX_POINT_LIGHTS` point lights (extras truncated), leaving
     /// the sun/fog fields untouched.
     pub fn set_point_lights(&mut self, lights: &[TestPointLight]) {
@@ -750,7 +786,12 @@ impl OffscreenRenderer {
             }
             transparent_draw(&mut pass, self);
         }
-        bloom.encode(&mut encoder, None);
+        // A debug frame's tonemap pass still needs bloom's output view bound
+        // (BloomPass::new above already built it), but skipping the encode
+        // itself keeps bloom out of debug channels structurally.
+        if self.light_state.debug_mode == 0 {
+            bloom.encode(&mut encoder, None);
+        }
         self.tonemap.encode(&mut encoder, &target.output_view, None);
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
     }

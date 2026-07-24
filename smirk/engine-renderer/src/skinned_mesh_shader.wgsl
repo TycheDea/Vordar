@@ -91,6 +91,8 @@ fn vtx_main(
 
 //#include "snippets/pbr_common.wgsl"
 
+//#include "snippets/debug_channel.wgsl"
+
 @fragment
 fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo_s = textureSample(t_albedo, s_mat, in.uv);
@@ -128,6 +130,10 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let nm_xy = textureSample(t_normal, s_mat, in.uv).xy * 2.0 - 1.0;
         let nm_z  = sqrt(max(1.0 - dot(nm_xy, nm_xy), 0.0));
         N = normalize(T * nm_xy.x + B * nm_xy.y + Nv * nm_z);
+    }
+
+    if light.debug_mode != 0u {
+        return vec4<f32>(debug_channel(albedo, metallic, roughness, ao, N), out_alpha);
     }
 
     let V = normalize(camera.eye.xyz - in.world_pos);
