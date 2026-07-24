@@ -38,6 +38,8 @@
                     (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-24.0, -0.5, 13.0), scale: 2.2, yaw: 205.0),
                     (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (-11.0, -0.5, 27.0), scale: 1.6, yaw: 118.0),
                     (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (31.0, -0.5, 22.0),  scale: 1.8, yaw: 320.0),
+                    // Wayside crucero flanking the eastward road to the portal.
+                    (model: "content/models/props/crucero/crucero.glb",               pos: (15.0, -0.5, 6.0), scale: 1.0, yaw: 200.0),
                     // Ruined chapel cluster — the mid-distance landmark southwest of spawn.
                     (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (-26.0, -0.5, -34.0), scale: 1.0,  yaw: 40.0),
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-20.0, -0.5, -29.0), scale: 0.9,  yaw: 190.0),
@@ -89,6 +91,8 @@
                     // Shrine pair framing the square's centre.
                     (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (5.0, -0.5, -6.0), scale: 1.0, yaw: 205.0),
                     (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (8.0, -0.5, 6.0),  scale: 1.0, yaw: 30.0),
+                    // Wayside crucero greeting arrivals at the west entrance.
+                    (model: "content/models/props/crucero/crucero.glb",               pos: (-12.0, -0.5, 7.0), scale: 1.0, yaw: 100.0),
                     // Ruined gate fragment at the square's far corner.
                     (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (27.0, -0.5, -13.0), scale: 1.0,  yaw: 250.0),
                     // Toppled colonnade remnants edging the plaza.
