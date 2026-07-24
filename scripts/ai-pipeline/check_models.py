@@ -21,13 +21,25 @@ EXPECTED = {
     "controlnet": {
         "controlnet-openpose-sdxl-1.0.safetensors",
         "controlnet-depth-sdxl-1.0.safetensors",
+        "Qwen-Image-InstantX-ControlNet-Union.safetensors",
     },
     "text_encoders": {
         "clip_l.safetensors",
         "t5xxl_fp8_e4m3fn.safetensors",
+        "qwen_3_4b_fp8_mixed.safetensors",
+        "qwen_2.5_vl_7b_fp8_scaled.safetensors",
     },
-    "vae": set(),
-    "diffusion_models": set(),
+    "vae": {
+        "ae.safetensors",
+        "qwen_image_vae.safetensors",
+    },
+    "diffusion_models": {
+        "z_image_turbo_bf16.safetensors",
+        "qwen_image_fp8_e4m3fn.safetensors",
+    },
+    "model_patches": {
+        "Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
+    },
 }
 
 

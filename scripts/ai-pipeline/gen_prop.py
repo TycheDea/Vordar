@@ -288,9 +288,9 @@ def main():
                         help="Multiview camera azimuths for prop_texture.py")
     parser.add_argument("--view-res", type=int, default=None,
                         help="Multiview strategy only: prop_texture.py's per-view depth/"
-                             "normal render and SDXL/ControlNet generation resolution "
-                             "(default 1024; the MaterialAnything estimator's input stays "
-                             "pinned at 768x768 regardless)")
+                             "normal render and Z-Image + Fun ControlNet-Union generation "
+                             "resolution (default 1024; the MaterialAnything estimator's "
+                             "input stays pinned at 768x768 regardless)")
     parser.add_argument("--texture-size", type=int, default=None,
                         help="prop_texture.py's atlas bake resolution (default 1024); "
                              "safe to raise without re-running cleanup (island gutters "

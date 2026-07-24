@@ -89,10 +89,11 @@ MA_PYTHON = Path(r"C:\tools\MaterialAnything") / "venv" / "Scripts" / "python.ex
 
 MV_ELEVATION_DEG = 15.0
 # Two-resolution contract: MV_RES sets the ortho depth/normal renders and the
-# SDXL/ControlNet generation canvas (sharper source imagery baked into the
-# atlas); prop_pbr.py's estimator always downscales its input to EST_RES=768
-# (its pinned training resolution) and upscales the result back to MV_RES, so
-# raising MV_RES never touches the estimator's fixed input size.
+# Z-Image + Fun ControlNet-Union generation canvas (sharper source imagery
+# baked into the atlas); prop_pbr.py's estimator always downscales its input
+# to EST_RES=768 (its pinned training resolution) and upscales the result
+# back to MV_RES, so raising MV_RES never touches the estimator's fixed input
+# size.
 
 
 def view_hint(az_deg, el_deg=MV_ELEVATION_DEG):
@@ -855,10 +856,10 @@ def main():
                              "use oblique sides, e.g. 0,60,180,300, for planar props")
     parser.add_argument("--view-res", type=int, default=None,
                         help="Multiview strategy only: per-view depth/normal render and "
-                             "SDXL/ControlNet generation resolution (default 1024). The "
-                             "MaterialAnything estimator's input stays pinned at 768x768 "
-                             "regardless (prop_pbr.py downscales/upscales around it) -- "
-                             "this only sharpens the source imagery blended into the atlas.")
+                             "Z-Image + Fun ControlNet-Union generation resolution (default "
+                             "1024). The MaterialAnything estimator's input stays pinned at "
+                             "768x768 regardless (prop_pbr.py downscales/upscales around it) "
+                             "-- this only sharpens the source imagery blended into the atlas.")
     parser.add_argument("--texture-size", type=int, default=None,
                         help="Atlas bake resolution for basecolor/normal/MR (default 1024, "
                              "TEXTURE_SIZE). A value above the resolution prop_cleanup.py's "

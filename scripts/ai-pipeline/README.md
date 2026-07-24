@@ -27,17 +27,20 @@ Server is up when `GET http://127.0.0.1:8188/system_stats` returns 200.
 | Folder | Files |
 |---|---|
 | `checkpoints\` | `sd_xl_base_1.0.safetensors`, `flux1-schnell-fp8.safetensors`, `sdxl_360_diffusion.safetensors` |
-| `controlnet\` | `controlnet-openpose-sdxl-1.0.safetensors`, `controlnet-depth-sdxl-1.0.safetensors` |
-| `text_encoders\` | `clip_l.safetensors`, `t5xxl_fp8_e4m3fn.safetensors` |
-| `vae\` | empty |
-| `diffusion_models\` | empty |
+| `controlnet\` | `controlnet-openpose-sdxl-1.0.safetensors`, `controlnet-depth-sdxl-1.0.safetensors`, `Qwen-Image-InstantX-ControlNet-Union.safetensors` |
+| `text_encoders\` | `clip_l.safetensors`, `t5xxl_fp8_e4m3fn.safetensors`, `qwen_3_4b_fp8_mixed.safetensors`, `qwen_2.5_vl_7b_fp8_scaled.safetensors` |
+| `vae\` | `ae.safetensors`, `qwen_image_vae.safetensors` |
+| `diffusion_models\` | `z_image_turbo_bf16.safetensors`, `qwen_image_fp8_e4m3fn.safetensors` |
+| `model_patches\` | `Z-Image-Turbo-Fun-Controlnet-Union.safetensors` |
 
 `flux1-schnell-fp8.safetensors` is the Comfy-Org all-in-one checkpoint
 (UNet+CLIPs+VAE bundled) — load it with `CheckpointLoaderSimple`, not the
 modular UNet/CLIP/VAE loader chain. The standalone `clip_l`/`t5xxl` text
-encoders are kept for a future modular path; that path also needs
-`ae.safetensors`, which sits behind a gated HF repo (401 anonymous) and has
-not been fetched.
+encoders are kept for a future modular path. `ae.safetensors` is on disk —
+fetched as the Z-Image concept/multiview VAE (`workflows/prop_concept.json`,
+`workflows/prop_multiview.json`), not for that modular path. The four
+`qwen_*`/`Qwen-Image-*` files are the Qwen-Image bake-off arm, kept as the
+documented fallback base (2026-07-20 ruling, `scripts/ai-pipeline/bakeoff/`).
 
 SHA256 for every downloaded file: `scripts/ai-pipeline/models.sha256`.
 
@@ -386,7 +389,7 @@ upload → IBL bake → sky + lit render path, exercised end to end.
 
 ## Prop generation (Phase A3)
 
-Image → 3D prop pipeline: an SDXL concept image feeds Hi3DGen for untextured
+Image → 3D prop pipeline: a Z-Image concept image feeds Hi3DGen for untextured
 geometry, then a Blender-only stage textures it. Full task-by-task record,
 the texture-strategy ruling, and the three-pass candidate review live in
 `tasks/ai-pipeline/a3.md`.
@@ -568,8 +571,8 @@ The normal map follows the same contract as the default strategy (real
 hires→clean bake — the estimator's bump head is discarded in its favor);
 the concept image is unused.
 
-**`--view-res N`** raises the per-view depth/normal render and SDXL/ControlNet
-generation resolution (default 1024) independently of the MaterialAnything
+**`--view-res N`** raises the per-view depth/normal render and Z-Image + Fun
+ControlNet-depth generation resolution (default 1024) independently of the MaterialAnything
 estimator's input, which stays pinned at 768×768 either way: `prop_pbr.py`
 downscales each generated view to 768 for the estimator call and upscales its
 albedo/rm output back to the view's own resolution (`full_res = gen.size`) —
@@ -649,7 +652,7 @@ chained `generation_manifest.json`; every stage is skipped if its output
 already exists, so a second identical invocation exits in under a second
 instead of regenerating. `--skip-concept <image.png>` bypasses concept
 generation with a provided image — re-rolls geometry and everything
-downstream of it without spending a new SDXL concept. **One seed per
+downstream of it without spending a new Z-Image concept. **One seed per
 command:** one invocation is one candidate; a batch is the caller looping
 seeds across separate foreground invocations, never one script call for N
 candidates, so every command stays under the shell's timeout budget.
@@ -677,7 +680,7 @@ along the way): `tasks/ai-pipeline/a3.md` → "Decision log". Known gap: thin
 iron members (posts, scroll arms) render as polished pewter rather than the
 concept's weathered dark iron — a characterized ceiling of the projection
 bake on thin-member-dominated props, ruled tolerable at game camera distance
-for this fixture; Strategy 2 (SDXL multi-view retexture) is the evidenced
+for this fixture; Strategy 2 (Z-Image multi-view retexture) is the evidenced
 escalation if a later art review rejects it.
 
 ## Character generation (Phase A4)
