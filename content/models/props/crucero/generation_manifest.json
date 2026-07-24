@@ -1,0 +1,346 @@
+{
+  "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+  "seed": 21,
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21",
+  "concept": {
+    "mode": "skip-concept",
+    "source_image": "target\\prop-batch\\b3\\crucero\\ab\\zimage_seed0\\concept.png",
+    "source_image_sha256": "1c78a36231c4bc5a2065e21c80cbd42e306f27488145513e67cce4135981de78",
+    "concept_png_sha256": "1c78a36231c4bc5a2065e21c80cbd42e306f27488145513e67cce4135981de78"
+  },
+  "geometry": {
+    "model": "Stable-X/Hi3DGen",
+    "weights": {
+      "geometry": "Stable-X/trellis-normal-v0-1",
+      "normal": "Stable-X/yoso-normal-v1-8-1",
+      "birefnet": "ZhengPeng7/BiRefNet"
+    },
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21\\concept.png",
+    "input_image_sha256": "1c78a36231c4bc5a2065e21c80cbd42e306f27488145513e67cce4135981de78",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21\\concept_rgba.png",
+    "concept_rgba_sha256": "59a734b7f9dcb0d372da945763b35c4f4ea7b80a3f34136182a5c85478289ee4",
+    "seed": 21,
+    "steps": {
+      "sparse_structure_sampler": 50,
+      "slat_sampler": 6
+    },
+    "torch_version": "2.7.1+cu128",
+    "xformers_version": "0.0.31.post1",
+    "vertex_count": 170927,
+    "face_count": 341808,
+    "peak_vram_allocated_gb": 11.380153856,
+    "raw_glb_sha256": "e061e34021b7d2a2a9ca8226085451e8d17727f27e0e54ca488317bcd9ceba4b"
+  },
+  "cleanup": {
+    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
+    "clean_glb_sha256": "d971bed918b1d67e141204bfcaf093e2d104774576b100715346d68c11fca0d2",
+    "clean_hires_glb_sha256": "cb4d140fdba30abb5c3f22e560cbf93bfe53abef5f1b84f6be11d17f62aad387"
+  },
+  "texture": {
+    "strategy": "multiview_controlnet_depth",
+    "front_axis": "-Y",
+    "workflow": "prop_multiview.json",
+    "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+    "render_resolution": 1536,
+    "views": [
+      {
+        "hint": "front view",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 2100
+        },
+        "prompt_id": "320ab3da-2e3b-49aa-9b0b-bcebebc02813",
+        "prompts": {
+          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+          }
+        ],
+        "depth_png_sha256": "087a8d2dcdbb4a4000364a8a98c5c73d729bcbf9434b4c932ba3873e2c72c9fd",
+        "gen_png_sha256": "b2b75bc81f0f4ce5d1f178801f0be820b36ee83e095f427b1ff59481330404d1"
+      },
+      {
+        "hint": "three-quarter view",
+        "azimuth_deg": 60.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 2101
+        },
+        "prompt_id": "3a475172-2b04-45cd-a1c8-628da37331dd",
+        "prompts": {
+          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: three-quarter view, right: three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+          }
+        ],
+        "depth_png_sha256": "2acc45ce2e4cbb334b5403fbcd427effa1edb7658042fe604761d8c35b091a7e",
+        "gen_png_sha256": "9c411e6b326c28a9776dccb33ea3347d6a61fcb9dd270136192885c61959b1ee"
+      },
+      {
+        "hint": "back view",
+        "azimuth_deg": 180.0,
+        "elevation_deg": 15.0,
+        "canvas": 0,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 2100
+        },
+        "prompt_id": "320ab3da-2e3b-49aa-9b0b-bcebebc02813",
+        "prompts": {
+          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+          }
+        ],
+        "depth_png_sha256": "f3545c4b3b6c2fe8c38f03a734a0ecc76c7c4b2778d272a4d09c8ea2c41d5ef4",
+        "gen_png_sha256": "ae10c23cabf6805554a9f69d019c92edb24f1762a4dc99858de316f0c1f5eacd"
+      },
+      {
+        "hint": "three-quarter view",
+        "azimuth_deg": 300.0,
+        "elevation_deg": 15.0,
+        "canvas": 1,
+        "canvas_slot": 1,
+        "seeds": {
+          "11": 2101
+        },
+        "prompt_id": "3a475172-2b04-45cd-a1c8-628da37331dd",
+        "prompts": {
+          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: three-quarter view, right: three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+          }
+        ],
+        "depth_png_sha256": "3676eebcc7a6f5d926663002d9eaa3563a0630907b3baa629de193a3c082bad4",
+        "gen_png_sha256": "dba04f84dc6bf2159d9239ff14bed0d93b0dcfb4fd6f3d82027d1688f4dd8958"
+      },
+      {
+        "hint": "back view, seen from below",
+        "azimuth_deg": 150,
+        "elevation_deg": -35.0,
+        "canvas": 2,
+        "canvas_slot": 0,
+        "seeds": {
+          "11": 2102
+        },
+        "prompt_id": "d3f41e0f-e2a3-4cc0-a43e-fe223e41067c",
+        "prompts": {
+          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        },
+        "models": [
+          {
+            "node_id": "1",
+            "class_type": "UNETLoader",
+            "input": "unet_name",
+            "filename": "z_image_turbo_bf16.safetensors",
+            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+          },
+          {
+            "node_id": "2",
+            "class_type": "CLIPLoader",
+            "input": "clip_name",
+            "filename": "qwen_3_4b_fp8_mixed.safetensors",
+            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+          },
+          {
+            "node_id": "3",
+            "class_type": "VAELoader",
+            "input": "vae_name",
+            "filename": "ae.safetensors",
+            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+          }
+        ],
+        "depth_png_sha256": "446d51b0cf63bd536f4580dfc3cb3517cf6f0026134f97a310f9fabefc291128",
+        "gen_png_sha256": "98deb1841d42bd6b349143f4960c8c19ca19bfa9637a6664b5fa53d6f6de4914"
+      }
+    ],
+    "extra_views": [
+      {
+        "hint": "back view, seen from below",
+        "azimuth_deg": 150,
+        "elevation_deg": -35.0,
+        "predicted_gain_texels": 266371,
+        "predicted_gain_frac": 0.0929
+      }
+    ],
+    "pbr_estimator": {
+      "model": "xanderhuang/material_estimator",
+      "steps": 50,
+      "resolution": 768,
+      "estimated_views": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "elapsed_s": 47.0,
+      "views": [
+        {
+          "seed": 21000,
+          "albedo_sha256": "2810bc8abc765cf1b2b05668b3dbafcb3a316abae66e8a1cfb974882be901620",
+          "rm_sha256": "10c7eb588a77c394b5646efa35b0087425851b974d6c93cd32dcc467b470c8db"
+        },
+        {
+          "seed": 21001,
+          "albedo_sha256": "f9c7f588f2d186cfefc96754dd418a2bcf3153a8e0a52c8c59ff61229a386bc4",
+          "rm_sha256": "479cc1e43092d2a732b1913af91fc63933a31020692b6683b11b75cd79244cb5"
+        },
+        {
+          "seed": 21002,
+          "albedo_sha256": "15aca569874b63ee020042457aed616afc5c3fdb40ae36779546f636661bf9e1",
+          "rm_sha256": "37b7db98f8920c827a5212b84d65d7c24b2ddd71bde1a6d66463efb1f3c46c11"
+        },
+        {
+          "seed": 21003,
+          "albedo_sha256": "a1190b72c56168473c399ee896ceaafb67e1e1891ac32ba1383317cdd04939f4",
+          "rm_sha256": "d6233bbf5b2ef1d648723461a380b2dfb9f10aeab608a2ef620068b9c4ad1779"
+        },
+        {
+          "seed": 21004,
+          "albedo_sha256": "b4a8262b5b8331cfd4f539a252a3dfa2e5a28c091df87dd319a41df6144460e8",
+          "rm_sha256": "80a6ca326510c5bc44dd0c65a505186254b99b31ddb0d49ef69e3fe9bfdd0605"
+        }
+      ]
+    },
+    "weight_exponent": 2.0,
+    "occlusion_eps": 0.02,
+    "edge_pad_px": 8,
+    "depth_dilate_px": 5,
+    "blend_coverage": 0.5743,
+    "hole_texels": 1221079,
+    "dielectric": true,
+    "metal_fraction": 0.0241,
+    "texture_size": 2048,
+    "base_bake_s": 258.5,
+    "normal_bake_s": 0.8,
+    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21\\textured.glb",
+    "textured_glb_sha256": "3cd8efe435e1d4632a82806715fdffc2a6d1b96fadff7379d631ff27d39e6e8d"
+  },
+  "preprocess": {
+    "textured_glb_bytes": 10544288,
+    "final_glb_bytes": 10544260
+  },
+  "bake": {
+    "source": "final.glb",
+    "sha256": "e0dbb896299b14f0bdbb2f67aa4224d07c6b04f70ba18d94c231b8fbed2892d3",
+    "images": [
+      {
+        "index": 0,
+        "slot": "normal",
+        "file": "img0.dds"
+      },
+      {
+        "index": 1,
+        "slot": "base",
+        "file": "img1.dds"
+      },
+      {
+        "index": 2,
+        "slot": "mr",
+        "file": "img2.dds"
+      }
+    ]
+  },
+  "final_glb_sha256": "e0dbb896299b14f0bdbb2f67aa4224d07c6b04f70ba18d94c231b8fbed2892d3",
+  "turntable": {
+    "angles": 8,
+    "size": "512x512",
+    "contact_sheet": "contact_sheet.png",
+    "frames": [
+      "frame_00.png",
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png",
+      "frame_04.png",
+      "frame_05.png",
+      "frame_06.png",
+      "frame_07.png"
+    ]
+  }
+}
