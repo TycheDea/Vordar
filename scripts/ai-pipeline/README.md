@@ -523,7 +523,7 @@ exit non-zero rather than patch silently.
 **3. `prop_texture.py`** — Blender headless texture bake:
 
 ```
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metallic F] [--roughness F] [--dielectric]
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metallic F] [--roughness F]
 ```
 
 Default strategy: **Blender projection bake** — concept image
@@ -557,44 +557,33 @@ this stage (started headless, killed after).
 
 The generated views are lit renders, so after generation each one is
 decomposed by MaterialAnything's material estimator (`prop_pbr.py`,
-subprocess in its own venv below) into a delit `albedo.png` and an
-`rm.png` (G=roughness, B=metallic), conditioned on a camera-space normal
-render of the same view. Both channel sets blend through the identical
-facing-weight machinery: the albedo blend is the exported basecolor (the
-lit `gen.png` is conditioning intermediate only) and the rm blend packs
-into a per-texel glTF `metallicRoughnessTexture` — the projection
-strategy's declared `--metallic`/`--roughness` scalars do not apply here.
-Per-canvas outputs, decomposed maps and provenance manifests are cached
-under `<textured.glb dir>/multiview/`, so a killed run resumes without
-respending GPU; the estimator is skipped when every view's maps exist.
-The normal map follows the same contract as the default strategy (real
-hires→clean bake — the estimator's bump head is discarded in its favor);
-the concept image is unused.
+subprocess in its own venv below) into a delit `albedo.png`, conditioned on
+a camera-space normal render of the same view. The albedo blend is the
+exported basecolor (the lit `gen.png` is conditioning intermediate only).
+Roughness/metallic ship as the glTF scalar factors on both strategies —
+`--metallic`/`--roughness` apply here the same as on the projection
+strategy. Per-canvas outputs, decomposed maps and provenance manifests are
+cached under `<textured.glb dir>/multiview/`, so a killed run resumes
+without respending GPU; the estimator is skipped when every view's albedo
+exists. The normal map follows the same contract as the default strategy
+(real hires→clean bake — the estimator's bump head is discarded in its
+favor); the concept image is unused.
 
 **`--view-res N`** raises the per-view depth/normal render and Z-Image + Fun
 ControlNet-depth generation resolution (default 1024) independently of the MaterialAnything
 estimator's input, which stays pinned at 768×768 either way: `prop_pbr.py`
 downscales each generated view to 768 for the estimator call and upscales its
-albedo/rm output back to the view's own resolution (`full_res = gen.size`) —
+albedo output back to the view's own resolution (`full_res = gen.size`) —
 that split is unconditional, not gated by this flag. Raising `--view-res`
 only sharpens the source imagery blended into the atlas; it does not change
 `TEXTURE_SIZE` (the atlas's own baked resolution, a separate constant).
 
 **`--texture-size N`** raises `TEXTURE_SIZE` (default 1024), the pixel
-resolution every basecolor/normal/MR image is baked at. Independent of
+resolution every basecolor/normal image is baked at. Independent of
 `prop_cleanup.py`'s xatlas packing: the mesh's UVs are resolution-independent
 0–1 floats, so a `--texture-size` above the resolution the atlas was packed
 for is safe (island gutters only grow) and re-running cleanup is not needed
 to raise it.
-
-**`--dielectric`** zeroes the blended metallic channel post-blend. The
-estimator has no material-class prior, so it can read specular highlights
-on stone/wood/foliage as stray metal (measured: cypress cand_31
-`metal_fraction` 0.403, a crumpled-gold-foil read on foliage that should be
-dielectric). Explicit opt-in per run, not a default — metal prop classes
-(the candelabra's iron) legitimately need the estimated channel. `--metallic`/
-`--roughness` (projection strategy) are unaffected; this only touches the
-multiview per-texel path.
 
 **MaterialAnything estimator venv** (`C:\tools\MaterialAnything`, clone of
 `3DTopia/MaterialAnything` @ `be3d6b3`, MIT code; weights HF
@@ -644,7 +633,7 @@ the sRGB EOTF at that value).
 **5. `gen_prop.py`** — chain assembly, one candidate per invocation:
 
 ```
-python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metallic F] [--roughness F] [--dielectric]
+python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metallic F] [--roughness F]
 ```
 
 Runs concept → geometry → cleanup → texture → preprocess+bake → turntable →
@@ -670,6 +659,67 @@ own flags (character-chain precedent below) — raise `--max-dim` alongside
 `--texture-size`, or the default 1024 resize cap silently downscales the
 bake back down during preprocessing regardless of what `--texture-size`
 baked.
+
+### `asset_inspect` — lighting × channel × distance review
+
+```
+cargo run -p vordar-client --release --features offscreen --bin asset_inspect -- <glb|gltf> [--out DIR] [--size WxH] [--scale S] [--lighting studio,furnace,raking,dusk] [--channel beauty,albedo,rough,metal,normal,ao,clay] [--angles N] [--distance full,gameplay,macro] [--reference]
+```
+
+Renders one prop across every combination of lighting preset, shading debug
+channel, and camera distance in a single invocation — the eyes-fix for a
+review instrument that used to pass every AI-generated prop that then failed
+in-game (`tasks/lessons/2026-07-23-review-in-engine-at-gameplay-framing.md`).
+Four lighting presets (`studio` neutral/even so no colour cast can hide an
+inpaint bleed, `furnace` uniform-radiance energy check, `raking`
+camera-relative grazing light for normal/geometry readout, `dusk` the real
+ship-gate HDRI + zone fog); seven channels (`beauty` the shipped shading,
+`albedo`/`rough`/`metal`/`normal`/`ao` isolated shader debug outputs,
+`clay` a uniform-grey material override); three distances (`full` a fitted
+turntable shot, `gameplay` 2.3 m from the prop's near surface at eye height,
+`macro` 0.6 m at the prop's mid-height). `--reference` renders
+`rock_face_01` alongside at its shipped placement scale (4.0) for a
+same-conditions material comparison.
+
+**Per-frame PNGs at `--size` (default 1024²) are the evidence** —
+`<out>/<lighting>_<channel>/<distance>_<angle>.png`. The stitched
+`sheet_<lighting>_<channel>.png` beside them is only an index (tiles capped
+at 512px, long edge near 1536px): a contact sheet gets downscaled by the
+viewer before judging it, which is exactly the blindness that let eight bad
+props ship. Judge `gameplay`/`macro` frames individually, at full
+resolution, never from a sheet.
+
+### `prop_audit.py` — measurement-only metric audit
+
+```
+python scripts/ai-pipeline/prop_audit.py [--asset <name-or-dir>] [--json]
+```
+
+Prints one fixed-width row per prop under `content/models/props/`, with
+`rock_face_01` (the Poly Haven photoscan reference) sorted first. Reads each
+prop's `*.textures/manifest.json` for its mesh path and image-slot map —
+slots come from the manifest, never inferred from the glTF's own texture
+indices, which can disagree (`crucero.glb`'s `baseColorTexture.index` is 0
+while `img0.dds` is the normal map). Metrics: roughness/metallic/AO from the
+ARM atlas, albedo luma percentiles and blown-highlight fraction, a
+normal-map Laplacian std and dead-flat-texel fraction, atlas and
+world-placed texel density (`atlas_px_per_m` and `placed_px_per_m` — the
+latter divided by the prop's max `zones.ron` placement scale, since
+`rock_face_01` ships at scale 4.0 and its raw atlas density alone overstates
+how it actually reads in-game), the glTF's own
+`roughnessFactor`/`metallicFactor`/`baseColorFactor`,
+`blend_coverage`/`hole_frac` from `generation_manifest.json`, and a
+tangent-space `baked_fraction` riding along as a relative corroborator (not
+a physical light fit — the world-space depth renders it would need aren't
+shipped).
+
+**Measurement only: no thresholds, no gate, no non-zero exit.** Nobody yet
+knows what quality this pipeline can reach, and every generated prop shipped
+so far read as AI slop under an instrument that was itself broken — writing
+a gate now would encode a guess from bad evidence. Metric names and slot
+keys (`base_color`/`normal`/`metallic_roughness`/`occlusion`) match
+`MaterialData`'s vocabulary in `content_lint.rs:259-265` so a later
+promotion into a real test is a rename-free port, not a rewrite.
 
 ### Fixture
 
@@ -744,14 +794,13 @@ exists, chosen under the 16 MB / 64-joint caps).
 `prop_texture.py`'s strategy is fixed to `--strategy multiview` for every
 character (A4.6 ruling): projection mirrors the concept's face through
 onto the back of the hood, which disqualifies it on any character.
-Multiview's per-view MaterialAnything decomposition (above) estimates
-roughness/metallic per texel from the generated views — the same
-machinery props use, not a character-specific mode; there is no
-character-only `--mr` flag. The constant-dielectric contract (`metallic
-0.0 / roughness 0.8`, matching every existing race model) applies directly
-where a scalar is set rather than estimated: `prop_texture.py`'s own
-`--metallic`/`--roughness` projection-strategy defaults, and the MPFB
-route's authored materials (below).
+Multiview's per-view MaterialAnything decomposition (above) estimates only
+the delit albedo per texel from the generated views — the same machinery
+props use, not a character-specific mode. Roughness/metallic ride the
+glTF scalar factors on both strategies: the constant-dielectric contract
+(`metallic 0.0 / roughness 0.8`, matching every existing race model) is
+`prop_texture.py`'s own `--metallic`/`--roughness` defaults, same for
+characters as for props, and the MPFB route's authored materials (below).
 
 ### `char_rig.py` — skeleton transplant + fit + weight adoption (Blender 5.2 headless)
 

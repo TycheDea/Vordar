@@ -4,10 +4,9 @@
 # between view generation and blending, while no other process holds the GPU.
 #
 # For each multiview view_<i>/gen.png it writes view_<i>/albedo.png and
-# view_<i>/rm.png (G=roughness, B=metallic — the estimator's native layout,
-# which is already the glTF packing) at the gen resolution, plus a
-# work-dir-level pbr_meta.json covering every view. Views whose outputs
-# already exist are skipped, so a killed run resumes without respending GPU;
+# view_<i>/bump.png at the gen resolution, plus a work-dir-level
+# pbr_meta.json covering every view. Views whose outputs already exist are
+# skipped, so a killed run resumes without respending GPU;
 # the meta file is rewritten in full every run (shas from files, seeds from
 # the deterministic per-view formula), so a resume yields identical meta.
 #
@@ -80,14 +79,13 @@ def estimate_view(pipe, work, i, seed):
     init_materials = {"albedo": white, "roughness_metallic": white, "bump": white}
 
     generator = torch.Generator("cuda").manual_seed(seed)
-    albedo, rm, _bump = pipe(
+    albedo, _rm, bump = pipe(
         prompt=[""], cond_image=[rgb], normal_image=[normal],
         init_materials=init_materials, masks=keep,
         num_inference_steps=EST_STEPS, guidance_scale=1.0,
         generator=generator, height=EST_RES, width=EST_RES).images
-    # bump discarded: the texture stage bakes a real high-to-low normal map
     albedo.resize(full_res, Image.LANCZOS).save(vdir / "albedo.png")
-    rm.resize(full_res, Image.LANCZOS).save(vdir / "rm.png")
+    bump.resize(full_res, Image.LANCZOS).save(vdir / "bump.png")
 
 
 def main():
@@ -100,8 +98,8 @@ def main():
 
     t0 = time.time()
     todo = [i for i in range(args.views)
-            if not all((work / f"view_{i}" / name).exists()
-                       for name in ("albedo.png", "rm.png"))]
+            if not (work / f"view_{i}" / "albedo.png").exists()
+            or not (work / f"view_{i}" / "bump.png").exists()]
     if todo:
         pipe = load_pipeline()
         for i in todo:
@@ -116,7 +114,7 @@ def main():
         "views": [{
             "seed": args.seed * 1000 + i,
             "albedo_sha256": sha256_file(work / f"view_{i}" / "albedo.png"),
-            "rm_sha256": sha256_file(work / f"view_{i}" / "rm.png"),
+            "bump_sha256": sha256_file(work / f"view_{i}" / "bump.png"),
         } for i in range(args.views)],
     }
     (work / "pbr_meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")

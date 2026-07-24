@@ -178,7 +178,7 @@ def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dic
 
 
 def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
-                  metallic: float, roughness: float, azimuths: str, dielectric: bool,
+                  metallic: float, roughness: float, azimuths: str,
                   view_res: int, texture_size: int) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
@@ -202,8 +202,6 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
             cmd += ["--view-res", view_res]
         if texture_size is not None:
             cmd += ["--texture-size", texture_size]
-        if dielectric:
-            cmd += ["--dielectric"]
         out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
@@ -276,10 +274,9 @@ def main():
     parser.add_argument("--texture-strategy", choices=["projection", "multiview"], default="projection",
                         help="Basecolor strategy for prop_texture.py (multiview = ControlNet-depth retexture)")
     parser.add_argument("--metallic", type=float, default=None,
-                        help="Declared metallic for prop_texture.py's projection strategy "
-                             "(default 0; multiview estimates per-texel MR)")
+                        help="Declared metallic for prop_texture.py, both strategies (default 0)")
     parser.add_argument("--roughness", type=float, default=None,
-                        help="Declared roughness for prop_texture.py's projection strategy (default 0.8)")
+                        help="Declared roughness for prop_texture.py, both strategies (default 0.8)")
     parser.add_argument("--symmetrize", action="store_true",
                         help="Mirror one half of the cleaned mesh across its best-fit vertical plane")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
@@ -302,11 +299,6 @@ def main():
     parser.add_argument("--max-bytes", type=int, default=None,
                         help="preprocess_prop.mjs's final.glb size assert (default 8 MB, "
                              "the prop cap)")
-    parser.add_argument("--dielectric", action="store_true",
-                        help="Multiview strategy only: zero the estimated metallic "
-                             "channel post-blend (prop_texture.py --dielectric). "
-                             "Explicit opt-in for prop classes declared non-metal "
-                             "(stone/wood/foliage) -- omit for metal classes.")
     parser.add_argument("--through", choices=STAGES, default="turntable",
                         help="Stop after this stage (batch triage: --through cleanup "
                              "sweeps geometry seeds without paying for texturing)")
@@ -333,7 +325,7 @@ def main():
         manifest["cleanup"] = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
     if stop >= STAGES.index("texture"):
         manifest["texture"] = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                                            args.metallic, args.roughness, args.azimuths, args.dielectric,
+                                            args.metallic, args.roughness, args.azimuths,
                                             args.view_res, args.texture_size)
     if stop >= STAGES.index("preprocess"):
         # final.glb, needed by the turntable stage below

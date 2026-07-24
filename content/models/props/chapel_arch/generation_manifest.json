@@ -257,32 +257,32 @@
         3,
         4
       ],
-      "elapsed_s": 44.6,
+      "elapsed_s": 49.4,
       "views": [
         {
           "seed": 0,
           "albedo_sha256": "5673b6386d8ad2f9cfc2d2d92ab41c6ef62918a2ba72a94c29afc320320a5d21",
-          "rm_sha256": "6d6b5fed628c866df45ec423934b16740bd5897c5005712afe36edc5b13823df"
+          "bump_sha256": "41b135580d7b383224f03159c7b28ce3d62f4e00bfa2b9b5e21a3fdad38fe969"
         },
         {
           "seed": 1,
           "albedo_sha256": "d0919ece9732fe260cc41ef5f427eba98bdefb6c6bd9ee409c8dd83cb4c99d11",
-          "rm_sha256": "e092812724a60e38cf521943328b27616f6c4863ca6eabaa8b357d2e804ed449"
+          "bump_sha256": "4f6f5d630696d519207c144675c57662c136da0385f4aacf1d5eba89e3f638a5"
         },
         {
           "seed": 2,
           "albedo_sha256": "2252465a48955990ca97cf2c63cef307032f066623af1a729f93d8f5931ce805",
-          "rm_sha256": "eec69ca61c75f923a244f6579a60fb625ca291860b8ac6e2396de4a7445cfa36"
+          "bump_sha256": "6947c9d7756b815511d719deaec746c4ad0ec307454f845712e213b9c852fbe8"
         },
         {
           "seed": 3,
           "albedo_sha256": "eb46b6bf84b86d11b22d3b3b058eb760ff3ad54c6c7d0f59edd1777b932cc359",
-          "rm_sha256": "f5a67f38a05c22a4768ac64e22dd51acc70fe1a99dbb02e3ae50b370657e7d0b"
+          "bump_sha256": "583c8ea0a58747011fbb7064fe5f1f2bb482961161d80e6123efc44ad170557e"
         },
         {
           "seed": 4,
           "albedo_sha256": "c88df94251ad2340b26bd54aeb3400eb5689439c2f1332baa90751ae43794c9c",
-          "rm_sha256": "42080a906558d3caa846ee111ed5b9db806dfe1bd8638efc3021e182718b9c22"
+          "bump_sha256": "9f283d69ec227e867f58bef43a59629cff64029f32029b60f6f6d470007ced07"
         }
       ]
     },
@@ -292,21 +292,22 @@
     "depth_dilate_px": 5,
     "blend_coverage": 0.5504,
     "hole_texels": 1202912,
-    "dielectric": true,
-    "metal_fraction": 0.1221,
     "texture_size": 2048,
-    "base_bake_s": 284.5,
-    "normal_bake_s": 1.1,
-    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\arch\\cand_0\\textured.glb",
-    "textured_glb_sha256": "7c6095490906038dc81b44e7f4e64517aed8e11d1d8aed83be5bb2afb357e122"
+    "metallic": 0.0,
+    "roughness": 0.85,
+    "base_bake_s": 48.0,
+    "normal_bake_s": 2.6,
+    "ao_bake_s": 14.5,
+    "ao_samples": 128,
+    "textured_glb": "textured_f3.glb"
   },
   "preprocess": {
-    "textured_glb_bytes": 12036184,
-    "final_glb_bytes": 12036160
+    "textured_glb_bytes": 14244856,
+    "final_glb_bytes": 14244824
   },
   "bake": {
-    "source": "final.glb",
-    "sha256": "44080ae1711fc885170474f237eb559a20e12fd92b5e9046af46eb7da3be80fb",
+    "source": "chapel_arch.glb",
+    "sha256": "829a868cf35df332f41d700d58d271da03c206a835f7bb2a2b81e0b6aa5001c9",
     "images": [
       {
         "index": 0,
@@ -315,30 +316,15 @@
       },
       {
         "index": 1,
-        "slot": "base",
+        "slot": "ao",
         "file": "img1.dds"
       },
       {
         "index": 2,
-        "slot": "mr",
+        "slot": "base",
         "file": "img2.dds"
       }
     ]
   },
-  "final_glb_sha256": "44080ae1711fc885170474f237eb559a20e12fd92b5e9046af46eb7da3be80fb",
-  "turntable": {
-    "angles": 8,
-    "size": "512x512",
-    "contact_sheet": "contact_sheet.png",
-    "frames": [
-      "frame_00.png",
-      "frame_01.png",
-      "frame_02.png",
-      "frame_03.png",
-      "frame_04.png",
-      "frame_05.png",
-      "frame_06.png",
-      "frame_07.png"
-    ]
-  }
+  "final_glb_sha256": "829a868cf35df332f41d700d58d271da03c206a835f7bb2a2b81e0b6aa5001c9"
 }

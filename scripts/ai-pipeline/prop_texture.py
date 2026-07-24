@@ -27,25 +27,27 @@
 #     candidate grid, Text2Tex-style next-best-view) whenever one would
 #     newly cover >= MV_EXTRA_MIN_GAIN of the island.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
-#     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
-#   - MR, projection strategy: two declared constants (--metallic/
-#     --roughness) carried by the glTF scalar factors rather than a map.
-#   - MR, multiview strategy: per-texel. Each generated view is decomposed
-#     by MaterialAnything's material estimator (prop_pbr.py, subprocess in
-#     its own venv) into a delit albedo and a roughness/metallic image,
-#     conditioned on a camera-space normal render of the same view; the
-#     albedo blend becomes the basecolor (the lit gen.png is conditioning
-#     intermediate only) and the rm blend packs into a glTF
-#     metallicRoughnessTexture. Classifying material from the BASECOLOR
-#     value was tried and retired (A6.1, tasks/ai-pipeline/research/
-#     a6-1-mr-contract.md): luma conflates albedo, shading and material.
+#     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned), composited
+#     (multiview only) via UDN/whiteout with a tangent-space detail normal
+#     Sobel'd from a high-pass of the blended albedo atlas (see
+#     DETAIL_NORMAL_WAVELENGTH_M's comment for why not the estimator's bump
+#     head).
+#   - occlusion map = Cycles AO bake, same selected-to-active rig as the
+#     normal bake, authored as the glTF occlusionTexture via a "glTF
+#     Material Output" node group (the exporter's Occlusion-socket
+#     contract) so it ships separately from basecolor/normal/MR.
+#   - MR: two declared constants (--metallic/--roughness) carried by the
+#     glTF scalar factors, on both strategies. Classifying material from
+#     the BASECOLOR value was tried and retired (A6.1, tasks/ai-pipeline/
+#     research/a6-1-mr-contract.md): luma conflates albedo, shading and
+#     material.
 #   - prints one JSON stats line (the only '{'-prefixed stdout line) for
 #     gen_prop.py's chained manifest.
 #
 # Usage: blender --background --python prop_texture.py -- \
 #            <clean.glb> <hires.glb> <concept.png> <textured.glb> \
 #            [--strategy projection|multiview] [--subject STR] [--seed N] \
-#            [--metallic F] [--roughness F] [--dielectric]
+#            [--metallic F] [--roughness F]
 
 import argparse
 import hashlib
@@ -75,9 +77,9 @@ TEXTURE_SIZE = 1024
 # the +Y projection renders mirrored against the concept). The multiview
 # rig keeps the same convention: azimuth 0 is the -Y camera.
 FRONT_AXIS = "-Y"
-# Declared MR defaults (projection strategy only; multiview estimates
-# per-texel MR): non-metal, matching every existing race model and the
-# stone/wood/cloth props the art direction calls for. Metal props override.
+# Declared MR defaults, both strategies: non-metal, matching every existing
+# race model and the stone/wood/cloth props the art direction calls for.
+# Metal props override.
 DEFAULT_METALLIC = 0.0
 DEFAULT_ROUGHNESS = 0.8
 
@@ -86,6 +88,38 @@ MV_WORKFLOW = SCRIPT_DIR / "workflows" / "prop_multiview.json"
 # its diffusers pin (0.28.2) predates everything else in the pipeline.
 MA_PYTHON = Path(r"C:\tools\MaterialAnything") / "venv" / "Scripts" / "python.exe"
 
+
+AO_SAMPLES = 128  # the EMIT/NORMAL bakes below are exact single-ray lookups,
+# but AO integrates a hemisphere per texel -- 1 sample would be per-texel
+# dithered noise, not the smooth occlusion gradient occlusionTexture needs
+AO_DISTANCE_M = 0.15  # Cycles' AO ray length defaults to 10 m (world
+# light_settings.distance), which on an archway treats the far leg across
+# the opening as an occluder and reads as one big cave shadow. Bounding it
+# to voussoir-joint scale keeps the occlusion local: drum joints and capital
+# undercuts darken, the opposite side of the arch does not
+
+# MaterialAnything's bump head (F3, prop_pbr.py) comes back near-flat on this
+# prop -- island-masked RGB std of 4-6/255 around the flat-normal encoding
+# (128,127,255), i.e. no usable relief (the plan's pre-authorized fallback
+# condition). The detail normal below is instead a high-pass of the blended
+# albedo atlas: dark mortar joints, soot staining and grain read as relief,
+# the same heuristic AO-from-albedo texturing already leans on elsewhere.
+DETAIL_NORMAL_WAVELENGTH_M = 0.03  # cutoff separating kept grain/staining
+# detail from removed broad shading, as a Gaussian-blur radius. Individual
+# chisel marks run 5-15 mm, but this atlas resolves ~9 mm/texel (matches the
+# shipped placed_px_per_m): a blur needs several texels of radius to actually
+# separate low frequencies from texel noise, so 30 mm (~3 texels here) is the
+# finest cutoff this atlas can carry a real Gaussian split at, not the tool-
+# mark scale itself
+DETAIL_NORMAL_MIN_SIGMA_TEXELS = 3.0  # floor on the blur radius in texels:
+# below this a Gaussian "high-pass" is indistinguishable from texel-to-texel
+# noise, which reads as sparse sharp spikes rather than distributed grain
+DETAIL_NORMAL_AMPLITUDE_M = 0.002  # one-sigma world-space height the
+# high-pass pattern (normalized to unit std over the island) is scaled to
+# after the wavelength cutoff above: hand-tooled limestone grain runs a few
+# mm peak-to-valley, independent of atlas resolution or prop scale -- the
+# Sobel gradient divides through the per-texel UV->world Jacobian, not pixel
+# count, to hold this constant regardless of how many texels a chart occupies
 
 MV_ELEVATION_DEG = 15.0
 # Two-resolution contract: MV_RES sets the ortho depth/normal renders and the
@@ -713,9 +747,9 @@ def blend_views(views, depths, rig, work_dir, pos, nrm, island,
     island coverage, and the per-texel covered mask (island texels that
     actually received blended weight; island holes are Telea-inpainted
     from their surroundings, off-island texels keep a mean-color fill).
-    srgb=False loads the per-view images as Non-Color data (rm maps):
-    Blender would otherwise linearize them on load, and the raw material
-    values must survive into the Non-Color atlas unchanged."""
+    srgb=False loads the per-view images as Non-Color data: Blender would
+    otherwise linearize them on load, and raw (non-color) values must
+    survive into the atlas unchanged."""
     accum = np.zeros((pos.shape[0], 3))
     wsum = np.zeros(pos.shape[0])
     for i, v in enumerate(views):
@@ -751,15 +785,60 @@ def blend_views(views, depths, rig, work_dir, pos, nrm, island,
     return out, coverage, covered
 
 
+SOBEL_UNIT_SCALE = 8.0  # a 3x3 Sobel kernel's raw output is 8x the true
+# per-pixel finite difference (verify on a unit ramp: kernel [-1,0,1;-2,0,2;
+# -1,0,1] against f(x)=x gives 8, not 1) -- both Sobel calls below divide by
+# this so their outputs are true per-one-texel-step quantities; a slope
+# (Sobel-height / Sobel-position-magnitude) would cancel the factor either
+# way, but texel_world_steps' result is also used standalone (as texel_m,
+# to size the blur radius above), where an uncorrected factor of 8 previously
+# read as ~71 mm/texel against the atlas's real ~9 mm/texel (placed_px_per_m).
+
+
+def texel_world_steps(pos):
+    """Per-texel world-space distance (m) of one atlas-U and one atlas-V
+    step: a Sobel finite difference on the world-position bake, i.e. the
+    same UV->world Jacobian the detail normal's gradient is scaled through."""
+    dpos_du = np.stack([cv2.Sobel(pos[:, :, c], cv2.CV_64F, 1, 0, ksize=3)
+                        for c in range(3)], axis=-1) / SOBEL_UNIT_SCALE
+    dpos_dv = np.stack([cv2.Sobel(pos[:, :, c], cv2.CV_64F, 0, 1, ksize=3)
+                        for c in range(3)], axis=-1) / SOBEL_UNIT_SCALE
+    return np.linalg.norm(dpos_du, axis=-1), np.linalg.norm(dpos_dv, axis=-1)
+
+
+def detail_normal_from_height(height, pos):
+    """Sobel gradient of a height field (already scaled to world-space
+    metres) into a tangent-space unit normal (h, w, 3), the gradient scaled
+    through the per-texel UV->world Jacobian so the resulting grain has a
+    physical size independent of atlas resolution or prop scale."""
+    dh_du = cv2.Sobel(height, cv2.CV_64F, 1, 0, ksize=3) / SOBEL_UNIT_SCALE
+    dh_dv = cv2.Sobel(height, cv2.CV_64F, 0, 1, ksize=3) / SOBEL_UNIT_SCALE
+    step_u, step_v = texel_world_steps(pos)
+    slope_u = dh_du / np.maximum(step_u, 1e-6)
+    slope_v = dh_dv / np.maximum(step_v, 1e-6)
+    n = np.stack([-slope_u, -slope_v, np.ones_like(slope_u)], axis=-1)
+    return n / np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-9)
+
+
+def whiteout_blend(base_n, detail_n):
+    """UDN/whiteout composite of two tangent-space unit normals: the base
+    map keeps its low frequencies (xy added, z multiplied) while the detail
+    map supplies the highs."""
+    xy = base_n[:, :, :2] + detail_n[:, :, :2]
+    z = base_n[:, :, 2:3] * detail_n[:, :, 2:3]
+    n = np.concatenate([xy, z], axis=-1)
+    return n / np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-9)
+
+
 def estimate_materials(views, work_dir, seed):
-    """Decompose every view_<i>/gen.png into albedo.png + rm.png via the
+    """Decompose every view_<i>/gen.png into albedo.png and bump.png via the
     MaterialAnything estimator subprocess (prop_pbr.py in its own venv,
     run only when some output is missing — GPU work resumes like gen.png).
     Its stdout is captured: gen_prop.py parses this stage's single
     '{'-prefixed stats line, which a streamed child JSON line would break."""
     missing = [i for i in range(len(views))
-               if not all((work_dir / f"view_{i}" / name).exists()
-                          for name in ("albedo.png", "rm.png"))]
+               if not (work_dir / f"view_{i}" / "albedo.png").exists()
+               or not (work_dir / f"view_{i}" / "bump.png").exists()]
     if missing:
         proc = subprocess.run(
             [str(MA_PYTHON), str(SCRIPT_DIR / "prop_pbr.py"), str(work_dir),
@@ -771,16 +850,13 @@ def estimate_materials(views, work_dir, seed):
     return json.loads((work_dir / "pbr_meta.json").read_text(encoding="utf-8"))
 
 
-def pbr_multiview(clean, hires, atlas, subject, seed, work_dir, dielectric=False):
-    """Full per-texel PBR set from the multiview path: generate lit views,
-    decompose each into albedo + roughness/metallic, blend every channel
-    through the same facing-weight machinery. The albedo blend is the
-    basecolor (delit — the lit gen.png is conditioning intermediate only);
-    the rm blend packs into the glTF G=roughness/B=metallic layout, which
-    is the estimator's native output layout. dielectric=True zeroes the
-    blended metallic channel post-blend: the estimator has no material-class
-    prior, so it can read specular highlights on stone/wood/foliage as
-    stray metal (measured: cypress cand_31 metal_fraction 0.403)."""
+def pbr_multiview(clean, hires, atlas, subject, seed, work_dir):
+    """Basecolor from the multiview path: generate lit views, decompose
+    each into a delit albedo (MaterialAnything, prop_pbr.py, subprocess in
+    its own venv), blend through the same facing-weight machinery. The
+    albedo blend is the basecolor -- the lit gen.png is conditioning
+    intermediate only. Roughness/metallic ship as the glTF scalar factors,
+    same as the projection strategy."""
     work_dir.mkdir(parents=True, exist_ok=True)
     views, rig = mv_camera_rig(clean, MV_VIEWS)
     pos, nrm, island = bake_geometry_atlas(clean, atlas, rig)
@@ -798,17 +874,33 @@ def pbr_multiview(clean, hires, atlas, subject, seed, work_dir, dielectric=False
     pbr_meta = estimate_materials(views, work_dir, seed)
     base_px, coverage, covered = blend_views(views, depths, rig, work_dir,
                                              pos, nrm, island)
-    rm_px, _, _ = blend_views(views, depths, rig, work_dir, pos, nrm, island,
-                              filename="rm.png", srgb=False)
 
     base_img = new_image("prop_base", srgb=True, fill=(0, 0, 0))
     base_img.pixels.foreach_set(base_px.ravel())
-    mr = np.zeros((pos.shape[0], 4), dtype=np.float32)
-    mr[:, 1] = rm_px[:, 1]  # estimator R channel dropped: glTF ignores it
-    mr[:, 2] = 0.0 if dielectric else rm_px[:, 2]
-    mr[:, 3] = 1.0
-    mr_img = new_image("prop_mr", srgb=False, fill=(0, 0, 0))
-    mr_img.pixels.foreach_set(mr.ravel())
+
+    # Detail-normal source: the estimator's bump head (prop_pbr.py) still
+    # gets saved and recorded (pbr_meta above), but it comes back near-flat
+    # on this prop, so the detail normal is a high-pass of the blended
+    # albedo atlas instead -- see DETAIL_NORMAL_WAVELENGTH_M's comment.
+    pos2d = pos.reshape(TEXTURE_SIZE, TEXTURE_SIZE, 3)
+    island2d = island.reshape(TEXTURE_SIZE, TEXTURE_SIZE)
+    luma = (base_px[:, :3] @ np.array([0.2126, 0.7152, 0.0722])).reshape(
+        TEXTURE_SIZE, TEXTURE_SIZE)
+    # padded past the island edge (same rationale/constant as pad_edges'
+    # other use above: a Sobel/blur taken across the chart boundary would
+    # otherwise spike on the jump to blend_views' off-island fill)
+    luma = pad_edges(luma[:, :, None].copy(), island2d, MV_EDGE_PAD_PX)[:, :, 0]
+
+    step_u, step_v = texel_world_steps(pos2d)
+    texel_m = float(np.median(np.concatenate(
+        [step_u[island2d], step_v[island2d]]))) if island2d.any() else 1.0
+    sigma_px = max(DETAIL_NORMAL_WAVELENGTH_M / max(texel_m, 1e-6),
+                   DETAIL_NORMAL_MIN_SIGMA_TEXELS)
+    high_pass = luma - cv2.GaussianBlur(luma, (0, 0), sigma_px)
+    std = float(high_pass[island2d].std()) if island2d.any() else 1.0
+    height = high_pass / max(std, 1e-6) * DETAIL_NORMAL_AMPLITUDE_M
+
+    detail = {"height": height, "pos": pos2d, "island": island2d}
 
     extras = {
         "strategy": "multiview_controlnet_depth",
@@ -825,11 +917,8 @@ def pbr_multiview(clean, hires, atlas, subject, seed, work_dir, dielectric=False
         "depth_dilate_px": MV_DEPTH_DILATE_PX,
         "blend_coverage": round(coverage, 4),
         "hole_texels": int((island & ~covered).sum()),
-        "dielectric": dielectric,
-        "metal_fraction": round(float((rm_px[island, 2] > 0.5).mean())
-                                if island.any() else 0.0, 4),
     }
-    return base_img, mr_img, extras
+    return base_img, extras, detail
 
 
 # ---------------------------------------------------------------------------
@@ -845,12 +934,10 @@ def main():
     parser.add_argument("--subject", help="Prompt substituted into the multiview workflow's {subject}")
     parser.add_argument("--seed", type=int, help="Base seed for the multiview passes")
     parser.add_argument("--metallic", type=float, default=DEFAULT_METALLIC,
-                        help="Declared metallic constant, projection strategy only "
-                             "(default 0: stone/wood/cloth/skin); multiview estimates "
-                             "per-texel MR instead")
+                        help="Declared metallic constant, both strategies "
+                             "(default 0: stone/wood/cloth/skin)")
     parser.add_argument("--roughness", type=float, default=DEFAULT_ROUGHNESS,
-                        help="Declared roughness constant, projection strategy only "
-                             "(default 0.8)")
+                        help="Declared roughness constant, both strategies (default 0.8)")
     parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
                         help="Multiview camera azimuths (default 0,90,180,270); "
                              "use oblique sides, e.g. 0,60,180,300, for planar props")
@@ -861,17 +948,11 @@ def main():
                              "768x768 regardless (prop_pbr.py downscales/upscales around it) "
                              "-- this only sharpens the source imagery blended into the atlas.")
     parser.add_argument("--texture-size", type=int, default=None,
-                        help="Atlas bake resolution for basecolor/normal/MR (default 1024, "
+                        help="Atlas bake resolution for basecolor/normal (default 1024, "
                              "TEXTURE_SIZE). A value above the resolution prop_cleanup.py's "
                              "xatlas packed the atlas for is safe -- island gutters only grow, "
                              "never shrink -- so re-running cleanup is not required to raise "
                              "this.")
-    parser.add_argument("--dielectric", action="store_true",
-                        help="Multiview strategy only: zero the estimated metallic "
-                             "channel post-blend. Explicit opt-in per run for prop "
-                             "classes declared non-metal (stone/wood/foliage) -- the "
-                             "estimator has no material-class prior and can read "
-                             "specular highlights as stray metal.")
     args = parser.parse_args(argv)
 
     if args.azimuths is not None:
@@ -902,16 +983,16 @@ def main():
         fail("clean mesh carries no UV atlas — re-run prop_cleanup")
     atlas = me.uv_layers[0].name
 
-    # ---- basecolor (+ per-texel MR on the multiview path), per strategy ----
-    mr_img = None
+    # ---- basecolor, per strategy ----
+    detail = None
     if args.strategy == "projection":
         base_img, extras = basecolor_projection(clean, atlas, args.concept_png)
     else:
         if not args.subject or args.seed is None:
             fail("--strategy multiview requires --subject and --seed")
         work_dir = Path(args.textured_glb).resolve().parent / "multiview"
-        base_img, mr_img, extras = pbr_multiview(clean, hires, atlas, args.subject,
-                                                 args.seed, work_dir, args.dielectric)
+        base_img, extras, detail = pbr_multiview(clean, hires, atlas, args.subject,
+                                                  args.seed, work_dir)
     t_base = time.time()
 
     # ---- normal: real high-to-low bake from the hires mesh ----
@@ -925,16 +1006,47 @@ def main():
                         use_selected_to_active=True, cage_extrusion=0.01,
                         max_ray_distance=0.03, margin=8, use_clear=True,
                         uv_layer=atlas)
+    # ---- detail: composite the high-pass detail normal (built above from
+    #      the blended albedo atlas) over the geometric bake (UDN/whiteout --
+    #      the geometric bake keeps its low frequencies, the detail normal
+    #      supplies the highs); multiview only, since projection has no
+    #      blended atlas of its own to derive detail from ----
+    if detail is not None:
+        base_n = img_array(normal_img)[:, :, :3].astype(np.float64) * 2.0 - 1.0
+        detail_n = detail_normal_from_height(detail["height"], detail["pos"])
+        composite = whiteout_blend(base_n, detail_n)
+        composite[~detail["island"]] = base_n[~detail["island"]]
+        rgba = np.empty((TEXTURE_SIZE, TEXTURE_SIZE, 4), dtype=np.float32)
+        rgba[:, :, :3] = (composite * 0.5 + 0.5).astype(np.float32)
+        rgba[:, :, 3] = 1.0
+        normal_img.pixels.foreach_set(rgba.ravel())
     t_normal = time.time()
+
+    # ---- occlusion: Cycles AO bake, same selected-to-active rig as the
+    #      normal bake above, so crevices the hires cage actually forms
+    #      (drum joints, capital undercuts) darken ----
+    world = bpy.data.worlds.new("bake_world")
+    world.light_settings.distance = AO_DISTANCE_M
+    scene.world = world
+    ao_img = new_image("prop_ao", srgb=False, fill=(1.0, 1.0, 1.0))
+    tree = bake_material(clean)
+    n_bake = tree.nodes.new("ShaderNodeTexImage")
+    n_bake.image = ao_img
+    tree.nodes.active = n_bake
+    select_only([clean, hires], clean)
+    scene.cycles.samples = AO_SAMPLES
+    bpy.ops.object.bake(type="AO", use_selected_to_active=True, cage_extrusion=0.01,
+                        max_ray_distance=0.03, margin=8, use_clear=True,
+                        uv_layer=atlas)
+    scene.cycles.samples = 1
+    t_ao = time.time()
 
     # ---- final material + export (hires dropped, images saved so the
     #      glTF exporter embeds them) ----
-    mr_stats = ({} if mr_img is not None
-                else {"metallic": args.metallic, "roughness": args.roughness})
+    mr_stats = {"metallic": args.metallic, "roughness": args.roughness}
     tmpdir = tempfile.TemporaryDirectory()
-    images_to_save = [(base_img, "base.png"), (normal_img, "normal.png")]
-    if mr_img is not None:
-        images_to_save.append((mr_img, "mr.png"))
+    images_to_save = [(base_img, "base.png"), (normal_img, "normal.png"),
+                      (ao_img, "occlusion.png")]
     for img, name in images_to_save:
         img.filepath_raw = str(Path(tmpdir.name) / name)
         img.file_format = "PNG"
@@ -947,27 +1059,24 @@ def main():
     n_base = tree.nodes.new("ShaderNodeTexImage")
     n_base.image = base_img
     tree.links.new(n_base.outputs["Color"], bsdf.inputs["Base Color"])
-    if mr_img is not None:
-        n_mr = tree.nodes.new("ShaderNodeTexImage")
-        n_mr.image = mr_img
-        n_sep = tree.nodes.new("ShaderNodeSeparateColor")
-        tree.links.new(n_mr.outputs["Color"], n_sep.inputs["Color"])
-        tree.links.new(n_sep.outputs["Green"], bsdf.inputs["Roughness"])
-        tree.links.new(n_sep.outputs["Blue"], bsdf.inputs["Metallic"])
-        # metallicFactor/roughnessFactor multiply the packed texture in the
-        # glTF spec, so both must be 1.0 for the texture's values to carry
-        # through to the exporter unscaled.
-        bsdf.inputs["Metallic"].default_value = 1.0
-        bsdf.inputs["Roughness"].default_value = 1.0
-    else:
-        # MR is uniform, so it rides the glTF scalar factors instead of a map.
-        bsdf.inputs["Metallic"].default_value = args.metallic
-        bsdf.inputs["Roughness"].default_value = args.roughness
+    # MR is uniform, so it rides the glTF scalar factors instead of a map.
+    bsdf.inputs["Metallic"].default_value = args.metallic
+    bsdf.inputs["Roughness"].default_value = args.roughness
     n_nrm = tree.nodes.new("ShaderNodeTexImage")
     n_nrm.image = normal_img
     n_nmap = tree.nodes.new("ShaderNodeNormalMap")
     tree.links.new(n_nrm.outputs["Color"], n_nmap.inputs["Color"])
     tree.links.new(n_nmap.outputs["Normal"], bsdf.inputs["Normal"])
+    # occlusionTexture has no Principled BSDF input -- the exporter instead
+    # looks for a node group named "glTF Material Output" (or the older
+    # "glTF Settings") with an "Occlusion" socket fed from the AO image.
+    n_ao = tree.nodes.new("ShaderNodeTexImage")
+    n_ao.image = ao_img
+    settings_tree = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+    settings_tree.interface.new_socket("Occlusion", socket_type="NodeSocketFloat")
+    n_settings = tree.nodes.new("ShaderNodeGroup")
+    n_settings.node_tree = settings_tree
+    tree.links.new(n_ao.outputs["Color"], n_settings.inputs["Occlusion"])
     me.materials.clear()
     me.materials.append(mat)
 
@@ -984,6 +1093,8 @@ def main():
         **mr_stats,
         "base_bake_s": round(t_base - t0, 1),
         "normal_bake_s": round(t_normal - t_base, 1),
+        "ao_bake_s": round(t_ao - t_normal, 1),
+        "ao_samples": AO_SAMPLES,
         "textured_glb": args.textured_glb,
     }
     print(json.dumps(stats))
