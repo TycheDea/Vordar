@@ -62,6 +62,10 @@ pub struct MaterialData {
     pub metallic_roughness_image: Option<TextureSource>, // linear (g=rough, b=metal)
     pub emissive_image:           Option<TextureSource>, // sRGB
     pub occlusion_image:          Option<TextureSource>, // linear (r)
+    /// glTF material extras `{"vordar_detail": true}` — opts this material
+    /// into the world-space triplanar detail overlay (mesh_shader.wgsl).
+    /// False for every material that doesn't carry the marker.
+    pub detail: bool,
 }
 
 impl Default for MaterialData {
@@ -78,6 +82,7 @@ impl Default for MaterialData {
             metallic_roughness_image: None,
             emissive_image:           None,
             occlusion_image:          None,
+            detail:                   false,
         }
     }
 }
@@ -302,8 +307,17 @@ fn read_material(
         }
     };
 
+    // glTF material extras `{"vordar_detail": true}` (set_material_extras.mjs)
+    // — a per-material fact, not a per-instance one, so it belongs here
+    // rather than zones.ron (see the plan's opt-in design).
+    let detail = mat.extras().as_ref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw.get()).ok())
+        .and_then(|v| v.get("vordar_detail").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false);
+
     let pbr = mat.pbr_metallic_roughness();
     MaterialData {
+        detail,
         base_color_factor: pbr.base_color_factor(),
         metallic_factor:   pbr.metallic_factor(),
         roughness_factor:  pbr.roughness_factor(),

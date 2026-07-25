@@ -54,7 +54,9 @@ const SKINNED_AABB_INFLATE: f32 = 2.0;
 
 /// One material texture slot: the image (sRGB or linear, mipped) when the
 /// asset has one, else a 1×1 neutral default so the bind group is complete.
-fn slot_texture(
+/// Also the detail-material loader's seam (`facade::set_detail_material`,
+/// `OffscreenRenderer::set_detail_material`) — same rule, different neutral.
+pub(crate) fn slot_texture(
     device:  &Device,
     queue:   &Queue,
     mipgen:  &MipGenerator,
@@ -67,7 +69,7 @@ fn slot_texture(
             device, queue, mipgen, img.width, img.height, &img.pixels, srgb,
         ),
         Some(TextureSource::Compressed(img)) => texture::create_bc_texture(device, queue, img),
-        None => texture::create_rgba_texture(device, queue, 1, 1, &neutral, false),
+        None => texture::create_rgba_texture(device, queue, 1, 1, &neutral, srgb),
     }
 }
 
@@ -150,7 +152,7 @@ pub(crate) fn upload_mesh(
                 m.emissive_factor[0] * m.emissive_strength,
                 m.emissive_factor[1] * m.emissive_strength,
                 m.emissive_factor[2] * m.emissive_strength,
-                0.0,
+                if m.detail { 1.0 } else { 0.0 },
             ],
             mr: [m.metallic_factor, m.roughness_factor, cutoff, blend_w],
         };

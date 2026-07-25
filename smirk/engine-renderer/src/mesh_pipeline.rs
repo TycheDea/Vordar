@@ -6,11 +6,12 @@
 use std::mem::size_of;
 use wgpu::VertexFormat::{Float32x2, Float32x3, Float32x4};
 use wgpu::{
-    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
-    Device, RenderPipeline, SamplerBindingType, ShaderStages, TextureFormat,
-    TextureSampleType, TextureViewDimension, VertexAttribute, VertexBufferLayout,
-    VertexStepMode,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
+    BindGroupLayoutEntry, BindingResource, BindingType, Device, RenderPipeline,
+    SamplerBindingType, ShaderStages, TextureFormat, TextureSampleType, TextureViewDimension,
+    VertexAttribute, VertexBufferLayout, VertexStepMode,
 };
+use crate::texture::ColorTexture;
 
 /// GPU vertex for static glTF meshes: the primitive-pass `Vertex` plus a
 /// vec4 tangent (xyz + handedness w, glTF convention) for normal mapping.
@@ -38,7 +39,7 @@ pub(crate) const MESH_INSTANCE_SIZE: usize = size_of::<MeshInstance>(); // 80
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct MaterialUniform {
     pub(crate) base_color: [f32; 4], // baseColorFactor
-    pub(crate) emissive:   [f32; 4], // emissiveFactor × KHR emissive_strength; w unused
+    pub(crate) emissive:   [f32; 4], // emissiveFactor × KHR emissive_strength; w = 1.0 opts into the world-space detail overlay (mesh_shader.wgsl)
     pub(crate) mr:         [f32; 4], // x = metallicFactor, y = roughnessFactor, z = mask cutoff (0 = opaque), w = 1 for BLEND
 }
 
@@ -88,12 +89,56 @@ pub(crate) fn create_material_bind_group_layout(device: &Device) -> BindGroupLay
     })
 }
 
+/// Bind group layout for the world-space detail overlay (group 3 of the
+/// static mesh pipeline only — the skinned pipeline is already at
+/// `wgpu::Limits::default().max_bind_groups` with no room for a 4th group,
+/// and characters don't opt into this layer). Two shared maps (detail
+/// albedo, detail normal) plus one sampler, bound once per pass — not per
+/// primitive, unlike the material BGL — since every opted-in material reads
+/// the same global tile.
+pub(crate) fn create_detail_bind_group_layout(device: &Device) -> BindGroupLayout {
+    device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label:   Some("Detail BGL"),
+        entries: &[
+            texture_entry(0), // detail albedo (sRGB, BC7)
+            texture_entry(1), // detail normal (linear, tangent-space, z reconstructed from xy — BC5)
+            BindGroupLayoutEntry {
+                binding:    2,
+                visibility: ShaderStages::FRAGMENT,
+                ty:         BindingType::Sampler(SamplerBindingType::Filtering),
+                count:      None,
+            },
+        ],
+    })
+}
+
+/// Bind group for `create_detail_bind_group_layout`'s layout — the shared
+/// sampler comes from `albedo` (both slots' samplers are built by
+/// `texture::make_sampler`, so either would do).
+pub(crate) fn create_detail_bind_group(
+    device: &Device,
+    layout: &BindGroupLayout,
+    albedo: &ColorTexture,
+    normal: &ColorTexture,
+) -> BindGroup {
+    device.create_bind_group(&BindGroupDescriptor {
+        label:   Some("Detail Bind Group"),
+        layout,
+        entries: &[
+            BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&albedo.view) },
+            BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&normal.view) },
+            BindGroupEntry { binding: 2, resource: BindingResource::Sampler(&albedo.sampler) },
+        ],
+    })
+}
+
 pub(crate) fn create_mesh_pipeline(
     device:                     &Device,
     surface_format:             TextureFormat,
     camera_bind_group_layout:   &BindGroupLayout,
     material_bind_group_layout: &BindGroupLayout,
     env_bind_group_layout:      &BindGroupLayout,
+    detail_bind_group_layout:   &BindGroupLayout,
     transparent:                bool,
 ) -> RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -107,6 +152,7 @@ pub(crate) fn create_mesh_pipeline(
             Some(camera_bind_group_layout),
             Some(material_bind_group_layout),
             Some(env_bind_group_layout),
+            Some(detail_bind_group_layout),
         ],
         immediate_size: 0,
     });

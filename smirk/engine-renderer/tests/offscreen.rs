@@ -50,6 +50,18 @@ fn channel_mean(pixels: &[u8], channel: usize) -> f64 {
     sum as f64 / (pixels.len() / 4) as f64
 }
 
+/// Population variance of one channel over the whole image — a debug-channel
+/// readback is a direct value passthrough (no tonemap/gamma, see
+/// `debug_channel_roughness_reads_back_as_exact_byte`), so this measures real
+/// per-pixel spread in that channel rather than an encoding artifact.
+fn channel_variance(pixels: &[u8], channel: usize) -> f64 {
+    let mean = channel_mean(pixels, channel);
+    let sum_sq: f64 = pixels.iter().skip(channel).step_by(4)
+        .map(|&v| { let d = v as f64 - mean; d * d })
+        .sum();
+    sum_sq / (pixels.len() / 4) as f64
+}
+
 /// Linear-light equivalent of a byte, on the same 0..255 scale, undoing the
 /// sRGB OETF (IEC 61966-2-1) that the offscreen target now bakes in so it
 /// matches the live swapchain's hardware encode. Assertions about physical
@@ -1357,4 +1369,206 @@ fn debug_channel_roughness_reads_back_as_exact_byte() {
     let center = ((H / 2 * W + W / 2) * 4) as usize;
     let g = pixels[center + 1] as i32;
     assert!((g - 153).abs() <= 2, "center G byte must be 153 ± 2, got {g}");
+}
+
+// ── World-space detail overlay ──────────────────────────────────────────────
+
+/// A 2×2 tangent-space normal map checkerboarding between two mirror-image
+/// tilts — spatially varying (unlike a 1×1 fixture) so triplanar-projecting
+/// it across a surface produces real per-pixel normal variance. Reused as the
+/// shared detail tile's normal map below.
+fn detail_normal_tile() -> ImageData {
+    checker_normal_texture()
+}
+
+/// A 2×2 albedo tile whose per-texel luminance alternates around the
+/// overlay's 0.5 identity — the detail tile's color map. Spatially varying
+/// for the same reason as `detail_normal_tile`.
+fn detail_albedo_tile() -> ImageData {
+    let a: [u8; 4] = [96, 96, 96, 255];
+    let b: [u8; 4] = [160, 160, 160, 255];
+    let mut pixels = Vec::with_capacity(16);
+    for row in [[a, b], [b, a]] {
+        for px in row {
+            pixels.extend_from_slice(&px);
+        }
+    }
+    ImageData { width: 2, height: 2, pixels }
+}
+
+/// The shared detail-overlay material the tests below bind at group 3 — a
+/// synthetic non-flat tile standing in for the real CC0 photoscan (T1).
+fn detail_tile_material() -> MaterialData {
+    MaterialData {
+        base_color_image: Some(TextureSource::Rgba8(detail_albedo_tile())),
+        normal_image:     Some(TextureSource::Rgba8(detail_normal_tile())),
+        ..Default::default()
+    }
+}
+
+/// A flat, unmapped subject material (no base normal map) whose only source
+/// of normal/roughness variation, if any, is the world-space detail overlay —
+/// `detail` selects whether it opts in.
+fn stone_quad_material(detail: bool) -> MaterialData {
+    MaterialData {
+        base_color_factor: [0.5, 0.5, 0.5, 1.0],
+        roughness_factor:  0.5,
+        metallic_factor:   0.0,
+        detail,
+        ..Default::default()
+    }
+}
+
+/// `detail = false` must render byte-identically whether or not a real
+/// (non-flat) tile is bound at group 3 — the uniform-gated branch in
+/// `mesh_shader.wgsl` must never execute for opted-out content. Proves the
+/// gate and the 1×1 neutral default together: an asset that never opts in
+/// must render exactly as it did before this layer existed, regardless of
+/// what the engine has bound for other, opted-in props.
+#[test]
+fn detail_layer_is_inert_without_opt_in() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_camera_lookat(Vec3::new(1.0, 2.0, 0.0), Vec3::ZERO);
+    let scene = || quad_with_material(40.0, stone_quad_material(false));
+
+    let target_neutral = r.target(W, H);
+    r.render_mesh(&target_neutral, scene(), wgpu::Color::BLACK);
+    let neutral_bound = r.read(&target_neutral);
+
+    r.set_detail_material(detail_tile_material());
+    let target_real = r.target(W, H);
+    r.render_mesh(&target_real, scene(), wgpu::Color::BLACK);
+    let real_tile_bound = r.read(&target_real);
+
+    assert_eq!(
+        neutral_bound, real_tile_bound,
+        "detail=false must ignore whatever tile is bound at group 3"
+    );
+}
+
+/// Opting in (`detail = true`) with a spatially-varying tile bound close up
+/// must perturb both the shaded normal and roughness across the surface — a
+/// flat quad with no base normal map has ~zero variance in either debug
+/// channel until the world-space overlay adds it.
+#[test]
+fn detail_layer_perturbs_normal_and_roughness_when_opted_in() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_camera_lookat(Vec3::new(1.0, 2.0, 0.0), Vec3::ZERO);
+    r.set_detail_material(detail_tile_material());
+
+    let mut render = |channel: DebugChannel, detail: bool| -> Vec<u8> {
+        r.set_debug_channel(channel);
+        let target = r.target(W, H);
+        r.render_mesh(&target, quad_with_material(40.0, stone_quad_material(detail)), wgpu::Color::BLACK);
+        r.read(&target)
+    };
+    let variance3 = |p: &[u8]| channel_variance(p, 0) + channel_variance(p, 1) + channel_variance(p, 2);
+
+    let var_normal_off = variance3(&render(DebugChannel::Normal, false));
+    let var_normal_on  = variance3(&render(DebugChannel::Normal, true));
+    let var_rough_off  = channel_variance(&render(DebugChannel::Roughness, false), 0);
+    let var_rough_on   = channel_variance(&render(DebugChannel::Roughness, true), 0);
+
+    assert!(var_normal_off < 0.5, "no base normal map, detail off: normal must be ~uniform, got variance {var_normal_off:.4}");
+    assert!(
+        var_normal_on > var_normal_off + 1.0,
+        "opted-in detail must add normal variance: off={var_normal_off:.4} on={var_normal_on:.4}"
+    );
+    assert!(var_rough_off < 0.5, "constant roughness factor, detail off: must be ~uniform, got variance {var_rough_off:.4}");
+    assert!(
+        var_rough_on > var_rough_off + 1.0,
+        "opted-in detail must add roughness variance: off={var_rough_off:.4} on={var_rough_on:.4}"
+    );
+}
+
+/// The mandatory distance fade (`DETAIL_NORMAL_FADE_NEAR`/`_FAR` in
+/// `snippets/detail_triplanar.wgsl`): the same opted-in quad shows real
+/// normal variance close up (2 m, inside the fade-in band) and only a small
+/// fraction of it far away (20 m, well beyond the 10 m cutoff) — the
+/// aliasing requirement made machine-checkable, and a probe that fails if the
+/// fade regresses to "always on" or "always off".
+#[test]
+fn detail_normal_fades_out_with_distance() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_detail_material(detail_tile_material());
+    r.set_debug_channel(DebugChannel::Normal);
+
+    let mut render_at = |eye_height: f32| -> Vec<u8> {
+        r.set_camera_lookat(Vec3::new(eye_height * 0.5, eye_height, 0.0), Vec3::ZERO);
+        let target = r.target(W, H);
+        r.render_mesh(&target, quad_with_material(40.0, stone_quad_material(true)), wgpu::Color::BLACK);
+        r.read(&target)
+    };
+    let variance3 = |p: &[u8]| channel_variance(p, 0) + channel_variance(p, 1) + channel_variance(p, 2);
+
+    let var_close = variance3(&render_at(2.0));
+    let var_far   = variance3(&render_at(20.0));
+
+    assert!(var_close > 1.0, "close range (2 m) must show real detail variance, got {var_close:.4}");
+    assert!(
+        var_far < var_close * 0.1,
+        "far range (20 m, beyond the 10 m fade cutoff) must be a small fraction of close: close={var_close:.4} far={var_far:.4}"
+    );
+}
+
+/// A detail tile whose albedo is exactly the DC-neutral byte value
+/// `content_lint`'s `detail_tile_is_dc_neutral` enforces on the real asset —
+/// unlike `detail_albedo_tile`, which is spatially varying for the variance
+/// tests above, this is flat so it isolates the overlay's identity point.
+fn detail_dc_neutral_tile() -> MaterialData {
+    MaterialData {
+        base_color_image: Some(TextureSource::Rgba8(ImageData {
+            width:  1,
+            height: 1,
+            pixels: vec![128, 128, 128, 255],
+        })),
+        ..Default::default()
+    }
+}
+
+/// The overlay's whole justification is "no visible pixel change on a
+/// DC-neutral tile". A uniform darkening (or brightening) preserves variance,
+/// which is why every other test in this file — measuring variance — cannot
+/// see it: `DebugChannel::Albedo` reads the shaded albedo directly (no
+/// lighting/tonemap confound), decoded to linear light before comparing, so a
+/// multiplicative bias shows up as a mean shift with nothing else to explain
+/// it. `DebugChannel::Roughness` is a direct byte passthrough (see
+/// `debug_channel_roughness_reads_back_as_exact_byte`), so the same identity
+/// check applies without a linear decode: `ratio == 1` on a DC-neutral tile
+/// must leave `roughness_delta` at exactly 0.
+#[test]
+fn detail_layer_albedo_and_roughness_are_near_identity_on_dc_neutral_tile() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_camera_lookat(Vec3::new(1.0, 2.0, 0.0), Vec3::ZERO);
+
+    r.set_debug_channel(DebugChannel::Albedo);
+    let target_off = r.target(W, H);
+    r.render_mesh(&target_off, quad_with_material(40.0, stone_quad_material(false)), wgpu::Color::BLACK);
+    let mean_off = channel_mean_linear(&r.read(&target_off), 0);
+
+    r.set_detail_material(detail_dc_neutral_tile());
+    let target_on = r.target(W, H);
+    r.render_mesh(&target_on, quad_with_material(40.0, stone_quad_material(true)), wgpu::Color::BLACK);
+    let mean_on = channel_mean_linear(&r.read(&target_on), 0);
+
+    let rel_diff = (mean_on - mean_off).abs() / mean_off;
+    assert!(
+        rel_diff < 0.05,
+        "DC-neutral detail tile must not change mean brightness: off={mean_off:.2} on={mean_on:.2} rel_diff={rel_diff:.4}"
+    );
+
+    r.set_debug_channel(DebugChannel::Roughness);
+    let target_rough_off = r.target(W, H);
+    r.render_mesh(&target_rough_off, quad_with_material(40.0, stone_quad_material(false)), wgpu::Color::BLACK);
+    let rough_off = channel_mean(&r.read(&target_rough_off), 0);
+
+    let target_rough_on = r.target(W, H);
+    r.render_mesh(&target_rough_on, quad_with_material(40.0, stone_quad_material(true)), wgpu::Color::BLACK);
+    let rough_on = channel_mean(&r.read(&target_rough_on), 0);
+
+    let rough_diff = (rough_on - rough_off).abs();
+    assert!(
+        rough_diff <= 1.0,
+        "DC-neutral detail tile must not change roughness: off={rough_off:.2} on={rough_on:.2} diff={rough_diff:.4}"
+    );
 }

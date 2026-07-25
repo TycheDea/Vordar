@@ -34,6 +34,7 @@ side — which models are allowed to generate anything that ships).
 | Cypress tree prop — `content/models/props/cypress/` | Project-generated | SDXL concept (prompt "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background", seed 21) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture (T1 re-run, `--subject` adjusted toward the locked dark-dusty-green register) + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/cypress/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
 | Olive stump prop — `content/models/props/olive_stump/` | Project-generated | SDXL concept (prompt "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark", seed 0) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/olive_stump/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
 | Crucero (wayside cross) prop — `content/models/props/crucero/` | Project-generated | Z-Image concept (prompt "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings", seed 21, `zimage_seed0` A/B lineup) + Hi3DGen geometry + multiview ControlNet-depth Z-Image retexture (oblique azimuths 0/60/180/300, `--dielectric`) + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/crucero/generation_manifest.json` | Apache 2.0 (Z-Image Turbo + Fun ControlNet-Union + Qwen3-4B text encoder) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
+| Limestone micro-detail tile ("Rock060"), 2k — `content/textures/detail/limestone/` | ambientCG (Lennart Demes) | https://ambientcg.com/a/Rock060 | CC0 1.0 | Yes |
 | MPFB2 parametric monk (A4 character fixture) — `content/models/characters/human_gen/` | Project-generated | MPFB2 2.0.17 parametric body (macros: gender 1.0, age 0.6, muscle 0.4, weight 0.35, caucasian) + CC0 `donitz_monk_robe`/`donitz_monk_robe_hood` (suits02 pack) + CC0 `old_caucasian_male` skin + CC0 low-poly brown eyes (MakeHuman system assets pack), rigged onto the canonical Mixamo skeleton (`content/source/characters/mixamo/Character.fbx`) via authored-weight transplant in Blender 5.2 headless (`char_mpfb.py`, run through `gen_character.py --mpfb`); full provenance in `content/models/characters/human_gen/generation_manifest.json` (`mode: "mpfb"` — parametric build, no prompt/seed) | GPLv3 (MPFB2 tool; outputs owner's, no program logic in exports) / CC0 1.0 (bundled MPFB2 assets) — `Cleared` rows in the model ledger; no NC tool anywhere in the path | With the project only |
 
 Notes:
@@ -84,6 +85,28 @@ Notes:
   winner cand_21 (seed 21, `zimage_seed0` concept), oblique multiview
   azimuths 0/60/180/300, `--dielectric` (metal_fraction 0.024), 2.8 m height
   (monument scale, deliberately taller than the 1.744 m player).
+- **Limestone micro-detail tile**: world-space detail layer for the chapel_arch
+  micro-relief phase (`tasks/aa-visual-upgrade-plan.md`, T1) — not a ground set,
+  deliberately outside `content/textures/ground/` so `content_lint`'s ground
+  loops don't sweep it up. Chosen over the plan's other two candidates
+  (Rock063: dominated by moss/lichen at full view despite "aged/cracked/eroded"
+  tags — wrong material; Rock058: reads as dark slate/basalt, wrong hue) after
+  a 1:1 crop comparison of all three; Rock060 is a clean warm-grey cracked rock
+  face with no vegetation and genuine photographic grain. Downloaded as
+  `Rock060_2K-PNG.zip` from https://ambientcg.com/get?file=Rock060_2K-PNG.zip
+  (sha256 `06885eb6ca90720f435406faa55b7d65fd18e8e37a86f09348645edcaec2d758`);
+  archive contains both `_NormalGL` and `_NormalDX` so no green-channel flip
+  was needed. Source PNGs used (sha256): `Rock060_2K-PNG_Color.png`
+  `2b39fb969341a594978584096f2d0125307ea3343012390ecc54fe68140770cb`,
+  `Rock060_2K-PNG_NormalGL.png`
+  `2addae1ed1a48900babfb8fc70bbbc1bff4ca510a1bf54b63ba46d8174d39fed`,
+  `Rock060_2K-PNG_Roughness.png`
+  `252fb60242cde809d823fbf4d95559579e64e61d746fa4d02ac482403086449c`.
+  DC-neutralised via `scripts/asset-pipeline/prep_detail_tile.py` (per-channel
+  albedo high-pass to mean luminance 0.5; normal shipped at full native
+  amplitude — the raw scan's mean X/Y already sit within ±3 of 128 (no
+  systematic tilt), the only real prerequisite, so no correction is applied)
+  before baking with `bake_textures.mjs ground` unchanged.
 - **MPFB2 parametric monk**: A4 fixture only — proven in place against
   `content/races/human.ron` (lint pass + review renders) then held under
   `content/models/characters/human_gen/`, not wired into any race; the RON still

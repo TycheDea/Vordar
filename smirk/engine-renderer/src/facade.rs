@@ -6,6 +6,7 @@ use crate::camera::ProjectionMode;
 use crate::ibl;
 use crate::instance::{InstancePool, InstanceSlot, ShapeGroupSlots};
 use crate::mesh::{self, MeshStore};
+use crate::mesh_pipeline;
 use crate::state::RendererState;
 use crate::texture;
 use engine_core::traits::Resources;
@@ -192,6 +193,28 @@ pub fn request_procedural_mesh(
     };
     store.request_job(key, job);
     true
+}
+
+/// Swaps in the shared tile for the world-space triplanar detail overlay
+/// (mesh pipeline group 3) — one global material every opted-in prop samples,
+/// not a per-primitive bind group. Takes `MaterialData`, not a directory: the
+/// content-convention loader already exists and is tested
+/// (`client::ground::load_ground_material`), so this stays ignorant of it and
+/// reuses `mesh::slot_texture` — the same 1×1-neutral-or-real-texture rule
+/// every material texture slot already follows. A no-op headless (no
+/// renderer to swap into).
+pub fn set_detail_material(material: mesh::MaterialData, resources: &mut Resources) {
+    let Some(state) = resources.get_mut::<RendererState>() else { return };
+    let albedo = mesh::slot_texture(
+        &state.device, &state.queue, &state.mipgen,
+        &material.base_color_image, true, [128, 128, 128, 255],
+    );
+    let normal = mesh::slot_texture(
+        &state.device, &state.queue, &state.mipgen,
+        &material.normal_image, false, [128, 128, 255, 255],
+    );
+    state.detail_bind_group = mesh_pipeline::create_detail_bind_group(&state.device, &state.detail_bgl, &albedo, &normal);
+    state.detail_textures = vec![albedo, normal];
 }
 
 /// Distance fog for the current zone: linear-space color, exponential

@@ -1,0 +1,23 @@
+{
+  "source": "limestone",
+  "images": [
+    {
+      "slot": "diff",
+      "file": "diff_2048.dds",
+      "source": "diff_2048.png",
+      "sha256": "ff797d9d453b71bc348e63ec81affd8c28ac744e0f4e33ccd798b4ad67a4a016"
+    },
+    {
+      "slot": "normal",
+      "file": "nor_gl_2048.dds",
+      "source": "nor_gl_2048.png",
+      "sha256": "14b27fadcdcd5954eb8fa2306c51f5e4f5ca7c54a9334fba640be8b5d6eadb27"
+    },
+    {
+      "slot": "mr",
+      "file": "rough_2048_mr.dds",
+      "source": "rough_2048.png",
+      "sha256": "5bc8616e27627b98c296c22c74dce6fada64915014ba52e7027d13648dd56b72"
+    }
+  ]
+}

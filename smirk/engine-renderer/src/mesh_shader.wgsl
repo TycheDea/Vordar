@@ -19,7 +19,7 @@
 
 struct MaterialUniform {
     base_color: vec4<f32>,
-    emissive:   vec4<f32>, // rgb premultiplied by KHR emissive_strength
+    emissive:   vec4<f32>, // rgb premultiplied by KHR emissive_strength; w > 0.5 opts into the world-space detail overlay
     mr:         vec4<f32>, // x=metallic factor, y=roughness factor
 }
 @group(1) @binding(6)
@@ -80,14 +80,16 @@ fn vtx_main(
 
 //#include "snippets/debug_channel.wgsl"
 
+//#include "snippets/detail_triplanar.wgsl"
+
 @fragment
 fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let albedo_s = textureSample(t_albedo, s_mat, in.uv);
-    let albedo   = albedo_s.rgb * material.base_color.rgb * in.tint.rgb;
+    var albedo   = albedo_s.rgb * material.base_color.rgb * in.tint.rgb;
 
     let mr        = textureSample(t_mr, s_mat, in.uv);
     let metallic  = mr.b * material.mr.x;
-    let roughness = mr.g * material.mr.y;
+    var roughness = mr.g * material.mr.y;
     let ao        = textureSample(t_ao, s_mat, in.uv).r;
     let emissive  = textureSample(t_emissive, s_mat, in.uv).rgb * material.emissive.rgb;
 
@@ -112,7 +114,31 @@ fn frag_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Normal mapping — tangent w = 0 means "no tangent basis" (degenerate UVs).
     let Nv = normalize(in.normal);
     var N  = Nv;
-    if (abs(in.tangent.w) > 0.5) {
+    if material.emissive.w > 0.5 {
+        // World-space micro-detail overlay: the base bump is UV-tangent-space
+        // and the detail bump is world-space triplanar — different frames, so
+        // Mikkelsen surface gradients (JCGT 2020) compose them instead of
+        // RNM/whiteout, which has no shared frame to work in. Sampling
+        // hoists above the `in.tangent.w` branch below because that value is
+        // an interpolated vertex output (non-uniform) and WGSL forbids
+        // textureSample under non-uniform control flow; `material.emissive.w`
+        // is a uniform buffer read, so gating the six detail taps on it is
+        // legal and costs non-stone materials nothing.
+        let eye_dist = distance(camera.eye.xyz, in.world_pos);
+        let detail = sample_detail(in.world_pos, Nv, eye_dist);
+        var surf_grad = detail.surf_grad;
+        if (abs(in.tangent.w) > 0.5) {
+            let T  = normalize(in.tangent.xyz - Nv * dot(in.tangent.xyz, Nv));
+            let B  = cross(Nv, T) * in.tangent.w;
+            let nm_xy = textureSample(t_normal, s_mat, in.uv).xy * 2.0 - 1.0;
+            let nm_z  = sqrt(max(1.0 - dot(nm_xy, nm_xy), 0.0));
+            let base_deriv = -nm_xy / max(nm_z, 1e-3);
+            surf_grad += base_deriv.x * T + base_deriv.y * B;
+        }
+        N = normalize(Nv - surf_grad);
+        albedo *= detail.albedo_scale;
+        roughness = saturate(roughness + detail.roughness_delta);
+    } else if (abs(in.tangent.w) > 0.5) {
         let T  = normalize(in.tangent.xyz - Nv * dot(in.tangent.xyz, Nv));
         let B  = cross(Nv, T) * in.tangent.w;
         let nm_xy = textureSample(t_normal, s_mat, in.uv).xy * 2.0 - 1.0;

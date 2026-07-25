@@ -105,6 +105,12 @@ pub(crate) struct RendererState {
     // ── textures ──
     pub(crate) texture_bgl:          wgpu::BindGroupLayout,
     pub(crate) material_bgl:         wgpu::BindGroupLayout,
+    // ── world-space detail overlay (mesh pipeline group 3 only) ──
+    pub(crate) detail_bgl:         wgpu::BindGroupLayout,
+    pub(crate) detail_bind_group:  wgpu::BindGroup,
+    // Kept alive alongside `detail_bind_group`, same idiom as
+    // `GpuPrimitive::_textures` — [albedo, normal].
+    pub(crate) detail_textures:    Vec<ColorTexture>,
     pub(crate) mipgen:               mipgen::MipGenerator,
     pub(crate) texture_store:        Vec<(ColorTexture, wgpu::BindGroup)>,
     pub(crate) active_texture_idx:   usize,
@@ -124,13 +130,15 @@ impl RendererState {
         let (vertex_buffer, index_buffer, texture_bgl, material_bgl, mipgen, default_tex, default_bg) =
             create_geometry_and_texture_resources(&device, &queue);
 
+        let (detail_bgl, detail_bind_group, detail_textures) = create_detail_resources(&device, &queue);
+
         // HDR scene targets + post chain: every scene pipeline
         // renders MSAA into Rgba16Float; the tonemap pass owns the swapchain.
         let (env_bgl, sky_bgl, baker, environment, brdf_view, sky_pipeline, hdr, gpu_timer, bloom, tonemap) =
             create_hdr_and_ibl_resources(&device, &queue, &camera_bgl, format, size);
 
         let (scene_format, render_pipeline, mesh_render_pipeline, mesh_transparent_pipeline) =
-            create_scene_pipelines(&device, &camera_bgl, &texture_bgl, &material_bgl, &env_bgl);
+            create_scene_pipelines(&device, &camera_bgl, &texture_bgl, &material_bgl, &env_bgl, &detail_bgl);
 
         let (joint_bgl, skinned_render_pipeline, skinned_transparent_pipeline) =
             create_skinned_pipeline_resources(&device, scene_format, &camera_bgl, &material_bgl, &env_bgl);
@@ -205,6 +213,9 @@ impl RendererState {
                 current_env_path: None,
                 texture_bgl,
                 material_bgl,
+                detail_bgl,
+                detail_bind_group,
+                detail_textures,
                 mipgen,
                 texture_store,
                 active_texture_idx: 0,
@@ -345,6 +356,23 @@ fn create_geometry_and_texture_resources(
     (vertex_buffer, index_buffer, texture_bgl, material_bgl, mipgen, default_tex, default_bg)
 }
 
+/// Group 3 of the mesh pipeline: the detail BGL and a bind group pointing at
+/// 1×1 neutral defaults — albedo `[128,128,128,255]` **sRGB** (its linear
+/// decode is `DETAIL_ALBEDO_NEUTRAL`, the overlay's identity point), normal
+/// `[128,128,255,255]` linear (zero gradient). `facade::set_detail_material`
+/// swaps in the real tile later; until then every opted-in-looking material
+/// still reads the identity.
+fn create_detail_resources(
+    device: &wgpu::Device,
+    queue:  &wgpu::Queue,
+) -> (wgpu::BindGroupLayout, wgpu::BindGroup, Vec<ColorTexture>) {
+    let detail_bgl = mesh_pipeline::create_detail_bind_group_layout(device);
+    let albedo = texture::create_rgba_texture(device, queue, 1, 1, &[128, 128, 128, 255], true);
+    let normal = texture::create_rgba_texture(device, queue, 1, 1, &[128, 128, 255, 255], false);
+    let detail_bind_group = mesh_pipeline::create_detail_bind_group(device, &detail_bgl, &albedo, &normal);
+    (detail_bgl, detail_bind_group, vec![albedo, normal])
+}
+
 fn create_hdr_and_ibl_resources(
     device:     &wgpu::Device,
     queue:      &wgpu::Queue,
@@ -373,14 +401,15 @@ fn create_scene_pipelines(
     texture_bgl:  &wgpu::BindGroupLayout,
     material_bgl: &wgpu::BindGroupLayout,
     env_bgl:      &wgpu::BindGroupLayout,
+    detail_bgl:   &wgpu::BindGroupLayout,
 ) -> (wgpu::TextureFormat, wgpu::RenderPipeline, wgpu::RenderPipeline, wgpu::RenderPipeline) {
     let scene_format = post::HDR_FORMAT;
     let render_pipeline =
         sdf_pipeline::create_pipeline(device, scene_format, camera_bgl, texture_bgl, env_bgl);
     let mesh_render_pipeline =
-        mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl, false);
+        mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl, detail_bgl, false);
     let mesh_transparent_pipeline =
-        mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl, true);
+        mesh_pipeline::create_mesh_pipeline(device, scene_format, camera_bgl, material_bgl, env_bgl, detail_bgl, true);
     (scene_format, render_pipeline, mesh_render_pipeline, mesh_transparent_pipeline)
 }
 

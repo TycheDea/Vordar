@@ -32,7 +32,7 @@ pub mod texture;
 pub mod ui_layers;
 
 pub use dev_overlay::DevOverlaySystem;
-pub use facade::{alloc_render_slot, alloc_shape_group_slots, camera_eye, camera_movement_axes, camera_yaw, clear_texture, create_checker_texture, free_render_slot, load_texture, register_procedural_mesh, request_procedural_mesh, screen_to_ground, set_camera_target, set_environment, set_exposure, set_fog, set_fog_height, set_light, set_texture, unproject_to_ground, update_camera, zoom_camera, CameraConfig, TextureHandle};
+pub use facade::{alloc_render_slot, alloc_shape_group_slots, camera_eye, camera_movement_axes, camera_yaw, clear_texture, create_checker_texture, free_render_slot, load_texture, register_procedural_mesh, request_procedural_mesh, screen_to_ground, set_camera_target, set_detail_material, set_environment, set_exposure, set_fog, set_fog_height, set_light, set_texture, unproject_to_ground, update_camera, zoom_camera, CameraConfig, TextureHandle};
 pub use instance_sync::RenderSyncSystem;
 pub use light_sync::PointLightSyncSystem;
 pub use menu::{MenuState, MenuSystem};

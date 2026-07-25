@@ -15,6 +15,7 @@ use crate::ibl::{Baker, Environment, EquirectImage};
 use crate::instance::SdfInstance;
 use crate::mesh::{self, MeshData};
 use crate::mesh_pipeline::{self, MeshInstance};
+use crate::texture::ColorTexture;
 use crate::mipgen::MipGenerator;
 use crate::post::{TonemapPass, HDR_FORMAT, SCENE_SAMPLES};
 use crate::sdf_pipeline::{self, INDICES};
@@ -161,6 +162,12 @@ pub struct OffscreenRenderer {
     material_bgl:   wgpu::BindGroupLayout,
     env_bgl:        wgpu::BindGroupLayout,
     sky_bgl:        wgpu::BindGroupLayout,
+    // Mirrors RendererState's group-3 detail overlay: without this field set,
+    // review harnesses would render props with the layer absent — blind to
+    // the feature — rather than matching the live game.
+    detail_bgl:         wgpu::BindGroupLayout,
+    detail_bind_group:  wgpu::BindGroup,
+    detail_textures:    Vec<ColorTexture>,
     sdf_pipeline:   wgpu::RenderPipeline,
     mesh_pipeline:  wgpu::RenderPipeline,
     mesh_transparent_pipeline: wgpu::RenderPipeline,
@@ -255,12 +262,20 @@ impl OffscreenRenderer {
         let environment  = Environment::default_gray(device, &gpu.queue, &baker, &env_bgl, &sky_bgl, &brdf_view);
         let mipgen       = MipGenerator::new(device);
 
+        let detail_bgl = mesh_pipeline::create_detail_bind_group_layout(device);
+        let detail_default_albedo = texture::create_rgba_texture(device, &gpu.queue, 1, 1, &[128, 128, 128, 255], true);
+        let detail_default_normal = texture::create_rgba_texture(device, &gpu.queue, 1, 1, &[128, 128, 255, 255], false);
+        let detail_bind_group = mesh_pipeline::create_detail_bind_group(
+            device, &detail_bgl, &detail_default_albedo, &detail_default_normal,
+        );
+        let detail_textures = vec![detail_default_albedo, detail_default_normal];
+
         let sdf_pipeline =
             sdf_pipeline::create_pipeline(device, HDR_FORMAT, &camera_bgl, &texture_bgl, &env_bgl);
         let mesh_pipeline =
-            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl, false);
+            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl, &detail_bgl, false);
         let mesh_transparent_pipeline =
-            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl, true);
+            mesh_pipeline::create_mesh_pipeline(device, HDR_FORMAT, &camera_bgl, &material_bgl, &env_bgl, &detail_bgl, true);
         let sky_pipeline = sky::create_sky_pipeline(device, &camera_bgl, &sky_bgl);
         let mut tonemap = TonemapPass::new(device, wgpu::TextureFormat::Rgba8Unorm);
         tonemap.set_exposure(&gpu.queue, 1.0);
@@ -302,6 +317,9 @@ impl OffscreenRenderer {
             material_bgl,
             env_bgl,
             sky_bgl,
+            detail_bgl,
+            detail_bind_group,
+            detail_textures,
             sdf_pipeline,
             mesh_pipeline,
             mesh_transparent_pipeline,
@@ -550,6 +568,24 @@ impl OffscreenRenderer {
         self.tonemap.set_bloom_intensity(&self.gpu.queue, intensity);
     }
 
+    /// Swaps in the shared detail-overlay tile (mesh pipeline group 3), the
+    /// offscreen mirror of `facade::set_detail_material` — reuses
+    /// `mesh::slot_texture`, the same rule every material texture slot
+    /// already follows, so this harness stays ignorant of content
+    /// conventions too.
+    pub fn set_detail_material(&mut self, material: mesh::MaterialData) {
+        let albedo = mesh::slot_texture(
+            &self.gpu.device, &self.gpu.queue, &self.mipgen,
+            &material.base_color_image, true, [128, 128, 128, 255],
+        );
+        let normal = mesh::slot_texture(
+            &self.gpu.device, &self.gpu.queue, &self.mipgen,
+            &material.normal_image, false, [128, 128, 255, 255],
+        );
+        self.detail_bind_group = mesh_pipeline::create_detail_bind_group(&self.gpu.device, &self.detail_bgl, &albedo, &normal);
+        self.detail_textures = vec![albedo, normal];
+    }
+
     /// Render SDF instances through the real primitive pipeline, then tonemap
     /// into the target's readable LDR output.
     pub fn render_sdf(&mut self, target: &SceneTarget, instances: &[SdfInstance], clear: wgpu::Color) {
@@ -660,6 +696,7 @@ impl OffscreenRenderer {
                 pass.set_pipeline(&this.mesh_pipeline);
                 pass.set_bind_group(0, &this.camera_bind_group, &[]);
                 pass.set_bind_group(2, &this.environment.bind_group, &[]);
+                pass.set_bind_group(3, &this.detail_bind_group, &[]);
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
                 for &i in &opaque {
                     let prim = &gpu_mesh.primitives[i];
@@ -673,6 +710,7 @@ impl OffscreenRenderer {
                 pass.set_pipeline(&this.mesh_transparent_pipeline);
                 pass.set_bind_group(0, &this.camera_bind_group, &[]);
                 pass.set_bind_group(2, &this.environment.bind_group, &[]);
+                pass.set_bind_group(3, &this.detail_bind_group, &[]);
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
                 for &i in &blend {
                     let prim = &gpu_mesh.primitives[i];

@@ -27,11 +27,7 @@
 #     candidate grid, Text2Tex-style next-best-view) whenever one would
 #     newly cover >= MV_EXTRA_MIN_GAIN of the island.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
-#     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned), composited
-#     (multiview only) via UDN/whiteout with a tangent-space detail normal
-#     Sobel'd from a high-pass of the blended albedo atlas (see
-#     DETAIL_NORMAL_WAVELENGTH_M's comment for why not the estimator's bump
-#     head).
+#     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
 #   - occlusion map = Cycles AO bake, same selected-to-active rig as the
 #     normal bake, authored as the glTF occlusionTexture via a "glTF
 #     Material Output" node group (the exporter's Occlusion-socket
@@ -97,29 +93,6 @@ AO_DISTANCE_M = 0.15  # Cycles' AO ray length defaults to 10 m (world
 # the opening as an occluder and reads as one big cave shadow. Bounding it
 # to voussoir-joint scale keeps the occlusion local: drum joints and capital
 # undercuts darken, the opposite side of the arch does not
-
-# MaterialAnything's bump head (F3, prop_pbr.py) comes back near-flat on this
-# prop -- island-masked RGB std of 4-6/255 around the flat-normal encoding
-# (128,127,255), i.e. no usable relief (the plan's pre-authorized fallback
-# condition). The detail normal below is instead a high-pass of the blended
-# albedo atlas: dark mortar joints, soot staining and grain read as relief,
-# the same heuristic AO-from-albedo texturing already leans on elsewhere.
-DETAIL_NORMAL_WAVELENGTH_M = 0.03  # cutoff separating kept grain/staining
-# detail from removed broad shading, as a Gaussian-blur radius. Individual
-# chisel marks run 5-15 mm, but this atlas resolves ~9 mm/texel (matches the
-# shipped placed_px_per_m): a blur needs several texels of radius to actually
-# separate low frequencies from texel noise, so 30 mm (~3 texels here) is the
-# finest cutoff this atlas can carry a real Gaussian split at, not the tool-
-# mark scale itself
-DETAIL_NORMAL_MIN_SIGMA_TEXELS = 3.0  # floor on the blur radius in texels:
-# below this a Gaussian "high-pass" is indistinguishable from texel-to-texel
-# noise, which reads as sparse sharp spikes rather than distributed grain
-DETAIL_NORMAL_AMPLITUDE_M = 0.002  # one-sigma world-space height the
-# high-pass pattern (normalized to unit std over the island) is scaled to
-# after the wavelength cutoff above: hand-tooled limestone grain runs a few
-# mm peak-to-valley, independent of atlas resolution or prop scale -- the
-# Sobel gradient divides through the per-texel UV->world Jacobian, not pixel
-# count, to hold this constant regardless of how many texels a chart occupies
 
 MV_ELEVATION_DEG = 15.0
 # Two-resolution contract: MV_RES sets the ortho depth/normal renders and the
@@ -785,51 +758,6 @@ def blend_views(views, depths, rig, work_dir, pos, nrm, island,
     return out, coverage, covered
 
 
-SOBEL_UNIT_SCALE = 8.0  # a 3x3 Sobel kernel's raw output is 8x the true
-# per-pixel finite difference (verify on a unit ramp: kernel [-1,0,1;-2,0,2;
-# -1,0,1] against f(x)=x gives 8, not 1) -- both Sobel calls below divide by
-# this so their outputs are true per-one-texel-step quantities; a slope
-# (Sobel-height / Sobel-position-magnitude) would cancel the factor either
-# way, but texel_world_steps' result is also used standalone (as texel_m,
-# to size the blur radius above), where an uncorrected factor of 8 previously
-# read as ~71 mm/texel against the atlas's real ~9 mm/texel (placed_px_per_m).
-
-
-def texel_world_steps(pos):
-    """Per-texel world-space distance (m) of one atlas-U and one atlas-V
-    step: a Sobel finite difference on the world-position bake, i.e. the
-    same UV->world Jacobian the detail normal's gradient is scaled through."""
-    dpos_du = np.stack([cv2.Sobel(pos[:, :, c], cv2.CV_64F, 1, 0, ksize=3)
-                        for c in range(3)], axis=-1) / SOBEL_UNIT_SCALE
-    dpos_dv = np.stack([cv2.Sobel(pos[:, :, c], cv2.CV_64F, 0, 1, ksize=3)
-                        for c in range(3)], axis=-1) / SOBEL_UNIT_SCALE
-    return np.linalg.norm(dpos_du, axis=-1), np.linalg.norm(dpos_dv, axis=-1)
-
-
-def detail_normal_from_height(height, pos):
-    """Sobel gradient of a height field (already scaled to world-space
-    metres) into a tangent-space unit normal (h, w, 3), the gradient scaled
-    through the per-texel UV->world Jacobian so the resulting grain has a
-    physical size independent of atlas resolution or prop scale."""
-    dh_du = cv2.Sobel(height, cv2.CV_64F, 1, 0, ksize=3) / SOBEL_UNIT_SCALE
-    dh_dv = cv2.Sobel(height, cv2.CV_64F, 0, 1, ksize=3) / SOBEL_UNIT_SCALE
-    step_u, step_v = texel_world_steps(pos)
-    slope_u = dh_du / np.maximum(step_u, 1e-6)
-    slope_v = dh_dv / np.maximum(step_v, 1e-6)
-    n = np.stack([-slope_u, -slope_v, np.ones_like(slope_u)], axis=-1)
-    return n / np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-9)
-
-
-def whiteout_blend(base_n, detail_n):
-    """UDN/whiteout composite of two tangent-space unit normals: the base
-    map keeps its low frequencies (xy added, z multiplied) while the detail
-    map supplies the highs."""
-    xy = base_n[:, :, :2] + detail_n[:, :, :2]
-    z = base_n[:, :, 2:3] * detail_n[:, :, 2:3]
-    n = np.concatenate([xy, z], axis=-1)
-    return n / np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-9)
-
-
 def estimate_materials(views, work_dir, seed):
     """Decompose every view_<i>/gen.png into albedo.png and bump.png via the
     MaterialAnything estimator subprocess (prop_pbr.py in its own venv,
@@ -878,30 +806,6 @@ def pbr_multiview(clean, hires, atlas, subject, seed, work_dir):
     base_img = new_image("prop_base", srgb=True, fill=(0, 0, 0))
     base_img.pixels.foreach_set(base_px.ravel())
 
-    # Detail-normal source: the estimator's bump head (prop_pbr.py) still
-    # gets saved and recorded (pbr_meta above), but it comes back near-flat
-    # on this prop, so the detail normal is a high-pass of the blended
-    # albedo atlas instead -- see DETAIL_NORMAL_WAVELENGTH_M's comment.
-    pos2d = pos.reshape(TEXTURE_SIZE, TEXTURE_SIZE, 3)
-    island2d = island.reshape(TEXTURE_SIZE, TEXTURE_SIZE)
-    luma = (base_px[:, :3] @ np.array([0.2126, 0.7152, 0.0722])).reshape(
-        TEXTURE_SIZE, TEXTURE_SIZE)
-    # padded past the island edge (same rationale/constant as pad_edges'
-    # other use above: a Sobel/blur taken across the chart boundary would
-    # otherwise spike on the jump to blend_views' off-island fill)
-    luma = pad_edges(luma[:, :, None].copy(), island2d, MV_EDGE_PAD_PX)[:, :, 0]
-
-    step_u, step_v = texel_world_steps(pos2d)
-    texel_m = float(np.median(np.concatenate(
-        [step_u[island2d], step_v[island2d]]))) if island2d.any() else 1.0
-    sigma_px = max(DETAIL_NORMAL_WAVELENGTH_M / max(texel_m, 1e-6),
-                   DETAIL_NORMAL_MIN_SIGMA_TEXELS)
-    high_pass = luma - cv2.GaussianBlur(luma, (0, 0), sigma_px)
-    std = float(high_pass[island2d].std()) if island2d.any() else 1.0
-    height = high_pass / max(std, 1e-6) * DETAIL_NORMAL_AMPLITUDE_M
-
-    detail = {"height": height, "pos": pos2d, "island": island2d}
-
     extras = {
         "strategy": "multiview_controlnet_depth",
         "front_axis": FRONT_AXIS,
@@ -918,7 +822,7 @@ def pbr_multiview(clean, hires, atlas, subject, seed, work_dir):
         "blend_coverage": round(coverage, 4),
         "hole_texels": int((island & ~covered).sum()),
     }
-    return base_img, extras, detail
+    return base_img, extras
 
 
 # ---------------------------------------------------------------------------
@@ -938,6 +842,10 @@ def main():
                              "(default 0: stone/wood/cloth/skin)")
     parser.add_argument("--roughness", type=float, default=DEFAULT_ROUGHNESS,
                         help="Declared roughness constant, both strategies (default 0.8)")
+    parser.add_argument("--detail", action="store_true",
+                        help="Opt the material into the world-space triplanar detail "
+                             "overlay (mesh_shader.wgsl 'vordar_detail' extra) -- masonry/"
+                             "stone classes only, never alpha-masked foliage cards")
     parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
                         help="Multiview camera azimuths (default 0,90,180,270); "
                              "use oblique sides, e.g. 0,60,180,300, for planar props")
@@ -984,15 +892,14 @@ def main():
     atlas = me.uv_layers[0].name
 
     # ---- basecolor, per strategy ----
-    detail = None
     if args.strategy == "projection":
         base_img, extras = basecolor_projection(clean, atlas, args.concept_png)
     else:
         if not args.subject or args.seed is None:
             fail("--strategy multiview requires --subject and --seed")
         work_dir = Path(args.textured_glb).resolve().parent / "multiview"
-        base_img, extras, detail = pbr_multiview(clean, hires, atlas, args.subject,
-                                                  args.seed, work_dir)
+        base_img, extras = pbr_multiview(clean, hires, atlas, args.subject,
+                                         args.seed, work_dir)
     t_base = time.time()
 
     # ---- normal: real high-to-low bake from the hires mesh ----
@@ -1006,20 +913,6 @@ def main():
                         use_selected_to_active=True, cage_extrusion=0.01,
                         max_ray_distance=0.03, margin=8, use_clear=True,
                         uv_layer=atlas)
-    # ---- detail: composite the high-pass detail normal (built above from
-    #      the blended albedo atlas) over the geometric bake (UDN/whiteout --
-    #      the geometric bake keeps its low frequencies, the detail normal
-    #      supplies the highs); multiview only, since projection has no
-    #      blended atlas of its own to derive detail from ----
-    if detail is not None:
-        base_n = img_array(normal_img)[:, :, :3].astype(np.float64) * 2.0 - 1.0
-        detail_n = detail_normal_from_height(detail["height"], detail["pos"])
-        composite = whiteout_blend(base_n, detail_n)
-        composite[~detail["island"]] = base_n[~detail["island"]]
-        rgba = np.empty((TEXTURE_SIZE, TEXTURE_SIZE, 4), dtype=np.float32)
-        rgba[:, :, :3] = (composite * 0.5 + 0.5).astype(np.float32)
-        rgba[:, :, 3] = 1.0
-        normal_img.pixels.foreach_set(rgba.ravel())
     t_normal = time.time()
 
     # ---- occlusion: Cycles AO bake, same selected-to-active rig as the
@@ -1053,6 +946,7 @@ def main():
         img.save()
 
     mat = bpy.data.materials.new("prop")
+    mat["vordar_detail"] = args.detail
     mat.use_nodes = True
     tree = mat.node_tree
     bsdf = tree.nodes["Principled BSDF"]
@@ -1084,7 +978,7 @@ def main():
     select_only([clean], clean)
     bpy.ops.export_scene.gltf(filepath=str(Path(args.textured_glb).resolve()),
                               export_format="GLB", export_yup=True,
-                              export_image_format="AUTO")
+                              export_image_format="AUTO", export_extras=True)
     tmpdir.cleanup()
 
     stats = {

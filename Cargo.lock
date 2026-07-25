@@ -1059,6 +1059,7 @@ dependencies = [
  "log",
  "nv-flip",
  "pollster",
+ "serde_json",
  "wgpu",
  "winit",
 ]

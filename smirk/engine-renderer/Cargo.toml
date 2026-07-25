@@ -35,7 +35,10 @@ hecs = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 egui-winit = { workspace = true }
-gltf = { version = "1.4.1", features = ["import", "KHR_materials_emissive_strength"] }
+gltf = { version = "1.4.1", features = ["import", "KHR_materials_emissive_strength", "extras"] }
+# Parses glTF material `extras` JSON (the `vordar_detail` opt-in marker) —
+# already in the graph via gltf-json, so this pin is free.
+serde_json = "1"
 # Radiance .hdr decode for IBL environments (+ png/jpeg for ground texture
 # sets); f32→f16 for Rgba16Float upload
 image = { version = "0.25", default-features = false, features = ["hdr", "png", "jpeg"] }

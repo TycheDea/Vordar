@@ -19,7 +19,8 @@ use glam::Vec3;
 use image::RgbaImage;
 use std::path::{Path, PathBuf};
 use std::process::exit;
-use vordar_client::presentation::{SUN_COLOR, SUN_DIR};
+use vordar_client::ground::load_ground_material;
+use vordar_client::presentation::{DETAIL_TEXTURE_DIR, SUN_COLOR, SUN_DIR};
 use vordar_game::zones::load_zones;
 
 const ZONES_PATH: &str = "content/zones/zones.ron";
@@ -404,6 +405,12 @@ fn main() {
         eprintln!("asset_inspect: no GPU adapter available");
         exit(1);
     };
+    // Without this, the debug channels this tool exists to inspect would be
+    // blind to the detail layer on any opted-in prop.
+    match load_ground_material(DETAIL_TEXTURE_DIR) {
+        Ok(material) => r.set_detail_material(material),
+        Err(e) => eprintln!("asset_inspect: detail tile not loaded ({DETAIL_TEXTURE_DIR}): {e}"),
+    }
 
     let out = Path::new(&args.out);
     if let Err(e) = std::fs::create_dir_all(out) {

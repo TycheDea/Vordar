@@ -18,7 +18,7 @@ const PREPROCESSED_SHADERS: [&str; 7] = [
     "shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl", "sky.wgsl",
     "depth_prepass.wgsl", "ssao.wgsl", "tonemap.wgsl",
 ];
-const SNIPPETS: [&str; 6] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl", "fog.wgsl", "debug_channel.wgsl", "srgb_oetf.wgsl"];
+const SNIPPETS: [&str; 7] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl", "fog.wgsl", "debug_channel.wgsl", "srgb_oetf.wgsl", "detail_triplanar.wgsl"];
 
 fn main() {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR set by cargo");

@@ -34,6 +34,12 @@ pub struct CurrentZone(pub String);
 pub const SUN_DIR: Vec3 = Vec3::new(0.11897, 0.13917, 0.98309);
 pub const SUN_COLOR: Vec3 = Vec3::new(1.5, 1.38, 1.2);
 
+/// The world-space detail overlay's one shared tile (chapel_arch fix phase):
+/// every `vordar_detail`-opted-in stone material samples this, regardless of
+/// zone. Public so `zone_review`/`asset_inspect` (offscreen review bins) bind
+/// the same tile the live game does.
+pub const DETAIL_TEXTURE_DIR: &str = "content/textures/detail/limestone";
+
 /// Ground palette per zone — each zone should read as a different place.
 fn zone_palette(zone: &str) -> Vec3 {
     match zone {
@@ -46,6 +52,10 @@ fn zone_palette(zone: &str) -> Vec3 {
 /// Spawns/rebuilds the floor and portal monuments whenever the zone changes.
 pub struct ZoneDressingSystem {
     applied: Option<String>,
+    /// Guards the one-time detail-tile load below — the tile is global (not
+    /// per-zone), so it must load exactly once regardless of how many zone
+    /// changes `run` processes.
+    detail_loaded: bool,
 }
 
 impl Default for ZoneDressingSystem {
@@ -56,12 +66,23 @@ impl Default for ZoneDressingSystem {
 
 impl ZoneDressingSystem {
     pub fn new() -> Self {
-        Self { applied: None }
+        Self { applied: None, detail_loaded: false }
     }
 }
 
 impl System for ZoneDressingSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
+        if !self.detail_loaded {
+            self.detail_loaded = true;
+            match crate::ground::load_ground_material(DETAIL_TEXTURE_DIR) {
+                Ok(material) => engine_renderer::set_detail_material(material, resources),
+                // A missing/incomplete detail directory leaves the engine's
+                // 1×1 neutral overlay bound (a clean no-op, not a panic) —
+                // content/textures/detail/limestone may not exist yet.
+                Err(e) => log::warn!("detail tile not loaded ({DETAIL_TEXTURE_DIR}): {e}"),
+            }
+        }
+
         let zone = resources.get::<CurrentZone>().map(|z| z.0.clone()).unwrap_or_default();
         if self.applied.as_deref() == Some(zone.as_str()) {
             return;

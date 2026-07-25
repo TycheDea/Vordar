@@ -20,6 +20,63 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
+fn sha256_hex(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+    format!("{:x}", Sha256::digest(&bytes))
+}
+
+#[derive(serde::Deserialize)]
+struct GroundManifest {
+    images: Vec<GroundManifestImage>,
+}
+#[derive(serde::Deserialize)]
+struct GroundManifestImage {
+    slot: String,
+    file: String,
+    source: String,
+    sha256: String,
+}
+
+/// VQ-C5: every image in a ground-style sidecar set (diff/nor_gl/rough +
+/// `manifest.json`) is present and hashes fresh against its source. Shared by
+/// zone ground sets and the world-space detail tile — both use
+/// `bake_textures.mjs ground`'s manifest shape.
+fn check_ground_sidecars(dir: &Path) {
+    let manifest_path = dir.join("manifest.json");
+    let regen = format!("node scripts/asset-pipeline/bake_textures.mjs ground {}", dir.display());
+    assert!(
+        manifest_path.exists(),
+        "VQ-C5: ground set {dir:?} has no sidecar manifest — regenerate: {regen}"
+    );
+    let text = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
+    let manifest: GroundManifest =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
+
+    for image in &manifest.images {
+        let source = dir.join(&image.source);
+        assert_eq!(
+            sha256_hex(&source),
+            image.sha256,
+            "VQ-C5: ground set {dir:?} source '{}' sidecar is stale — regenerate: {regen}",
+            image.source
+        );
+        let dds = dir.join(&image.file);
+        assert!(
+            dds.exists(),
+            "VQ-C5: ground set {dir:?} manifest lists sidecar '{}' but it's missing — regenerate: {regen}",
+            image.file
+        );
+    }
+    for required in ["diff", "normal"] {
+        assert!(
+            manifest.images.iter().any(|i| i.slot == required),
+            "VQ-C5: ground set {dir:?} manifest lacks a required '{required}' sidecar — regenerate: {regen}"
+        );
+    }
+}
+
 /// Every race id (RON filename stem) with its parsed definition's model.
 fn race_models() -> Vec<(String, RaceModel, MeshData)> {
     let root = repo_root();
@@ -412,13 +469,6 @@ fn total_texture_memory_within_budget() {
 /// texture to a slot, or falling back to RGBA8, with no other signal.
 #[test]
 fn material_textures_have_fresh_sidecars() {
-    use sha2::{Digest, Sha256};
-
-    fn sha256_hex(path: &Path) -> String {
-        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
-        format!("{:x}", Sha256::digest(&bytes))
-    }
-
     #[derive(serde::Deserialize)]
     struct GltfManifest {
         sha256: String,
@@ -461,54 +511,6 @@ fn material_textures_have_fresh_sidecars() {
         }
     }
 
-    #[derive(serde::Deserialize)]
-    struct GroundManifest {
-        images: Vec<GroundManifestImage>,
-    }
-    #[derive(serde::Deserialize)]
-    struct GroundManifestImage {
-        slot: String,
-        file: String,
-        source: String,
-        sha256: String,
-    }
-
-    fn check_ground_sidecars(dir: &Path) {
-        let manifest_path = dir.join("manifest.json");
-        let regen =
-            format!("node scripts/asset-pipeline/bake_textures.mjs ground {}", dir.display());
-        assert!(
-            manifest_path.exists(),
-            "VQ-C5: ground set {dir:?} has no sidecar manifest — regenerate: {regen}"
-        );
-        let text = std::fs::read_to_string(&manifest_path)
-            .unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
-        let manifest: GroundManifest =
-            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{manifest_path:?}: {e}"));
-
-        for image in &manifest.images {
-            let source = dir.join(&image.source);
-            assert_eq!(
-                sha256_hex(&source),
-                image.sha256,
-                "VQ-C5: ground set {dir:?} source '{}' sidecar is stale — regenerate: {regen}",
-                image.source
-            );
-            let dds = dir.join(&image.file);
-            assert!(
-                dds.exists(),
-                "VQ-C5: ground set {dir:?} manifest lists sidecar '{}' but it's missing — regenerate: {regen}",
-                image.file
-            );
-        }
-        for required in ["diff", "normal"] {
-            assert!(
-                manifest.images.iter().any(|i| i.slot == required),
-                "VQ-C5: ground set {dir:?} manifest lacks a required '{required}' sidecar — regenerate: {regen}"
-            );
-        }
-    }
-
     let root = repo_root();
 
     for (_id, model, _data) in race_models() {
@@ -529,4 +531,70 @@ fn material_textures_have_fresh_sidecars() {
                 check_ground_sidecars(&root.join(&g.texture_dir));
             }
     }
+}
+
+/// VQ-C5: the world-space detail tile (shared by every `vordar_detail`
+/// material) has fresh sidecars, same contract as a zone ground set.
+#[test]
+fn detail_set_has_fresh_sidecars() {
+    let root = repo_root();
+    check_ground_sidecars(&root.join("content/textures/detail/limestone"));
+}
+
+/// The detail tile is a multiplicative overlay around 0.5 — any DC offset
+/// tints every stone prop, and a leaning mean normal tilts every surface by a
+/// constant. No constraint on mean Z: for a normal map carrying real grain,
+/// `sqrt(1-x²-y²)` structurally pulls mean Z well under 255 (Jensen's
+/// inequality) — a 255±3 band would demand a flat normal map.
+#[test]
+fn detail_tile_is_dc_neutral() {
+    use engine_renderer::mesh::load_image_rgba;
+
+    const LUMA: [f64; 3] = [0.2126, 0.7152, 0.0722]; // matches prep_detail_tile.py
+
+    let root = repo_root();
+    let dir = root.join("content/textures/detail/limestone");
+
+    let albedo = load_image_rgba(dir.join("diff_2048.png").to_str().unwrap()).unwrap();
+    let n = albedo.width as f64 * albedo.height as f64;
+    let mean_luma: f64 = albedo
+        .pixels
+        .chunks_exact(4)
+        .map(|px| LUMA[0] * px[0] as f64 + LUMA[1] * px[1] as f64 + LUMA[2] * px[2] as f64)
+        .sum::<f64>()
+        / n
+        / 255.0;
+    assert!(
+        (mean_luma - 0.5).abs() <= 0.02,
+        "detail albedo mean luminance {mean_luma:.4} outside 0.5 +/- 0.02"
+    );
+
+    let normal = load_image_rgba(dir.join("nor_gl_2048.png").to_str().unwrap()).unwrap();
+    let n = normal.width as f64 * normal.height as f64;
+    let mean_x: f64 = normal.pixels.chunks_exact(4).map(|px| px[0] as f64).sum::<f64>() / n;
+    let mean_y: f64 = normal.pixels.chunks_exact(4).map(|px| px[1] as f64).sum::<f64>() / n;
+    assert!((mean_x - 128.0).abs() <= 3.0, "detail normal mean X {mean_x:.2} outside 128 +/- 3");
+    assert!((mean_y - 128.0).abs() <= 3.0, "detail normal mean Y {mean_y:.2} outside 128 +/- 3");
+}
+
+/// Catches a future regeneration silently dropping the `vordar_detail` marker
+/// (chapel_arch), or a foliage card silently picking it up (cypress,
+/// olive_stump — alpha-masked cards that must never get stone grain).
+#[test]
+fn stone_props_declare_detail() {
+    let root = repo_root();
+    let check = |asset: &str, expect: bool| {
+        let data = load_gltf_data(root.join(asset).to_str().unwrap())
+            .unwrap_or_else(|e| panic!("{asset}: failed to parse: {e}"));
+        for prim in &data.primitives {
+            assert_eq!(
+                prim.material.detail, expect,
+                "{asset}: material.detail = {}, expected {expect}",
+                prim.material.detail
+            );
+        }
+    };
+    check("content/models/props/chapel_arch/chapel_arch.glb", true);
+    check("content/models/props/cypress/cypress.glb", false);
+    check("content/models/props/olive_stump/olive_stump.glb", false);
 }

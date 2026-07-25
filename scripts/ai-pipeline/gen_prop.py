@@ -178,7 +178,7 @@ def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dic
 
 
 def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
-                  metallic: float, roughness: float, azimuths: str,
+                  metallic: float, roughness: float, detail: bool, azimuths: str,
                   view_res: int, texture_size: int) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
@@ -196,6 +196,8 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
             cmd += ["--metallic", metallic]
         if roughness is not None:
             cmd += ["--roughness", roughness]
+        if detail:
+            cmd += ["--detail"]
         if azimuths is not None:
             cmd += ["--azimuths", azimuths]
         if view_res is not None:
@@ -277,6 +279,10 @@ def main():
                         help="Declared metallic for prop_texture.py, both strategies (default 0)")
     parser.add_argument("--roughness", type=float, default=None,
                         help="Declared roughness for prop_texture.py, both strategies (default 0.8)")
+    parser.add_argument("--detail", action="store_true",
+                        help="Opt the material into the world-space triplanar detail overlay "
+                             "for prop_texture.py -- masonry/stone classes only, never "
+                             "alpha-masked foliage cards")
     parser.add_argument("--symmetrize", action="store_true",
                         help="Mirror one half of the cleaned mesh across its best-fit vertical plane")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
@@ -325,7 +331,7 @@ def main():
         manifest["cleanup"] = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
     if stop >= STAGES.index("texture"):
         manifest["texture"] = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                                            args.metallic, args.roughness, args.azimuths,
+                                            args.metallic, args.roughness, args.detail, args.azimuths,
                                             args.view_res, args.texture_size)
     if stop >= STAGES.index("preprocess"):
         # final.glb, needed by the turntable stage below

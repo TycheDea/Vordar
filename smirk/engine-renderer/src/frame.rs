@@ -602,6 +602,7 @@ fn record_main_pass(
         && !list.instances.is_empty() {
             pass.set_pipeline(&state.mesh_pipeline);
             pass.set_bind_group(2, &state.environment.bind_group, &[]);
+            pass.set_bind_group(3, &state.detail_bind_group, &[]);
             pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
             for &(mesh_idx, first, count) in &list.ranges {
                 if first as usize >= MAX_MESH_INSTANCES { break; }
@@ -664,6 +665,7 @@ fn record_main_pass(
                     pass.set_pipeline(&state.mesh_transparent_pipeline);
                     pass.set_bind_group(0, &state.camera_bind_group, &[]);
                     pass.set_bind_group(2, &state.environment.bind_group, &[]);
+                    pass.set_bind_group(3, &state.detail_bind_group, &[]);
                     pass.set_vertex_buffer(1, state.mesh_instance_buffer.slice(..));
                 }
             }

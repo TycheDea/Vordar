@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::process::exit;
 use vordar_client::ground::{generate_ground, height as ground_height, load_ground_material, GROUND_TOP_Y};
-use vordar_client::presentation::{SUN_COLOR, SUN_DIR};
+use vordar_client::presentation::{DETAIL_TEXTURE_DIR, SUN_COLOR, SUN_DIR};
 use vordar_game::zones::{load_zones, ZoneVisuals};
 
 const ZONES_PATH:  &str = "content/zones/zones.ron";
@@ -363,6 +363,12 @@ fn main() {
         eprintln!("zone_review: no GPU adapter available");
         exit(1);
     };
+    // Without this, the review harness would render stone props with the
+    // detail layer absent — blind to the feature it exists to check.
+    match load_ground_material(DETAIL_TEXTURE_DIR) {
+        Ok(material) => r.set_detail_material(material),
+        Err(e) => eprintln!("zone_review: detail tile not loaded ({DETAIL_TEXTURE_DIR}): {e}"),
+    }
     let hdri = visuals.env.as_deref().unwrap_or(DEFAULT_HDRI);
     if let Err(e) = r.load_environment_hdr(hdri) {
         eprintln!("zone_review: failed to load HDRI {hdri}: {e}");
