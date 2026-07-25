@@ -10,6 +10,7 @@ import argparse
 import json
 import re
 import statistics
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ STOP_STATES = ("blocked", "stalled", "exhausted")
 FALSIFICATION_MARKER = "premise-falsified:"
 _QUEUE_ENTRY_RE = re.compile(r"\b(finding|rework)\s+(\d+)\b")
 _GATE_RE = re.compile(r"gate\s+(\d+)/(\d+)")
+_REVERT_SUBJECT_RE = re.compile(r"^Revert")
 
 
 def categorize_tool(name, command):
@@ -411,6 +413,89 @@ def _carried_forward_in(lines):
     return count
 
 
+@dataclass
+class GitOutcome:
+    start: str = None
+    end: str = None
+    commits_workspace: str = "n/a"
+    commits_claude: str = "n/a"
+    reverts: str = "n/a"
+    commit_range: str = "n/a"
+
+
+def _run_git(argv, cwd):
+    try:
+        result = subprocess.run(
+            ["git"] + list(argv),
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    return result.stdout
+
+
+def resolve_commit_range(repo_root, report_path):
+    """(start, end) SHAs bounding a report's git history: start is the commit
+    that added it (oldest of --diff-filter=A), end is its most recent touch.
+    (None, None) if the report was never committed."""
+    added = _run_git(
+        ["log", "--diff-filter=A", "--format=%H", "--", str(report_path)],
+        cwd=repo_root,
+    )
+    lines = [line for line in (added or "").splitlines() if line]
+    if not lines:
+        return None, None
+    start = lines[-1]
+    last = _run_git(["log", "-1", "--format=%H", "--", str(report_path)], cwd=repo_root)
+    end = last.strip() if last and last.strip() else None
+    return start, end
+
+
+def resolve_git_outcome(repo_root, report_path, until=None):
+    start, end = resolve_commit_range(repo_root, report_path)
+    if not start:
+        return GitOutcome()
+    if until:
+        end = until
+
+    commits_workspace = "n/a"
+    count_out = _run_git(["rev-list", "--count", f"{start}..{end}"], cwd=repo_root)
+    if count_out is not None:
+        commits_workspace = count_out.strip()
+
+    reverts = "n/a"
+    subjects = _run_git(["log", "--format=%s", f"{start}..{end}"], cwd=repo_root)
+    if subjects is not None:
+        reverts = str(sum(1 for line in subjects.splitlines() if _REVERT_SUBJECT_RE.match(line)))
+
+    commits_claude = "n/a"
+    claude_git_dir = Path(repo_root) / ".claude" / ".git"
+    if claude_git_dir.exists():
+        since_out = _run_git(["log", "-1", "--format=%cI", start], cwd=repo_root)
+        until_out = _run_git(["log", "-1", "--format=%cI", end], cwd=repo_root)
+        since = since_out.strip() if since_out else None
+        until_ts = until_out.strip() if until_out else None
+        if since and until_ts:
+            claude_log = _run_git(
+                ["log", f"--since={since}", f"--until={until_ts}", "--format=%H"],
+                cwd=Path(repo_root) / ".claude",
+            )
+            if claude_log is not None:
+                commits_claude = str(len([line for line in claude_log.splitlines() if line]))
+
+    return GitOutcome(
+        start=start,
+        end=end,
+        commits_workspace=commits_workspace,
+        commits_claude=commits_claude,
+        reverts=reverts,
+        commit_range=f"{start[:12]}..{end[:12]}",
+    )
+
+
 def parse_report(report_path):
     text = Path(report_path).read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -483,6 +568,7 @@ def main(argv):
     parser.add_argument("report")
     parser.add_argument("--transcripts", default=None)
     parser.add_argument("--out", default=None)
+    parser.add_argument("--until", default=None, help="override the end SHA for the git commit range")
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -525,7 +611,13 @@ def main(argv):
     tool_time_section = render_tool_time_section(spawns)
     window = _window_bounds(attributed)
     orchestrator_section = render_orchestrator_section(transcripts_dir, window)
-    outcome_section = render_outcome_section(parse_report(report_path))
+    outcome = parse_report(report_path)
+    git_outcome = resolve_git_outcome(repo_root, report_path.resolve(), until=args.until)
+    outcome["commits_workspace"] = git_outcome.commits_workspace
+    outcome["commits_claude"] = git_outcome.commits_claude
+    outcome["reverts"] = git_outcome.reverts
+    outcome["commit_range"] = git_outcome.commit_range
+    outcome_section = render_outcome_section(outcome)
     out_path.write_text(
         header + "\n" + cost_section + tool_time_section + orchestrator_section + outcome_section,
         encoding="utf-8",

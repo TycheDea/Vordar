@@ -1,4 +1,5 @@
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -8,6 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import campaign_report  # noqa: E402
+
+REPO_ROOT = Path(campaign_report.__file__).resolve().parent.parent
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REPORT = FIXTURES / "reviews" / "demo" / "audit-demo-2026-07-20.md"
@@ -158,6 +161,41 @@ class TestCampaignReport(unittest.TestCase):
             ])
             self.assertNotEqual(rc, 0)
             self.assertEqual(list(Path(out_dir).iterdir()), [])
+
+
+class TestGitOutcome(unittest.TestCase):
+    def test_workspace_range_over_stable_history(self):
+        verify = subprocess.run(
+            ["git", "rev-parse", "--verify", "1aaa4cd0"],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        if verify.returncode != 0:
+            raise unittest.SkipTest("commit 1aaa4cd0 not present (shallow clone)")
+
+        report_path = REPO_ROOT / "docs" / "reviews" / "rendering" / "audit-rendering-2026-07-16.md"
+        outcome = campaign_report.resolve_git_outcome(REPO_ROOT, report_path)
+        self.assertEqual(outcome.start, "1aaa4cd0835c71a3078339694fee943bb710d3df")
+        self.assertEqual(outcome.commits_workspace, "51")
+
+    def test_uncommitted_report_renders_na(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            report_copy = Path(work_dir) / REPORT.name
+            report_copy.write_text(REPORT.read_text(encoding="utf-8"), encoding="utf-8")
+
+            with tempfile.TemporaryDirectory() as out_dir:
+                rc = campaign_report.main([
+                    str(report_copy),
+                    "--transcripts", str(TRANSCRIPTS),
+                    "--out", out_dir,
+                ])
+                self.assertEqual(rc, 0)
+
+                text = (Path(out_dir) / "demo-2026-07-20.md").read_text(encoding="utf-8")
+                fields = _read_fields(text)
+                self.assertEqual(fields["commits_workspace"], "n/a")
+                self.assertEqual(fields["commits_claude"], "n/a")
+                self.assertEqual(fields["reverts"], "n/a")
+                self.assertEqual(fields["commit_range"], "n/a")
 
 
 if __name__ == "__main__":
