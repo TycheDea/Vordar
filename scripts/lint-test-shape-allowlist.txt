@@ -1,0 +1,4 @@
+# Tests pinned as known-good for lint-test-shape.mjs, one path:test_name per
+# line. A pin absorbs a detector error, so it hides the very drift the scan
+# exists to catch: fix the rule in lint-test-shape.mjs first and pin only when
+# the test genuinely cannot reach code.
