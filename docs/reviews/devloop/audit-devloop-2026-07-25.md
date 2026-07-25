@@ -36,7 +36,7 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-25.md`):
 
 > **~~finding 1~~ → ~~finding 2 (micro)~~ → ~~finding 3~~ → ~~finding 4 (user-decides)~~ →
 > ~~finding 5~~ → ~~finding 6 (user-decides)~~ → ~~finding 7~~ → ~~finding 8 (micro)~~ →
-> ~~rework 1 (user-decides)~~ → finding 9 → finding 10 → finding 11 (micro).**
+> ~~rework 1 (user-decides)~~ → ~~finding 9~~ → ~~finding 10~~ → ~~finding 11 (micro)~~.**
 > findings 1–8 done 2026-07-25 (`.claude` commits `c3884c5`..`8eee577`; finding 5
 > has no commit — all its targets are unversioned — and measured 24→22 lesson
 > notes, index −30%, 2 absorbed strikes, 2 merges).
@@ -49,6 +49,16 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-25.md`):
 > bullet" check, unsatisfiable because that file is one line per bullet;
 > premise-falsified: step 6's expectation that devloop-2026-07-17 carries suite
 > counts, that report having no `gate N/N` token at all).
+> findings 9–11 done 2026-07-25 (`93bb011`, `bc3055e`; `.claude` `165a69c`,
+> `4c00c6d`, `94efad6`; loop-final gate 422/422, which also clears the rework-1
+> loop's red `content_lint` and confirms it was never attributable here).
+> Trial baselines: finding 9 gate zero = 1184 anchors across `docs/reviews/`, of
+> which 29 are genuinely stale and all 29 sit in closed pre-07-17 reports, so by
+> user ruling it was narrowed to path-bearing anchors on one report at a time and
+> its "names a measurable" check was cut as an unfixable keyword heuristic;
+> finding 10 = 0 false positives over 427 tests with an empty allowlist, covering
+> only the "asserts only literals and consts" half of its Gap, since "never calls
+> a workspace crate path" needs type resolution a regex cannot supply.
 > rework 2 is **parked**: its gate is a per-audit read-volume baseline that does
 > not exist, takeable free on the next audit.
 >
