@@ -100,10 +100,13 @@ Cross-type queue (mirrored verbatim from `audit-devloop-2026-07-25.md`):
   nothing gets deleted, this is an addition, and ruling 7 says an addition that
   subtracts nothing is worth less than one that does.
 - **Path:**
-  1. **(user-decides, at this rework's own pause)** Is a quality vector wanted at
-     all, given ruling 5 — and if so, does it inform the user's judgement only, or
-     is it ever allowed to gate anything automatically? The answer changes the
-     design substantially.
+  1. **DECIDED 2026-07-25 at the rework pause: inform-only.** A vector is wanted;
+     it never gates. Plan steps 1–8 land
+     (`plan-devloop-rework-1-2026-07-25.md`, committed `b187b47` — the approval
+     pins to that SHA); the plan's conditional step 9 (consistency exit code) is
+     **not built**, and the script's exit code means only "a vector was produced".
+     No field may block a commit or a queue advance: under ruling 5 the vector
+     informs the user's judgement and never substitutes for it.
   2. Design pass (`/plan-rework 1`): enumerate the outcome dimensions already
      recoverable from committed artifacts at zero marginal cost; reject any that
      need a transcript, since `.claude/CLAUDE.md` §9 destroys conversation state
