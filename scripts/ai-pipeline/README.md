@@ -721,6 +721,25 @@ keys (`base_color`/`normal`/`metallic_roughness`/`occlusion`) match
 `MaterialData`'s vocabulary in `content_lint.rs:259-265` so a later
 promotion into a real test is a rename-free port, not a rewrite.
 
+### `prop_tonal_audit.py` — chapel_arch tonal-range stage diagnostic
+
+```
+python scripts/ai-pipeline/prop_tonal_audit.py
+```
+
+Read-only, no CLI args: decodes `target/prop-batch/b3/arch/cand_0/multiview/`
+(the run confirmed behind the shipped chapel_arch asset, by `gen.png`
+sha256) and the shipped `content/models/props/{chapel_arch,rock_face_01}/`
+atlases, and prints luma/Lab stage-by-stage stats (STAGE A: raw multiview
+diffusion vs MaterialAnything-delit albedo, per view; STAGE B: shipped atlas
+vs the rock_face_01 photoscan control; STAGE C/D: a facing+frustum coverage
+proxy isolating blend-averaging and inpaint-hole effects, no occlusion test
+— see the caveat in-file). Produced the numbers behind the delighting A/B
+(does MaterialAnything's delighting stage earn its keep, or is it costing
+the tonal range a flat cream albedo now needs back) — the diagnostic that
+answered it lives with the rest of the evidence under `target/delight-ab/`,
+not in this repo.
+
 ### Fixture
 
 `content/models/props/candelabra_shrine/` — winner seed 2 (`cand_2`),
