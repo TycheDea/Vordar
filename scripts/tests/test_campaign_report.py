@@ -84,6 +84,24 @@ class TestCampaignReport(unittest.TestCase):
             )
             self.assertAlmostEqual(float(fields["agent_hours"]), expected_hours, places=4)
 
+    def test_orchestrator_window_attribution(self):
+        with tempfile.TemporaryDirectory() as out_dir:
+            rc = campaign_report.main([
+                str(REPORT),
+                "--transcripts", str(TRANSCRIPTS),
+                "--out", out_dir,
+            ])
+            self.assertEqual(rc, 0)
+
+            out_path = Path(out_dir) / "demo-2026-07-20.md"
+            text = out_path.read_text(encoding="utf-8")
+            self.assertIn("## Orchestrator (window-attributed, not task-attributed)", text)
+
+            fields = _read_fields(text)
+            self.assertEqual(fields["orchestrator_output_tokens"], "400")
+            self.assertEqual(fields["orchestrator_cache_create_tokens"], "2000")
+            self.assertEqual(fields["orchestrator_sessions"], "1")
+
     def test_missing_transcripts_dir_fails_without_writing(self):
         with tempfile.TemporaryDirectory() as out_dir:
             missing = Path(out_dir) / "does-not-exist"

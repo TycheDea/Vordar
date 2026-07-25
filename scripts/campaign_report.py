@@ -312,6 +312,38 @@ def render_tool_time_section(spawns):
     return "\n".join(lines) + "\n"
 
 
+def collect_orchestrator_totals(transcripts_dir, window):
+    if not window:
+        return 0, 0, 0
+    start, end = window
+    output_sum = 0
+    cache_create_sum = 0
+    session_count = 0
+    for jsonl_path in sorted(Path(transcripts_dir).glob("*.jsonl")):
+        scan = scan_transcript(jsonl_path)
+        in_window = [
+            r for r in scan.assistant_records
+            if r["timestamp"] and start <= r["timestamp"] <= end
+        ]
+        if in_window:
+            session_count += 1
+            output_sum += sum(r["output_tokens"] for r in in_window)
+            cache_create_sum += sum(r["cache_creation_input_tokens"] for r in in_window)
+    return output_sum, cache_create_sum, session_count
+
+
+def render_orchestrator_section(transcripts_dir, window):
+    output_sum, cache_create_sum, session_count = collect_orchestrator_totals(transcripts_dir, window)
+    rows = [
+        ("orchestrator_output_tokens", output_sum),
+        ("orchestrator_cache_create_tokens", cache_create_sum),
+        ("orchestrator_sessions", session_count),
+    ]
+    lines = ["## Orchestrator (window-attributed, not task-attributed)", "", "| field | value |", "| --- | --- |"]
+    lines.extend(f"| {name} | {value} |" for name, value in rows)
+    return "\n".join(lines) + "\n"
+
+
 def _mangle_repo_root(repo_root):
     s = str(repo_root)
     for ch in [":", "\\", "/", "_", "."]:
@@ -379,7 +411,11 @@ def main(argv):
     header = _render_header(attribution.domain, attribution.date, args.report, attributed)
     cost_section = render_cost_section(spawns)
     tool_time_section = render_tool_time_section(spawns)
-    out_path.write_text(header + "\n" + cost_section + tool_time_section, encoding="utf-8")
+    window = _window_bounds(attributed)
+    orchestrator_section = render_orchestrator_section(transcripts_dir, window)
+    out_path.write_text(
+        header + "\n" + cost_section + tool_time_section + orchestrator_section, encoding="utf-8"
+    )
     return 0
 
 
