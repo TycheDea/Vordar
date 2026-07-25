@@ -34,9 +34,12 @@ taxonomy carries is restated against its own denominator before it is trusted.
 
 Cross-type queue (mirrored in `reworks-devloop-2026-07-25.md`):
 
-> **finding 1 → finding 2 (micro) → finding 3 → finding 4 (user-decides) →
-> finding 5 → finding 6 (user-decides) → finding 7 → finding 8 (micro) →
+> **~~finding 1~~ → ~~finding 2 (micro)~~ → ~~finding 3~~ → ~~finding 4 (user-decides)~~ →
+> ~~finding 5~~ → ~~finding 6 (user-decides)~~ → ~~finding 7~~ → ~~finding 8 (micro)~~ →
 > rework 1 (user-decides) → finding 9 → finding 10 → finding 11 (micro).**
+> findings 1–8 done 2026-07-25 (`.claude` commits `c3884c5`..`8eee577`; finding 5
+> has no commit — all its targets are unversioned — and measured 24→22 lesson
+> notes, index −30%, 2 absorbed strikes, 2 merges).
 > rework 2 is **parked**: its gate is a per-audit read-volume baseline that does
 > not exist, takeable free on the next audit.
 >
