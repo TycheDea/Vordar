@@ -12,11 +12,35 @@ import re
 import statistics
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 REPORT_FILENAME_RE = re.compile(r"^audit-(?P<domain>.+)-(?P<date>\d{4}-\d{2}-\d{2})\.md$")
 SYNTHETIC_MODEL = "<synthetic>"
+
+TOOL_CATEGORIES = ("test", "compile", "shell", "edit", "read", "other")
+_TEST_CMD_RE = re.compile(r"cargo\s+(nextest|test)")
+_COMPILE_CMD_RE = re.compile(r"cargo\s+(build|check|clippy)")
+
+
+def categorize_tool(name, command):
+    if name in ("Bash", "PowerShell"):
+        cmd = command or ""
+        if _TEST_CMD_RE.search(cmd):
+            return "test"
+        if _COMPILE_CMD_RE.search(cmd):
+            return "compile"
+        return "shell"
+    if name in ("Edit", "Write", "NotebookEdit"):
+        return "edit"
+    if name in ("Read", "Glob", "Grep"):
+        return "read"
+    return "other"
+
+
+def _parse_ts(ts):
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
 @dataclass
@@ -29,6 +53,7 @@ class Attribution:
 class TranscriptScan:
     first_user_text: str
     assistant_records: list
+    tool_seconds: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -44,6 +69,7 @@ class Spawn:
     task_text: str
     dead: bool
     attributed: bool
+    tool_seconds: dict = field(default_factory=dict)
 
 
 def attribution_patterns(report_path):
@@ -87,6 +113,8 @@ def _extract_text(content):
 def scan_transcript(jsonl_path):
     first_user_text = None
     assistant_records = []
+    open_tool_uses = {}
+    tool_seconds = {category: 0.0 for category in TOOL_CATEGORIES}
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -94,11 +122,10 @@ def scan_transcript(jsonl_path):
                 continue
             record = json.loads(line)
             rtype = record.get("type")
+            message = record.get("message", {})
             if rtype == "user" and first_user_text is None:
-                message = record.get("message", {})
                 first_user_text = _extract_text(message.get("content"))
             elif rtype == "assistant":
-                message = record.get("message", {})
                 usage = message.get("usage", {})
                 assistant_records.append({
                     "timestamp": record.get("timestamp"),
@@ -107,7 +134,36 @@ def scan_transcript(jsonl_path):
                     "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
                     "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
                 })
-    return TranscriptScan(first_user_text=first_user_text or "", assistant_records=assistant_records)
+
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type")
+                if btype == "tool_use":
+                    tool_id = block.get("id")
+                    ts = record.get("timestamp")
+                    if not tool_id or not ts:
+                        continue
+                    input_ = block.get("input")
+                    command = input_.get("command") if isinstance(input_, dict) else None
+                    open_tool_uses[tool_id] = (block.get("name"), command, ts)
+                elif btype == "tool_result":
+                    tool_id = block.get("tool_use_id")
+                    result_ts = record.get("timestamp")
+                    if tool_id not in open_tool_uses or not result_ts:
+                        continue
+                    name, command, use_ts = open_tool_uses.pop(tool_id)
+                    duration = (_parse_ts(result_ts) - _parse_ts(use_ts)).total_seconds()
+                    if 0 <= duration < 3600:
+                        tool_seconds[categorize_tool(name, command)] += duration
+    return TranscriptScan(
+        first_user_text=first_user_text or "",
+        assistant_records=assistant_records,
+        tool_seconds=tool_seconds,
+    )
 
 
 def collect_spawns(transcripts_dir, patterns):
@@ -149,6 +205,7 @@ def collect_spawns(transcripts_dir, patterns):
             task_text=scan.first_user_text[:80],
             dead=dead,
             attributed=is_attributed(scan.first_user_text, patterns.domain, patterns.date),
+            tool_seconds=scan.tool_seconds,
         ))
     return spawns
 
@@ -213,6 +270,44 @@ def render_cost_section(spawns):
     ]
 
     lines = ["## Cost", "", "| field | value |", "| --- | --- |"]
+    lines.extend(f"| {name} | {value} |" for name, value in rows)
+    return "\n".join(lines) + "\n"
+
+
+def _span_hours(spawn):
+    if not spawn.first_ts or not spawn.last_ts:
+        return 0.0
+    return (_parse_ts(spawn.last_ts) - _parse_ts(spawn.first_ts)).total_seconds() / 3600.0
+
+
+def _fmt_seconds(value):
+    return f"{value:g}"
+
+
+def render_tool_time_section(spawns):
+    attributed = [s for s in spawns if s.attributed]
+
+    agent_hours = sum(_span_hours(s) for s in attributed)
+    totals = {category: 0.0 for category in TOOL_CATEGORIES}
+    for s in attributed:
+        for category in TOOL_CATEGORIES:
+            totals[category] += s.tool_seconds.get(category, 0.0)
+    tool_hours = sum(totals.values()) / 3600.0
+    tool_share_pct = f"{100 * tool_hours / agent_hours:.1f}" if agent_hours else "n/a"
+
+    rows = [
+        ("agent_hours", f"{agent_hours:.4f}"),
+        ("tool_hours", f"{tool_hours:.4f}"),
+        ("tool_share_pct", tool_share_pct),
+        ("tool_seconds_test", _fmt_seconds(totals["test"])),
+        ("tool_seconds_compile", _fmt_seconds(totals["compile"])),
+        ("tool_seconds_shell", _fmt_seconds(totals["shell"])),
+        ("tool_seconds_edit", _fmt_seconds(totals["edit"])),
+        ("tool_seconds_read", _fmt_seconds(totals["read"])),
+        ("tool_seconds_other", _fmt_seconds(totals["other"])),
+    ]
+
+    lines = ["## Tool time", "", "| field | value |", "| --- | --- |"]
     lines.extend(f"| {name} | {value} |" for name, value in rows)
     return "\n".join(lines) + "\n"
 
@@ -283,7 +378,8 @@ def main(argv):
 
     header = _render_header(attribution.domain, attribution.date, args.report, attributed)
     cost_section = render_cost_section(spawns)
-    out_path.write_text(header + "\n" + cost_section, encoding="utf-8")
+    tool_time_section = render_tool_time_section(spawns)
+    out_path.write_text(header + "\n" + cost_section + tool_time_section, encoding="utf-8")
     return 0
 
 

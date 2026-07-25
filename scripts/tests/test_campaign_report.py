@@ -2,6 +2,7 @@ import re
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -50,6 +51,38 @@ class TestCampaignReport(unittest.TestCase):
             self.assertEqual(fields["cache_create_tokens"], "1000")
             self.assertEqual(fields["cache_read_tokens"], "10000")
             self.assertEqual(fields["dead_spawns"], "1")
+
+    def test_tool_time_attribution(self):
+        with tempfile.TemporaryDirectory() as out_dir:
+            rc = campaign_report.main([
+                str(REPORT),
+                "--transcripts", str(TRANSCRIPTS),
+                "--out", out_dir,
+            ])
+            self.assertEqual(rc, 0)
+
+            out_path = Path(out_dir) / "demo-2026-07-20.md"
+            text = out_path.read_text(encoding="utf-8")
+            self.assertIn("## Tool time", text)
+
+            fields = _read_fields(text)
+            self.assertEqual(fields["tool_seconds_test"], "60")
+            self.assertEqual(fields["tool_seconds_read"], "2")
+            self.assertEqual(fields["tool_seconds_compile"], "0")
+            self.assertAlmostEqual(float(fields["tool_hours"]), round(62 / 3600, 4), places=4)
+
+            # agent_hours must follow from the fixture timestamps: the sum of
+            # each attributed spawn's own (last - first) span, not a literal.
+            attribution = campaign_report.attribution_patterns(str(REPORT))
+            spawns = campaign_report.collect_spawns(TRANSCRIPTS, attribution)
+            attributed = [s for s in spawns if s.attributed]
+            expected_hours = sum(
+                (datetime.fromisoformat(s.last_ts.replace("Z", "+00:00"))
+                 - datetime.fromisoformat(s.first_ts.replace("Z", "+00:00"))).total_seconds() / 3600.0
+                for s in attributed
+                if s.first_ts and s.last_ts
+            )
+            self.assertAlmostEqual(float(fields["agent_hours"]), expected_hours, places=4)
 
     def test_missing_transcripts_dir_fails_without_writing(self):
         with tempfile.TemporaryDirectory() as out_dir:
