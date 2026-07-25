@@ -578,8 +578,9 @@ fn detail_tile_is_dc_neutral() {
 }
 
 /// Catches a future regeneration silently dropping the `vordar_detail` marker
-/// (chapel_arch), or a foliage card silently picking it up (cypress,
-/// olive_stump — alpha-masked cards that must never get stone grain).
+/// (chapel_arch, broken_column, gravestone, crucero), or a non-stone material
+/// silently picking it up (candelabra_shrine — dark grey weathered iron, not
+/// stone; cypress, olive_stump — alpha-masked foliage cards).
 #[test]
 fn stone_props_declare_detail() {
     let root = repo_root();
@@ -595,6 +596,10 @@ fn stone_props_declare_detail() {
         }
     };
     check("content/models/props/chapel_arch/chapel_arch.glb", true);
+    check("content/models/props/broken_column/broken_column.glb", true);
+    check("content/models/props/gravestone/gravestone.glb", true);
+    check("content/models/props/crucero/crucero.glb", true);
+    check("content/models/props/candelabra_shrine/candelabra_shrine.glb", false);
     check("content/models/props/cypress/cypress.glb", false);
     check("content/models/props/olive_stump/olive_stump.glb", false);
 }
