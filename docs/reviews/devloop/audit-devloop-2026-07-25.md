@@ -197,17 +197,26 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-25.md`):
   partially-correct expensive diff** — on a 180k-class step that is real money.
   Handing the dirty tree to the user instead costs an attention round-trip and
   leaves the queue note describing a workspace that is not green, which breaks
-  the resumable-from-files property finding 1 is strengthening. There is no
-  option without a cost, which is why this is user-decides rather than a default.
+  the resumable-from-files property finding 1 is strengthening. Both costs are
+  real, which is why this was put to the user — and the answer removed the
+  choice rather than settling it; see Path step 1.
 - **Suggestion:** name the choice explicitly in the skill rather than saying
   "recover" and leaving it to judgment. Research doc 7.3's layer-5 practice
   (deliberate crash drills that kill a worker mid-edit) is **rejected** as
   disproportionate at solo-developer scale.
 - **Path:**
-  1. **(user-decides, ask at loop launch)** On a spawn death after edits, does the
-     loop (a) run `git status --short`, discard to the last green commit and
-     respawn, or (b) run `git status --short`, stop, and hand the dirty state to
-     the user? Ruling 5 makes this the user's call, not the skill's.
+  1. **DECIDED 2026-07-25 at loop launch — neither (a) nor (b).** The user ruled
+     that a non-critical event must never interrupt them and that the orchestrator
+     decides stop-vs-respawn. That answer is only implementable because preserving
+     the diff first makes discarding non-destructive, which is what the two
+     original options were trading against each other. The rule to encode:
+     on a spawn death after edits, `git status --short`, then
+     `git stash push -u -m "dead-spawn <item>"`, then discard to the last green
+     commit and respawn — no user contact. Stop and hand over **only** when the
+     same item dies post-edit a second time in one loop: that is a loop, not an
+     incident, and respawning a third time burns tokens against an unchanged
+     cause. Stash refs are named per item so a salvage is possible later; nothing
+     is ever destroyed, so no judgment call about diff value is required.
   2. `implement-finding/SKILL.md:62-69`: extend probe-and-override with the
      post-edit case, encoding the answer to (1) as a stated rule.
   3. `run-queue/SKILL.md:60-70`, rework substep 2: commit the plan file **before**
@@ -319,10 +328,11 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-25.md`):
   abandons them for four different labels. Importing it as a checklist is the
   shim ruling 6 forbids.
 - **Path:**
-  1. **(user-decides, ask at loop launch)** Adopt the recurring ~45–53k
-     end-of-campaign pass at all, given that its break-even rests on an
-     unmeasured prevention rate? The trigger widening (step 2) is nearly free and
-     can land without it.
+  1. **DECIDED 2026-07-25 at loop launch: adopt in full.** The user took the
+     recurring ~45–53k end-of-campaign pass together with the trigger widening,
+     accepting that break-even rests on a prevention rate nothing yet measures.
+     Steps 2–4 all land. Step 5's recurrence metric is what will eventually
+     retire or confirm that acceptance.
   2. `~/.claude/CLAUDE.md` Workflow bullet 4: change the trigger to "after ANY
      correction from me, **or after any loop failure that left a durable
      artifact** — a gate that was red and stayed red through a fix round, a commit
