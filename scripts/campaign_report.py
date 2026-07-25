@@ -23,6 +23,15 @@ TOOL_CATEGORIES = ("test", "compile", "shell", "edit", "read", "other")
 _TEST_CMD_RE = re.compile(r"cargo\s+(nextest|test)")
 _COMPILE_CMD_RE = re.compile(r"cargo\s+(build|check|clippy)")
 
+QUEUE_HEADING = "## Findings (implementation order)"
+CARRIED_HEADING = "## Carried forward from previous report"
+STOP_PREFIX = "**STOP**"
+STOP_SEPARATOR = " · "
+STOP_STATES = ("blocked", "stalled", "exhausted")
+FALSIFICATION_MARKER = "premise-falsified:"
+_QUEUE_ENTRY_RE = re.compile(r"\b(finding|rework)\s+(\d+)\b")
+_GATE_RE = re.compile(r"gate\s+(\d+)/(\d+)")
+
 
 def categorize_tool(name, command):
     if name in ("Bash", "PowerShell"):
@@ -344,6 +353,109 @@ def render_orchestrator_section(transcripts_dir, window):
     return "\n".join(lines) + "\n"
 
 
+def _queue_note(lines):
+    """The blockquote note under the queue heading: the first contiguous `>` run."""
+    try:
+        heading = lines.index(QUEUE_HEADING)
+    except ValueError:
+        return []
+    start = None
+    for i in range(heading + 1, len(lines)):
+        if lines[i].startswith(">"):
+            start = i
+            break
+        if lines[i].startswith("## "):
+            return []
+    if start is None:
+        return []
+    end = start
+    while end < len(lines) and lines[end].startswith(">"):
+        end += 1
+    return lines[start:end]
+
+
+def _queue_entries(note):
+    """Distinct `finding N`/`rework N` entries in the note's bold queue line, and how
+    many are struck. A `~~` toggles strike state, so an entry is struck iff an odd
+    number of `~~` precede it."""
+    span_lines = []
+    for line in note:
+        span_lines.append(line)
+        if line.rstrip().endswith(".**"):
+            break
+    span = "\n".join(span_lines)
+
+    seen = set()
+    struck = 0
+    for m in _QUEUE_ENTRY_RE.finditer(span):
+        key = (m.group(1), m.group(2))
+        if key in seen:
+            continue
+        seen.add(key)
+        if span.count("~~", 0, m.start()) % 2 == 1:
+            struck += 1
+    return len(seen), struck
+
+
+def _carried_forward_in(lines):
+    try:
+        heading = lines.index(CARRIED_HEADING)
+    except ValueError:
+        return 0
+    count = 0
+    for line in lines[heading + 1:]:
+        if line.startswith("## "):
+            break
+        if line.startswith("### "):
+            count += 1
+    return count
+
+
+def parse_report(report_path):
+    text = Path(report_path).read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    note = _queue_note(lines)
+    note_text = "\n".join(note)
+    queue_items, queue_items_struck = _queue_entries(note)
+
+    gates = _GATE_RE.findall(note_text)
+    suite_first = gates[0][0] if gates else "n/a"
+    suite_last = gates[-1][0] if gates else "n/a"
+    gate_mismatches = sum(1 for run, total in gates if run != total)
+
+    stops = {state: 0 for state in STOP_STATES}
+    stops_malformed = 0
+    for line in lines:
+        if not line.startswith(STOP_PREFIX):
+            continue
+        fields = [f.strip() for f in line.split(STOP_SEPARATOR)]
+        if len(fields) == 5 and fields[2] in stops:
+            stops[fields[2]] += 1
+        else:
+            stops_malformed += 1
+
+    return {
+        "queue_items": queue_items,
+        "queue_items_struck": queue_items_struck,
+        "suite_first": suite_first,
+        "suite_last": suite_last,
+        "gate_mismatches": gate_mismatches,
+        "stops_blocked": stops["blocked"],
+        "stops_stalled": stops["stalled"],
+        "stops_exhausted": stops["exhausted"],
+        "stops_malformed": stops_malformed,
+        "premise_falsifications_recorded": note_text.count(FALSIFICATION_MARKER),
+        "carried_forward_in": _carried_forward_in(lines),
+    }
+
+
+def render_outcome_section(outcome):
+    lines = ["## Outcome", "", "| field | value |", "| --- | --- |"]
+    lines.extend(f"| {name} | {value} |" for name, value in outcome.items())
+    return "\n".join(lines) + "\n"
+
+
 def _mangle_repo_root(repo_root):
     s = str(repo_root)
     for ch in [":", "\\", "/", "_", "."]:
@@ -413,8 +525,10 @@ def main(argv):
     tool_time_section = render_tool_time_section(spawns)
     window = _window_bounds(attributed)
     orchestrator_section = render_orchestrator_section(transcripts_dir, window)
+    outcome_section = render_outcome_section(parse_report(report_path))
     out_path.write_text(
-        header + "\n" + cost_section + tool_time_section + orchestrator_section, encoding="utf-8"
+        header + "\n" + cost_section + tool_time_section + orchestrator_section + outcome_section,
+        encoding="utf-8",
     )
     return 0
 

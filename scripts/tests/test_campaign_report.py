@@ -102,6 +102,52 @@ class TestCampaignReport(unittest.TestCase):
             self.assertEqual(fields["orchestrator_cache_create_tokens"], "2000")
             self.assertEqual(fields["orchestrator_sessions"], "1")
 
+    def test_outcome_parsed_from_report(self):
+        with tempfile.TemporaryDirectory() as out_dir:
+            rc = campaign_report.main([
+                str(REPORT),
+                "--transcripts", str(TRANSCRIPTS),
+                "--out", out_dir,
+            ])
+            self.assertEqual(rc, 0)
+
+            text = (Path(out_dir) / "demo-2026-07-20.md").read_text(encoding="utf-8")
+            self.assertIn("## Outcome", text)
+
+            fields = _read_fields(text)
+            self.assertEqual(fields["queue_items"], "4")
+            self.assertEqual(fields["queue_items_struck"], "2")
+            self.assertEqual(fields["suite_first"], "400")
+            self.assertEqual(fields["suite_last"], "402")
+            self.assertEqual(fields["gate_mismatches"], "0")
+            self.assertEqual(fields["stops_blocked"], "0")
+            self.assertEqual(fields["stops_stalled"], "1")
+            self.assertEqual(fields["stops_exhausted"], "0")
+            self.assertEqual(fields["stops_malformed"], "0")
+            self.assertEqual(fields["premise_falsifications_recorded"], "1")
+            self.assertEqual(fields["carried_forward_in"], "2")
+
+    def test_outcome_without_gate_tokens(self):
+        with tempfile.TemporaryDirectory() as work_dir:
+            gateless = Path(work_dir) / REPORT.name
+            gateless.write_text(
+                re.sub(r"gate \d+/\d+", "", REPORT.read_text(encoding="utf-8")),
+                encoding="utf-8",
+            )
+            rc = campaign_report.main([
+                str(gateless),
+                "--transcripts", str(TRANSCRIPTS),
+                "--out", work_dir,
+            ])
+            self.assertEqual(rc, 0)
+
+            text = (Path(work_dir) / "demo-2026-07-20.md").read_text(encoding="utf-8")
+            fields = _read_fields(text)
+            self.assertEqual(fields["suite_first"], "n/a")
+            self.assertEqual(fields["suite_last"], "n/a")
+            self.assertEqual(fields["gate_mismatches"], "0")
+            self.assertEqual(fields["queue_items"], "4")
+
     def test_missing_transcripts_dir_fails_without_writing(self):
         with tempfile.TemporaryDirectory() as out_dir:
             missing = Path(out_dir) / "does-not-exist"
