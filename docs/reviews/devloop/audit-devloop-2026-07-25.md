@@ -36,10 +36,19 @@ Cross-type queue (mirrored in `reworks-devloop-2026-07-25.md`):
 
 > **~~finding 1~~ → ~~finding 2 (micro)~~ → ~~finding 3~~ → ~~finding 4 (user-decides)~~ →
 > ~~finding 5~~ → ~~finding 6 (user-decides)~~ → ~~finding 7~~ → ~~finding 8 (micro)~~ →
-> rework 1 (user-decides) → finding 9 → finding 10 → finding 11 (micro).**
+> ~~rework 1 (user-decides)~~ → finding 9 → finding 10 → finding 11 (micro).**
 > findings 1–8 done 2026-07-25 (`.claude` commits `c3884c5`..`8eee577`; finding 5
 > has no commit — all its targets are unversioned — and measured 24→22 lesson
 > notes, index −30%, 2 absorbed strikes, 2 merges).
+> rework 1 done 2026-07-25 (plan-devloop-rework-1-2026-07-25.md, 8 steps,
+> loop-final gate RED: 356 passed, 1 failed. The failure is
+> `vordar-game::content_lint prop_material_matches_surface_class`, caused by a
+> concurrent session's uncommitted `content/models/` files; this plan's six
+> commits touch no Rust, WGSL or `content/`, so it is not attributable to the
+> rework. premise-falsified: step 7's "diff removes ≥3 lines from the `:27`
+> bullet" check, unsatisfiable because that file is one line per bullet;
+> premise-falsified: step 6's expectation that devloop-2026-07-17 carries suite
+> counts, that report having no `gate N/N` token at all).
 > rework 2 is **parked**: its gate is a per-audit read-volume baseline that does
 > not exist, takeable free on the next audit.
 >
