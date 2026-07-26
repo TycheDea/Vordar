@@ -132,7 +132,8 @@ def geometry_stages(clean, atlas, rig, views, mesh_input, contract):
     the pick itself, and the picked extras appended to the view list — their
     depths already rendered as candidates, so a pick costs no render.
     Returns the grown view list, its depth arrays and depth cache units, the
-    atlas unit and its arrays, and every unit in chain order."""
+    atlas unit and its arrays (including `reachable`, the island texels any
+    base or candidate direction can see), and every unit in chain order."""
     view_res = contract.view_res
     blender = blender_id()
 
@@ -152,11 +153,12 @@ def geometry_stages(clean, atlas, rig, views, mesh_input, contract):
                              mesh_input, blender)
 
     def pick(out_dir):
-        meta = pick_extra_views(
+        meta, reachable = pick_extra_views(
             views, depths, cands,
             (read_depth(u.dir / "depth.exr") for u in cand_units),
             rig, pos, nrm, island)
         (out_dir / "extras.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        np.save(out_dir / "reachable.npy", reachable)
 
     nbv_inputs = {**mesh_input, **atlas_unit.record["outputs"]}
     for u in units + cand_units:
@@ -165,14 +167,15 @@ def geometry_stages(clean, atlas, rig, views, mesh_input, contract):
         "nbv", None, proptex.coverage,
         {"azimuths": contract.azimuths, "elevation_deg": MV_ELEVATION_DEG,
          "blender": blender},
-        nbv_inputs, ("extras.json",), pick)
+        nbv_inputs, ("extras.json", "reachable.npy"), pick)
 
     extra_meta = json.loads((nbv_unit.dir / "extras.json").read_text(encoding="utf-8"))
+    reachable = np.load(nbv_unit.dir / "reachable.npy")
     picked = pick_indices(cands, extra_meta)
     return (views + [cands[j][1] for j in picked],
             depths + [read_depth(cand_units[j].dir / "depth.exr") for j in picked],
             units + [cand_units[j] for j in picked],
-            atlas_unit, (pos, nrm, island),
+            atlas_unit, (pos, nrm, island, reachable),
             [atlas_unit] + units + cand_units + [nbv_unit])
 
 
@@ -242,7 +245,7 @@ def basecolor_stages(clean, clean_glb_path, atlas, seed, contract):
     mesh_input = {"clean.glb": sha256_file(clean_glb_path)}
     mv_specs = [(view_hint(a), a, MV_ELEVATION_DEG) for a in contract.azimuths]
     views, rig = mv_camera_rig(clean, mv_specs)
-    views, depths, dunits, atlas_unit, (pos, nrm, island), units = geometry_stages(
+    views, depths, dunits, atlas_unit, (pos, nrm, island, reachable), units = geometry_stages(
         clean, atlas, rig, views, mesh_input, contract)
 
     delit = needs_estimator(contract.albedo_source)
@@ -271,7 +274,7 @@ def basecolor_stages(clean, clean_glb_path, atlas, seed, contract):
          "numpy_cv2": numpy_cv2_id()},
         blend_inputs, ("base.png", "coverage.json"),
         lambda out_dir: blend_views(views, [u.dir / name for u, name in sources],
-                                    depths, rig, pos, nrm, island, out_dir))
+                                    depths, rig, pos, nrm, island, reachable, out_dir))
     return blend_unit, units + [blend_unit]
 
 

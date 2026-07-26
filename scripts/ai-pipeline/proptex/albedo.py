@@ -99,13 +99,15 @@ def numpy_cv2_id():
     return f"numpy {np.__version__} cv2 {cv2.__version__}"
 
 
-def blend_views(views, sources, depths, rig, pos, nrm, island, out_dir):
+def blend_views(views, sources, depths, rig, pos, nrm, island, reachable, out_dir):
     """Facing-weighted, occlusion-tested blend of every view's albedo source
     into the atlas, written to out_dir as base.png plus coverage.json;
     `sources` is each view's albedo source image, parallel to `views`.
     Island texels no view covered are Telea-inpainted from their
-    surroundings, off-island texels keep a mean-color fill. Returns the
-    coverage measurements."""
+    surroundings, off-island texels keep a mean-color fill. `reachable`
+    (from `pick_extra_views`) restricts which hole components can fail the
+    coverage gate to those some view could actually have covered. Returns
+    the coverage measurements."""
     accum = np.zeros((pos.shape[0], 3))
     wsum = np.zeros(pos.shape[0])
     for i, v in enumerate(views):
@@ -128,7 +130,7 @@ def blend_views(views, sources, depths, rig, pos, nrm, island, out_dir):
     size = atlas_size(island)
     holes = island & ~covered
     if holes.any() and covered.any():
-        over = [c for c in hole_component_depths(covered, island)
+        over = [c for c in hole_component_depths(covered, island & reachable)
                 if c["depth_frac"] > MAX_HOLE_DEPTH_FRAC]
         if over:
             raise CoverageFailure(

@@ -169,12 +169,21 @@ def pick_extra_views(views, depths, cands, cand_depths, rig, pos, nrm, island):
     """Greedy next-best-view pick over the candidate set: coverage is purely
     geometric (facing/frustum/occlusion, never the generated pixels), so
     extras are picked before any generation and a re-run re-derives the same
-    picks. Returns one entry per pick — its direction and the gain it was
-    predicted to add. `cand_depths` is iterated exactly once, so it may be a
-    generator that loads one candidate's depth at a time."""
-    uncovered = island & ~covered_mask(view_coverage(views, depths, rig, pos, nrm), island)
+    picks. Returns `(extra_meta, reachable)`: one entry per pick (its
+    direction and the gain it was predicted to add), and the island texels
+    the base view set or any raw candidate direction can see -- interior
+    texels no direction ever reaches are excluded from `reachable`
+    regardless of which candidates end up picked, since a component made of
+    only those texels has no view that could ever cover it. `cand_depths` is
+    iterated exactly once, so it may be a generator that loads one
+    candidate's depth at a time."""
+    base_covered = covered_mask(view_coverage(views, depths, rig, pos, nrm), island)
+    uncovered = island & ~base_covered
     masks = [covered_mask(view_coverage([cand], [depth], rig, pos, nrm), island)
              for (_, cand), depth in zip(cands, cand_depths)]
+    reachable = base_covered.copy()
+    for m in masks:
+        reachable |= m
     min_dot = cos(radians(MV_EXTRA_MIN_SEP_DEG))
 
     extra_meta = []
@@ -195,7 +204,7 @@ def pick_extra_views(views, depths, cands, cand_depths, rig, pos, nrm, island):
             "predicted_gain_texels": gains[best],
             "predicted_gain_frac": round(gains[best] / max(island_total, 1), 4),
         })
-    return extra_meta
+    return extra_meta, reachable
 
 
 def pick_indices(cands, extra_meta):
@@ -270,7 +279,7 @@ def main():
         cands = extra_candidates(views, rig)
         cand_dirs = _render_depths(clean, [cand for _, cand in cands], rig,
                                    contract.view_res, work_dir / "candidate")
-        extra_meta = pick_extra_views(
+        extra_meta, reachable = pick_extra_views(
             views, depths, cands, (read_depth(d / "depth.exr") for d in cand_dirs),
             rig, pos, nrm, island)
         for j in pick_indices(cands, extra_meta):
@@ -279,7 +288,7 @@ def main():
 
         covered = covered_mask(view_coverage(views, depths, rig, pos, nrm), island)
         stats = coverage_stats(covered, island)
-        over = [c for c in hole_component_depths(covered, island)
+        over = [c for c in hole_component_depths(covered, island & reachable)
                 if c["depth_frac"] > MAX_HOLE_DEPTH_FRAC]
 
         size = atlas_size(island)
@@ -293,7 +302,7 @@ def main():
         bpy.data.images.remove(hole_img)
 
         if over:
-            _, labels, _ = _hole_labels(covered, island)
+            _, labels, _ = _hole_labels(covered, island & reachable)
             offending = np.isin(labels, [c["label"] for c in over]).reshape(-1)
             directions = rank_candidates(
                 cands, (read_depth(d / "depth.exr") for d in cand_dirs),
