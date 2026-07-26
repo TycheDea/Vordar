@@ -307,9 +307,8 @@ fn read_material(
         }
     };
 
-    // glTF material extras `{"vordar_detail": true}` (set_material_extras.mjs)
-    // — a per-material fact, not a per-instance one, so it belongs here
-    // rather than zones.ron (see the plan's opt-in design).
+    // glTF material extras `{"vordar_detail": true}` — a per-material fact,
+    // not a per-instance one, so it belongs here rather than zones.ron.
     let detail = mat.extras().as_ref()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw.get()).ok())
         .and_then(|v| v.get("vordar_detail").and_then(serde_json::Value::as_bool))

@@ -4,11 +4,17 @@ write. All three take the cleaned mesh and write files a cache entry
 declares, so each is skippable independently of the others.
 """
 
+import json
+import os
+import struct
 from pathlib import Path
 
 import bpy
 
 from proptex.scene import bake_material, new_image, save_png, scene_state, select_only
+
+_GLB_MAGIC = 0x46546C67   # glTF binary's own magic number ("glTF")
+_JSON_CHUNK_TYPE = 0x4E4F534A  # glTF binary's chunk-type tag for JSON ("JSON")
 
 AO_SAMPLES = 128  # the EMIT/NORMAL bakes are exact single-ray lookups, but AO
 # integrates a hemisphere per texel -- 1 sample would be per-texel dithered
@@ -74,9 +80,66 @@ def _load(path, srgb):
     return img
 
 
+def _write_glb(obj, filepath):
+    select_only([obj], obj)
+    result = bpy.ops.export_scene.gltf(filepath=str(filepath),
+                                       export_format="GLB", export_yup=True,
+                                       export_image_format="AUTO",
+                                       export_extras=True, use_selection=True)
+    if result != {"FINISHED"}:
+        raise ExportError(f"export_scene.gltf returned {result}")
+
+
+def _read_glb_json(path):
+    data = Path(path).read_bytes()
+    try:
+        magic, _version, length = struct.unpack_from("<III", data, 0)
+        chunk_length, chunk_type = struct.unpack_from("<II", data, 12)
+    except struct.error as e:
+        raise ExportError(f"{path}: truncated glb ({e})")
+    if magic != _GLB_MAGIC or chunk_type != _JSON_CHUNK_TYPE:
+        raise ExportError(f"{path}: not a well-formed glb")
+    if length != len(data) or 20 + chunk_length > len(data):
+        raise ExportError(f"{path}: truncated glb "
+                          f"(header declares {length} bytes, file has {len(data)})")
+    try:
+        return json.loads(data[20:20 + chunk_length])
+    except json.JSONDecodeError as e:
+        raise ExportError(f"{path}: truncated glb (JSON chunk does not parse: {e})")
+
+
+def _validate_export(path, contract):
+    """The glb the stage promised, checked against the contract it actually
+    resolved rather than a hardcoded list: a material carrying all three
+    baked textures, the contract's scalar MR factors, and the detail flag
+    the class declared."""
+    doc = _read_glb_json(path)
+    materials = doc.get("materials") or []
+    if not materials:
+        raise ExportError(f"{path}: glb carries no materials")
+    mat = materials[0]
+    pbr = mat.get("pbrMetallicRoughness", {})
+    for label, present in (("baseColorTexture", "baseColorTexture" in pbr),
+                           ("normalTexture", "normalTexture" in mat),
+                           ("occlusionTexture", "occlusionTexture" in mat)):
+        if not present:
+            raise ExportError(f"{path}: material missing {label}")
+    for factor_name, expected in (("metallicFactor", contract.metallic),
+                                  ("roughnessFactor", contract.roughness)):
+        got = pbr.get(factor_name)
+        if got is None or abs(got - expected) > 1e-4:
+            raise ExportError(f"{path}: {factor_name} {got!r} != contract {expected!r}")
+    detail = mat.get("extras", {}).get("vordar_detail")
+    if detail != contract.detail:
+        raise ExportError(f"{path}: extras.vordar_detail {detail!r} != contract {contract.detail!r}")
+
+
 def export_prop(clean, base_png, normal_png, ao_png, contract, out_dir):
     """Build the Principled BSDF material graph on clean from the three
-    baked maps and export clean alone as out_dir/textured.glb."""
+    baked maps and export clean alone as out_dir/textured.glb: written to a
+    temp name and swapped into place with one rename, then re-read and
+    checked against contract so a truncated or incomplete write is caught
+    before anything downstream can cache or consume it."""
     base_img = _load(base_png, srgb=True)
     normal_img = _load(normal_png, srgb=False)
     ao_img = _load(ao_png, srgb=False)
@@ -113,10 +176,14 @@ def export_prop(clean, base_png, normal_png, ao_png, contract, out_dir):
     # use_selection=True makes the export self-contained: it writes exactly
     # the selected object regardless of what else is linked in the scene,
     # rather than depending on the scene happening to be clean.
-    select_only([clean], clean)
-    result = bpy.ops.export_scene.gltf(filepath=str(Path(out_dir) / "textured.glb"),
-                                       export_format="GLB", export_yup=True,
-                                       export_image_format="AUTO",
-                                       export_extras=True, use_selection=True)
-    if result != {"FINISHED"}:
-        raise ExportError(f"export_scene.gltf returned {result}")
+    out_dir = Path(out_dir)
+    tmp_path = out_dir / "textured.tmp.glb"  # ends in .glb: the exporter
+    # appends its own extension to any filepath that doesn't already carry it
+    final_path = out_dir / "textured.glb"
+    _write_glb(clean, tmp_path)
+    os.replace(tmp_path, final_path)  # same directory, so this rename is atomic
+    try:
+        _validate_export(final_path, contract)
+    except ExportError:
+        final_path.unlink(missing_ok=True)
+        raise
