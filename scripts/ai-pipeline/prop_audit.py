@@ -14,11 +14,11 @@
 # (base_color / normal / metallic_roughness / occlusion) so that promotion is
 # a rename-free port, not a rewrite.
 #
-# Plain system Python: numpy + Pillow only, both already used by
-# bakeoff/metrics.py. PIL 12.3 decodes BC7 and BC5 .dds directly, so no
-# texconv round-trip. glTF/GLB accessors are read with pure struct, and the
-# normal-map Laplacian is hand-rolled numpy -- deliberately not cv2, which
-# lives inside Blender's bundled interpreter and is unavailable here.
+# Plain system Python: numpy + Pillow only. PIL 12.3 decodes BC7 and BC5
+# .dds directly, so no texconv round-trip. glTF/GLB accessors are read with
+# pure struct, and the normal-map Laplacian is hand-rolled numpy --
+# deliberately not cv2, which lives inside Blender's bundled interpreter and
+# is unavailable here.
 import argparse
 import json
 import re
@@ -29,11 +29,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from bakeoff.metrics import baked_fraction, luma_of, rgb_of
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROPS_DIR = REPO_ROOT / "content/models/props"
 ZONES_RON = REPO_ROOT / "content/zones/zones.ron"
+ASSETS_JSON = REPO_ROOT / "content/models/assets.json"
+HOLES_DIR = REPO_ROOT / "target/prop-coverage"
+COVERAGE_JSON = HOLES_DIR / "coverage.json"
 REFERENCE_PROP = "rock_face_01"
 
 # manifest slot string -> MaterialData field name (content_lint.rs:259-265),
@@ -43,7 +44,7 @@ SLOT_NAMES = {"base": "base_color", "normal": "normal", "mr": "metallic_roughnes
 FIELDS = [
     "roughness_mean", "roughness_std", "metallic_mean",
     "ao_mean", "ao_bound",
-    "albedo_luma_p1", "albedo_luma_p50", "albedo_luma_p99", "albedo_blown_frac",
+    "albedo_luma_p1", "albedo_luma_p50", "albedo_luma_p99", "albedo_blown_frac", "albedo_sat",
     "normal_lap_std", "normal_flat_frac",
     "island_frac",
     "atlas_px_per_m", "placed_px_per_m", "world_area_m2", "atlas_w", "atlas_h",
@@ -53,7 +54,7 @@ FIELDS = [
 ]
 PRECISION = {
     "roughness_mean": 3, "roughness_std": 3, "metallic_mean": 3, "ao_mean": 3,
-    "albedo_luma_p1": 3, "albedo_luma_p50": 3, "albedo_luma_p99": 3, "albedo_blown_frac": 3,
+    "albedo_luma_p1": 3, "albedo_luma_p50": 3, "albedo_luma_p99": 3, "albedo_blown_frac": 3, "albedo_sat": 3,
     "normal_lap_std": 3, "normal_flat_frac": 3, "island_frac": 3,
     "atlas_px_per_m": 1, "placed_px_per_m": 1, "world_area_m2": 2,
     "roughness_factor": 2, "metallic_factor": 2,
@@ -147,17 +148,49 @@ def island_mask(gltf, buffers, w, h):
     audit stats can be restricted to surface texels instead of the whole
     atlas (F-2: off-island texels are mean-fill/inpaint, not surface data,
     and dilute every whole-atlas statistic toward however much of the atlas
-    xatlas actually packed)."""
+    xatlas actually packed). glTF TEXCOORD_0 and PIL's array both put the
+    origin at top-left, so V maps straight across -- no flip."""
     img = Image.new("L", (w, h), 0)
     draw = ImageDraw.Draw(img)
     for _pos, uv, tris, _scale in iter_prims(gltf, buffers):
-        # V flipped: the bake wrote texels in Blender's V-up UV space, but
-        # glTF TEXCOORD_0 stores V-down (top-left origin) -- confirmed
-        # empirically against the shipped normal atlas's flat-texel geometry.
-        px = np.stack([uv[:, 0], 1.0 - uv[:, 1]], axis=1) * np.array([w, h], dtype=np.float32)
+        px = uv * np.array([w, h], dtype=np.float32)
         for tri in tris:
             draw.polygon([tuple(px[i]) for i in tri], fill=255)
     return np.asarray(img) > 0
+
+
+def covered_mask(prop_name, island):
+    """Albedo mask for a `kind: generated` prop: the rasterized UV island
+    intersected with coverage.py's hole map covered (grey) texels -- island
+    texels no multiview render reached are Telea-inpainted, and that filler
+    runs brighter than genuine content on every shipped prop, so unmasked
+    albedo stats flatter exactly the props with the most inpaint to hide.
+    The hole map's own island (covered|hole) is not used on its own: it is
+    baked through a Blender margin bake and so is a dilation of the true UV
+    footprint, and its margin texels are dilated copies of chart-edge
+    colour, not surface. Refuses (does not fall back to the island mask) on
+    a missing map, a dimension mismatch, or the rasterized island landing
+    <98% inside the hole map's island -- the containment relation that
+    actually holds between a tight footprint and its dilation, and the
+    cheap check that catches a wrong orientation."""
+    path = HOLES_DIR / f"holes_{prop_name}.png"
+    if not path.exists():
+        print(f"error: {path} missing -- run: python scripts/ai-pipeline/prop_coverage_sweep.py "
+              f"--asset {prop_name}", file=sys.stderr)
+        sys.exit(1)
+    holes = np.asarray(Image.open(path).convert("RGB")).astype(np.int16)
+    if holes.shape[:2] != island.shape:
+        print(f"error: {path} is {holes.shape[1]}x{holes.shape[0]}, atlas is "
+              f"{island.shape[1]}x{island.shape[0]}", file=sys.stderr)
+        sys.exit(1)
+    covered = (np.abs(holes - 64) <= 8).all(axis=-1)
+    holed = (holes[..., 0] >= 247) & (holes[..., 1] <= 8) & (holes[..., 2] <= 8)
+    outside = float((island & ~(covered | holed)).sum()) / float(island.sum())
+    if outside > 0.02:
+        print(f"error: {path} island misses {outside:.1%} of the rasterized UV island "
+              f"(must be >= 98% contained) -- wrong orientation?", file=sys.stderr)
+        sys.exit(1)
+    return island & covered
 
 
 # --- zones.ron placement scale ---------------------------------------------
@@ -175,6 +208,51 @@ def placement_scales():
         name = Path(model).parent.name
         scales[name] = max(scales.get(name, 0.0), float(scale))
     return scales
+
+
+# --- baked-lighting instrument (A6.2) ---------------------------------------
+#
+# baked_fraction: best R^2 of luma ~ a + b*max(N.L, 0) over a hemisphere of
+# light directions -- baked lighting is luminance that tracks surface
+# orientation. A uniformly dark object with flat albedo scores ~0. Calibrated
+# against a hard-sun/flat-white control (~0.33 measured; a pure Lambert 1.0
+# is not reachable once shadow and occlusion are real) and against generated
+# multiview albedo (0.006-0.018 measured).
+
+def rgb_of(path):
+    return np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+
+
+def luma_of(path):
+    a = rgb_of(path)
+    return 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+
+
+def _light_dirs(n_az=24, n_el=6):
+    out = []
+    for el in np.linspace(0.0, np.pi / 2 * 0.95, n_el):
+        for az in np.linspace(0, 2 * np.pi, n_az, endpoint=False):
+            out.append([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
+    return np.array(out, dtype=np.float32)
+
+
+def baked_fraction(luma, normals, mask):
+    y = luma[mask]
+    y = y - y.mean()
+    denom = float((y * y).sum())
+    if denom < 1e-9:
+        return 0.0
+    nm = normals[mask]
+    best = 0.0
+    for L in _light_dirs():
+        x = np.maximum(nm @ L, 0.0)
+        x = x - x.mean()
+        sx = float((x * x).sum())
+        if sx < 1e-9:
+            continue
+        b = float((x * y).sum()) / sx
+        best = max(best, (b * b * sx) / denom)
+    return best
 
 
 # --- per-texture metrics -----------------------------------------------------
@@ -195,12 +273,16 @@ def ao_stats(path, mask):
 
 def albedo_stats(path, mask):
     luma = luma_of(path)
+    rgb = rgb_of(path)[mask]
     m = luma[mask]
+    mx, mn = rgb.max(axis=-1), rgb.min(axis=-1)
+    sat = np.divide(mx - mn, mx, out=np.zeros_like(mx), where=mx > 0)
     stats = {
         "albedo_luma_p1": float(np.percentile(m, 1)),
         "albedo_luma_p50": float(np.percentile(m, 50)),
         "albedo_luma_p99": float(np.percentile(m, 99)),
         "albedo_blown_frac": float((m > 0.9).mean()),
+        "albedo_sat": float(sat.mean()),
     }
     return stats, luma
 
@@ -221,7 +303,7 @@ def normal_stats(path, mask):
 
 
 def baked_fraction_ts(luma, normal_rgb):
-    """baked_fraction (bakeoff/metrics.py) applied in tangent space off the
+    """baked_fraction (below) applied in tangent space off the
     normal atlas, instead of the world-space normals the prior art derives
     from generation-stage depth renders -- those work dirs are not shipped,
     only .glb + .textures + generation_manifest.json survive. This is a
@@ -242,20 +324,29 @@ def baked_fraction_ts(luma, normal_rgb):
     return float(baked_fraction(luma, normals, mask))
 
 
-def generation_stats(prop_dir):
-    path = prop_dir / "generation_manifest.json"
-    if not path.exists():
+def generation_stats(prop_name, asset):
+    """(blend_coverage, hole_frac) for a `kind: generated` prop, from
+    prop_coverage_sweep.py's target/prop-coverage/coverage.json -- the same
+    coverage computation covered_mask's albedo routing depends on, so this
+    table's blend_coverage and its albedo mask cannot silently disagree. A
+    `kind: downloaded` prop was never generated and truthfully has no
+    coverage."""
+    if asset.get("kind") != "generated":
         return None, None
-    tex = json.loads(path.read_text(encoding="utf-8")).get("texture", {})
-    coverage = tex.get("blend_coverage")
-    holes, size = tex.get("hole_texels"), tex.get("texture_size")
-    hole_frac = holes / size ** 2 if holes is not None and size else None
-    return coverage, hole_frac
+    coverage = json.loads(COVERAGE_JSON.read_text(encoding="utf-8")) if COVERAGE_JSON.exists() else {}
+    entry = coverage.get(prop_name)
+    if entry is None:
+        print(f"error: {COVERAGE_JSON} has no entry for {prop_name!r} -- run: "
+              f"python scripts/ai-pipeline/prop_coverage_sweep.py --asset {prop_name}", file=sys.stderr)
+        sys.exit(1)
+    stats = entry["coverage"]
+    return stats["blend_coverage"], stats["hole_texels"] / asset["texture_size"] ** 2
 
 
 # --- per-prop assembly --------------------------------------------------
 
-def measure_prop(prop_dir, scales):
+def measure_prop(prop_dir, scales, assets):
+    asset = assets.get(prop_dir.name, {})
     row = {f: None for f in FIELDS}
     row["prop"] = prop_dir.name
     row["reference"] = prop_dir.name == REFERENCE_PROP
@@ -308,7 +399,8 @@ def measure_prop(prop_dir, scales):
 
     luma = None
     if "base_color" in slots:
-        stats, luma = albedo_stats(slots["base_color"], mask)
+        albedo_mask = covered_mask(prop_dir.name, mask) if asset.get("kind") == "generated" else mask
+        stats, luma = albedo_stats(slots["base_color"], albedo_mask)
         row.update(stats)
 
     if "normal" in slots:
@@ -316,7 +408,7 @@ def measure_prop(prop_dir, scales):
         if luma is not None:
             row["baked_fraction_ts"] = baked_fraction_ts(luma, rgb_of(slots["normal"]))
 
-    row["blend_coverage"], row["hole_frac"] = generation_stats(prop_dir)
+    row["blend_coverage"], row["hole_frac"] = generation_stats(prop_dir.name, asset)
     return row
 
 
@@ -365,6 +457,7 @@ def main():
     args = parser.parse_args()
 
     scales = placement_scales()
+    assets = json.loads(ASSETS_JSON.read_text(encoding="utf-8"))
     prop_dirs = {p.name: p for p in sorted(PROPS_DIR.iterdir()) if p.is_dir()}
 
     targets = dict(prop_dirs)
@@ -374,7 +467,7 @@ def main():
         if REFERENCE_PROP in prop_dirs:
             targets.setdefault(REFERENCE_PROP, prop_dirs[REFERENCE_PROP])
 
-    rows = [measure_prop(prop_dir, scales) for prop_dir in targets.values()]
+    rows = [measure_prop(prop_dir, scales, assets) for prop_dir in targets.values()]
     print_table(rows)
     if args.json:
         print()
