@@ -50,7 +50,8 @@ class CoverageFailure(Exception):
 # Coverage-driven extra views (clean-room Text2Tex next-best-view):
 MV_EXTRA_MAX = 2  # at most one extra canvas (two side-by-side views)
 MV_EXTRA_MIN_GAIN = 0.03  # an extra view must newly cover >=3% of island
-# texels; a smaller residue is scattered enough that Telea inpaint suffices
+# texels; below that a pick only trims rims off charts the set already reaches
+# and moves no hole component's extrapolation depth
 MV_EXTRA_CANDIDATE_AZIMUTHS = tuple(range(0, 360, 30))
 MV_EXTRA_CANDIDATE_ELEVATIONS = (-35.0, 15.0, 55.0)  # on standing props the
 # uncovered set is dominated by DOWN-facing texels (cup/arm/base undersides:
