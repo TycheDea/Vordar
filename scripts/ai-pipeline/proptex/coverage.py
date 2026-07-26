@@ -38,6 +38,15 @@ MV_COVERAGE_EPS = 1e-4  # a texel counts as covered above this summed blend
 # weight; shared by covered_mask's every caller (albedo.py's blend_views and
 # pick_extra_views below) so they cannot drift
 
+MAX_HOLE_DEPTH_FRAC = 0.015  # max per-component extrapolation depth, as a
+# fraction of atlas width, before Telea is filling material rather than
+# scattered noise
+
+
+class CoverageFailure(Exception):
+    pass
+
+
 # Coverage-driven extra views (clean-room Text2Tex next-best-view):
 MV_EXTRA_MAX = 2  # at most one extra canvas (two side-by-side views)
 MV_EXTRA_MIN_GAIN = 0.03  # an extra view must newly cover >=3% of island
@@ -68,25 +77,68 @@ def view_coverage(views, depths, rig, pos, nrm):
     return wsum
 
 
+def _hole_labels(covered, island):
+    """8-connected component labelling of the hole mask (island & ~covered):
+    (n_labels, labels, atlas size)."""
+    size = atlas_size(island)
+    holes = island & ~covered
+    n_labels, labels = cv2.connectedComponents(
+        holes.reshape(size, size).astype(np.uint8), connectivity=8)
+    return n_labels, labels, size
+
+
+def hole_component_depths(covered, island):
+    """Per 8-connected hole component: the maximum L2 distance, in
+    atlas-width fractions, from a hole texel to the nearest *covered*
+    texel. The distance transform's source set is the covered mask alone
+    -- out-of-island gutter is not a source, so a hole enclosed by texture
+    measures about half its width while one running off a chart edge
+    measures its full width. Returns a list of {"label", "texels",
+    "depth_frac"} sorted deepest-first."""
+    n_labels, labels, size = _hole_labels(covered, island)
+    if n_labels <= 1:
+        return []
+    src = (~covered).reshape(size, size).astype(np.uint8)
+    dist = cv2.distanceTransform(src, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    components = []
+    for label in range(1, n_labels):
+        mask = labels == label
+        components.append({
+            "label": label,
+            "texels": int(mask.sum()),
+            "depth_frac": float(dist[mask].max()) / size,
+        })
+    components.sort(key=lambda c: -c["depth_frac"])
+    return components
+
+
 def coverage_stats(covered, island):
-    """{"blend_coverage": float, "hole_texels": int, "largest_hole_texels": int}
-    Largest contiguous hole via cv2.connectedComponentsWithStats on the
-    square hole mask (island & ~covered)."""
+    """{"blend_coverage": float, "hole_texels": int, "max_hole_depth_frac": float}"""
     blend_coverage = float(covered[island].mean()) if island.any() else 0.0
     holes = island & ~covered
-    hole_texels = int(holes.sum())
-    largest_hole_texels = 0
-    if hole_texels:
-        size = atlas_size(island)
-        mask8 = holes.reshape(size, size).astype(np.uint8)
-        n_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask8, connectivity=8)
-        if n_labels > 1:
-            largest_hole_texels = int(stats[1:, cv2.CC_STAT_AREA].max())
+    depths = hole_component_depths(covered, island)
+    max_hole_depth_frac = max((c["depth_frac"] for c in depths), default=0.0)
     return {
         "blend_coverage": round(blend_coverage, 4),
-        "hole_texels": hole_texels,
-        "largest_hole_texels": largest_hole_texels,
+        "hole_texels": int(holes.sum()),
+        "max_hole_depth_frac": round(max_hole_depth_frac, 4),
     }
+
+
+def rank_candidates(cands, cand_depths, rig, pos, nrm, target, top_n=3):
+    """Candidate directions ranked by how many `target` texels they would
+    newly cover, restricted to those with any overlap at all -- the same
+    per-candidate scoring pick_extra_views uses, against a caller-chosen
+    target mask instead of the full uncovered set."""
+    scored = []
+    for (spec, cand), depth in zip(cands, cand_depths):
+        gain = int(covered_mask(view_coverage([cand], [depth], rig, pos, nrm), target).sum())
+        if gain > 0:
+            scored.append((gain, spec))
+    scored.sort(key=lambda t: -t[0])
+    return [{"hint": spec[0], "azimuth_deg": spec[1], "elevation_deg": spec[2],
+             "covers_texels": gain}
+            for gain, spec in scored[:top_n]]
 
 
 def extra_candidates(views, rig):
@@ -222,6 +274,8 @@ def main():
 
         covered = covered_mask(view_coverage(views, depths, rig, pos, nrm), island)
         stats = coverage_stats(covered, island)
+        over = [c for c in hole_component_depths(covered, island)
+                if c["depth_frac"] > MAX_HOLE_DEPTH_FRAC]
 
         size = atlas_size(island)
         hole_buf = np.zeros((island.shape[0], 4), dtype=np.float32)
@@ -232,6 +286,29 @@ def main():
         hole_img.pixels.foreach_set(hole_buf.ravel())
         save_png(hole_img, args.map)
         bpy.data.images.remove(hole_img)
+
+        if over:
+            _, labels, _ = _hole_labels(covered, island)
+            offending = np.isin(labels, [c["label"] for c in over]).reshape(-1)
+            directions = rank_candidates(
+                cands, (read_depth(d / "depth.exr") for d in cand_dirs),
+                rig, pos, nrm, offending)
+            depths_str = ", ".join(f"{c['depth_frac']:.2%}" for c in over[:5])
+            if len(over) > 5:
+                depths_str += f", +{len(over) - 5} more"
+            print(f"coverage: {args.asset}: {len(over)} hole component(s) exceed "
+                  f"MAX_HOLE_DEPTH_FRAC={MAX_HOLE_DEPTH_FRAC:.3f} (deepest {depths_str})",
+                  file=sys.stderr)
+            print(f"coverage: uncovered-island map: {args.map}", file=sys.stderr)
+            if directions:
+                print("coverage: candidate directions that would newly cover them: "
+                      + ", ".join(f"{d['hint']} (+{d['covers_texels']} texels)"
+                                  for d in directions),
+                      file=sys.stderr)
+            else:
+                print("coverage: no candidate direction newly covers the offending "
+                      "component(s)", file=sys.stderr)
+            sys.exit(1)
 
     print(json.dumps({
         "asset": args.asset,

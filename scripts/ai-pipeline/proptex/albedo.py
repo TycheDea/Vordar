@@ -19,7 +19,10 @@ import comfy_run
 from proptex.atlas import (
     MV_EDGE_PAD_PX, atlas_size, bilinear, pad_edges, view_weight,
 )
-from proptex.coverage import covered_mask, coverage_stats
+from proptex.coverage import (
+    MAX_HOLE_DEPTH_FRAC, CoverageFailure, covered_mask, coverage_stats,
+    hole_component_depths,
+)
 from proptex.registry import RegistryError
 from proptex.scene import img_array, new_image, save_png
 
@@ -125,6 +128,13 @@ def blend_views(views, sources, depths, rig, pos, nrm, island, out_dir):
     size = atlas_size(island)
     holes = island & ~covered
     if holes.any() and covered.any():
+        over = [c for c in hole_component_depths(covered, island)
+                if c["depth_frac"] > MAX_HOLE_DEPTH_FRAC]
+        if over:
+            raise CoverageFailure(
+                f"{len(over)} hole component(s) exceed "
+                f"MAX_HOLE_DEPTH_FRAC={MAX_HOLE_DEPTH_FRAC:.3f}: deepest "
+                + ", ".join(f"{c['depth_frac']:.2%}" for c in over))
         img8 = (np.clip(out[:, :3], 0.0, 1.0) * 255.0).round().astype(np.uint8)
         img8 = img8.reshape(size, size, 3)
         mask8 = holes.reshape(size, size).astype(np.uint8)
