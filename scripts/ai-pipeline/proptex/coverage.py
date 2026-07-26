@@ -101,14 +101,18 @@ def hole_component_depths(covered, island):
         return []
     src = (~covered).reshape(size, size).astype(np.uint8)
     dist = cv2.distanceTransform(src, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
-    components = []
-    for label in range(1, n_labels):
-        mask = labels == label
-        components.append({
+    flat_labels = labels.ravel()
+    max_dist = np.zeros(n_labels, dtype=dist.dtype)
+    np.maximum.at(max_dist, flat_labels, dist.ravel())
+    texel_counts = np.bincount(flat_labels, minlength=n_labels)
+    components = [
+        {
             "label": label,
-            "texels": int(mask.sum()),
-            "depth_frac": float(dist[mask].max()) / size,
-        })
+            "texels": int(texel_counts[label]),
+            "depth_frac": float(max_dist[label]) / size,
+        }
+        for label in range(1, n_labels)
+    ]
     components.sort(key=lambda c: -c["depth_frac"])
     return components
 
