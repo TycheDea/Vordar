@@ -15,13 +15,11 @@ whose failure carries extra context is rig: a rig-quality-gate failure is a
 recorded candidate outcome (A4.4), so the abort message includes the gate's
 stats alongside the exit code, not just the stage name.
 
-The character texture strategy is fixed by the A4.6 ruling (multiview
-ControlNet-depth) -- not exposed as a CLI flag, unlike gen_prop.py's
---texture-strategy (props still default to projection). MR takes
-prop_texture's non-metal defaults, which are the character contract.
+MR is the character_skin surface class's registry contract (proptex.registry).
 
 Run:
-  python scripts/ai-pipeline/gen_character.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--height M]
+  python scripts/ai-pipeline/gen_character.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>] [--height M]
+  python scripts/ai-pipeline/gen_character.py --mpfb --out <dir> [--height M]
 
 Every ComfyUI stage owns its server lifecycle (comfy_run.server(),
 gen_prop.py's convention): the concept stage and the multiview texture
@@ -44,6 +42,9 @@ from pathlib import Path
 import comfy_run
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+from proptex.registry import resolve  # noqa: E402
+
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 CHAR_CONCEPT_WORKFLOW = SCRIPT_DIR / "workflows" / "char_concept.json"
@@ -211,7 +212,7 @@ def stage_cleanup(cand_dir: Path, height: float) -> dict:
     return meta
 
 
-def stage_texture(cand_dir: Path, subject: str, seed: int) -> dict:
+def stage_texture(cand_dir: Path, asset: str, seed: int) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -219,13 +220,9 @@ def stage_texture(cand_dir: Path, subject: str, seed: int) -> dict:
     else:
         clean_glb = cand_dir / "clean.glb"
         hires_glb = cand_dir / "clean_hires.glb"
-        concept_rgba = cand_dir / "concept_rgba.png"
-        # Strategy is the A4.6 ruling, not CLI-selectable here: multiview,
-        # because projection mirrors the face onto the hood's back. MR takes
-        # prop_texture's non-metal defaults, which are the character contract.
         cmd = [BLENDER, "--background", "--python", PROP_TEXTURE, "--",
-               clean_glb, hires_glb, concept_rgba, textured_glb,
-               "--strategy", "multiview", "--subject", subject, "--seed", seed]
+               clean_glb, hires_glb, textured_glb,
+               "--asset", asset, "--seed", seed]
         out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
@@ -376,8 +373,10 @@ def main():
     sys.stdout.reconfigure(line_buffering=True)
 
     parser = argparse.ArgumentParser(description="Generate one character candidate through the full A4 chain.")
-    parser.add_argument("subject", nargs="?", default=None,
-                        help="Character description substituted into char_concept.json's {subject} (omit with --mpfb)")
+    parser.add_argument("--asset", default=None,
+                        help="Registered asset name (content/models/assets.json); resolves "
+                             "the subject prompt and material contract (proptex.registry). "
+                             "Omit with --mpfb")
     parser.add_argument("--out", type=Path, required=True,
                         help="Batch directory; the candidate lands in <out>/cand_<seed>/ (<out>/cand_mpfb/ with --mpfb)")
     parser.add_argument("--seed", type=int, default=None, help="Required unless --mpfb")
@@ -386,12 +385,12 @@ def main():
     parser.add_argument("--height", type=float, default=TARGET_HEIGHT,
                         help="Target character height in metres, applied to both the cleanup and rig stages")
     parser.add_argument("--mpfb", action="store_true",
-                        help="Parametric MPFB2 body instead of the generative chain (char_mpfb.py); no subject/seed")
+                        help="Parametric MPFB2 body instead of the generative chain (char_mpfb.py); no asset/seed")
     args = parser.parse_args()
 
     if args.mpfb:
-        if args.subject is not None:
-            parser.error("--mpfb takes no subject: the parametric body has no prompt")
+        if args.asset is not None:
+            parser.error("--mpfb takes no --asset: the parametric body has no prompt")
         if args.seed is not None:
             parser.error("--mpfb takes no --seed: the parametric body has no seed")
         if args.skip_concept is not None:
@@ -416,24 +415,26 @@ def main():
         print(f"OK: wrote {manifest_path}")
         return
 
-    if args.subject is None:
-        parser.error("the following arguments are required: subject")
+    if args.asset is None:
+        parser.error("the following arguments are required: --asset")
     if args.seed is None:
         parser.error("the following arguments are required: --seed")
+
+    contract = resolve(args.asset)
 
     cand_dir = args.out / f"cand_{args.seed}"
     cand_dir.mkdir(parents=True, exist_ok=True)
 
-    concept = stage_concept(cand_dir, args.subject, args.seed, args.skip_concept)
+    concept = stage_concept(cand_dir, contract.subject, args.seed, args.skip_concept)
     geometry = stage_geometry(cand_dir, args.seed)
     cleanup = stage_cleanup(cand_dir, args.height)
-    texture = stage_texture(cand_dir, args.subject, args.seed)
+    texture = stage_texture(cand_dir, args.asset, args.seed)
     rig = stage_rig(cand_dir, args.height, args.seed)
     preprocess_bake = stage_preprocess_bake(cand_dir)  # final.glb, needed by the review stage below
     review = stage_review(cand_dir)
 
     manifest = {
-        "subject": args.subject,
+        "subject": contract.subject,
         "seed": args.seed,
         "height": args.height,
         "candidate_dir": str(cand_dir),

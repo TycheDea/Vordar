@@ -1,0 +1,32 @@
+{
+  "character_skin": {
+    "albedo_source": "delit",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 0.8
+  },
+  "foliage": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 0.7
+  },
+  "limestone": {
+    "albedo_source": "direct",
+    "detail": true,
+    "metallic": 0.0,
+    "roughness": 0.85
+  },
+  "painted_metal": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 0.75
+  },
+  "wood": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 0.85
+  }
+}

@@ -47,9 +47,10 @@ FRAGMENT_DIAG_FRACTION = 0.02
 # Ground-contact band: vertices within the bottom 2.5% of the target
 # height (~4.5 cm at 1.8 m) define the footprint the prop stands on.
 CONTACT_BAND_FRACTION = 0.025
-# UV atlas packing: resolution must match prop_texture's TEXTURE_SIZE so
-# the padding (island gutter) is real texels there; 4 px keeps islands
-# apart under the normal bake's margin=8 dilation.
+# UV atlas packing: resolution must match the asset's texture_size (the
+# registry's per-asset bake resolution prop_texture.py resolves) so the
+# padding (island gutter) is real texels there; 4 px keeps islands apart
+# under the normal bake's margin=8 dilation.
 UV_ATLAS_RESOLUTION = 1024
 UV_ATLAS_PADDING_PX = 4
 

@@ -1,0 +1,75 @@
+{
+  "broken_column": {
+    "kind": "generated",
+    "subject": "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections",
+    "surface_class": "limestone",
+    "texture_size": 1024,
+    "view_res": 1024
+  },
+  "candelabra_shrine": {
+    "azimuths": [
+      0,
+      60,
+      180,
+      300
+    ],
+    "kind": "generated",
+    "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
+    "surface_class": "painted_metal",
+    "texture_size": 1024,
+    "view_res": 1024
+  },
+  "chapel_arch": {
+    "kind": "generated",
+    "subject": "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry",
+    "surface_class": "limestone",
+    "texture_size": 2048,
+    "view_res": 1536
+  },
+  "crucero": {
+    "azimuths": [
+      0,
+      60,
+      180,
+      300
+    ],
+    "kind": "generated",
+    "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+    "surface_class": "limestone",
+    "texture_size": 2048,
+    "view_res": 1536
+  },
+  "cypress": {
+    "kind": "generated",
+    "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
+    "surface_class": "foliage",
+    "texture_size": 2048,
+    "view_res": 1536
+  },
+  "gravestone": {
+    "kind": "generated",
+    "subject": "weathered stone wayside cross, carved religious stele, sun-bleached granite, worn eroded inscriptions",
+    "surface_class": "limestone",
+    "texture_size": 1024,
+    "view_res": 1024
+  },
+  "olive_stump": {
+    "kind": "generated",
+    "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+    "surface_class": "wood",
+    "texture_size": 1024,
+    "view_res": 1024
+  },
+  "rock_07": {
+    "kind": "downloaded",
+    "surface_class": "limestone"
+  },
+  "rock_09": {
+    "kind": "downloaded",
+    "surface_class": "limestone"
+  },
+  "rock_face_01": {
+    "kind": "downloaded",
+    "surface_class": "limestone"
+  }
+}

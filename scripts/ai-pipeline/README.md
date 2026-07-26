@@ -40,7 +40,8 @@ encoders are kept for a future modular path. `ae.safetensors` is on disk —
 fetched as the Z-Image concept/multiview VAE (`workflows/prop_concept.json`,
 `workflows/prop_multiview.json`), not for that modular path. The four
 `qwen_*`/`Qwen-Image-*` files are the Qwen-Image bake-off arm, kept as the
-documented fallback base (2026-07-20 ruling, `scripts/ai-pipeline/bakeoff/`).
+documented fallback base (2026-07-20 ruling,
+`tasks/ai-pipeline/research/a5b-bakeoff-results.md`).
 
 SHA256 for every downloaded file: `scripts/ai-pipeline/models.sha256`.
 
@@ -88,7 +89,7 @@ reproducible from this file alone.
 | `prompt_id` | ComfyUI's prompt id for this run |
 | `prompts` | Text of every `CLIPTextEncode` node, keyed by node id |
 | `seed` | Resolved `seed`/`noise_seed` value per node id |
-| `models` | Every `*Loader` node's filename input, cross-referenced against `models.sha256` for its sha256 (`null` if not in the manifest) |
+| `models` | Every `*Loader` node's filename input, cross-referenced against `models.sha256` for its sha256. A model missing from the manifest is a refusal, not a `null`: the texture pipeline's stage keys hash these, so an unhashed model would leave the cache blind to a model swap |
 | `outputs` | Each saved output file: node id, output kind, filename, subfolder, type, local save path |
 
 ## TRELLIS (image → 3D, eval-only)
@@ -493,12 +494,16 @@ site, so install into its per-user modules dir:
 C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--steps N]
 ```
 
-BiRefNet matte → StableNormal-turbo normal prediction →
-`Hi3DGenPipeline` geometry → `to_trimesh` export. Writes `<out>/raw.glb`
-(bare geometry — texturing is a later stage), `<out>/concept_rgba.png` (the
-BiRefNet-matted concept at the input's own framing — this, not the raw RGB
-concept, is what `prop_texture.py` projects), and
-`<out>/generation_manifest.json`. `--steps` overrides both sampler stages
+BiRefNet matte → opaque-fraction refusal gate → StableNormal-turbo normal
+prediction → `Hi3DGenPipeline` geometry → `to_trimesh` export. A matte with
+no usable alpha (opaque fraction ≥ 0.995 — BiRefNet did nothing, a raw RGB
+image) or no opaque pixels at all exits non-zero before `concept_rgba.png`
+is written, since a degenerate matte would otherwise reconstruct the
+background as geometry in this script's own `preprocess_image` step, the
+matte's only consumer. Writes `<out>/raw.glb` (bare geometry — texturing is
+a later stage), `<out>/concept_rgba.png` (the BiRefNet-matted concept at the
+input's own framing), and `<out>/generation_manifest.json`. `--steps`
+overrides both sampler stages
 uniformly; omitted, each stage keeps `app.py`'s own default (50
 sparse-structure / 6 slat). Peak VRAM measured at 11.5 GiB of 12 — see the
 VRAM sequencing rule under `gen_prop.py` below.
@@ -523,23 +528,14 @@ exit non-zero rather than patch silently.
 **3. `prop_texture.py`** — Blender headless texture bake:
 
 ```
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <concept.png> <textured.glb> [--strategy projection|multiview] [--subject STR] [--seed N] [--metallic F] [--roughness F]
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_texture.py -- <clean.glb> <hires.glb> <textured.glb> --asset NAME --seed N
 ```
 
-Default strategy: **Blender projection bake** — concept image
-EMIT-projected onto basecolor (into the clean mesh's cleanup-made UV
-atlas; a mesh arriving without UVs hard-fails), real hires→clean Cycles
-normal bake, MR from the two declared constants. Full ruling and rejected-option
-evidence: `tasks/ai-pipeline/a3.md` → "Texture strategy log". **Requires an
-alpha-matted concept** (`prop_hi3dgen.py`'s `concept_rgba.png`, not a raw RGB
-image) — a concept with no usable alpha matte hard-fails instead of
-degenerating silently into a full-frame projection and a washed-out fill
-color.
-
-**`--strategy multiview`** (Strategy 2, the evidenced escalation for prop
-classes needing true material register or strong backsides; needs
-`--subject` and `--seed`): ortho depth renders of the clean mesh from four
-azimuths feed Z-Image Turbo + its Fun ControlNet-depth model patch
+Basecolor is a **multiview retexture** (the evidenced strategy for prop
+classes needing true material register or strong backsides; full ruling and
+rejected-option evidence: `tasks/ai-pipeline/a3.md` → "Texture strategy
+log"). Requires `--asset` and `--seed`: ortho depth renders of the clean
+mesh from four azimuths feed Z-Image Turbo + its Fun ControlNet-depth model patch
 (`workflows/prop_multiview.json`). Opposite views are tiled side by side
 into one 2048×1024 conditioning canvas per sampling pass (Paint3D's
 front+back grid — the model attends to both views at once, so they come
@@ -560,28 +556,30 @@ decomposed by MaterialAnything's material estimator (`prop_pbr.py`,
 subprocess in its own venv below) into a delit `albedo.png`, conditioned on
 a camera-space normal render of the same view. The albedo blend is the
 exported basecolor (the lit `gen.png` is conditioning intermediate only).
-Roughness/metallic ship as the glTF scalar factors on both strategies —
-`--metallic`/`--roughness` apply here the same as on the projection
-strategy. Per-canvas outputs, decomposed maps and provenance manifests are
-cached under `<textured.glb dir>/multiview/`, so a killed run resumes
-without respending GPU; the estimator is skipped when every view's albedo
-exists. The normal map follows the same contract as the default strategy
-(real hires→clean bake — the estimator's bump head is discarded in its
-favor); the concept image is unused.
+Roughness/metallic ship as the glTF scalar factors via the resolved asset's
+contract (`content/models/surface_classes.json`, `proptex.registry`).
+Every stage of the chain is a content-addressed cache unit under
+`target/prop-cache/<stage>/<key>/`, keyed by the sha256 of its stage source
+set, its resolved params and its input content hashes; each entry holds its
+outputs beside the `key.json` that is both its key and its provenance
+record. A killed run therefore resumes at stage granularity, and a stage
+reruns exactly when its key changes. The normal map is a real hires→clean Cycles bake (the estimator's
+bump head is discarded in its favor).
 
-**`--view-res N`** raises the per-view depth/normal render and Z-Image + Fun
-ControlNet-depth generation resolution (default 1024) independently of the MaterialAnything
-estimator's input, which stays pinned at 768×768 either way: `prop_pbr.py`
-downscales each generated view to 768 for the estimator call and upscales its
-albedo output back to the view's own resolution (`full_res = gen.size`) —
-that split is unconditional, not gated by this flag. Raising `--view-res`
-only sharpens the source imagery blended into the atlas; it does not change
-`TEXTURE_SIZE` (the atlas's own baked resolution, a separate constant).
+The asset's **`view_res`** field (`content/models/assets.json`) sets the
+per-view depth/normal render and Z-Image + Fun ControlNet-depth generation
+resolution independently of the MaterialAnything estimator's input, which
+stays pinned at 768×768 either way: `prop_pbr.py` downscales each generated
+view to 768 for the estimator call and upscales its albedo output back to
+the view's own resolution (`full_res = gen.size`) — that split is
+unconditional, not gated by this field. Raising `view_res` only sharpens
+the source imagery blended into the atlas; it does not change
+`texture_size` (the atlas's own baked resolution, a separate field).
 
-**`--texture-size N`** raises `TEXTURE_SIZE` (default 1024), the pixel
-resolution every basecolor/normal image is baked at. Independent of
+The asset's **`texture_size`** field (`content/models/assets.json`) is the
+pixel resolution every basecolor/normal image is baked at. Independent of
 `prop_cleanup.py`'s xatlas packing: the mesh's UVs are resolution-independent
-0–1 floats, so a `--texture-size` above the resolution the atlas was packed
+0–1 floats, so a `texture_size` above the resolution the atlas was packed
 for is safe (island gutters only grow) and re-running cleanup is not needed
 to raise it.
 
@@ -599,7 +597,7 @@ C:\tools\MaterialAnything\venv\Scripts\python.exe -m pip install diffusers==0.28
 C:\tools\MaterialAnything\venv\Scripts\huggingface-cli.exe download xanderhuang/material_estimator --local-dir C:\tools\MaterialAnything\pretrained_models\material_estimator
 ```
 
-**Writing `--subject` for this strategy — name every material's colour.**
+**Writing an asset's `subject` for this strategy — name every material's colour.**
 Z-Image runs at cfg 1, and unlike SDXL at cfg 7 it does not infer a material's
 colour from its name: `"melted wax candles"` produced black iron candles,
 `"pale cream-white wax candles"` produced correct ones. Each view is an
@@ -633,7 +631,7 @@ the sRGB EOTF at that value).
 **5. `gen_prop.py`** — chain assembly, one candidate per invocation:
 
 ```
-python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--texture-strategy projection|multiview] [--metallic F] [--roughness F]
+python scripts/ai-pipeline/gen_prop.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>]
 ```
 
 Runs concept → geometry → cleanup → texture → preprocess+bake → turntable →
@@ -647,18 +645,17 @@ seeds across separate foreground invocations, never one script call for N
 candidates, so every command stays under the shell's timeout budget.
 **VRAM sequencing (forced by the 11.5 GiB Hi3DGen peak above): ComfyUI must
 never be up while a geometry stage runs.** Every ComfyUI stage owns its
-server lifecycle (`comfy_run.server()`): the concept stage and
-`--texture-strategy multiview`'s generation passes each start a headless
-server and stop it before returning, so the chain runs unattended and the
-rule holds by construction. An already-running external server is refused,
-not reused — the chain can't stop somebody else's server before geometry.
+server lifecycle (`comfy_run.server()`): the concept stage and the
+multiview texture stage's generation passes each start a headless server
+and stop it before returning, so the chain runs unattended and the rule
+holds by construction. An already-running external server is refused, not
+reused — the chain can't stop somebody else's server before geometry.
 
-`--view-res`/`--texture-size` thread straight through to `prop_texture.py`
-(above). `--max-dim`/`--max-bytes` thread through to `preprocess_prop.mjs`'s
-own flags (character-chain precedent below) — raise `--max-dim` alongside
-`--texture-size`, or the default 1024 resize cap silently downscales the
-bake back down during preprocessing regardless of what `--texture-size`
-baked.
+The asset's `view_res`/`texture_size` fields thread straight through to
+`prop_texture.py` (above) via `--asset`; `--max-bytes` threads through to
+`preprocess_prop.mjs`'s own flag (character-chain precedent below).
+`preprocess_prop.mjs`'s `--max-dim` is driven automatically from the same
+`texture_size` — no separate flag, so the two can no longer diverge.
 
 ### `asset_inspect` — lighting × channel × distance review
 
@@ -708,7 +705,9 @@ latter divided by the prop's max `zones.ron` placement scale, since
 `rock_face_01` ships at scale 4.0 and its raw atlas density alone overstates
 how it actually reads in-game), the glTF's own
 `roughnessFactor`/`metallicFactor`/`baseColorFactor`,
-`blend_coverage`/`hole_frac` from `generation_manifest.json`, and a
+`blend_coverage`/`hole_frac` (the texture chain's `blend` stage record in
+`generation_manifest.json`: `blend_coverage`/`hole_texels` under its
+`measurements`, `texture_size` under its `params`), and a
 tangent-space `baked_fraction` riding along as a relative corroborator (not
 a physical light fit — the world-space depth renders it would need aren't
 shipped).
@@ -720,25 +719,6 @@ a gate now would encode a guess from bad evidence. Metric names and slot
 keys (`base_color`/`normal`/`metallic_roughness`/`occlusion`) match
 `MaterialData`'s vocabulary in `content_lint.rs:259-265` so a later
 promotion into a real test is a rename-free port, not a rewrite.
-
-### `prop_tonal_audit.py` — chapel_arch tonal-range stage diagnostic
-
-```
-python scripts/ai-pipeline/prop_tonal_audit.py
-```
-
-Read-only, no CLI args: decodes `target/prop-batch/b3/arch/cand_0/multiview/`
-(the run confirmed behind the shipped chapel_arch asset, by `gen.png`
-sha256) and the shipped `content/models/props/{chapel_arch,rock_face_01}/`
-atlases, and prints luma/Lab stage-by-stage stats (STAGE A: raw multiview
-diffusion vs MaterialAnything-delit albedo, per view; STAGE B: shipped atlas
-vs the rock_face_01 photoscan control; STAGE C/D: a facing+frustum coverage
-proxy isolating blend-averaging and inpaint-hole effects, no occlusion test
-— see the caveat in-file). Produced the numbers behind the delighting A/B
-(does MaterialAnything's delighting stage earn its keep, or is it costing
-the tonal range a flat cream albedo now needs back) — the diagnostic that
-answered it lives with the rest of the evidence under `target/delight-ab/`,
-not in this repo.
 
 ### Fixture
 
@@ -810,15 +790,13 @@ characters; the concept stage substitutes `char_concept.json`
 1.744 --tri-budget 30000` (double the prop budget; no VQ triangle clause
 exists, chosen under the 16 MB / 64-joint caps).
 
-`prop_texture.py`'s strategy is fixed to `--strategy multiview` for every
-character (A4.6 ruling): projection mirrors the concept's face through
-onto the back of the hood, which disqualifies it on any character.
-Multiview's per-view MaterialAnything decomposition (above) estimates only
-the delit albedo per texel from the generated views — the same machinery
-props use, not a character-specific mode. Roughness/metallic ride the
-glTF scalar factors on both strategies: the constant-dielectric contract
-(`metallic 0.0 / roughness 0.8`, matching every existing race model) is
-`prop_texture.py`'s own `--metallic`/`--roughness` defaults, same for
+`prop_texture.py`'s per-view MaterialAnything decomposition (above)
+estimates only the delit albedo per texel from the generated views — the
+same machinery props use, not a character-specific mode. Roughness/metallic
+ride the glTF scalar factors: the constant-dielectric contract (`metallic
+0.0 / roughness 0.8`, matching every existing race model) is the
+`character_skin` surface class's registry contract
+(`content/models/surface_classes.json`, `proptex.registry`), same for
 characters as for props, and the MPFB route's authored materials (below).
 
 ### `char_rig.py` — skeleton transplant + fit + weight adoption (Blender 5.2 headless)
@@ -884,7 +862,7 @@ MPFB route also passes `--max-dim 1024` explicitly — at 2048 its two
 ### `gen_character.py` — chain assembly
 
 ```
-python scripts/ai-pipeline/gen_character.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>] [--height M]
+python scripts/ai-pipeline/gen_character.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>] [--height M]
 python scripts/ai-pipeline/gen_character.py --mpfb --out <dir> [--height M]
 ```
 
@@ -894,7 +872,7 @@ texture (multiview, always) → rig (`char_rig.py fit` → `char_skin.py` →
 `char_rig.py finish`) → preprocess+bake → review renders → chained
 `generation_manifest.json`, landing under `<out>/cand_<seed>/`. `--mpfb`
 swaps the first five stages for the parametric `char_mpfb.py` body (below;
-the parser rejects a subject, `--seed`, or `--skip-concept` in this mode)
+the parser rejects `--asset`, `--seed`, or `--skip-concept` in this mode)
 and lands under `<out>/cand_mpfb/`, with the manifest carrying `"mode":
 "mpfb"` and no AI-chain keys. Both modes share the review stage: a static
 8-angle turntable plus three animated sheets (`--clip walk`, `--clip
@@ -946,7 +924,7 @@ binds it to the transplanted `Character.fbx` armature by MPFB's own
 artist-authored, name-matched vertex groups: no bone-heat, no weight
 prediction, no AI model of any kind on this route. `gen_character.py
 --mpfb --out <dir>` runs it (no concept/geometry/texture/SkinTokens
-stages, no subject/seed, CPU-only ~10 s) into `<out>/cand_mpfb/`, then the
+stages, no asset/seed, CPU-only ~10 s) into `<out>/cand_mpfb/`, then the
 shared preprocess/DDS-bake/turntable-review stages.
 
 ### Fixture

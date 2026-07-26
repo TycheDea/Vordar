@@ -10,7 +10,7 @@ command resumes rather than restarts. Any stage's non-zero exit aborts the
 whole chain with that stage named -- no silent fallbacks.
 
 Run:
-  python scripts/ai-pipeline/gen_prop.py "<subject prompt>" --out <dir> --seed N [--skip-concept <image.png>]
+  python scripts/ai-pipeline/gen_prop.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>]
 
 Every ComfyUI stage owns its server lifecycle (comfy_run.server()): the
 concept stage and the multiview texture strategy (inside prop_texture.py)
@@ -31,6 +31,9 @@ from pathlib import Path
 import comfy_run
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+from proptex.registry import resolve  # noqa: E402
+
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 PROP_CONCEPT_WORKFLOW = SCRIPT_DIR / "workflows" / "prop_concept.json"
@@ -177,9 +180,7 @@ def stage_cleanup(cand_dir: Path, symmetrize: bool, symmetrize_keep: str) -> dic
     return meta
 
 
-def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
-                  metallic: float, roughness: float, detail: bool, azimuths: str,
-                  view_res: int, texture_size: int) -> dict:
+def stage_texture(cand_dir: Path, asset: str, seed: int) -> dict:
     textured_glb = cand_dir / "textured.glb"
     meta_path = cand_dir / "texture_stats.json"
     if textured_glb.exists():
@@ -187,23 +188,9 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
     else:
         clean_glb = cand_dir / "clean.glb"
         hires_glb = cand_dir / "clean_hires.glb"
-        concept_rgba = cand_dir / "concept_rgba.png"
         cmd = [BLENDER, "--background", "--python", PROP_TEXTURE, "--",
-               clean_glb, hires_glb, concept_rgba, textured_glb]
-        if strategy != "projection":
-            cmd += ["--strategy", strategy, "--subject", subject, "--seed", seed]
-        if metallic is not None:
-            cmd += ["--metallic", metallic]
-        if roughness is not None:
-            cmd += ["--roughness", roughness]
-        if detail:
-            cmd += ["--detail"]
-        if azimuths is not None:
-            cmd += ["--azimuths", azimuths]
-        if view_res is not None:
-            cmd += ["--view-res", view_res]
-        if texture_size is not None:
-            cmd += ["--texture-size", texture_size]
+               clean_glb, hires_glb, textured_glb,
+               "--asset", asset, "--seed", seed]
         out = run_capture(cmd)
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"texture: generated -> {textured_glb}")
@@ -212,7 +199,7 @@ def stage_texture(cand_dir: Path, strategy: str, subject: str, seed: int,
     return meta
 
 
-def stage_preprocess_bake(cand_dir: Path, max_dim: int = None, max_bytes: int = None) -> dict:
+def stage_preprocess_bake(cand_dir: Path, texture_size: int, max_bytes: int = None) -> dict:
     textured_glb = cand_dir / "textured.glb"
     final_glb = cand_dir / "final.glb"
     bake_manifest = cand_dir / "final.textures" / "manifest.json"
@@ -222,9 +209,7 @@ def stage_preprocess_bake(cand_dir: Path, max_dim: int = None, max_bytes: int = 
         print(f"preprocess: skip (exists) -> {final_glb}")
     else:
         preprocess_stats = {"textured_glb_bytes": textured_glb.stat().st_size}
-        cmd = ["node", PREPROCESS_PROP_MJS, textured_glb, final_glb]
-        if max_dim is not None:
-            cmd += ["--max-dim", max_dim]
+        cmd = ["node", PREPROCESS_PROP_MJS, textured_glb, final_glb, "--max-dim", texture_size]
         if max_bytes is not None:
             cmd += ["--max-bytes", max_bytes]
         run(cmd)
@@ -268,40 +253,17 @@ def main():
     sys.stdout.reconfigure(line_buffering=True)
 
     parser = argparse.ArgumentParser(description="Generate one prop candidate through the full A3 chain.")
-    parser.add_argument("subject", help="Object description substituted into prop_concept.json's {subject}")
+    parser.add_argument("--asset", required=True,
+                        help="Registered asset name (content/models/assets.json); resolves "
+                             "the subject prompt and material contract (proptex.registry)")
     parser.add_argument("--out", type=Path, required=True, help="Batch directory; the candidate lands in <out>/cand_<seed>/")
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--skip-concept", type=Path, default=None, metavar="IMAGE",
                         help="Bypass concept generation with a provided image (re-roll geometry without re-rolling the concept)")
-    parser.add_argument("--texture-strategy", choices=["projection", "multiview"], default="projection",
-                        help="Basecolor strategy for prop_texture.py (multiview = ControlNet-depth retexture)")
-    parser.add_argument("--metallic", type=float, default=None,
-                        help="Declared metallic for prop_texture.py, both strategies (default 0)")
-    parser.add_argument("--roughness", type=float, default=None,
-                        help="Declared roughness for prop_texture.py, both strategies (default 0.8)")
-    parser.add_argument("--detail", action="store_true",
-                        help="Opt the material into the world-space triplanar detail overlay "
-                             "for prop_texture.py -- masonry/stone classes only, never "
-                             "alpha-masked foliage cards")
     parser.add_argument("--symmetrize", action="store_true",
                         help="Mirror one half of the cleaned mesh across its best-fit vertical plane")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
                         help="Half to mirror in prop_cleanup.py's plane-aligned frame")
-    parser.add_argument("--azimuths", default=None, metavar="DEG,DEG,...",
-                        help="Multiview camera azimuths for prop_texture.py")
-    parser.add_argument("--view-res", type=int, default=None,
-                        help="Multiview strategy only: prop_texture.py's per-view depth/"
-                             "normal render and Z-Image + Fun ControlNet-Union generation "
-                             "resolution (default 1024; the MaterialAnything estimator's "
-                             "input stays pinned at 768x768 regardless)")
-    parser.add_argument("--texture-size", type=int, default=None,
-                        help="prop_texture.py's atlas bake resolution (default 1024); "
-                             "safe to raise without re-running cleanup (island gutters "
-                             "only grow)")
-    parser.add_argument("--max-dim", type=int, default=None,
-                        help="preprocess_prop.mjs's texture resize cap (default 1024) -- "
-                             "raise alongside --texture-size, or the preprocess stage "
-                             "silently downscales the bake back down")
     parser.add_argument("--max-bytes", type=int, default=None,
                         help="preprocess_prop.mjs's final.glb size assert (default 8 MB, "
                              "the prop cap)")
@@ -314,28 +276,27 @@ def main():
     # subprocess under cwd=HI3DGEN_REPO / cwd=REPO_ROOT respectively, so a
     # relative --out would otherwise resolve against the wrong directory.
     args.out = args.out.resolve()
+    contract = resolve(args.asset)
 
     cand_dir = args.out / f"cand_{args.seed}"
     cand_dir.mkdir(parents=True, exist_ok=True)
 
     stop = STAGES.index(args.through)
     manifest = {
-        "subject": args.subject,
+        "subject": contract.subject,
         "seed": args.seed,
         "candidate_dir": str(cand_dir),
-        "concept": stage_concept(cand_dir, args.subject, args.seed, args.skip_concept),
+        "concept": stage_concept(cand_dir, contract.subject, args.seed, args.skip_concept),
     }
     if stop >= STAGES.index("geometry"):
         manifest["geometry"] = stage_geometry(cand_dir, args.seed)
     if stop >= STAGES.index("cleanup"):
         manifest["cleanup"] = stage_cleanup(cand_dir, args.symmetrize, args.symmetrize_keep)
     if stop >= STAGES.index("texture"):
-        manifest["texture"] = stage_texture(cand_dir, args.texture_strategy, args.subject, args.seed,
-                                            args.metallic, args.roughness, args.detail, args.azimuths,
-                                            args.view_res, args.texture_size)
+        manifest["texture"] = stage_texture(cand_dir, args.asset, args.seed)
     if stop >= STAGES.index("preprocess"):
         # final.glb, needed by the turntable stage below
-        manifest.update(stage_preprocess_bake(cand_dir, args.max_dim, args.max_bytes))
+        manifest.update(stage_preprocess_bake(cand_dir, contract.texture_size, args.max_bytes))
     if stop >= STAGES.index("turntable"):
         manifest["turntable"] = stage_turntable(cand_dir)
     manifest_path = cand_dir / "generation_manifest.json"

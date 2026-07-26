@@ -577,29 +577,139 @@ fn detail_tile_is_dc_neutral() {
     assert!((mean_y - 128.0).abs() <= 3.0, "detail normal mean Y {mean_y:.2} outside 128 +/- 3");
 }
 
-/// Catches a future regeneration silently dropping the `vordar_detail` marker
-/// (chapel_arch, broken_column, gravestone, crucero), or a non-stone material
-/// silently picking it up (candelabra_shrine — dark grey weathered iron, not
-/// stone; cypress, olive_stump — alpha-masked foliage cards).
+#[derive(serde::Deserialize)]
+struct SurfaceClass {
+    detail: bool,
+    metallic: f32,
+    roughness: f32,
+}
+
+#[derive(serde::Deserialize)]
+struct AssetEntry {
+    kind: String,
+    surface_class: String,
+}
+
+fn load_registry<T: serde::de::DeserializeOwned>(path: &Path) -> std::collections::HashMap<String, T> {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path:?}: {e}"))
+}
+
+/// A prop placement's registry key: its model's containing directory name.
+fn prop_dir_name(model: &str) -> &str {
+    Path::new(model)
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or_else(|| panic!("prop model '{model}' has no parent directory"))
+}
+
+/// Registration is one-directional: every zone prop placement must resolve to
+/// a content/models/assets.json entry keyed by its model's directory name. An
+/// assets.json entry with no placement is a declaration awaiting its
+/// generation sweep, not a failure — only an unregistered placement is.
 #[test]
-fn stone_props_declare_detail() {
+fn prop_placements_are_registered() {
     let root = repo_root();
-    let check = |asset: &str, expect: bool| {
-        let data = load_gltf_data(root.join(asset).to_str().unwrap())
-            .unwrap_or_else(|e| panic!("{asset}: failed to parse: {e}"));
-        for prim in &data.primitives {
-            assert_eq!(
-                prim.material.detail, expect,
-                "{asset}: material.detail = {}, expected {expect}",
-                prim.material.detail
+    let assets: std::collections::HashMap<String, AssetEntry> =
+        load_registry(&root.join("content/models/assets.json"));
+
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+    for zone in &def.zones {
+        for prop in &zone.visuals.props {
+            let name = prop_dir_name(&prop.model);
+            assert!(
+                assets.contains_key(name),
+                "zone '{}': prop '{}' has no content/models/assets.json entry for '{name}'",
+                zone.name, prop.model
             );
         }
-    };
-    check("content/models/props/chapel_arch/chapel_arch.glb", true);
-    check("content/models/props/broken_column/broken_column.glb", true);
-    check("content/models/props/gravestone/gravestone.glb", true);
-    check("content/models/props/crucero/crucero.glb", true);
-    check("content/models/props/candelabra_shrine/candelabra_shrine.glb", false);
-    check("content/models/props/cypress/cypress.glb", false);
-    check("content/models/props/olive_stump/olive_stump.glb", false);
+    }
+}
+
+/// Every shipped prop material matches its assets.json surface_class
+/// contract: metallic/roughness/detail as the class authors them, and the
+/// map slots the pipeline is expected to have baked for that `kind`.
+#[test]
+fn prop_material_matches_surface_class() {
+    const TOLERANCE: f32 = 1e-6;
+
+    let root = repo_root();
+    let assets: std::collections::HashMap<String, AssetEntry> =
+        load_registry(&root.join("content/models/assets.json"));
+    let classes: std::collections::HashMap<String, SurfaceClass> =
+        load_registry(&root.join("content/models/surface_classes.json"));
+
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+    let mut checked = std::collections::HashSet::new();
+    let mut violations = std::collections::BTreeMap::new();
+
+    for zone in &def.zones {
+        for prop in &zone.visuals.props {
+            if !checked.insert(prop.model.clone()) {
+                continue;
+            }
+            let name = prop_dir_name(&prop.model);
+            let asset = assets
+                .get(name)
+                .unwrap_or_else(|| panic!("prop '{name}' has no assets.json entry"));
+            let class = classes.get(&asset.surface_class).unwrap_or_else(|| {
+                panic!("prop '{name}': surface_class '{}' not in surface_classes.json", asset.surface_class)
+            });
+            let downloaded = asset.kind == "downloaded";
+
+            let data = load_gltf_data(root.join(&prop.model).to_str().unwrap())
+                .unwrap_or_else(|e| panic!("prop '{name}': failed to parse: {e}"));
+
+            let mut clauses = Vec::new();
+            for prim in &data.primitives {
+                let mat = &prim.material;
+
+                if (mat.metallic_factor - class.metallic).abs() > TOLERANCE {
+                    clauses.push(format!("metallic_factor {} != {}", mat.metallic_factor, class.metallic));
+                }
+
+                // A downloaded roughness map multiplies this factor, so
+                // anything but 1.0 would silently rescale the authored map.
+                let want_roughness = if downloaded { 1.0 } else { class.roughness };
+                if (mat.roughness_factor - want_roughness).abs() > TOLERANCE {
+                    clauses.push(format!("roughness_factor {} != {want_roughness}", mat.roughness_factor));
+                }
+
+                let want_detail = if downloaded { false } else { class.detail };
+                if mat.detail != want_detail {
+                    clauses.push(format!("detail {} != {want_detail}", mat.detail));
+                }
+
+                if downloaded {
+                    // The authored roughness lives in this map; losing it
+                    // would read as a uniform 1.0 with no other signal.
+                    if mat.metallic_roughness_image.is_none() {
+                        clauses.push("metallic_roughness_image missing".to_string());
+                    }
+                } else {
+                    if mat.metallic_roughness_image.is_some() {
+                        clauses.push("metallic_roughness_image present, expected none".to_string());
+                    }
+                    if mat.occlusion_image.is_none() {
+                        clauses.push("occlusion_image missing".to_string());
+                    }
+                }
+            }
+
+            if !clauses.is_empty() {
+                violations.insert(name.to_string(), clauses);
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "prop material violates its surface_class contract:\n{}",
+        violations
+            .iter()
+            .map(|(name, clauses)| format!("  {name}: {}", clauses.join("; ")))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }

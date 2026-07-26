@@ -69,6 +69,29 @@ def preload_birefnet(pipeline: Hi3DGenPipeline) -> None:
     pipeline.birefnet_model = birefnet_model
 
 
+class DegenerateMatteError(Exception):
+    """Raised when a concept matte fails the opaque-fraction gate."""
+
+
+def check_matte(rgba: Image.Image) -> float:
+    """Refuse a degenerate BiRefNet matte: opaque fraction >= 0.995 (the
+    matte did nothing -- a raw RGB image, alpha == 255) or no opaque pixels
+    at all. preprocess_image() is this matte's only surviving consumer, and
+    a degenerate one there reconstructs the background as geometry -- silent
+    degeneration, not a fit. Returns the measured opaque fraction."""
+    alpha = np.asarray(rgba.convert("RGBA"))[:, :, 3]
+    opaque = alpha > 0.1 * 255
+    opaque_fraction = float(opaque.mean())
+    if opaque_fraction >= 0.995:
+        raise DegenerateMatteError(
+            f"concept matte has no usable alpha ({opaque_fraction:.1%} opaque) -- "
+            "BiRefNet produced a full-frame matte, not a fit")
+    if opaque_fraction == 0.0:
+        raise DegenerateMatteError(
+            f"concept matte has no opaque pixels ({opaque_fraction:.1%} opaque)")
+    return opaque_fraction
+
+
 def matte_concept(pipeline: Hi3DGenPipeline, image: Image.Image) -> Image.Image:
     """BiRefNet background-removal matte at the concept image's own
     resolution/framing -- mirrors preprocess_image()'s internal
@@ -126,6 +149,10 @@ def main():
 
     image = Image.open(args.image).convert("RGBA")
     concept_rgba = matte_concept(hi3dgen_pipeline, image)
+    try:
+        check_matte(concept_rgba)
+    except DegenerateMatteError as e:
+        sys.exit(f"prop_hi3dgen: {e}")
     concept_rgba_path = args.out / "concept_rgba.png"
     concept_rgba.save(concept_rgba_path)
     # concept_rgba already carries the real matte, so preprocess_image()'s

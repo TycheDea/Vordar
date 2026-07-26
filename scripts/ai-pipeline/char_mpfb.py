@@ -32,6 +32,8 @@ from mathutils import Matrix, Vector
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "asset-pipeline"))
 import mixamo_rig  # noqa: E402
+sys.path.insert(0, str(SCRIPT_DIR))
+from proptex.registry import resolve_class  # noqa: E402
 
 REPO = SCRIPT_DIR.parent.parent
 CHARACTER_FBX = REPO / "content/source/characters/mixamo/Character.fbx"
@@ -350,6 +352,7 @@ def main():
     # + blended surface method, which the glTF exporter turns into
     # alphaMode BLEND — the engine then renders the whole character
     # translucent (robe see-through, eyes visible through the hood).
+    skin = resolve_class("character_skin")
     for slot in mesh_obj.material_slots:
         mat = slot.material
         if not mat or not mat.node_tree:
@@ -358,7 +361,8 @@ def main():
         for node in mat.node_tree.nodes:
             if node.type != "BSDF_PRINCIPLED":
                 continue
-            for input_name, value in (("Metallic", 0.0), ("Roughness", 0.8),
+            for input_name, value in (("Metallic", skin["metallic"]),
+                                      ("Roughness", skin["roughness"]),
                                       ("Alpha", 1.0)):
                 socket = node.inputs[input_name]
                 for link in list(socket.links):

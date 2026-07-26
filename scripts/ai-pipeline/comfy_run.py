@@ -31,6 +31,20 @@ MODEL_INPUT_KEY = re.compile(r"_name\d*$", re.IGNORECASE)
 MODELS_SHA256 = Path(__file__).resolve().parent / "models.sha256"
 
 
+def comfy_id():
+    """ComfyUI's build identity, the toolchain string a generation stage
+    carries in its cache params: the checkout revision plus the torch build
+    it samples with. Neither is a file the stage can hash, and swapping
+    either changes what one graph and one seed produce."""
+    def out(cmd):
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              check=True).stdout.strip()
+    rev = out(["git", "-C", str(COMFY_MAIN.parent), "rev-parse", "HEAD"])
+    torch = out([str(COMFY_PYTHON), "-c",
+                 "import torch; print(torch.__version__, torch.version.cuda)"])
+    return f"comfyui {rev} torch {torch}"
+
+
 def http_json(method, path, payload=None):
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if data is not None else {}
@@ -133,12 +147,18 @@ def extract_models(workflow):
             continue
         for key, value in node.get("inputs", {}).items():
             if isinstance(value, str) and MODEL_INPUT_KEY.search(key):
+                sha256 = hashes.get(value)
+                if sha256 is None:
+                    raise SystemExit(
+                        f"no sha256 for model {value!r} (node {node_id} input {key}) "
+                        f"in {MODELS_SHA256}"
+                    )
                 models.append({
                     "node_id": node_id,
                     "class_type": class_type,
                     "input": key,
                     "filename": value,
-                    "sha256": hashes.get(value),
+                    "sha256": sha256,
                 })
     return models
 
