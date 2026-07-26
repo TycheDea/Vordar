@@ -184,7 +184,6 @@ def pick_extra_views(views, depths, cands, cand_depths, rig, pos, nrm, island):
     reachable = base_covered.copy()
     for m in masks:
         reachable |= m
-    min_dot = cos(radians(MV_EXTRA_MIN_SEP_DEG))
 
     extra_meta = []
     island_total = int(island.sum())
@@ -193,12 +192,10 @@ def pick_extra_views(views, depths, cands, cand_depths, rig, pos, nrm, island):
         best = int(np.argmax(gains))
         if gains[best] < MV_EXTRA_MIN_GAIN * island_total:
             break
-        spec, best_view = cands[best]
+        spec, _ = cands[best]
         uncovered &= ~masks[best]
-        keep = [j for j, (_, cand) in enumerate(cands)
-                if j != best and float(cand["f"] @ best_view["f"]) < min_dot]
-        cands = [cands[j] for j in keep]
-        masks = [masks[j] for j in keep]
+        cands = cands[:best] + cands[best + 1:]
+        masks = masks[:best] + masks[best + 1:]
         extra_meta.append({
             "hint": spec[0], "azimuth_deg": spec[1], "elevation_deg": spec[2],
             "predicted_gain_texels": gains[best],
