@@ -78,6 +78,9 @@ MAX_BYTES = 16 * 1024 * 1024
 # At 2048 the packed final.glb hits 18.97 MB, over the MAX_BYTES cap (VQ-B2);
 # 1024 lands at 7.1 MB despite the MPFB robe assets shipping 4096x4096 sources.
 MPFB_MAX_DIM = 1024
+# VQ-C5's character map cap. Passed explicitly so the character chain does not
+# inherit whatever the prop chain's preprocess default happens to be.
+MAX_DIM = 2048
 
 TURNTABLE_ANGLES = 8
 TURNTABLE_SIZE = "512x512"
@@ -301,7 +304,7 @@ def stage_mpfb(cand_dir: Path, height: float) -> dict:
     return meta
 
 
-def stage_preprocess_bake(cand_dir: Path, max_dim: int = None) -> dict:
+def stage_preprocess_bake(cand_dir: Path, max_dim: int) -> dict:
     rigged_glb = cand_dir / "rigged.glb"
     final_glb = cand_dir / "final.glb"
     bake_manifest = cand_dir / "final.textures" / "manifest.json"
@@ -311,10 +314,8 @@ def stage_preprocess_bake(cand_dir: Path, max_dim: int = None) -> dict:
         print(f"preprocess: skip (exists) -> {final_glb}")
     else:
         preprocess_stats = {"rigged_glb_bytes": rigged_glb.stat().st_size}
-        cmd = ["node", PREPROCESS_PROP_MJS, rigged_glb, final_glb, "--max-bytes", MAX_BYTES]
-        if max_dim is not None:
-            cmd += ["--max-dim", max_dim]
-        run(cmd)
+        run(["node", PREPROCESS_PROP_MJS, rigged_glb, final_glb,
+             "--max-bytes", MAX_BYTES, "--max-dim", max_dim])
         preprocess_stats["final_glb_bytes"] = final_glb.stat().st_size
         meta_path.write_text(json.dumps(preprocess_stats, indent=2), encoding="utf-8")
         print(f"preprocess: generated -> {final_glb}")
@@ -430,7 +431,7 @@ def main():
     cleanup = stage_cleanup(cand_dir, args.height)
     texture = stage_texture(cand_dir, args.asset, args.seed)
     rig = stage_rig(cand_dir, args.height, args.seed)
-    preprocess_bake = stage_preprocess_bake(cand_dir)  # final.glb, needed by the review stage below
+    preprocess_bake = stage_preprocess_bake(cand_dir, max_dim=MAX_DIM)  # final.glb, needed by the review stage below
     review = stage_review(cand_dir)
 
     manifest = {
