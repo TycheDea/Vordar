@@ -7,7 +7,7 @@ this script's output is bare geometry.
 
 Run under the Hi3DGen venv; cwd-independent (all weight/output paths
 resolve against REPO_DIR or the parsed args, not the working directory):
-C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--steps N]
+C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F]
 """
 import argparse
 import hashlib
@@ -58,9 +58,17 @@ STABLE_NORMAL_HUB_SNAPSHOT = "hugoycj_StableNormal_main"
 
 # app.py's Advanced Settings slider defaults (Stage 1: Sparse Structure /
 # Stage 2: Structured Latent) -- the two stages have different native
-# defaults, so an omitted --steps applies each rather than one shared number.
+# defaults, so an omitted --ss-steps/--slat-steps applies each rather than
+# one shared number.
 SS_SAMPLING_STEPS_DEFAULT = 50
 SLAT_SAMPLING_STEPS_DEFAULT = 6
+# CFG guidance strength both stages ran at before these flags existed --
+# weights/trellis-normal-v0-1/pipeline.json's checkpoint default (5.0 for
+# both stages), inherited silently through the sampler_params merge below.
+# Kept as the default so adding explicit control is behaviour-neutral until
+# a measured A/B picks a different value.
+SS_CFG_DEFAULT = 5.0
+SLAT_CFG_DEFAULT = 5.0
 
 GIB = 1024 ** 3
 
@@ -191,14 +199,15 @@ def main():
     parser.add_argument("image", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--steps", type=int, default=None, help="Overrides both sampler stages uniformly; omit for app.py's per-stage defaults (50/6).")
+    parser.add_argument("--ss-steps", type=int, default=SS_SAMPLING_STEPS_DEFAULT, help="Sparse structure stage sampling steps.")
+    parser.add_argument("--slat-steps", type=int, default=SLAT_SAMPLING_STEPS_DEFAULT, help="Structured latent stage sampling steps.")
+    parser.add_argument("--ss-cfg", type=float, default=SS_CFG_DEFAULT, help="Sparse structure stage CFG guidance strength.")
+    parser.add_argument("--slat-cfg", type=float, default=SLAT_CFG_DEFAULT, help="Structured latent stage CFG guidance strength.")
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.image = args.image.resolve()
 
     seed = args.seed if args.seed is not None else random.randint(0, 2**32 - 1)
-    ss_steps = args.steps if args.steps is not None else SS_SAMPLING_STEPS_DEFAULT
-    slat_steps = args.steps if args.steps is not None else SLAT_SAMPLING_STEPS_DEFAULT
 
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -253,12 +262,12 @@ def main():
     normal_image.save(normal_path)
     t_normal = time.perf_counter()
 
-    # Both samplers merge their checkpoint params (cfg_strength, cfg_interval,
-    # rescale_t, from weights/*/pipeline.json) under whatever run() is handed.
-    # Merging here first makes the recorded dicts the ones the samplers
-    # actually ran with, not the two steps counts this script asked for.
-    ss_params = {**hi3dgen_pipeline.sparse_structure_sampler_params, "steps": ss_steps}
-    slat_params = {**hi3dgen_pipeline.slat_sampler_params, "steps": slat_steps}
+    # Both samplers merge their checkpoint params (cfg_interval, rescale_t,
+    # from weights/*/pipeline.json) under whatever run() is handed. Merging
+    # here first makes the recorded dicts the ones the samplers actually ran
+    # with, not just the steps/cfg this script asked for.
+    ss_params = {**hi3dgen_pipeline.sparse_structure_sampler_params, "steps": args.ss_steps, "cfg_strength": args.ss_cfg}
+    slat_params = {**hi3dgen_pipeline.slat_sampler_params, "steps": args.slat_steps, "cfg_strength": args.slat_cfg}
     outputs = hi3dgen_pipeline.run(
         normal_image,
         seed=seed,

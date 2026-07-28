@@ -502,7 +502,7 @@ site, so install into its per-user modules dir:
 cwd-independent):
 
 ```
-C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--steps N]
+C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F]
 ```
 
 BiRefNet matte → opaque-fraction refusal gate → StableNormal-turbo normal
@@ -515,10 +515,10 @@ matte's only consumer. Writes `<out>/raw.glb` (bare geometry — texturing is
 a later stage), `<out>/concept_rgba.png` (the BiRefNet-matted concept at the
 input's own framing), `<out>/normal.png` (the predicted normal map — the
 geometry stage's only input, so it separates a normal-stage failure from a
-sampler one), and `<out>/hi3dgen_manifest.json`. `--steps`
-overrides both sampler stages
-uniformly; omitted, each stage keeps `app.py`'s own default (50
-sparse-structure / 6 slat). Peak VRAM measured at 10.6–12.3 GiB of 12 across
+sampler one), and `<out>/hi3dgen_manifest.json`. `--ss-steps`/`--slat-steps`
+and `--ss-cfg`/`--slat-cfg` control each stage's sampling steps and CFG
+guidance strength independently; omitted, they keep the current effective
+defaults (50/6 steps, 5.0/5.0 CFG). Peak VRAM measured at 10.6–12.3 GiB of 12 across
 the shipped props — see the VRAM sequencing rule under `gen_prop.py` below.
 The manifest records the run end to end: fork revision + dirty flag, the
 post-merge sampler params, the normal map's hash, the per-stage `elapsed_s`
