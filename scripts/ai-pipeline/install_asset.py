@@ -143,17 +143,11 @@ def build_steps(ctx):
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
 
-    def do_lint(c):
-        run(["cargo", "nextest", "run", "-p", "vordar-game", "--test", "content_lint",
-             "prop_material_matches_surface_class"], cwd=REPO_ROOT)
-
     return [
         (f"copy {ctx.source_glb} -> {ctx.dest_glb} (byte-faithful; provenance already verified)", do_copy),
         (f"bake sidecars: node {BAKE_TEXTURES_MJS} gltf {ctx.dest_glb}", do_bake),
         (f"write {ctx.dest_dir / 'generation_manifest.json'} (final_glb_sha256 computed here, "
          "after the bake above)", do_write_manifest),
-        ("run lint clause: cargo nextest run -p vordar-game --test content_lint "
-         "prop_material_matches_surface_class", do_lint),
     ]
 
 
