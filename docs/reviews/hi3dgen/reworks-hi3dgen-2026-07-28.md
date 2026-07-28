@@ -18,9 +18,19 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 ~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
 ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
 ~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
-~~finding 17~~ → finding 15 → finding 16 → **rework 1** →
-finding 18 → finding 19 → finding 20 → finding 21 → finding 22 → finding 23 →
+~~finding 17~~ → ~~finding 15~~ → finding 16 → **rework 1** →
+finding 18 → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
+Done 2026-07-28 (findings 15, 19–23, commits `23c7063`..`f2015e7`; findings 19–23
+run out of queue order, pulled forward as file-disjoint parallel work while the
+GPU-bound items serialized). Finding 15 raised `blend_coverage` 0.7303→0.9759 on
+crucero by deleting 46170 camera-unreachable interior tris. premise-falsified:
+finding 19's `concept_rgba` is not dead output — `matte_concept()` feeds
+`preprocess_image()`, so only the stale docstring was defective and the
+"drop" branch would have deleted live code. Finding 20's per-metre re-baseline
+is blocked on rework 9 (stale coverage bakes); its audit-side rescale of
+`world_area_m2` was cut rather than kept, since regeneration — not a correction
+factor — is what makes shipped height match the registry.
 Done 2026-07-28 (findings 1–14 + 17, commits `4e5dfaa`..`a77c156`). Measured
 outcomes that diverged from the findings' premises: finding 11's sampler A/B
 found cfg and SLAT-step changes indistinguishable (defaults kept); finding 13's
