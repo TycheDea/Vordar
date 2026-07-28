@@ -15,11 +15,20 @@ fork we own.
 ## Findings (implementation order)
 
 Queue (single cross-file sequence, mirrored from the fixes file):
-finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
-finding 7 → ~~finding 8~~ → finding 9 → finding 10 → finding 11 → finding 12 →
-finding 13 → finding 14 → finding 15 → finding 16 → finding 17 → **rework 1** →
+~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
+~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
+~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
+~~finding 17~~ → finding 15 → finding 16 → **rework 1** →
 finding 18 → finding 19 → finding 20 → finding 21 → finding 22 → finding 23 →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
+Done 2026-07-28 (findings 1–14 + 17, commits `4e5dfaa`..`a77c156`). Measured
+outcomes that diverged from the findings' premises: finding 11's sampler A/B
+found cfg and SLAT-step changes indistinguishable (defaults kept); finding 13's
+full StableNormal lost to turbo on both subjects (kept opt-out, flag retained);
+finding 12's adopted 1024 normal resolution stands on resample-chain
+cleanliness, not on its original top-octave evidence, which was invalid because
+both arms denoise at 768. Finding 17 cut peak VRAM 15.57→7.41 GiB reserved and
+wall time 39%. Two defects found in-path were fixed at `a77c156`.
 Parked: rework 5 (gate: finding 24's measurement shows extraction is a
 dominant wall-clock share).
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
