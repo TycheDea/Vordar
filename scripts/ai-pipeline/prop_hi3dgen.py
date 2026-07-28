@@ -116,6 +116,10 @@ class DegenerateMatteError(Exception):
     """Raised when a concept matte fails the opaque-fraction gate."""
 
 
+class DegenerateMeshError(Exception):
+    """Raised when extracted geometry fails the mesh sanity gate."""
+
+
 def check_matte(rgba: Image.Image) -> float:
     """Refuse a degenerate BiRefNet matte: opaque fraction >= 0.995 (the
     matte did nothing -- a raw RGB image, alpha == 255) or no opaque pixels
@@ -152,6 +156,34 @@ def matte_concept(pipeline: Hi3DGenPipeline, image: Image.Image) -> Image.Image:
     rgba = np.array(rgb.convert("RGBA"))
     rgba[:, :, 3] = mask * 255
     return Image.fromarray(rgba)
+
+
+def check_mesh(mesh_result, trimesh_mesh: trimesh.Trimesh) -> dict:
+    """Refuse degenerate raw geometry before it reaches decimation/xatlas
+    three stages downstream, where it currently surfaces as a confusing
+    Blender abort (prop_cleanup.py). Mirrors check_matte's refusal at the
+    input side. Returns the measured stats on success."""
+    if not mesh_result.success:
+        raise DegenerateMeshError(
+            "Hi3DGen mesh extraction reported success=False (empty vertices or faces)")
+    vertices = trimesh_mesh.vertices
+    n_nonfinite = int((~np.isfinite(vertices)).any(axis=1).sum())
+    if n_nonfinite:
+        raise DegenerateMeshError(f"{n_nonfinite} non-finite vertices in raw mesh")
+    extents = trimesh_mesh.bounding_box.extents
+    if not (extents > 0).all():
+        raise DegenerateMeshError(f"degenerate bounding box extents {extents.tolist()}")
+    areas = trimesh_mesh.area_faces
+    n_degenerate = int((areas <= 0).sum())
+    if n_degenerate:
+        raise DegenerateMeshError(
+            f"{n_degenerate}/{len(areas)} zero-area (degenerate) faces in raw mesh")
+    return {
+        "vertex_count": int(vertices.shape[0]),
+        "face_count": int(trimesh_mesh.faces.shape[0]),
+        "degenerate_face_count": n_degenerate,
+        "bbox_extents": extents.tolist(),
+    }
 
 
 def main():
@@ -236,7 +268,12 @@ def main():
         slat_sampler_params=slat_params,
     )
     t_geometry = time.perf_counter()
-    trimesh_mesh = outputs["mesh"][0].to_trimesh(transform_pose=True)
+    mesh_result = outputs["mesh"][0]
+    trimesh_mesh = mesh_result.to_trimesh(transform_pose=True)
+    try:
+        mesh_stats = check_mesh(mesh_result, trimesh_mesh)
+    except DegenerateMeshError as e:
+        sys.exit(f"prop_hi3dgen: {e}")
 
     raw_glb_path = args.out / "raw.glb"
     trimesh_mesh.export(str(raw_glb_path))
@@ -279,8 +316,9 @@ def main():
             "export": t_end - t_geometry,
             "total": t_end - t_start,
         },
-        "vertex_count": int(trimesh_mesh.vertices.shape[0]),
-        "face_count": int(trimesh_mesh.faces.shape[0]),
+        "vertex_count": mesh_stats["vertex_count"],
+        "face_count": mesh_stats["face_count"],
+        "degenerate_face_count": mesh_stats["degenerate_face_count"],
         "vram": vram,
     }
     (args.out / "hi3dgen_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
