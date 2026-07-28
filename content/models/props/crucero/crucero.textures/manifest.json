@@ -1,6 +1,6 @@
 {
   "source": "crucero.glb",
-  "sha256": "3bd33feec8cb2f6b04816181429000f8cd6d7bb7366fdfcb477918997ea0fb14",
+  "sha256": "637bfe035acd8cbaa639ecf6dd5be3049fe495fc84167a1e0a9d075d3bb073c6",
   "images": [
     {
       "index": 0,
@@ -9,12 +9,12 @@
     },
     {
       "index": 1,
-      "slot": "base",
+      "slot": "ao",
       "file": "img1.dds"
     },
     {
       "index": 2,
-      "slot": "mr",
+      "slot": "base",
       "file": "img2.dds"
     }
   ]

@@ -1,10 +1,163 @@
 {
   "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
   "seed": 21,
-  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cypress\\cand_21",
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\cypress\\cand_21",
   "concept": {
-    "note": "no stats captured (concept_meta.json not found; output pre-existed this gen_prop.py run)",
-    "concept_png_sha256": "b233d3c88ccc29e75c37fc7e3dc3e8d80d05155e5f30358c883e25289366ed22"
+    "mode": "generated",
+    "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
+    "comfy_manifest": {
+      "workflow": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "z_image_turbo_bf16.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen_3_4b_fp8_mixed.safetensors",
+            "type": "lumina2",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ae.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, single object centered, plain grey background"
+          }
+        },
+        "5": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "4",
+              0
+            ]
+          }
+        },
+        "6": {
+          "class_type": "ModelSamplingAuraFlow",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift": 3.0
+          }
+        },
+        "7": {
+          "class_type": "EmptySD3LatentImage",
+          "inputs": {
+            "width": 1024,
+            "height": 1024,
+            "batch_size": 1
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "6",
+              0
+            ],
+            "seed": 21,
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler_name": "res_multistep",
+            "scheduler": "simple",
+            "positive": [
+              "4",
+              0
+            ],
+            "negative": [
+              "5",
+              0
+            ],
+            "latent_image": [
+              "7",
+              0
+            ],
+            "denoise": 1.0
+          }
+        },
+        "9": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "8",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "9",
+              0
+            ],
+            "filename_prefix": "prop_concept"
+          }
+        }
+      },
+      "prompt_id": "8f19bba1-3031-4b75-8489-e4958ac0927b",
+      "prompts": {
+        "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, single object centered, plain grey background"
+      },
+      "seed": {
+        "8": 21
+      },
+      "models": [
+        {
+          "node_id": "1",
+          "class_type": "UNETLoader",
+          "input": "unet_name",
+          "filename": "z_image_turbo_bf16.safetensors",
+          "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+        },
+        {
+          "node_id": "2",
+          "class_type": "CLIPLoader",
+          "input": "clip_name",
+          "filename": "qwen_3_4b_fp8_mixed.safetensors",
+          "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+        },
+        {
+          "node_id": "3",
+          "class_type": "VAELoader",
+          "input": "vae_name",
+          "filename": "ae.safetensors",
+          "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+        }
+      ],
+      "outputs": [
+        {
+          "node_id": "10",
+          "output_kind": "images",
+          "filename": "prop_concept_00039_.png",
+          "subfolder": "",
+          "type": "output",
+          "saved_as": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\cypress\\cand_21\\concept_raw\\prop_concept_00039_.png"
+        }
+      ]
+    },
+    "concept_png_sha256": "8ff494fb8f9a032ae5c28e5e53710f34e44d83eb52f9e45a87b5c231e96b5ab8"
   },
   "geometry": {
     "model": "Stable-X/Hi3DGen",
@@ -13,10 +166,10 @@
       "normal": "Stable-X/yoso-normal-v1-8-1",
       "birefnet": "ZhengPeng7/BiRefNet"
     },
-    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cypress\\cand_21\\concept.png",
-    "input_image_sha256": "b233d3c88ccc29e75c37fc7e3dc3e8d80d05155e5f30358c883e25289366ed22",
-    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cypress\\cand_21\\concept_rgba.png",
-    "concept_rgba_sha256": "5c0c08238e49569b605ecc6bb59320007b86dd98078340f710afe0653dcfb6bf",
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\cypress\\cand_21\\concept.png",
+    "input_image_sha256": "8ff494fb8f9a032ae5c28e5e53710f34e44d83eb52f9e45a87b5c231e96b5ab8",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\cypress\\cand_21\\concept_rgba.png",
+    "concept_rgba_sha256": "6c3c78e6c190ea37255584cb59e0f27fb91f7d70db96589e753cb680286b611d",
     "seed": 21,
     "steps": {
       "sparse_structure_sampler": 50,
@@ -24,341 +177,1163 @@
     },
     "torch_version": "2.7.1+cu128",
     "xformers_version": "0.0.31.post1",
-    "vertex_count": 150048,
-    "face_count": 299938,
-    "peak_vram_allocated_gb": 11.38385664,
-    "raw_glb_sha256": "4328849d8dc5e5b0cd0e6ba73960f01db0949815fa46ea72ea56f2a312af4154"
+    "vertex_count": 210696,
+    "face_count": 422150,
+    "peak_vram_allocated_gb": 12.011303936,
+    "raw_glb_sha256": "88ab27cec67ae5e881e33b45cca5d4638916ba6d5c862fa87c2d978318f8922c"
   },
   "cleanup": {
-    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
-    "clean_glb_sha256": "0b9829ab3844b9814d72f13b4bc9f229f693536712f033f5cad81e6b646d0e0c",
-    "clean_hires_glb_sha256": "922302a3ca129eb00202a4d8a2a3aea2b007e972108b98c302b32f3a5705ca16"
+    "raw_tris": 422150,
+    "fragments_removed": 401,
+    "fragment_tris_removed": 4698,
+    "hires_tris": 417452,
+    "clean_tris": 14999,
+    "height_target": 1.8,
+    "clean_height": 1.7988537549972534,
+    "clean_min_y": 0.0,
+    "uv_charts": 3633,
+    "uv_utilization": 0.735,
+    "hires_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\cypress\\cand_21\\clean_hires.glb",
+    "clean_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\cypress\\cand_21\\clean.glb",
+    "clean_glb_sha256": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b",
+    "clean_hires_glb_sha256": "eec7123c1fc8cf06aa164b0a8bbae954d5f01dbdf59d624d17aee9c36a4afb7d"
   },
   "texture": {
-    "strategy": "multiview_controlnet_depth",
-    "front_axis": "-Y",
-    "workflow": "prop_multiview.json",
-    "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
-    "render_resolution": 1536,
-    "views": [
+    "stages": [
       {
-        "hint": "front view",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 15.0,
-        "canvas": 0,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 2100
+        "stage": "atlas",
+        "unit": null,
+        "version": "a143fcbc9615481a72471a791dc461de51f46b162ea1ae5d9a54181c98405234",
+        "params": {
+          "texture_size": 2048,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "c743d697-0a6d-4fce-9cc0-f45327e23a0a",
-        "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "e92760dd6139a2ae989fa74b9dfa8d6dd28fbe041ce375098865a5e4fcbc1626",
-        "gen_png_sha256": "328fb6680bc013ff9e27b98214669385df358e656658c7eac6e5a07868388e26"
+        "key": "b80d26c054b8c7b0e511f279db7156adef5b4e921819de6c787dfa95c97a0f11",
+        "outputs": {
+          "atlas:pos.npy": "616ef558da0b8c417c3f3f707a14fdbc4b56b7f0a0da80312604a3ad99c589cc",
+          "atlas:nrm.npy": "6ad1559310fe4417f53d90b76d933539d5145a1edbb162d9f586e141b3c64b0a",
+          "atlas:island.npy": "a01ae5266c5abcc19752094e47cabc439b227de3a11eba4b3b8df49f13e23bcb"
+        },
+        "measurements": {},
+        "elapsed_s": 4.4,
+        "hit": false
       },
       {
-        "hint": "side view",
-        "azimuth_deg": 90.0,
-        "elevation_deg": 15.0,
-        "canvas": 1,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 2101
+        "stage": "depth",
+        "unit": "az0_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "28e6b9af-d933-4ed9-b812-c2929a72936a",
-        "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "41750eddc052182061fd52fcc7f673982ce1b6e7b117e7e434b62c230ba9a89a",
-        "gen_png_sha256": "cfb9b1470859964254b76229dbd341877d124b734f967e8ff92b848f50235524"
+        "key": "0b2ddfcead654dd917ec31eeb586ed1f63380beb7fa2d0dbd8133fec2ebc1375",
+        "outputs": {
+          "depth:az0_el15:depth.exr": "70e33ba7a17fb20f6329be12ddcfa6ce5c877a0944c4dc3d06da0ec950b3bb34",
+          "depth:az0_el15:depth.png": "0b3367211b4edb42c097a1f2d98354b5753335c4ae212c6be68d2e84fbcb0ee4"
+        },
+        "measurements": {},
+        "elapsed_s": 0.3,
+        "hit": false
       },
       {
-        "hint": "back view",
-        "azimuth_deg": 180.0,
-        "elevation_deg": 15.0,
-        "canvas": 0,
-        "canvas_slot": 1,
-        "seeds": {
-          "11": 2100
+        "stage": "depth",
+        "unit": "az90_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "c743d697-0a6d-4fce-9cc0-f45327e23a0a",
-        "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "c817408501d1e2b111df4835cc7cd2c7001eb4361a7491a1e54fbf204883a171",
-        "gen_png_sha256": "b591e19fe14a24f8b00b1ef51b6fe21ae76490e6d80e5e4a6c250d025d1cf554"
+        "key": "974bd73f6e4cfc8ecebd08200e243fd6b2a4111ffbf2389b95ac6ff300820e1d",
+        "outputs": {
+          "depth:az90_el15:depth.exr": "ceabb93454bb0aa9efb5146ecedd347c048a75b462cb2771f0008158302362cc",
+          "depth:az90_el15:depth.png": "8703a3741a71e4d20234387d178eca9b19ec059d24769b54bede3fe0d70d774e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
       },
       {
-        "hint": "side view",
-        "azimuth_deg": 270.0,
-        "elevation_deg": 15.0,
-        "canvas": 1,
-        "canvas_slot": 1,
-        "seeds": {
-          "11": 2101
+        "stage": "depth",
+        "unit": "az180_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "28e6b9af-d933-4ed9-b812-c2929a72936a",
-        "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "ca3d97bba56476915e93151c4cefd67ba3c082fb92a9a2e9c2be3b37590623bb",
-        "gen_png_sha256": "3c580ae348f65cbaf929b9a86e5e1d967a927ccbedbfc8c4c497c7129cd75dd9"
+        "key": "d55f58ac2b04f9546f0b4d7db513238da10103feb05bac7299af59c8301f68fc",
+        "outputs": {
+          "depth:az180_el15:depth.exr": "d4e154e7e6b476b4626e2a5b38bfcf6e0af275773a0ed5e89795313a8d637dda",
+          "depth:az180_el15:depth.png": "48027600cee33e5edce0abb87de3870d46a780842865b31292a0ff25b10a52af"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
       },
       {
-        "hint": "front view, seen from below",
-        "azimuth_deg": 330,
-        "elevation_deg": -35.0,
-        "canvas": 2,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 2102
+        "stage": "depth",
+        "unit": "az270_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "505b29ab-6652-42dc-972a-b5c6ca206b1a",
-        "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, seen from below, right: back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "cea3612ac656351a02970b33596a4bbd184cc6163bb48e4210f9f2d951399064",
-        "gen_png_sha256": "10d2f8e6d395ad5504ace6245953784b6100a1e55af81496a0c24aff4204481d"
+        "key": "54c735d0e18822e4f0a268b2d6ed2ab6361fa45f3b811b0b8c31cc59bff3a587",
+        "outputs": {
+          "depth:az270_el15:depth.exr": "9b66e7e3256f3b3ee73229875d649a46415b54c2d6af618f1758e5fa30686d50",
+          "depth:az270_el15:depth.png": "1761d4d464da9b94b5c5bf2550f244be444a6b17331c1db51a789bbed1cf69a6"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
       },
       {
-        "hint": "back view, seen from below",
-        "azimuth_deg": 150,
-        "elevation_deg": -35.0,
-        "canvas": 2,
-        "canvas_slot": 1,
-        "seeds": {
-          "11": 2102
+        "stage": "depth",
+        "unit": "az0_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "505b29ab-6652-42dc-972a-b5c6ca206b1a",
-        "prompts": {
-          "4": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones, two views of the same object side by side, left: front view, seen from below, right: back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "3995c74aaf452c6382f6f74b4ee2bd7d8fa91c78c958effe518c6ada43222902",
-        "gen_png_sha256": "e46165287dceebeb326d9f57ff0f7627551103eae7fb407b5ce6075df4de191f"
+        "key": "4d40c1ca2fa04bef56f18c511c89a390ff6ac6ace0ab54f9ee14c480ef3a3b2f",
+        "outputs": {
+          "depth:az0_el-35:depth.exr": "0a3a7b990b9a7c616796e680263c9de9263b3d41078d0c5baeabb0dcdd6e332c",
+          "depth:az0_el-35:depth.png": "4c0ea9b80e62f992edf23a173684e555a50b398eb729a8f49444191dbc0d94cd"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "802b3037c71f477523609ce660d653b9a3338c10fddd0b7126e2d7f47e25ca86",
+        "outputs": {
+          "depth:az30_el-35:depth.exr": "f672e53c61b11a60fd4c410004cf6fa552308f246a8b17b9750a20d954053350",
+          "depth:az30_el-35:depth.png": "b0aa852c67ff7f0f70ff560afd95bc8695c1888d685591e34882f80d33095f9d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "45ae3fbaa1f2d3ace9d6dd3c13c3a8cda36f84ef8d7719e3f8d879946f6dc0c4",
+        "outputs": {
+          "depth:az60_el-35:depth.exr": "994308ede0904d87ba0a26fe18505dc1e7e8ccda43afbf929f021186a40f29bb",
+          "depth:az60_el-35:depth.png": "ee9882726279962867c64e3c5d7f6abd523d81d7cce42acf548ac8e9ea582a04"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "ea955c772b4bb42049eb5eea674132cd797c557ec66075c0b7b2b6bfd0bd7551",
+        "outputs": {
+          "depth:az90_el-35:depth.exr": "0f8da1b316e3d0a36b0e8ce50e580a718d62da2275903d7551168e14d5c0d56e",
+          "depth:az90_el-35:depth.png": "89c86cd01671d9592b850c0726b54088b25c19833df8036ef25c92b5426aaa47"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "d7b76b64d4236023270f3398d243dd6eaf529e8a6e8583c59ccb488bd60affd6",
+        "outputs": {
+          "depth:az120_el-35:depth.exr": "31136f857038eab71fa3e6166626c8f5c0daed66e3cb7707efe7f26b36e4b714",
+          "depth:az120_el-35:depth.png": "7f7dd758b23f30ea5cb7e8326f7eb77b94fad2199094aa8ec89262ca2f9abc5d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "4da9fdeb65313629ebd96beef0082e6bbaf42c7130c1ceed1529780593b7e33c",
+        "outputs": {
+          "depth:az150_el-35:depth.exr": "fcf1629c4857fd96b414de80ff3d9f3ec095182889f718c00f9eadef264653e1",
+          "depth:az150_el-35:depth.png": "af5d307d4fe37535b0a1c0cd4f23875a201fe32d8f71c0c34e6e03cb08cf3e32"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "dbca5f164a2dd081e1af46c33699d59a77ee48520475d7dd39130e665c62cfe5",
+        "outputs": {
+          "depth:az180_el-35:depth.exr": "a2b9041bd2a99ed9ce71c535fa3c44f12e2a018537a80c7e877faad7cbeeac79",
+          "depth:az180_el-35:depth.png": "c02187c8d0bb2f78b54826156a6d223687b346b54ca8f786d10ee53609bd344f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "ad6ee282437e00d14271b38991e4bbf9d8e5ac26f3c4a7d24a1d0c20dddcc165",
+        "outputs": {
+          "depth:az210_el-35:depth.exr": "0f19e24116c43b0d55e811aa82311b7e703238b6c39f7ac599311598c5cc0024",
+          "depth:az210_el-35:depth.png": "86911e8a43a2002cb6c5f01ac2c769163de0e97b9e5cdaf08df72b4039b30b76"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "f300cc3866255c7b8e1fc10f5e0069236f4dc2849533afef78d85ce88f5aa566",
+        "outputs": {
+          "depth:az240_el-35:depth.exr": "45e1e0b3527ccbd8ebd7535fe903255c1ba5377c78be7024200a9f7b7e525034",
+          "depth:az240_el-35:depth.png": "45b6ca7061d66e5c9082b45ffb07b79ee58658ca91e98da97ec1fe8336a7c3a9"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "69cee87b5814b4566163fcc4d672402d68121b6689ad7a4cb43942d46cb4b91c",
+        "outputs": {
+          "depth:az270_el-35:depth.exr": "a4667a2c4c9f02391c4c6afc1eb89c1e16ff1395d845ceec82ae2cb56e4c79bd",
+          "depth:az270_el-35:depth.png": "979506513a08f02e2dc0e94f3607fdac8cfd6cb4a537b54931a806b3d211701d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "767d8f04eef58f2a9d1018efee1b7780ad060ef4c38ba574a3677b400714c509",
+        "outputs": {
+          "depth:az300_el-35:depth.exr": "ffc9f2376ac1ac22a29c6fb77d0bd5b09193a1b41d11209c723f2a878127751f",
+          "depth:az300_el-35:depth.png": "30068f7defda3f864defc7bd7bb8a8e2e93ae8fd21d2089bb9d7465c2158594a"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "696eb05877404df78a44826c2d19d13b6a0a66b864f21eeaa0be8155fa322e61",
+        "outputs": {
+          "depth:az330_el-35:depth.exr": "2ecc669de000dfd50a8777dcfab3bc8ddfc4a2a2585da582ffcb77e85e13a532",
+          "depth:az330_el-35:depth.png": "18c32e6f9facbd5268d19f26af67d028d0f9e66b90a898e06f266170477d3cd0"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "229849a813b3d3468a72cf36e5be86801d66a3e4cd06b6bf7633d4409373932f",
+        "outputs": {
+          "depth:az30_el15:depth.exr": "d70629a0803f1eba944ea9491955efbe76b49e2df2f77c1d52beee4f452f8e1d",
+          "depth:az30_el15:depth.png": "84fc012bd450f678cef8598c570f51678d46d55a6140dbd1e5ea60965b93ea4f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "a256b275a76a081f72874dab0b89995371a78f45401d1d61c1400064627e62c1",
+        "outputs": {
+          "depth:az60_el15:depth.exr": "88b63099b6b41eb1495e35bfb9dc3cb05f3f6948ed11338e94b5c6aa279d6f8f",
+          "depth:az60_el15:depth.png": "9da4f714c3ccd58ce25f12a43f56ac26ab2278a45919a5c388634facd590c035"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "ec4cb5b6dc9c811f36fda179a7bbd0b843a33df58f11afec1c9b567c81d3fda2",
+        "outputs": {
+          "depth:az120_el15:depth.exr": "ff4f2b80a9cfe060347e5da7282c79685009518b3f7385fbb09366565ae754f0",
+          "depth:az120_el15:depth.png": "331b5e72c1c76f3209d05699db145b90c1c0b308a7ce89f41258cbec11108c4c"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "369ed397bda3747c0ea0c3fe5f1c27f3cc5d3a520a45edb817106496da9d529d",
+        "outputs": {
+          "depth:az150_el15:depth.exr": "e98bebe6abef04c8d9943790d36974af875c38121e50b6e3ca2fec111eaf33b2",
+          "depth:az150_el15:depth.png": "1dff29a86947bcf15f8c319d53ec2ae66704b2833537a991eec9e5bba0f0dabf"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "5f14d50f3664e2ff6fb63a6d715e88b6d1fc7e2f3ec0c5778c320f374a1f6e40",
+        "outputs": {
+          "depth:az210_el15:depth.exr": "2303c057f996aeffaf4fae400e056a60342b3b78f6d17898890ed4b24a811f1d",
+          "depth:az210_el15:depth.png": "4029525a5e45686ac497bbbe15742b8f62accdb9b05e1a72afa72ae31a6c4e72"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "6c51493f97cda5520ef0fa7af7ace91b8176faa0ff6711ab4dcd14a080588c3d",
+        "outputs": {
+          "depth:az240_el15:depth.exr": "9ff1de174b8cc8dbd9abf78f1c93185fe37b302011be3839019ba085f84f4128",
+          "depth:az240_el15:depth.png": "4fd5f5f649fe512bafd1463970340408feadf659dcb39152169fcd710401d5c7"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "6395f95715608cf51b53f9db72ccee962ad068e78a59cf50eb161491fa4c5d3b",
+        "outputs": {
+          "depth:az300_el15:depth.exr": "9677bd00dbf44037167f3164992d9f2670d13d8713585724271f58fc6b757069",
+          "depth:az300_el15:depth.png": "650941928d8ba320a7123206ec827f2b2ad13f84a5a8d193e65173f6cd893862"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "f9558d2adb444741cbabbbc078b16f6bddf0b3a133bebad17eccdadb2e2e309a",
+        "outputs": {
+          "depth:az330_el15:depth.exr": "8105e9467deb9cb882f5b305c27ea85aa3a5fbcf8c9060cf784381244f6f1388",
+          "depth:az330_el15:depth.png": "19fb304920ef64878bc2d2a2fb67a21b04cc09aa99403713e0b4319655e99409"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "71748fbe987b386086a92e3d3d2db0791a23debcce0c3df5e4bc525181f14b9f",
+        "outputs": {
+          "depth:az0_el55:depth.exr": "b6e4e7e2a4c73bee8421d82c7f401887423d2c78720d5231698ae2c2c9572867",
+          "depth:az0_el55:depth.png": "6289a8fefd4434f349b58a47694a07b90f5a9f0b9929bed984bd5051d31f5e5b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "43804704269885fe8a2c8c72fa16e3aefdc7ff1fdd8da6a575df5a093f851793",
+        "outputs": {
+          "depth:az30_el55:depth.exr": "e011505f263b8af751aa179e1c392d4e33caa9858622df215e80e6069dbf8fd3",
+          "depth:az30_el55:depth.png": "d06a6f7fc4e2df88510b9538da4680c7b6547bbc51ad58dfd626607786169c42"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "9665b9f52bd8509c52ce0ae9a370d70855cf67d3987b71f75fa1f8a1de5492de",
+        "outputs": {
+          "depth:az60_el55:depth.exr": "515de9cd71057595d715a2ba8e687fe9aa410bfc09c5367c101cea866eea7ebb",
+          "depth:az60_el55:depth.png": "6fda3e83aad26ff3d59f2f0d094df2d84fac7c9db42fe94992103b1b8ea15389"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "922949b40529dddcace7eea04c8621a31fd5a74b338eb55aff3d41f84fad7161",
+        "outputs": {
+          "depth:az90_el55:depth.exr": "75a9038b98a0f06a97f227fc07959e65d145ebd2a91e8c6832f78534d0e202fd",
+          "depth:az90_el55:depth.png": "210f84af948b7f8c8aef1a2a5cfd3c599f3749b5c365a098616d36c3de8c44d9"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "544ce918fb01568203648c264928d6c4dfca17fdf7b7dde90bd73956172a9175",
+        "outputs": {
+          "depth:az120_el55:depth.exr": "9dc93bad05afc402281e612f9d302f28e8fadd8dc661d01d15be1d4baf92e94f",
+          "depth:az120_el55:depth.png": "3840eca9c240134c08c4a8e48b0258237f005d893ffefd84dd109f4df47fe512"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "525a80aa6aaa002423f1825a650133ac2c85e6f0203d89a251d151fa01abbf72",
+        "outputs": {
+          "depth:az150_el55:depth.exr": "9ec314ac2429e85723060bcbda21fa751d34862d15b8cc259cb05b96613293ce",
+          "depth:az150_el55:depth.png": "2e374d8c5b6361a414464a7f3b4b88c2ed4590ee36baceb2b0c1963111ce9336"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "472bc99225f1fbb01be2bcf9630cc8af2252193a79a76c66b8d1890ec977ed5a",
+        "outputs": {
+          "depth:az180_el55:depth.exr": "340ace2d79b9aea2f50f977e8fbf3256d8b47ce8dd7ab5c96ca7043ba01d1941",
+          "depth:az180_el55:depth.png": "5270322ebd1d36b66c5756514e186e92f153db7e65dd07dc3ee6c920161afaa5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "0a1d479cfc2ec09605dde9753d030de54e09b7e2afc581c5891422587b3dc216",
+        "outputs": {
+          "depth:az210_el55:depth.exr": "da19059fb8186fecacdb0a3e4c328a1b096e4816b2a5331ffbe780311cf9912c",
+          "depth:az210_el55:depth.png": "e03c8709b3d690928f64ae96e9b8ed686024cb34d0488d17633e6a64e1c253ac"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "93d22023422a9662e1f3c7b99f1744dea66423aee75c110babb754a1c26366c4",
+        "outputs": {
+          "depth:az240_el55:depth.exr": "7f93239ea41a541369f694fbb8b001c518e637e60bc9e8462ca5adfcdf2e2669",
+          "depth:az240_el55:depth.png": "c67f5fa90f582231ed9e405773a6bbdc929075d87e0805ff7fc32462a36f3935"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "f750218d6fdab0f6a03af38d84fe41a4db4b6b7825f78057bf81cb55ee538f5b",
+        "outputs": {
+          "depth:az270_el55:depth.exr": "d5d6ea37ef616848386b7163f2bedeb6a950a8a7fe3d6c289485b2aa650bd28a",
+          "depth:az270_el55:depth.png": "14fc742439b241eb37a011df4ef668a7cdcdc061a4915dff09ddd5ad5993e63a"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "ab1cdae43380e85d17c0d9df3be4233e7463681e129dbd5702e0e0b5f6f8f969",
+        "outputs": {
+          "depth:az300_el55:depth.exr": "eee70f7ccf55f00f20e6139cd45d78a020e21c4437e777c94371b55db279a9fc",
+          "depth:az300_el55:depth.png": "e58898d7cccb7c931c3919cae29ea4e9522d5d2f23564192665dc3f9e823a532"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "76f5392fd82f3432952d5ce4aab09356ef298abf38dc4a4302b96dcf5e5eccbf",
+        "outputs": {
+          "depth:az330_el55:depth.exr": "0ea46d55a32356ddc76fd25d369ccd6a2e4f5dac1ae4b1ee6e9f6bd3e28ae959",
+          "depth:az330_el55:depth.png": "9c4b510a08d2410c71cffaf06fb4955794d6938c554ad793da9674435ed5c26e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el75",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 75.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b"
+        },
+        "key": "018799e56c369fd8f56af622ed47429ff6c33a249b333676bf2f69f4e174f3f6",
+        "outputs": {
+          "depth:az0_el75:depth.exr": "9f478dfeca09f5fdf0fc448827db856f8e0c79168829f54018e694decc8fb6cd",
+          "depth:az0_el75:depth.png": "26378e0250aab7f76657c3feac6f021ebc2d10af3ad16b66b631a5d07185c86e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "nbv",
+        "unit": null,
+        "version": "c3c174ba00ca6db061899aa0276ff8e21bc733febd447e0daa8a0da70b8fd50a",
+        "params": {
+          "azimuths": [
+            0,
+            90,
+            180,
+            270
+          ],
+          "elevation_deg": 15.0,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b",
+          "atlas:pos.npy": "616ef558da0b8c417c3f3f707a14fdbc4b56b7f0a0da80312604a3ad99c589cc",
+          "atlas:nrm.npy": "6ad1559310fe4417f53d90b76d933539d5145a1edbb162d9f586e141b3c64b0a",
+          "atlas:island.npy": "a01ae5266c5abcc19752094e47cabc439b227de3a11eba4b3b8df49f13e23bcb",
+          "depth:az0_el15:depth.exr": "70e33ba7a17fb20f6329be12ddcfa6ce5c877a0944c4dc3d06da0ec950b3bb34",
+          "depth:az90_el15:depth.exr": "ceabb93454bb0aa9efb5146ecedd347c048a75b462cb2771f0008158302362cc",
+          "depth:az180_el15:depth.exr": "d4e154e7e6b476b4626e2a5b38bfcf6e0af275773a0ed5e89795313a8d637dda",
+          "depth:az270_el15:depth.exr": "9b66e7e3256f3b3ee73229875d649a46415b54c2d6af618f1758e5fa30686d50",
+          "depth:az0_el-35:depth.exr": "0a3a7b990b9a7c616796e680263c9de9263b3d41078d0c5baeabb0dcdd6e332c",
+          "depth:az30_el-35:depth.exr": "f672e53c61b11a60fd4c410004cf6fa552308f246a8b17b9750a20d954053350",
+          "depth:az60_el-35:depth.exr": "994308ede0904d87ba0a26fe18505dc1e7e8ccda43afbf929f021186a40f29bb",
+          "depth:az90_el-35:depth.exr": "0f8da1b316e3d0a36b0e8ce50e580a718d62da2275903d7551168e14d5c0d56e",
+          "depth:az120_el-35:depth.exr": "31136f857038eab71fa3e6166626c8f5c0daed66e3cb7707efe7f26b36e4b714",
+          "depth:az150_el-35:depth.exr": "fcf1629c4857fd96b414de80ff3d9f3ec095182889f718c00f9eadef264653e1",
+          "depth:az180_el-35:depth.exr": "a2b9041bd2a99ed9ce71c535fa3c44f12e2a018537a80c7e877faad7cbeeac79",
+          "depth:az210_el-35:depth.exr": "0f19e24116c43b0d55e811aa82311b7e703238b6c39f7ac599311598c5cc0024",
+          "depth:az240_el-35:depth.exr": "45e1e0b3527ccbd8ebd7535fe903255c1ba5377c78be7024200a9f7b7e525034",
+          "depth:az270_el-35:depth.exr": "a4667a2c4c9f02391c4c6afc1eb89c1e16ff1395d845ceec82ae2cb56e4c79bd",
+          "depth:az300_el-35:depth.exr": "ffc9f2376ac1ac22a29c6fb77d0bd5b09193a1b41d11209c723f2a878127751f",
+          "depth:az330_el-35:depth.exr": "2ecc669de000dfd50a8777dcfab3bc8ddfc4a2a2585da582ffcb77e85e13a532",
+          "depth:az30_el15:depth.exr": "d70629a0803f1eba944ea9491955efbe76b49e2df2f77c1d52beee4f452f8e1d",
+          "depth:az60_el15:depth.exr": "88b63099b6b41eb1495e35bfb9dc3cb05f3f6948ed11338e94b5c6aa279d6f8f",
+          "depth:az120_el15:depth.exr": "ff4f2b80a9cfe060347e5da7282c79685009518b3f7385fbb09366565ae754f0",
+          "depth:az150_el15:depth.exr": "e98bebe6abef04c8d9943790d36974af875c38121e50b6e3ca2fec111eaf33b2",
+          "depth:az210_el15:depth.exr": "2303c057f996aeffaf4fae400e056a60342b3b78f6d17898890ed4b24a811f1d",
+          "depth:az240_el15:depth.exr": "9ff1de174b8cc8dbd9abf78f1c93185fe37b302011be3839019ba085f84f4128",
+          "depth:az300_el15:depth.exr": "9677bd00dbf44037167f3164992d9f2670d13d8713585724271f58fc6b757069",
+          "depth:az330_el15:depth.exr": "8105e9467deb9cb882f5b305c27ea85aa3a5fbcf8c9060cf784381244f6f1388",
+          "depth:az0_el55:depth.exr": "b6e4e7e2a4c73bee8421d82c7f401887423d2c78720d5231698ae2c2c9572867",
+          "depth:az30_el55:depth.exr": "e011505f263b8af751aa179e1c392d4e33caa9858622df215e80e6069dbf8fd3",
+          "depth:az60_el55:depth.exr": "515de9cd71057595d715a2ba8e687fe9aa410bfc09c5367c101cea866eea7ebb",
+          "depth:az90_el55:depth.exr": "75a9038b98a0f06a97f227fc07959e65d145ebd2a91e8c6832f78534d0e202fd",
+          "depth:az120_el55:depth.exr": "9dc93bad05afc402281e612f9d302f28e8fadd8dc661d01d15be1d4baf92e94f",
+          "depth:az150_el55:depth.exr": "9ec314ac2429e85723060bcbda21fa751d34862d15b8cc259cb05b96613293ce",
+          "depth:az180_el55:depth.exr": "340ace2d79b9aea2f50f977e8fbf3256d8b47ce8dd7ab5c96ca7043ba01d1941",
+          "depth:az210_el55:depth.exr": "da19059fb8186fecacdb0a3e4c328a1b096e4816b2a5331ffbe780311cf9912c",
+          "depth:az240_el55:depth.exr": "7f93239ea41a541369f694fbb8b001c518e637e60bc9e8462ca5adfcdf2e2669",
+          "depth:az270_el55:depth.exr": "d5d6ea37ef616848386b7163f2bedeb6a950a8a7fe3d6c289485b2aa650bd28a",
+          "depth:az300_el55:depth.exr": "eee70f7ccf55f00f20e6139cd45d78a020e21c4437e777c94371b55db279a9fc",
+          "depth:az330_el55:depth.exr": "0ea46d55a32356ddc76fd25d369ccd6a2e4f5dac1ae4b1ee6e9f6bd3e28ae959",
+          "depth:az0_el75:depth.exr": "9f478dfeca09f5fdf0fc448827db856f8e0c79168829f54018e694decc8fb6cd"
+        },
+        "key": "d6f29b0ff4ad49cc652b7e47dfd7bc2768593d3f77439dda02794f9f8003b639",
+        "outputs": {
+          "nbv:extras.json": "76ed60c56ad99e0dc2519d8534849e5285e78f11ca5691c98f24d9342b72d8ff",
+          "nbv:reachable.npy": "57426283d678330ea5b1cce4e162481ac0afae08a3464a76be84c220899b47ea"
+        },
+        "measurements": {},
+        "elapsed_s": 15.5,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_0",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
+          "view_hints": [
+            "front view",
+            "back view"
+          ],
+          "canvas_seed": 2100,
+          "width": 3072,
+          "height": 1536,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az0_el15:depth.png": "0b3367211b4edb42c097a1f2d98354b5753335c4ae212c6be68d2e84fbcb0ee4",
+          "depth:az180_el15:depth.png": "48027600cee33e5edce0abb87de3870d46a780842865b31292a0ff25b10a52af"
+        },
+        "key": "9dacf45ba3a63dc5dd7d7602abf115fa0f65eb362827f03f0b4b5fa37543a6f7",
+        "outputs": {
+          "generate:canvas_0:canvas.png": "240811cf1656c495ca701f4d6c81807542a4a4958e002aed6c7272474d4a67fa",
+          "generate:canvas_0:manifest.json": "18ea07d031de484b94314168a2cda1309897774c7fc63b1b6159c6fc16c05b6f",
+          "generate:canvas_0:gen_0.png": "843732269c18709ee7a1466675c038a91477405220fabd8d1198cbe728eba684",
+          "generate:canvas_0:gen_1.png": "1de4062f81550f32284a1d92ecd7ea65c6904f6d103ece9f27f9d33525394aa8"
+        },
+        "measurements": {},
+        "elapsed_s": 72.3,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_1",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
+          "view_hints": [
+            "side view",
+            "side view"
+          ],
+          "canvas_seed": 2101,
+          "width": 3072,
+          "height": 1536,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az90_el15:depth.png": "8703a3741a71e4d20234387d178eca9b19ec059d24769b54bede3fe0d70d774e",
+          "depth:az270_el15:depth.png": "1761d4d464da9b94b5c5bf2550f244be444a6b17331c1db51a789bbed1cf69a6"
+        },
+        "key": "60a5b27fed75458ebc4e46a312624f382100b419780efd0d6c6252df5327911b",
+        "outputs": {
+          "generate:canvas_1:canvas.png": "273aa6cae7fc5cd9c26578b8387f710ca872209ef3f915551c8eead6626b94fc",
+          "generate:canvas_1:manifest.json": "5c1b166fcac7e18772c9ccd3e36d6faed5c17bb502a1881faaae9574ae184959",
+          "generate:canvas_1:gen_0.png": "2934490e8fff867516f80dc92adfcf41dfb42a86d038ea5069bfa62081725cef",
+          "generate:canvas_1:gen_1.png": "3e6e06aeb07192a3c747aa08d05cce88fd8dbe7db86be2f47fe76faaf7d108a8"
+        },
+        "measurements": {},
+        "elapsed_s": 74.3,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_2",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "towering Italian cypress tree, cupressus sempervirens, very tall narrow columnar evergreen spire, flame-shaped silhouette, dense dark dusty-green foliage, deep desaturated olive green, dry matte Mediterranean evergreen, muted dark tones",
+          "view_hints": [
+            "front view, seen from below"
+          ],
+          "canvas_seed": 2102,
+          "width": 1536,
+          "height": 1536,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az0_el-35:depth.png": "4c0ea9b80e62f992edf23a173684e555a50b398eb729a8f49444191dbc0d94cd"
+        },
+        "key": "926e634dbc3e8de5013a2d2c5602d225a101f96f19762c1b099713b18dbf48c6",
+        "outputs": {
+          "generate:canvas_2:canvas.png": "2c9ab0532349a0bbb61d543e0ccd1de52327b932cb7faaf47ac7d39d88011c1e",
+          "generate:canvas_2:manifest.json": "2a202021b3231e57f01b18c7e397616f1029c1dea4a1a7f8881728b341fdc07d",
+          "generate:canvas_2:gen_0.png": "7ad2d85c403b76dbae37c833f750ead73b172e52e761724c6c32228b78796f45"
+        },
+        "measurements": {},
+        "elapsed_s": 31.2,
+        "hit": false
+      },
+      {
+        "stage": "blend",
+        "unit": null,
+        "version": "81f6c812fb0c61b19369c1cff64b62ae3db2a8b8fc6fdb907daa2cf6cced79e5",
+        "params": {
+          "albedo_source": "direct",
+          "views": [
+            {
+              "azimuth_deg": 0.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 90.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 180.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 270.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 0.0,
+              "elevation_deg": -35.0
+            }
+          ],
+          "numpy_cv2": "numpy 2.3.4 cv2 5.0.0"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b",
+          "atlas:pos.npy": "616ef558da0b8c417c3f3f707a14fdbc4b56b7f0a0da80312604a3ad99c589cc",
+          "atlas:nrm.npy": "6ad1559310fe4417f53d90b76d933539d5145a1edbb162d9f586e141b3c64b0a",
+          "atlas:island.npy": "a01ae5266c5abcc19752094e47cabc439b227de3a11eba4b3b8df49f13e23bcb",
+          "depth:az0_el15:depth.exr": "70e33ba7a17fb20f6329be12ddcfa6ce5c877a0944c4dc3d06da0ec950b3bb34",
+          "depth:az90_el15:depth.exr": "ceabb93454bb0aa9efb5146ecedd347c048a75b462cb2771f0008158302362cc",
+          "depth:az180_el15:depth.exr": "d4e154e7e6b476b4626e2a5b38bfcf6e0af275773a0ed5e89795313a8d637dda",
+          "depth:az270_el15:depth.exr": "9b66e7e3256f3b3ee73229875d649a46415b54c2d6af618f1758e5fa30686d50",
+          "depth:az0_el-35:depth.exr": "0a3a7b990b9a7c616796e680263c9de9263b3d41078d0c5baeabb0dcdd6e332c",
+          "generate:canvas_0:gen_0.png": "843732269c18709ee7a1466675c038a91477405220fabd8d1198cbe728eba684",
+          "generate:canvas_1:gen_0.png": "2934490e8fff867516f80dc92adfcf41dfb42a86d038ea5069bfa62081725cef",
+          "generate:canvas_0:gen_1.png": "1de4062f81550f32284a1d92ecd7ea65c6904f6d103ece9f27f9d33525394aa8",
+          "generate:canvas_1:gen_1.png": "3e6e06aeb07192a3c747aa08d05cce88fd8dbe7db86be2f47fe76faaf7d108a8",
+          "generate:canvas_2:gen_0.png": "7ad2d85c403b76dbae37c833f750ead73b172e52e761724c6c32228b78796f45"
+        },
+        "key": "1fbb1c9262c22a2b50e34511b392ce2bf519a920c7b2cdcbec8dc0a452400f1c",
+        "outputs": {
+          "blend:base.png": "1021e0bab6d8ca789a38e581f816d33c6a8a0837a606b7261feda2e4efb434b3",
+          "blend:coverage.json": "42bc36f1c8efe72350ca5ecc0c1a03c09dfd98ac830b5459b4f08c780ee29d43"
+        },
+        "measurements": {
+          "blend_coverage": 0.8018,
+          "hole_texels": 519181,
+          "max_hole_depth_frac": 0.0183
+        },
+        "elapsed_s": 9.6,
+        "hit": false
+      },
+      {
+        "stage": "bake_normal",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 2048,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b",
+          "clean_hires.glb": "eec7123c1fc8cf06aa164b0a8bbae954d5f01dbdf59d624d17aee9c36a4afb7d"
+        },
+        "key": "02bb614d137ea44dc3e6be79c7b269d8d885eee2738286f7578fdeb8edcd0a90",
+        "outputs": {
+          "bake_normal:normal.png": "fffc44e1e52359319f07a0049101336756108c1d0f52bd4b39103b0a4e8e634c"
+        },
+        "measurements": {},
+        "elapsed_s": 1.2,
+        "hit": false
+      },
+      {
+        "stage": "bake_ao",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 2048,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b",
+          "clean_hires.glb": "eec7123c1fc8cf06aa164b0a8bbae954d5f01dbdf59d624d17aee9c36a4afb7d"
+        },
+        "key": "e00a3a9e4086bf7b3a717a1ca87edc53d6d275498dd005cc01c55e3080fb5e4c",
+        "outputs": {
+          "bake_ao:occlusion.png": "6f94ca215c2fe26683c17ee40cbf7be2143dfe3f9f63b58641bb630fa1c70ac1"
+        },
+        "measurements": {},
+        "elapsed_s": 9.3,
+        "hit": false
+      },
+      {
+        "stage": "export",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "metallic": 0.0,
+          "roughness": 0.7,
+          "detail": false,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "ee7410e2e33807735cb77bd23a9905afd2437af0a37f7939a3d374331a95e33b",
+          "blend:base.png": "1021e0bab6d8ca789a38e581f816d33c6a8a0837a606b7261feda2e4efb434b3",
+          "bake_normal:normal.png": "fffc44e1e52359319f07a0049101336756108c1d0f52bd4b39103b0a4e8e634c",
+          "bake_ao:occlusion.png": "6f94ca215c2fe26683c17ee40cbf7be2143dfe3f9f63b58641bb630fa1c70ac1"
+        },
+        "key": "851c17205b6dfb93ae65f737bad73b44bd42293cd8cc7d2313b4f0a093e0d59a",
+        "outputs": {
+          "export:textured.glb": "2434f723826becccc8762c283f3cd961ab6c433d9e648891e8851e1ccff2ca1a"
+        },
+        "measurements": {},
+        "elapsed_s": 0.4,
+        "hit": false
       }
     ],
-    "extra_views": [
-      {
-        "hint": "front view, seen from below",
-        "azimuth_deg": 330,
-        "elevation_deg": -35.0,
-        "predicted_gain_texels": 199377,
-        "predicted_gain_frac": 0.0776
-      },
-      {
-        "hint": "back view, seen from below",
-        "azimuth_deg": 150,
-        "elevation_deg": -35.0,
-        "predicted_gain_texels": 139947,
-        "predicted_gain_frac": 0.0545
-      }
-    ],
-    "pbr_estimator": {
-      "model": "xanderhuang/material_estimator",
-      "steps": 50,
-      "resolution": 768,
-      "estimated_views": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "elapsed_s": 49.8,
-      "views": [
-        {
-          "seed": 21000,
-          "albedo_sha256": "f6b43f50110d041e054c149a2253d22e632721d1a2a46a037d3030a52a5df6f5",
-          "rm_sha256": "cd68bd18e46ee9e6d37563d8c4d389a4413860fb56a63f9539404ea0de82d904"
-        },
-        {
-          "seed": 21001,
-          "albedo_sha256": "81a23ec6b8aef5c6f06d15a7945837fb00b3fca7a76173974f436455f4f7622e",
-          "rm_sha256": "ba55bc2c8ac4f420e7047e846538a91098184b04a704c16c726bf4edd914b465"
-        },
-        {
-          "seed": 21002,
-          "albedo_sha256": "7de554c39f4740082ad395b3f5b6a989c6f73730e66c7433296276ae2abe5a3b",
-          "rm_sha256": "6c0f17fb0aa6e7d1b3726110db66385d65c9ecced9450bbf2e653aa315eeca16"
-        },
-        {
-          "seed": 21003,
-          "albedo_sha256": "43c2390a824e96f2766edf6c8e8b2bd5f61e733979cec99490847264ca4b9266",
-          "rm_sha256": "500c551b2e86b535b6f86631093e3366fc9dffc3b9a3bd351c292c82901c47bb"
-        },
-        {
-          "seed": 21004,
-          "albedo_sha256": "70d6af5323651d134ac68a9fa32049b9df415f161f4bc358b8b6ce8f56b25646",
-          "rm_sha256": "c207a49cda80c558733ebcbcd87bbb93abfe239d4cc1fc0beb0eecd4c2e59c7e"
-        },
-        {
-          "seed": 21005,
-          "albedo_sha256": "dd063723c2065091286f21971758570bf8babae958137607b442925019531606",
-          "rm_sha256": "85e9219441c56ff5f2ded143878b2d58e850abdac6ea590d1a75ffdbbfb237c6"
-        }
-      ]
-    },
-    "weight_exponent": 2.0,
-    "occlusion_eps": 0.02,
-    "edge_pad_px": 8,
-    "depth_dilate_px": 5,
-    "blend_coverage": 0.7623,
-    "hole_texels": 610510,
-    "dielectric": true,
-    "metal_fraction": 0.0304,
-    "texture_size": 2048,
-    "base_bake_s": 319.5,
-    "normal_bake_s": 0.9,
-    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\cypress\\cand_21\\textured.glb",
-    "textured_glb_sha256": "e94bc8ea3e6ece18c817bb7f7b9e35e2953ce771c2de2d245b58f25f7a68b5bc"
+    "elapsed_s_total": 225.7,
+    "textured_glb_sha256": "2434f723826becccc8762c283f3cd961ab6c433d9e648891e8851e1ccff2ca1a"
   },
   "preprocess": {
-    "textured_glb_bytes": 13917024,
-    "final_glb_bytes": 13917000
+    "textured_glb_bytes": 17034488,
+    "final_glb_bytes": 17034460
   },
   "bake": {
-    "source": "final.glb",
-    "sha256": "6fa1865fe8431fbaf214fc94e58a0f879a2dfdd868f94aa55b360f1f5149cd12",
+    "source": "cypress.glb",
+    "sha256": "2434f723826becccc8762c283f3cd961ab6c433d9e648891e8851e1ccff2ca1a",
     "images": [
       {
         "index": 0,
@@ -367,17 +1342,17 @@
       },
       {
         "index": 1,
-        "slot": "base",
+        "slot": "ao",
         "file": "img1.dds"
       },
       {
         "index": 2,
-        "slot": "mr",
+        "slot": "base",
         "file": "img2.dds"
       }
     ]
   },
-  "final_glb_sha256": "6fa1865fe8431fbaf214fc94e58a0f879a2dfdd868f94aa55b360f1f5149cd12",
+  "final_glb_sha256": "2434f723826becccc8762c283f3cd961ab6c433d9e648891e8851e1ccff2ca1a",
   "turntable": {
     "angles": 8,
     "size": "512x512",

@@ -1,10 +1,163 @@
 {
   "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
   "seed": 0,
-  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0",
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\olive_stump\\cand_0",
   "concept": {
-    "note": "no stats captured (concept_meta.json not found; output pre-existed this gen_prop.py run)",
-    "concept_png_sha256": "ce23094ab36add2ada0a49d372967a756fe3090795bea482fa232835178e615b"
+    "mode": "generated",
+    "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+    "comfy_manifest": {
+      "workflow": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "z_image_turbo_bf16.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen_3_4b_fp8_mixed.safetensors",
+            "type": "lumina2",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ae.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, single object centered, plain grey background"
+          }
+        },
+        "5": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "4",
+              0
+            ]
+          }
+        },
+        "6": {
+          "class_type": "ModelSamplingAuraFlow",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift": 3.0
+          }
+        },
+        "7": {
+          "class_type": "EmptySD3LatentImage",
+          "inputs": {
+            "width": 1024,
+            "height": 1024,
+            "batch_size": 1
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "6",
+              0
+            ],
+            "seed": 0,
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler_name": "res_multistep",
+            "scheduler": "simple",
+            "positive": [
+              "4",
+              0
+            ],
+            "negative": [
+              "5",
+              0
+            ],
+            "latent_image": [
+              "7",
+              0
+            ],
+            "denoise": 1.0
+          }
+        },
+        "9": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "8",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "9",
+              0
+            ],
+            "filename_prefix": "prop_concept"
+          }
+        }
+      },
+      "prompt_id": "543b33bd-cc44-4927-bc49-dc2a41fe81db",
+      "prompts": {
+        "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, single object centered, plain grey background"
+      },
+      "seed": {
+        "8": 0
+      },
+      "models": [
+        {
+          "node_id": "1",
+          "class_type": "UNETLoader",
+          "input": "unet_name",
+          "filename": "z_image_turbo_bf16.safetensors",
+          "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+        },
+        {
+          "node_id": "2",
+          "class_type": "CLIPLoader",
+          "input": "clip_name",
+          "filename": "qwen_3_4b_fp8_mixed.safetensors",
+          "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+        },
+        {
+          "node_id": "3",
+          "class_type": "VAELoader",
+          "input": "vae_name",
+          "filename": "ae.safetensors",
+          "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+        }
+      ],
+      "outputs": [
+        {
+          "node_id": "10",
+          "output_kind": "images",
+          "filename": "prop_concept_00041_.png",
+          "subfolder": "",
+          "type": "output",
+          "saved_as": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\olive_stump\\cand_0\\concept_raw\\prop_concept_00041_.png"
+        }
+      ]
+    },
+    "concept_png_sha256": "e02769ff624d52a3a9e0ed2e6e355a2d883e03e1ed11d5f2d94ba54127868b9a"
   },
   "geometry": {
     "model": "Stable-X/Hi3DGen",
@@ -13,10 +166,10 @@
       "normal": "Stable-X/yoso-normal-v1-8-1",
       "birefnet": "ZhengPeng7/BiRefNet"
     },
-    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0\\concept.png",
-    "input_image_sha256": "ce23094ab36add2ada0a49d372967a756fe3090795bea482fa232835178e615b",
-    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0\\concept_rgba.png",
-    "concept_rgba_sha256": "7964d190242b3c526f3b8f52279fb37b5f9a27f9a9709b3a06791b712af40fba",
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\olive_stump\\cand_0\\concept.png",
+    "input_image_sha256": "e02769ff624d52a3a9e0ed2e6e355a2d883e03e1ed11d5f2d94ba54127868b9a",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\olive_stump\\cand_0\\concept_rgba.png",
+    "concept_rgba_sha256": "bd10c936c337c95ec71c3b413125c2c04d3cc3252b2e1b5e0d1b611964602a95",
     "seed": 0,
     "steps": {
       "sparse_structure_sampler": 50,
@@ -24,289 +177,1209 @@
     },
     "torch_version": "2.7.1+cu128",
     "xformers_version": "0.0.31.post1",
-    "vertex_count": 636662,
-    "face_count": 1273538,
-    "peak_vram_allocated_gb": 15.766702592,
-    "raw_glb_sha256": "740bf7364ef3a1a6a54c1553d5f68eb5a56a896d0808d75db7128142a7118022"
+    "vertex_count": 371353,
+    "face_count": 742584,
+    "peak_vram_allocated_gb": 13.20326144,
+    "raw_glb_sha256": "681bf300b0f31ecae0700752a2f5ec4a08dd4f83599dc42895e69b7334fba2e1"
   },
   "cleanup": {
-    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
-    "clean_glb_sha256": "1ab82f6cf0fadb2d95cd91bb65b09c51467c39e6f34ef6202837380d14cad5cb",
-    "clean_hires_glb_sha256": "94606e771a0b817c4dcca6a4e6541f17087703e4eb2b34222eb05f7e19d7dd23"
+    "raw_tris": 742584,
+    "fragments_removed": 11,
+    "fragment_tris_removed": 144,
+    "hires_tris": 742440,
+    "clean_tris": 14999,
+    "height_target": 1.8,
+    "clean_height": 1.804898977279663,
+    "clean_min_y": 0.0,
+    "uv_charts": 862,
+    "uv_utilization": 0.8046,
+    "hires_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\olive_stump\\cand_0\\clean_hires.glb",
+    "clean_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\olive_stump\\cand_0\\clean.glb",
+    "clean_glb_sha256": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2",
+    "clean_hires_glb_sha256": "39fccbf7cddb8e2143ed3dcb3566b0a1ebf50f221543bc745c14205ef6812b53"
   },
   "texture": {
-    "strategy": "multiview_controlnet_depth",
-    "front_axis": "-Y",
-    "workflow": "prop_multiview.json",
-    "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
-    "render_resolution": 1024,
-    "views": [
+    "stages": [
       {
-        "hint": "front view",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 15.0,
-        "canvas": 0,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 0
+        "stage": "atlas",
+        "unit": null,
+        "version": "a143fcbc9615481a72471a791dc461de51f46b162ea1ae5d9a54181c98405234",
+        "params": {
+          "texture_size": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "01b470a3-8df9-494a-90b2-10da09a9baac",
-        "prompts": {
-          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "e394b8dabcb8c59f3d6e73acfeb114355a922b7234e3d5891bba99eb1a790ae5",
-        "gen_png_sha256": "12935807ba1207701f20e4cc2f01087151a814bd745d22c3f93cbe2954d749d0"
+        "key": "d0c71564f2f76925aec881b60e766ba1322fea80ada6fdbcd77ef40304c1cd55",
+        "outputs": {
+          "atlas:pos.npy": "6da0b097bd2b786775445657b27217622348b207ab537dbe41330205be430066",
+          "atlas:nrm.npy": "a6fcce6ffedd80f08335b7ad5bf109bc4e9ce34fd9e199d773c5803b659d8b43",
+          "atlas:island.npy": "523d9d97e5e0358d184b690b01609963381186e5850aaa943ab37320a19ca051"
+        },
+        "measurements": {},
+        "elapsed_s": 1.6,
+        "hit": false
       },
       {
-        "hint": "side view",
-        "azimuth_deg": 90.0,
-        "elevation_deg": 15.0,
-        "canvas": 1,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 1
+        "stage": "depth",
+        "unit": "az0_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "10b4d39e-72b3-475a-a8cb-cfc5dff4cfb7",
-        "prompts": {
-          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "feec9c9cef72137e28ebe1dd11ac438f12318d55f351d62ab8156ddd5ad2e5a7",
-        "gen_png_sha256": "2ef1da18a710b7bdb8a6a794b4146f1c5b0f3d11e305f026d79c48acd9e624f3"
+        "key": "e9fa732ef19b7b9ec0d277014a30f00705dd0941a6cd110924dcbfd3b0173fab",
+        "outputs": {
+          "depth:az0_el15:depth.exr": "c915790940d9f14fef83184ed34e09413df8d1a8e4811f31c337ec7bbee270f3",
+          "depth:az0_el15:depth.png": "81b90a85077b68e00a4f4b920fbb2d86419a99f30bd49290e85481267134f821"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
       },
       {
-        "hint": "back view",
-        "azimuth_deg": 180.0,
-        "elevation_deg": 15.0,
-        "canvas": 0,
-        "canvas_slot": 1,
-        "seeds": {
-          "11": 0
+        "stage": "depth",
+        "unit": "az90_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "01b470a3-8df9-494a-90b2-10da09a9baac",
-        "prompts": {
-          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "2f3d7363365ef0d8a37d225e298d05dde33a51bcdda1594cc053cfaf82e5c298",
-        "gen_png_sha256": "3b0c2d04f5cee43680f731b5e494c0ad0a48b8542d1ce303e55e3ca75e90b008"
+        "key": "9eac541feb7fb77e518ebb19f7f8fe1b5217e4e7eb1610a8886509557165a269",
+        "outputs": {
+          "depth:az90_el15:depth.exr": "1829a3dc405e948eb26b4cbae1cc76a4bb7380dcb89dbc89f7574cbe52949934",
+          "depth:az90_el15:depth.png": "1e66e91ac03746653f3c0fad282e095132c7f56166877e3e909425558eff8c1b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
       },
       {
-        "hint": "side view",
-        "azimuth_deg": 270.0,
-        "elevation_deg": 15.0,
-        "canvas": 1,
-        "canvas_slot": 1,
-        "seeds": {
-          "11": 1
+        "stage": "depth",
+        "unit": "az180_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "10b4d39e-72b3-475a-a8cb-cfc5dff4cfb7",
-        "prompts": {
-          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, two views of the same object side by side, left: side view, right: side view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "282e59c7cdb74d7db02193e0b9a7719de23ab528fda7329d09a57ca09c5b7159",
-        "gen_png_sha256": "28f035c73d8e4e58bbf4a8a8dc0ec15e81bf2d86be2b0f78341f5a0602b02261"
+        "key": "3ac043f4018a8b1ec461045173c91ed15076cef7a02259ebbdf3539d4f91ce6d",
+        "outputs": {
+          "depth:az180_el15:depth.exr": "279eb6dd2b9a7d134d4166a29bfae8a2d1535a4d993235d9dd4bf347b47c1d6d",
+          "depth:az180_el15:depth.png": "46ace8df5a4d8ef730f70727934b1e7ff743adcbcaafb2724b471f2e3b5fbfba"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
       },
       {
-        "hint": "back view, seen from below",
-        "azimuth_deg": 210,
-        "elevation_deg": -35.0,
-        "canvas": 2,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 2
+        "stage": "depth",
+        "unit": "az270_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "b7dce046-5689-4c77-aad5-c4947d93cc8f",
-        "prompts": {
-          "4": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark, back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "d042cec1ad7fd1138c8c1efc31ffc5c0eba65688eb1299d5f25a798c4db85465",
-        "gen_png_sha256": "29b21e582089dbf57d027d9235efb527a524169fe5a5e83bc5d0a4ae5dab7370"
+        "key": "69b8719197c3e503e5783b16d13a31a9a35e88f926bf826798628f158872786f",
+        "outputs": {
+          "depth:az270_el15:depth.exr": "92d8a7ea882651a99c577e9624c099d6fcc01b45f25176e089715c95e7e5303b",
+          "depth:az270_el15:depth.png": "7f630fa371fd1af52cf68e5d98685da184db176615975985b66f7cff916bff45"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "a8c06f2dd46a9bc3ddeaafa35a99d27d4303f0b0b719071d5a8e99240c78dd9a",
+        "outputs": {
+          "depth:az0_el-35:depth.exr": "bad6f318195a7c3e6882f4a2fbe49e67384dde7f0d1ef879103d06df61347757",
+          "depth:az0_el-35:depth.png": "1e9729072e8847bd955d7bb4a603d6c10655e9c295b2ed9fd36faaa08b9049a5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "a0849cfbd2e70286d4a7792300840a176ba5b20b1c565a845d11f3eba2f5c16e",
+        "outputs": {
+          "depth:az30_el-35:depth.exr": "a658c2ca27e46f92ca548b37e7e1669d76a13bf6d14716d8cfc5ae65eaa8ecee",
+          "depth:az30_el-35:depth.png": "531f1df15070fa202b3317109b96e4ad2cf1b720f7a1deaed16e0d7adf8cd612"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "1c990d7db0a5a9af680297e1790c2b2bbece51b970465b64da72ef682a805767",
+        "outputs": {
+          "depth:az60_el-35:depth.exr": "f218fd06832328f7139ad9a796bbaf895d3551640c2a6d7bb922e78eedb8ed4c",
+          "depth:az60_el-35:depth.png": "5ef2bc2916e7f6e7e604d55266cbb56b022dc7e90f421c695110351d11491eac"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "98019cad93a125139691c418b3e20142458769923cf196b9b1f4387741a5e01c",
+        "outputs": {
+          "depth:az90_el-35:depth.exr": "a32f52e5e95e843566d96909fa7891ff81f215fc4bdd6c197671f591340a8d08",
+          "depth:az90_el-35:depth.png": "1297e0cabf6f2fa792b18bf6caac474291a1ace667bdf75cd03075921d567161"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "7ff52a997e0b3ab2e92316ceeb3ccc7e108d691b22caeaf6289978dc422dd4ca",
+        "outputs": {
+          "depth:az120_el-35:depth.exr": "5e0733ea0a500416cc3afd08c26c71642df59096660865d7762d64d308990b9a",
+          "depth:az120_el-35:depth.png": "934c55c8faca49da80fe4a339422d0af6fbde45bb1aabe73ad0d42f9d25ad46b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "815b5fbf8c3de7d1180ec24bfd8d6d3e52fa97aa472af01315138fdee43cf628",
+        "outputs": {
+          "depth:az150_el-35:depth.exr": "a604cf854dfada177764f5c514780c73d912ed3d2eedaf5e9c7a55e77ce069d6",
+          "depth:az150_el-35:depth.png": "9b3951022d3d4380858efaf396b3acc1c5dc27272133c99ed5f70019ce527575"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "5e3de53c1bf86a04487533232e13cdd7bd329b70b353245c96f8e7744dce3fb8",
+        "outputs": {
+          "depth:az180_el-35:depth.exr": "45fa3cd99e809386edeedd9c1c4d209d6290299f77e03f9053ad764e41cfade3",
+          "depth:az180_el-35:depth.png": "6e50b97010a04769106d77d2c3910856ece23bf143053d96b964c11153d35532"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "cbb2d512ced0b9fca847f815e2a9e8d245bb29880933e189e2551bbe0a0420d6",
+        "outputs": {
+          "depth:az210_el-35:depth.exr": "b5fd8d274b837095e499cbdaf96ea7f027424074f664536d52a9b85ea09a2695",
+          "depth:az210_el-35:depth.png": "73543e5a3a5379551643a8c27505abe4ec9069181db302a37433d3975ffd0158"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "46cfaed8388356b575908ce969bb81be54137b36e3f39c222b59eec10c4bef7f",
+        "outputs": {
+          "depth:az240_el-35:depth.exr": "a667d26b5202360f8bf697bb9c1792dc84c2e5eb17e113ded721fd3da417ffaf",
+          "depth:az240_el-35:depth.png": "341796f72e4cc9b13bbae017f6d7acc3cddeb2bd8b8661b817ecd30db80ff22e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "b5035b55cbf9c16a529fee803d4613c94c6045f8206f7035e27ce466cbd08f80",
+        "outputs": {
+          "depth:az270_el-35:depth.exr": "0826a4c593d1ae04e2d591bd0f1b14903107f448229c7ece0edd0639b1309cfe",
+          "depth:az270_el-35:depth.png": "ae2576813b8380caf70b884667c5699c8ab681f639c95f8e4003ad0e9938c785"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "814f4496cef59d438d94a3d8ba6201d3311b0758d3b13dac377a77ccc34a5287",
+        "outputs": {
+          "depth:az300_el-35:depth.exr": "cdeb05d0a950d028ac5d48eab455b0a201c5bd4d1e8a23f6acbab2a911791c8c",
+          "depth:az300_el-35:depth.png": "c5305685a5c91fe4c0be8d978690b4a1c4fff3090a309d4df95c7e02bb540d9e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "2e3ae3b19e927a8321478896bea2aed3fa055a81e27667b6dfe0f2eeafbbb213",
+        "outputs": {
+          "depth:az330_el-35:depth.exr": "57c4779246fae98fc426c5edabd14bec473df3d2425dc6ddaca7549fdc4288d1",
+          "depth:az330_el-35:depth.png": "7f6661caec8e4db9e6e897870c16f8cdb6daf6b8e458d60b1a9c35741c8c1e5f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "4d9a29aeac33bcb3124038dab7c266efb43334d5291f7f355fcc622ac1bae0a2",
+        "outputs": {
+          "depth:az30_el15:depth.exr": "b94805f2003c685a28b86311a6fd96425296acd17b344ba62abf3f3227ce54e5",
+          "depth:az30_el15:depth.png": "935898467ed5047b8b5ce2e7c4319d99a0dc0dd16b5bea203831056d2321fb19"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "20a1e090b057f7ad28ecf244d9163d284834f7b5b81dc00c065936cc008befe4",
+        "outputs": {
+          "depth:az60_el15:depth.exr": "e6aebbd9595718f6421d5baad1d122ac598856831fc0298390fac2de690b38cd",
+          "depth:az60_el15:depth.png": "1db4704163a6997bd753fcf40308589d447a0becd47941e4e5def3cbce1fe9bc"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "7f1e6f674f6bb74bd29d190f9e2d2ad0ef476538ef3e9c1681557d24fcec5da8",
+        "outputs": {
+          "depth:az120_el15:depth.exr": "34b0c64b1e1f0710609fe0e8b98a5e5b7a767fa191c2c130244eb5d3ddf6cee4",
+          "depth:az120_el15:depth.png": "4068fc50b95983bc06f2a085842e2e0a71926fbae2039d735d31b8b63d304cdc"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "b4dc3bd872ce41260d6dc403c5a1adec573ef7c0783a1a77f5db082f68bf478e",
+        "outputs": {
+          "depth:az150_el15:depth.exr": "e053a808842e94c256a961e5635fbd1623805f5f71a9a1603c0eec08106c9d76",
+          "depth:az150_el15:depth.png": "9df1be5092a4dbe76ad1f201bccbae1ea54cdedd7df236ff5192095c76b199cd"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "6f6dced3653adde7419af5d324a07c6420ad8becaf876d469a881efe42bf8199",
+        "outputs": {
+          "depth:az210_el15:depth.exr": "ebe4297473fd900db373ce93d4af47a14da2bb57968856fd30067da9dbe3b7d9",
+          "depth:az210_el15:depth.png": "2baa0fcca939f5e49aad6377d567860f52a231b9f66651569054817eefd7f70d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "2e77a9d235d6c50a8001e2f502c0c40563525d2e6694659902418d8c4ff50b96",
+        "outputs": {
+          "depth:az240_el15:depth.exr": "408508598a5c00e6d0b08f5126eccac509a73fb8298a96181a598b9bd67c570f",
+          "depth:az240_el15:depth.png": "40e3385b3f349a3229ce0f8e78318f8fed33421f9d5853c5fef222d243d966b5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "8288f376e1d0a6a8b09696e6c4c59b44b0ad5eb3f79c4e4381fe42aed7c3b6e1",
+        "outputs": {
+          "depth:az300_el15:depth.exr": "1be66b4b21de2f6982700149fab3edbda7c0dbbbccc926152eaff24edd4c36fd",
+          "depth:az300_el15:depth.png": "b13e59d2c3386ba48f089877ebff0b0df5f64167b9ef4b11c46ab267f8ba3021"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "ae35e9ff15e0a4d76496cb5c19c7450cb2848cbcc99a6ff79ae26b48ee80b7f0",
+        "outputs": {
+          "depth:az330_el15:depth.exr": "ba2d42b3dc9a776a00674a54292f9efb37c25c316ca67a2dcd2a11ad6bce5091",
+          "depth:az330_el15:depth.png": "9f59a177168ebd8c7d0315716a8de7e199109aa6094359dacd2c5f68e1971ba4"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "55a7c455a13ae297606adcdef443e9a866e05ec72bd14be5798ac85af4a5793d",
+        "outputs": {
+          "depth:az0_el55:depth.exr": "cc34ca6ca246832fcc19fd8abfa9645698c7c61255118efe51468b6ccddc707d",
+          "depth:az0_el55:depth.png": "5f58622a7cec3e68a18b93966c7dda616bd7738b7baa70396cf2f42a2beffdd5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "cfe6c2bd639ce2d5b0f1e18a12e5b3e14009cc90b61a6c3ca7ea65898b72d811",
+        "outputs": {
+          "depth:az30_el55:depth.exr": "962b8aecb0b0411a5bff944fa91acd593df1419ec156c027e4a7d562fc3155de",
+          "depth:az30_el55:depth.png": "c1851e979dbd20ff4f73c148caf348fd3245b2311ffc5ad0a74dbdc8d5e12a0f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "ed6430ba41bcf8ff8925fc90cb82a50540995f08865f61f8675f09e42378c93d",
+        "outputs": {
+          "depth:az60_el55:depth.exr": "ca201def7e7f8629a1f496f7445cd63f916e22ed648a7329310ee166067e2567",
+          "depth:az60_el55:depth.png": "17f7adc8fe77eb41affba00b496d4879aa5caf4438d34b180240575e5d319c48"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "04cac4f2855cc0e101e61e07bb186dba74f5ca93bf278d04c21422e126a41aac",
+        "outputs": {
+          "depth:az90_el55:depth.exr": "19038b41925b82e04be8e481db09544f8666ca8821ec9af7b79e3e192e8970ec",
+          "depth:az90_el55:depth.png": "04f51e92316cd1efe4febcd5d3f7798835629d9338c739fe443f01e9699f41b3"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "54028a72f7613d4ab991eb97e7af6c4219a57bca84c525f6002407c2e9b52dbf",
+        "outputs": {
+          "depth:az120_el55:depth.exr": "a0f613f6cb27e60f04e919d6d90a41ceb8ba6d1b894a0f0caffc9efbb194ae31",
+          "depth:az120_el55:depth.png": "4d39c7a75f69191c5fe045e0e91b7df75a58430774daedf7f18aa42e4b7a303d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "5d419a8f4714d8f8c3759da8ac215196d27cc95fecf8255b07fd06730c62c275",
+        "outputs": {
+          "depth:az150_el55:depth.exr": "a3a254f43f4dc752253411c73d86483d78c516de0b6e4deb9d37fe7f640a0327",
+          "depth:az150_el55:depth.png": "ee0534b6c95f02c586f89aa70194a63903d89c59bb98e315c5059022d53060bf"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "354655097f2895b6c777c4e97663c72fa0be48a1eb0d31b3fa096accdf9a47cc",
+        "outputs": {
+          "depth:az180_el55:depth.exr": "ae67ce48cfdd17c8644baf05a22a5d8298eabeacb4ab7b098026916aa0250811",
+          "depth:az180_el55:depth.png": "105b53f8ca61097044220ec474de164b5433444560751d418aaa6e7eaaf47857"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "61f9d00f5eb0957b4666387bf5021a39aca63c49c13472c8818945ccf827e021",
+        "outputs": {
+          "depth:az210_el55:depth.exr": "52818ad6c1bc1b345ea27f5e4485b28b753b2a9576d42898b5dddc1f7e0900ed",
+          "depth:az210_el55:depth.png": "efb7e280fcf59e2b9c641774db35b0bd6333c5239dc9447d2f6df335eade6b90"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "397fd46731d228899d62f20301430226d83eab491095c3d45f6712e6ab6bc455",
+        "outputs": {
+          "depth:az240_el55:depth.exr": "9bb2e8bbc168131891a51c49aa8911edf0e81c3d9549c8f07fb83ce5d45bfa62",
+          "depth:az240_el55:depth.png": "98294fdc0d15fb482550146a65065dc0f8b33c1eaafb741055bfb7f97809e4dd"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "9441b5cad92ae52af6235ab97c70a362c08d8672558bd82d1348c23e07d4011d",
+        "outputs": {
+          "depth:az270_el55:depth.exr": "899f919e4198e69f390a742367b10c811f276d7a40fc2b0e925a9827a37adcc5",
+          "depth:az270_el55:depth.png": "fe597e8ca834006393f13292d9af62702219e71435a826f3aec2824dcd323c73"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "13f5058b895fef5a64be63da4e46978f59baf29f9c2ffecb9fc82bd9591e9265",
+        "outputs": {
+          "depth:az300_el55:depth.exr": "f1551346b274733f7eeea92556d8c8f70431cea9c964188eaef782ee7313caa5",
+          "depth:az300_el55:depth.png": "7dc513baeadb468aff2ed9d309b6daaea9f56c148ffa8ab528465ba9fd489bfc"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "f9d73263ff223b19630ecd0dabbcd7cb33756d44f4525f57b6355bfb33f4322e",
+        "outputs": {
+          "depth:az330_el55:depth.exr": "c1a7df648d2a264308c5a1f0e3fd5e18dbc00b53571d92f266dd7e7f2793293a",
+          "depth:az330_el55:depth.png": "2d6228dc3acec44f2657afb465f34dae4657c3bc8610882244e8c9d73278087a"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el75",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 75.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2"
+        },
+        "key": "9200cdb5846fd2e9bd8a2056f957d69c81c13e7038c4aa5780fa877709021f89",
+        "outputs": {
+          "depth:az0_el75:depth.exr": "761045079a405c6167ba4170e660b514b9c4444a1a87a9ac9d906d0bb95ff7ba",
+          "depth:az0_el75:depth.png": "07f95b8c5ceb76732be0dd955c453d2164c896b3bf62f2271deab83221f76746"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "nbv",
+        "unit": null,
+        "version": "c3c174ba00ca6db061899aa0276ff8e21bc733febd447e0daa8a0da70b8fd50a",
+        "params": {
+          "azimuths": [
+            0,
+            90,
+            180,
+            270
+          ],
+          "elevation_deg": 15.0,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2",
+          "atlas:pos.npy": "6da0b097bd2b786775445657b27217622348b207ab537dbe41330205be430066",
+          "atlas:nrm.npy": "a6fcce6ffedd80f08335b7ad5bf109bc4e9ce34fd9e199d773c5803b659d8b43",
+          "atlas:island.npy": "523d9d97e5e0358d184b690b01609963381186e5850aaa943ab37320a19ca051",
+          "depth:az0_el15:depth.exr": "c915790940d9f14fef83184ed34e09413df8d1a8e4811f31c337ec7bbee270f3",
+          "depth:az90_el15:depth.exr": "1829a3dc405e948eb26b4cbae1cc76a4bb7380dcb89dbc89f7574cbe52949934",
+          "depth:az180_el15:depth.exr": "279eb6dd2b9a7d134d4166a29bfae8a2d1535a4d993235d9dd4bf347b47c1d6d",
+          "depth:az270_el15:depth.exr": "92d8a7ea882651a99c577e9624c099d6fcc01b45f25176e089715c95e7e5303b",
+          "depth:az0_el-35:depth.exr": "bad6f318195a7c3e6882f4a2fbe49e67384dde7f0d1ef879103d06df61347757",
+          "depth:az30_el-35:depth.exr": "a658c2ca27e46f92ca548b37e7e1669d76a13bf6d14716d8cfc5ae65eaa8ecee",
+          "depth:az60_el-35:depth.exr": "f218fd06832328f7139ad9a796bbaf895d3551640c2a6d7bb922e78eedb8ed4c",
+          "depth:az90_el-35:depth.exr": "a32f52e5e95e843566d96909fa7891ff81f215fc4bdd6c197671f591340a8d08",
+          "depth:az120_el-35:depth.exr": "5e0733ea0a500416cc3afd08c26c71642df59096660865d7762d64d308990b9a",
+          "depth:az150_el-35:depth.exr": "a604cf854dfada177764f5c514780c73d912ed3d2eedaf5e9c7a55e77ce069d6",
+          "depth:az180_el-35:depth.exr": "45fa3cd99e809386edeedd9c1c4d209d6290299f77e03f9053ad764e41cfade3",
+          "depth:az210_el-35:depth.exr": "b5fd8d274b837095e499cbdaf96ea7f027424074f664536d52a9b85ea09a2695",
+          "depth:az240_el-35:depth.exr": "a667d26b5202360f8bf697bb9c1792dc84c2e5eb17e113ded721fd3da417ffaf",
+          "depth:az270_el-35:depth.exr": "0826a4c593d1ae04e2d591bd0f1b14903107f448229c7ece0edd0639b1309cfe",
+          "depth:az300_el-35:depth.exr": "cdeb05d0a950d028ac5d48eab455b0a201c5bd4d1e8a23f6acbab2a911791c8c",
+          "depth:az330_el-35:depth.exr": "57c4779246fae98fc426c5edabd14bec473df3d2425dc6ddaca7549fdc4288d1",
+          "depth:az30_el15:depth.exr": "b94805f2003c685a28b86311a6fd96425296acd17b344ba62abf3f3227ce54e5",
+          "depth:az60_el15:depth.exr": "e6aebbd9595718f6421d5baad1d122ac598856831fc0298390fac2de690b38cd",
+          "depth:az120_el15:depth.exr": "34b0c64b1e1f0710609fe0e8b98a5e5b7a767fa191c2c130244eb5d3ddf6cee4",
+          "depth:az150_el15:depth.exr": "e053a808842e94c256a961e5635fbd1623805f5f71a9a1603c0eec08106c9d76",
+          "depth:az210_el15:depth.exr": "ebe4297473fd900db373ce93d4af47a14da2bb57968856fd30067da9dbe3b7d9",
+          "depth:az240_el15:depth.exr": "408508598a5c00e6d0b08f5126eccac509a73fb8298a96181a598b9bd67c570f",
+          "depth:az300_el15:depth.exr": "1be66b4b21de2f6982700149fab3edbda7c0dbbbccc926152eaff24edd4c36fd",
+          "depth:az330_el15:depth.exr": "ba2d42b3dc9a776a00674a54292f9efb37c25c316ca67a2dcd2a11ad6bce5091",
+          "depth:az0_el55:depth.exr": "cc34ca6ca246832fcc19fd8abfa9645698c7c61255118efe51468b6ccddc707d",
+          "depth:az30_el55:depth.exr": "962b8aecb0b0411a5bff944fa91acd593df1419ec156c027e4a7d562fc3155de",
+          "depth:az60_el55:depth.exr": "ca201def7e7f8629a1f496f7445cd63f916e22ed648a7329310ee166067e2567",
+          "depth:az90_el55:depth.exr": "19038b41925b82e04be8e481db09544f8666ca8821ec9af7b79e3e192e8970ec",
+          "depth:az120_el55:depth.exr": "a0f613f6cb27e60f04e919d6d90a41ceb8ba6d1b894a0f0caffc9efbb194ae31",
+          "depth:az150_el55:depth.exr": "a3a254f43f4dc752253411c73d86483d78c516de0b6e4deb9d37fe7f640a0327",
+          "depth:az180_el55:depth.exr": "ae67ce48cfdd17c8644baf05a22a5d8298eabeacb4ab7b098026916aa0250811",
+          "depth:az210_el55:depth.exr": "52818ad6c1bc1b345ea27f5e4485b28b753b2a9576d42898b5dddc1f7e0900ed",
+          "depth:az240_el55:depth.exr": "9bb2e8bbc168131891a51c49aa8911edf0e81c3d9549c8f07fb83ce5d45bfa62",
+          "depth:az270_el55:depth.exr": "899f919e4198e69f390a742367b10c811f276d7a40fc2b0e925a9827a37adcc5",
+          "depth:az300_el55:depth.exr": "f1551346b274733f7eeea92556d8c8f70431cea9c964188eaef782ee7313caa5",
+          "depth:az330_el55:depth.exr": "c1a7df648d2a264308c5a1f0e3fd5e18dbc00b53571d92f266dd7e7f2793293a",
+          "depth:az0_el75:depth.exr": "761045079a405c6167ba4170e660b514b9c4444a1a87a9ac9d906d0bb95ff7ba"
+        },
+        "key": "a055a6af35b5f0ef6583910ed75fe61c5f61377f9c10890ab925cbffc9402ad2",
+        "outputs": {
+          "nbv:extras.json": "5082904101664b5f8696f8f06b7e7268aa9540c7ca6eed6f0e4c3c2720c8a2d3",
+          "nbv:reachable.npy": "8713aed274fb5b3a555c58c315288e80234857fbc06fba1efedddc0aeab26056"
+        },
+        "measurements": {},
+        "elapsed_s": 6.0,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_0",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+          "view_hints": [
+            "front view",
+            "back view"
+          ],
+          "canvas_seed": 0,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az0_el15:depth.png": "81b90a85077b68e00a4f4b920fbb2d86419a99f30bd49290e85481267134f821",
+          "depth:az180_el15:depth.png": "46ace8df5a4d8ef730f70727934b1e7ff743adcbcaafb2724b471f2e3b5fbfba"
+        },
+        "key": "d709865a0156fc18e859e3144db00370c1324666aa276bb043ff3c1113fc5d1d",
+        "outputs": {
+          "generate:canvas_0:canvas.png": "a907716bd82aec721fdc00b10864229c6470fc5790c43011f0056420bd7ceab3",
+          "generate:canvas_0:manifest.json": "2ee6f146b8ccaf3c06c3ea759269e4f38282a36cc913a99524ac2af0f95dc36f",
+          "generate:canvas_0:gen_0.png": "2d0d951c9dbd3422e7481444976e3eb66b7c1e4e40f1298fbe4d0d1dd8057d37",
+          "generate:canvas_0:gen_1.png": "b69d8b50222252651ef37868f91d4ee8cc5673e44d7271772e6d772d47ca3721"
+        },
+        "measurements": {},
+        "elapsed_s": 31.3,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_1",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+          "view_hints": [
+            "side view",
+            "side view"
+          ],
+          "canvas_seed": 1,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az90_el15:depth.png": "1e66e91ac03746653f3c0fad282e095132c7f56166877e3e909425558eff8c1b",
+          "depth:az270_el15:depth.png": "7f630fa371fd1af52cf68e5d98685da184db176615975985b66f7cff916bff45"
+        },
+        "key": "a991cc50f162960de9e42abb01354d4ea0093d779430e192752a640266b05088",
+        "outputs": {
+          "generate:canvas_1:canvas.png": "7b05f30e0de2a64b30efc9f3031507c90809dd2e2bb3f0abd0a974d5561fd1f2",
+          "generate:canvas_1:manifest.json": "d117ecc8d060c4ba020bf7502307577acf7f7273839ac543fd6de8fecd4d40bc",
+          "generate:canvas_1:gen_0.png": "40835b2a81457c2f050a1eecd365d993dd450584a79ada100528dac2dc48580e",
+          "generate:canvas_1:gen_1.png": "b999e7f84382983bf17164cd2de3a66e194f70fa042d4c8abe8d4b62a2afa598"
+        },
+        "measurements": {},
+        "elapsed_s": 29.2,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_2",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+          "view_hints": [
+            "front view, seen from below",
+            "front view, seen from below"
+          ],
+          "canvas_seed": 2,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az330_el-35:depth.png": "7f6661caec8e4db9e6e897870c16f8cdb6daf6b8e458d60b1a9c35741c8c1e5f",
+          "depth:az0_el-35:depth.png": "1e9729072e8847bd955d7bb4a603d6c10655e9c295b2ed9fd36faaa08b9049a5"
+        },
+        "key": "b5b5b38af0331088d214b6a64a724850ff82dcd58c3faca69c1e2e6fcb87252a",
+        "outputs": {
+          "generate:canvas_2:canvas.png": "309a143f8083361de69eeb8601e42a61e9df54a68e3888f2afbb255a9929ad62",
+          "generate:canvas_2:manifest.json": "cf5175ffddbe9028b61b5cb9e3cb8f17890fd18337a18bbb1f7c6c678a09439d",
+          "generate:canvas_2:gen_0.png": "247f86a93ca31162e9c47ffa36a56e49980a492b6fd6d8da0dd077824ac6ec86",
+          "generate:canvas_2:gen_1.png": "de1b935a678ddc6d7d9f4677b00a2d1a46b74e868eeba15cc8c155d2e1ca8e2a"
+        },
+        "measurements": {},
+        "elapsed_s": 29.2,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_3",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "gnarled dead olive tree stump, twisted weathered grey trunk, deep cracked bark",
+          "view_hints": [
+            "front view, seen from below"
+          ],
+          "canvas_seed": 3,
+          "width": 1024,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az30_el-35:depth.png": "531f1df15070fa202b3317109b96e4ad2cf1b720f7a1deaed16e0d7adf8cd612"
+        },
+        "key": "318f9b696e553497ee00149edd70d1f9caea1c6dcecf682472ffb244cb3694ac",
+        "outputs": {
+          "generate:canvas_3:canvas.png": "7c9ca0f142b40539b09a5db3bec6f8252a5b64d26a82de4f3f76771e24eb1275",
+          "generate:canvas_3:manifest.json": "a4a7a4aa2aff9dc0c5381c1c726b51e98f746372af8307a13b79ce45e242b3d8",
+          "generate:canvas_3:gen_0.png": "805da408424429f8b9c377323afcc063e6d057c95d0656ee575a0a671ca16282"
+        },
+        "measurements": {},
+        "elapsed_s": 17.1,
+        "hit": false
+      },
+      {
+        "stage": "blend",
+        "unit": null,
+        "version": "81f6c812fb0c61b19369c1cff64b62ae3db2a8b8fc6fdb907daa2cf6cced79e5",
+        "params": {
+          "albedo_source": "direct",
+          "views": [
+            {
+              "azimuth_deg": 0.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 90.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 180.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 270.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 330.0,
+              "elevation_deg": -35.0
+            },
+            {
+              "azimuth_deg": 0.0,
+              "elevation_deg": -35.0
+            },
+            {
+              "azimuth_deg": 30.0,
+              "elevation_deg": -35.0
+            }
+          ],
+          "numpy_cv2": "numpy 2.3.4 cv2 5.0.0"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2",
+          "atlas:pos.npy": "6da0b097bd2b786775445657b27217622348b207ab537dbe41330205be430066",
+          "atlas:nrm.npy": "a6fcce6ffedd80f08335b7ad5bf109bc4e9ce34fd9e199d773c5803b659d8b43",
+          "atlas:island.npy": "523d9d97e5e0358d184b690b01609963381186e5850aaa943ab37320a19ca051",
+          "depth:az0_el15:depth.exr": "c915790940d9f14fef83184ed34e09413df8d1a8e4811f31c337ec7bbee270f3",
+          "depth:az90_el15:depth.exr": "1829a3dc405e948eb26b4cbae1cc76a4bb7380dcb89dbc89f7574cbe52949934",
+          "depth:az180_el15:depth.exr": "279eb6dd2b9a7d134d4166a29bfae8a2d1535a4d993235d9dd4bf347b47c1d6d",
+          "depth:az270_el15:depth.exr": "92d8a7ea882651a99c577e9624c099d6fcc01b45f25176e089715c95e7e5303b",
+          "depth:az330_el-35:depth.exr": "57c4779246fae98fc426c5edabd14bec473df3d2425dc6ddaca7549fdc4288d1",
+          "depth:az0_el-35:depth.exr": "bad6f318195a7c3e6882f4a2fbe49e67384dde7f0d1ef879103d06df61347757",
+          "depth:az30_el-35:depth.exr": "a658c2ca27e46f92ca548b37e7e1669d76a13bf6d14716d8cfc5ae65eaa8ecee",
+          "generate:canvas_0:gen_0.png": "2d0d951c9dbd3422e7481444976e3eb66b7c1e4e40f1298fbe4d0d1dd8057d37",
+          "generate:canvas_1:gen_0.png": "40835b2a81457c2f050a1eecd365d993dd450584a79ada100528dac2dc48580e",
+          "generate:canvas_0:gen_1.png": "b69d8b50222252651ef37868f91d4ee8cc5673e44d7271772e6d772d47ca3721",
+          "generate:canvas_1:gen_1.png": "b999e7f84382983bf17164cd2de3a66e194f70fa042d4c8abe8d4b62a2afa598",
+          "generate:canvas_2:gen_0.png": "247f86a93ca31162e9c47ffa36a56e49980a492b6fd6d8da0dd077824ac6ec86",
+          "generate:canvas_2:gen_1.png": "de1b935a678ddc6d7d9f4677b00a2d1a46b74e868eeba15cc8c155d2e1ca8e2a",
+          "generate:canvas_3:gen_0.png": "805da408424429f8b9c377323afcc063e6d057c95d0656ee575a0a671ca16282"
+        },
+        "key": "ef345a3f8bcfe039efcdfcc9bbd12489ee7aad6548361c0ef9a7e7d0f51cb47e",
+        "outputs": {
+          "blend:base.png": "06d12bf09e0671cdb255d6aad259a69beb476376dbdd8b4a805e1e7b4fb9cb30",
+          "blend:coverage.json": "353f9bae119268ba6c535d9a644192941acbe4cd241f7288cb5a3583a0ebfd40"
+        },
+        "measurements": {
+          "blend_coverage": 0.7162,
+          "hole_texels": 269098,
+          "max_hole_depth_frac": 0.0703
+        },
+        "elapsed_s": 4.4,
+        "hit": false
+      },
+      {
+        "stage": "bake_normal",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2",
+          "clean_hires.glb": "39fccbf7cddb8e2143ed3dcb3566b0a1ebf50f221543bc745c14205ef6812b53"
+        },
+        "key": "b0ceae66b7cc32d24b4abf08d4cae4d95ba61db9605a3c8a9324785df77f54b1",
+        "outputs": {
+          "bake_normal:normal.png": "9dac83e391d4be702bcb0daf4e6c991438720fc6257b2f9679be45af3efe0860"
+        },
+        "measurements": {},
+        "elapsed_s": 0.7,
+        "hit": false
+      },
+      {
+        "stage": "bake_ao",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2",
+          "clean_hires.glb": "39fccbf7cddb8e2143ed3dcb3566b0a1ebf50f221543bc745c14205ef6812b53"
+        },
+        "key": "8d75498a94e55d0da8b0b3e347dba8785821667f99559216a4d0da50dd40a125",
+        "outputs": {
+          "bake_ao:occlusion.png": "b234b02fb74e52f4f937cfb2469b0a79cc95e6a25791a2fa157c730a00c62b21"
+        },
+        "measurements": {},
+        "elapsed_s": 5.3,
+        "hit": false
+      },
+      {
+        "stage": "export",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "metallic": 0.0,
+          "roughness": 0.85,
+          "detail": false,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "fdf1d6497e9bd054388714415e64a44f0dbcefa9a04de2457b6bd7fa88bdfad2",
+          "blend:base.png": "06d12bf09e0671cdb255d6aad259a69beb476376dbdd8b4a805e1e7b4fb9cb30",
+          "bake_normal:normal.png": "9dac83e391d4be702bcb0daf4e6c991438720fc6257b2f9679be45af3efe0860",
+          "bake_ao:occlusion.png": "b234b02fb74e52f4f937cfb2469b0a79cc95e6a25791a2fa157c730a00c62b21"
+        },
+        "key": "638e7f565d3082576b7b5accf0e4ef042075513d20bf9106bbe4deaf3abafe6d",
+        "outputs": {
+          "export:textured.glb": "5305faf17d685a6f863a5d565620ffa6fb937c558cfff9172b6034bcb229cb0b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.4,
+        "hit": false
       }
     ],
-    "extra_views": [
-      {
-        "hint": "back view, seen from below",
-        "azimuth_deg": 210,
-        "elevation_deg": -35.0,
-        "predicted_gain_texels": 81046,
-        "predicted_gain_frac": 0.0842
-      }
-    ],
-    "pbr_estimator": {
-      "model": "xanderhuang/material_estimator",
-      "steps": 50,
-      "resolution": 768,
-      "estimated_views": [
-        0,
-        1,
-        2,
-        3,
-        4
-      ],
-      "elapsed_s": 49.4,
-      "views": [
-        {
-          "seed": 0,
-          "albedo_sha256": "8b379ffcd276cc50bbdf809da0f9410001f8996ea260c443b7b2f9993c0a4a6f",
-          "rm_sha256": "7b7ca71b8c7f481c34ffd007118b53b52ef1c0e1421e73eef4202f65cdc86347"
-        },
-        {
-          "seed": 1,
-          "albedo_sha256": "5106b78a6714dd64aa18008eb7a52242f5ab9a76f95646db8b9a74774dd94960",
-          "rm_sha256": "de297bd2bde65071513d380758b3639fdb56989f66155cbf2530b77e207e8abe"
-        },
-        {
-          "seed": 2,
-          "albedo_sha256": "e4fde07a11833f98473cc720e13c8c7709d4b1861662e4dfefa1ed7cf48116e3",
-          "rm_sha256": "64b6737f3db6a7880fd15eee6140a24bc77298aaaf5687a808c38e00682dce29"
-        },
-        {
-          "seed": 3,
-          "albedo_sha256": "44e61dd7ccfce0e0165643cbb77e0997239950e603f92a82cf3069c88696b76d",
-          "rm_sha256": "844602978ee916447ff7b9d2ac51a14f3f64c9f22b94eaf6f1f191ee7e3f1cf7"
-        },
-        {
-          "seed": 4,
-          "albedo_sha256": "49b177b479a28495404bd4c1d19807b8b1ae1162e88ebe8d8b60a0e874960bd1",
-          "rm_sha256": "3de48d4bc006de3a564fecfc72be9cb83a2b1ecd672139dd792a3a6949d8edc3"
-        }
-      ]
-    },
-    "weight_exponent": 2.0,
-    "occlusion_eps": 0.02,
-    "edge_pad_px": 8,
-    "depth_dilate_px": 5,
-    "blend_coverage": 0.5851,
-    "hole_texels": 399212,
-    "dielectric": true,
-    "metal_fraction": 0.0148,
-    "texture_size": 1024,
-    "base_bake_s": 13.0,
-    "normal_bake_s": 0.6,
-    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\stump\\cand_0\\textured.glb",
-    "textured_glb_sha256": "b3eea8c73157b60906ee5e8866c5d2e6a49be9930b15ac05d01ee6b780aac7e2"
+    "elapsed_s_total": 129.1,
+    "textured_glb_sha256": "5305faf17d685a6f863a5d565620ffa6fb937c558cfff9172b6034bcb229cb0b"
   },
   "preprocess": {
-    "textured_glb_bytes": 4858612,
-    "final_glb_bytes": 4858580
+    "textured_glb_bytes": 5254452,
+    "final_glb_bytes": 5254424
   },
   "bake": {
-    "source": "final.glb",
-    "sha256": "a47a1fee6808bb358b9d6fbac9eaae931b9b24d6f014a4992bbdc1da76740427",
+    "source": "olive_stump.glb",
+    "sha256": "5305faf17d685a6f863a5d565620ffa6fb937c558cfff9172b6034bcb229cb0b",
     "images": [
       {
         "index": 0,
@@ -315,17 +1388,17 @@
       },
       {
         "index": 1,
-        "slot": "base",
+        "slot": "ao",
         "file": "img1.dds"
       },
       {
         "index": 2,
-        "slot": "mr",
+        "slot": "base",
         "file": "img2.dds"
       }
     ]
   },
-  "final_glb_sha256": "a47a1fee6808bb358b9d6fbac9eaae931b9b24d6f014a4992bbdc1da76740427",
+  "final_glb_sha256": "5305faf17d685a6f863a5d565620ffa6fb937c558cfff9172b6034bcb229cb0b",
   "turntable": {
     "angles": 8,
     "size": "512x512",

@@ -1,127 +1,163 @@
 {
   "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
   "seed": 4,
-  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4",
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\candelabra_shrine\\cand_4",
   "concept": {
     "mode": "generated",
-    "subject": "wrought iron candelabra shrine, standing votive candle stand, five white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy",
-    "workflow_copy": "concept_workflow.json",
+    "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
     "comfy_manifest": {
       "workflow": {
         "1": {
-          "class_type": "CheckpointLoaderSimple",
+          "class_type": "UNETLoader",
           "inputs": {
-            "ckpt_name": "sd_xl_base_1.0.safetensors"
+            "unet_name": "z_image_turbo_bf16.safetensors",
+            "weight_dtype": "default"
           }
         },
         "2": {
-          "class_type": "CLIPTextEncode",
+          "class_type": "CLIPLoader",
           "inputs": {
-            "clip": [
-              "1",
-              1
-            ],
-            "text": "wrought iron candelabra shrine, standing votive candle stand, five white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background"
+            "clip_name": "qwen_3_4b_fp8_mixed.safetensors",
+            "type": "lumina2",
+            "device": "default"
           }
         },
         "3": {
-          "class_type": "CLIPTextEncode",
+          "class_type": "VAELoader",
           "inputs": {
-            "clip": [
-              "1",
-              1
-            ],
-            "text": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+            "vae_name": "ae.safetensors"
           }
         },
         "4": {
-          "class_type": "EmptyLatentImage",
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, single object centered, plain grey background"
+          }
+        },
+        "5": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "4",
+              0
+            ]
+          }
+        },
+        "6": {
+          "class_type": "ModelSamplingAuraFlow",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift": 3.0
+          }
+        },
+        "7": {
+          "class_type": "EmptySD3LatentImage",
           "inputs": {
             "width": 1024,
             "height": 1024,
             "batch_size": 1
           }
         },
-        "5": {
+        "8": {
           "class_type": "KSampler",
           "inputs": {
             "model": [
-              "1",
+              "6",
               0
             ],
             "seed": 4,
-            "steps": 30,
-            "cfg": 7.0,
-            "sampler_name": "dpmpp_2m",
-            "scheduler": "karras",
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler_name": "res_multistep",
+            "scheduler": "simple",
             "positive": [
-              "2",
+              "4",
               0
             ],
             "negative": [
-              "3",
+              "5",
               0
             ],
             "latent_image": [
-              "4",
+              "7",
               0
             ],
             "denoise": 1.0
           }
         },
-        "6": {
+        "9": {
           "class_type": "VAEDecode",
           "inputs": {
             "samples": [
-              "5",
+              "8",
               0
             ],
             "vae": [
-              "1",
-              2
+              "3",
+              0
             ]
           }
         },
-        "7": {
+        "10": {
           "class_type": "SaveImage",
           "inputs": {
             "images": [
-              "6",
+              "9",
               0
             ],
             "filename_prefix": "prop_concept"
           }
         }
       },
-      "prompt_id": "fb165654-d6d0-46ce-a9cb-06812999ef4e",
+      "prompt_id": "1e244fe2-6315-4c7b-8986-48360b1efb92",
       "prompts": {
-        "2": "wrought iron candelabra shrine, standing votive candle stand, five white wax candles each in its own iron drip cup, evenly spaced, near-black weathered iron, grey stone base, semi-realistic dark fantasy, neutral studio lighting, 3/4 view, single object centered, plain light grey background",
-        "3": "scenery, landscape, multiple objects, dramatic lighting, strong shadows, cropped"
+        "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, single object centered, plain grey background"
       },
       "seed": {
-        "5": 4
+        "8": 4
       },
       "models": [
         {
           "node_id": "1",
-          "class_type": "CheckpointLoaderSimple",
-          "input": "ckpt_name",
-          "filename": "sd_xl_base_1.0.safetensors",
-          "sha256": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b"
+          "class_type": "UNETLoader",
+          "input": "unet_name",
+          "filename": "z_image_turbo_bf16.safetensors",
+          "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+        },
+        {
+          "node_id": "2",
+          "class_type": "CLIPLoader",
+          "input": "clip_name",
+          "filename": "qwen_3_4b_fp8_mixed.safetensors",
+          "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+        },
+        {
+          "node_id": "3",
+          "class_type": "VAELoader",
+          "input": "vae_name",
+          "filename": "ae.safetensors",
+          "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
         }
       ],
       "outputs": [
         {
-          "node_id": "7",
+          "node_id": "10",
           "output_kind": "images",
-          "filename": "prop_concept_00008_.png",
+          "filename": "prop_concept_00037_.png",
           "subfolder": "",
           "type": "output",
-          "saved_as": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4\\concept_raw\\prop_concept_00008_.png"
+          "saved_as": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\candelabra_shrine\\cand_4\\concept_raw\\prop_concept_00037_.png"
         }
       ]
     },
-    "concept_png_sha256": "19a10880bda515485fee3297f76a7d36432c7d6aa647135881b7970a480578fc"
+    "concept_png_sha256": "3f82a981df8fb796f6ede07ec02d10ece131fae2fcbe2fd76a3b8d6db1fd6368"
   },
   "geometry": {
     "model": "Stable-X/Hi3DGen",
@@ -130,10 +166,10 @@
       "normal": "Stable-X/yoso-normal-v1-8-1",
       "birefnet": "ZhengPeng7/BiRefNet"
     },
-    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4\\concept.png",
-    "input_image_sha256": "19a10880bda515485fee3297f76a7d36432c7d6aa647135881b7970a480578fc",
-    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4\\concept_rgba.png",
-    "concept_rgba_sha256": "8e511f7c79ca90daf69765da09a8bc01dae852ff15b602b327f882b79edba1cf",
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\candelabra_shrine\\cand_4\\concept.png",
+    "input_image_sha256": "3f82a981df8fb796f6ede07ec02d10ece131fae2fcbe2fd76a3b8d6db1fd6368",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\candelabra_shrine\\cand_4\\concept_rgba.png",
+    "concept_rgba_sha256": "dd639d4545a7f9e5a330bc2255f672dbf09770a18c61b469d8cbcc5d22f0a5a9",
     "seed": 4,
     "steps": {
       "sparse_structure_sampler": 50,
@@ -141,365 +177,1301 @@
     },
     "torch_version": "2.7.1+cu128",
     "xformers_version": "0.0.31.post1",
-    "vertex_count": 167493,
-    "face_count": 334970,
-    "peak_vram_allocated_gb": 11.38631424,
-    "raw_glb_sha256": "bc91b56f72c0a59ec85c4c021cf6a537f41fd211cde9bb8a032e0fb0e154545d"
+    "vertex_count": 93429,
+    "face_count": 187022,
+    "peak_vram_allocated_gb": 11.38385664,
+    "raw_glb_sha256": "9fd57d06f57a59c243fe4d343182383d954a2cc88f4c5026e230397e6ecca369"
   },
   "cleanup": {
-    "raw_tris": 334970,
+    "raw_tris": 187022,
     "fragments_removed": 0,
     "fragment_tris_removed": 0,
-    "hires_tris": 344378,
-    "clean_tris": 15000,
+    "hires_tris": 187022,
+    "clean_tris": 14998,
     "height_target": 1.8,
-    "clean_height": 1.7997546195983887,
+    "clean_height": 1.7994979619979858,
     "clean_min_y": 0.0,
-    "hires_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4\\clean_hires.glb",
-    "clean_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4\\clean.glb",
-    "symmetrize": {
-      "theta_deg": 90.0,
-      "offset_m": 0.0015,
-      "keep": "+x",
-      "score_before_m": 0.00861,
-      "score_after_m": 0.0
-    },
-    "clean_glb_sha256": "c5d5f98d9c52a7f20ceb869974bdf1f7297aec3f41a44a5e4bb893ec6871dd49",
-    "clean_hires_glb_sha256": "e67f4a4faa2b33db68c3131aebd164c2df9768d8b757059b96956ec150cd8b36"
+    "uv_charts": 639,
+    "uv_utilization": 0.7744,
+    "hires_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\candelabra_shrine\\cand_4\\clean_hires.glb",
+    "clean_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\candelabra_shrine\\cand_4\\clean.glb",
+    "clean_glb_sha256": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2",
+    "clean_hires_glb_sha256": "885c0fdfd939bcea21074a9c781f4f626157dca842676010ef0f87cdfcbfd9af"
   },
   "texture": {
-    "strategy": "multiview_controlnet_depth",
-    "front_axis": "-Y",
-    "workflow": "prop_multiview.json",
-    "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
-    "render_resolution": 1024,
-    "views": [
+    "stages": [
       {
-        "hint": "front view",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 15.0,
-        "seeds": {
-          "11": 400
+        "stage": "atlas",
+        "unit": null,
+        "version": "a143fcbc9615481a72471a791dc461de51f46b162ea1ae5d9a54181c98405234",
+        "params": {
+          "texture_size": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "2fac800d-ab8c-4d58-b2ec-b008c08c0fc3",
-        "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, front view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "27b66508bba94436da4ad8cadf7c63570cef07209f67201fe6a266f017301ba5",
-        "gen_png_sha256": "64029c1f337709dc6bae5efbe98943a6d643af858c87fd9f54c28c8a5b4cf89c"
+        "key": "9b4615226a1a2f0df4bbe4b1e4e7418e6232ddadeabca93e2a6318d45a9c181f",
+        "outputs": {
+          "atlas:pos.npy": "a0e271253fd1b239155cb2cc47607c4e9c406a5f29a2ddda0b37e4fffe172744",
+          "atlas:nrm.npy": "f60d29f0342124c6908da2b3b73320900e538419dbb49e328d4ed4c1eabe9d13",
+          "atlas:island.npy": "cca4b431462b152f5e9580613c1895e9ab4b22bcd79604a4f49bc263b0bececd"
+        },
+        "measurements": {},
+        "elapsed_s": 1.0,
+        "hit": false
       },
       {
-        "hint": "three-quarter view",
-        "azimuth_deg": 60.0,
-        "elevation_deg": 15.0,
-        "seeds": {
-          "11": 401
-        },
-        "prompt_id": "5856f1c1-2e84-4082-9515-5b7405c7f010",
-        "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
-        },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "1c386e089f258058ec13222499b1e4f9087b9b45a5d5332fb1a2355e5150bf59",
-        "gen_png_sha256": "0bb17fa250c641a0afb2034aa4757aa454e106ea60624fbf2ecce85f380d2c46"
-      },
-      {
-        "hint": "back view",
-        "azimuth_deg": 180.0,
-        "elevation_deg": 15.0,
-        "seeds": {
-          "11": 402
-        },
-        "prompt_id": "23f38d82-1dc1-447e-aaee-4a04125a949d",
-        "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, back view, flat even neutral studio lighting, single object centered, plain dark grey background"
-        },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "3fa729607d9d74f71497c5891f99c13802b718ce3b3471eb2bbfff80d412c248",
-        "gen_png_sha256": "05c45579c533f02dee440e6905d50855dca40c2ad02cc096878719105853fb32"
-      },
-      {
-        "hint": "three-quarter view",
-        "azimuth_deg": 300.0,
-        "elevation_deg": 15.0,
-        "seeds": {
-          "11": 403
-        },
-        "prompt_id": "edd0749c-dda8-4963-a317-4a779581b09d",
-        "prompts": {
-          "4": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
-        },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": null
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": null
-          }
-        ],
-        "depth_png_sha256": "d45b1e8de2bce99139d35dc861ee74df7b8c396801251053177468f0f2feb1f6",
-        "gen_png_sha256": "5b1431c0f925f1091725a3125c80882c0365f11e70dca70e345e1f41af549dfb"
-      }
-    ],
-    "weight_exponent": 2.0,
-    "occlusion_eps": 0.02,
-    "edge_pad_px": 8,
-    "blend_coverage": 0.6088,
-    "texture_size": 1024,
-    "metallic": 0.0,
-    "roughness": 0.8,
-    "metal_roughness": 0.9,
-    "mr_mask": {
-      "mask_subject": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base",
-      "workflow": "prop_multiview.json",
-      "views": [
-        {
-          "hint": "front view",
+        "stage": "depth",
+        "unit": "az0_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
           "azimuth_deg": 0.0,
           "elevation_deg": 15.0,
-          "seeds": {
-            "11": 400
-          },
-          "prompt_id": "f5f3528d-1fee-432e-8b88-f97dac2f1926",
-          "prompts": {
-            "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, front view, flat even neutral studio lighting, single object centered, plain dark grey background"
-          },
-          "models": [
-            {
-              "node_id": "1",
-              "class_type": "UNETLoader",
-              "input": "unet_name",
-              "filename": "z_image_turbo_bf16.safetensors",
-              "sha256": null
-            },
-            {
-              "node_id": "2",
-              "class_type": "CLIPLoader",
-              "input": "clip_name",
-              "filename": "qwen_3_4b_fp8_mixed.safetensors",
-              "sha256": null
-            },
-            {
-              "node_id": "3",
-              "class_type": "VAELoader",
-              "input": "vae_name",
-              "filename": "ae.safetensors",
-              "sha256": null
-            }
-          ],
-          "depth_png_sha256": "27b66508bba94436da4ad8cadf7c63570cef07209f67201fe6a266f017301ba5",
-          "gen_png_sha256": "1eb3cf88e00657a476d43b4a786a8d1bfafc955879b1a948f2d2f6417c358b30"
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        {
-          "hint": "three-quarter view",
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "481e2209ff521741338d02ef4fd3aa256a428663cdd9b92388b4a4bfd3d79f1b",
+        "outputs": {
+          "depth:az0_el15:depth.exr": "ba0f0382f66312c6a1603d5719d3c57c0f5b11c04dc872859eef69ed7a2e2121",
+          "depth:az0_el15:depth.png": "1a33c9dcf6075bc2c5ec5f50ed4726b2b1b784e4ea5b1212406e590bb37dc66d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
           "azimuth_deg": 60.0,
           "elevation_deg": 15.0,
-          "seeds": {
-            "11": 401
-          },
-          "prompt_id": "da38eb00-84d5-41c5-a951-96080cc0a9b9",
-          "prompts": {
-            "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
-          },
-          "models": [
-            {
-              "node_id": "1",
-              "class_type": "UNETLoader",
-              "input": "unet_name",
-              "filename": "z_image_turbo_bf16.safetensors",
-              "sha256": null
-            },
-            {
-              "node_id": "2",
-              "class_type": "CLIPLoader",
-              "input": "clip_name",
-              "filename": "qwen_3_4b_fp8_mixed.safetensors",
-              "sha256": null
-            },
-            {
-              "node_id": "3",
-              "class_type": "VAELoader",
-              "input": "vae_name",
-              "filename": "ae.safetensors",
-              "sha256": null
-            }
-          ],
-          "depth_png_sha256": "1c386e089f258058ec13222499b1e4f9087b9b45a5d5332fb1a2355e5150bf59",
-          "gen_png_sha256": "c8df95c932ccec7753d27db32abc7c0bb92c48fd4636aafb8648153ce8a6a4ed"
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        {
-          "hint": "back view",
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "c8c821d21aee475a2235f59f1148505cd1a1ae66c527674c22f76ca91b6ac711",
+        "outputs": {
+          "depth:az60_el15:depth.exr": "9cb175fa43b5a88a534a8e7f81378650234090ccfcb034616aad4086134f3302",
+          "depth:az60_el15:depth.png": "11c68a930600c9e18c9561d764928194399707e78e96c4feb315ac552ea30a3a"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
           "azimuth_deg": 180.0,
           "elevation_deg": 15.0,
-          "seeds": {
-            "11": 402
-          },
-          "prompt_id": "94d4da2e-75b7-4551-893a-476df4cf8fdd",
-          "prompts": {
-            "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, back view, flat even neutral studio lighting, single object centered, plain dark grey background"
-          },
-          "models": [
-            {
-              "node_id": "1",
-              "class_type": "UNETLoader",
-              "input": "unet_name",
-              "filename": "z_image_turbo_bf16.safetensors",
-              "sha256": null
-            },
-            {
-              "node_id": "2",
-              "class_type": "CLIPLoader",
-              "input": "clip_name",
-              "filename": "qwen_3_4b_fp8_mixed.safetensors",
-              "sha256": null
-            },
-            {
-              "node_id": "3",
-              "class_type": "VAELoader",
-              "input": "vae_name",
-              "filename": "ae.safetensors",
-              "sha256": null
-            }
-          ],
-          "depth_png_sha256": "3fa729607d9d74f71497c5891f99c13802b718ce3b3471eb2bbfff80d412c248",
-          "gen_png_sha256": "45bb0521f9a446f0f493fa7247d4900feda2f37cfe964fd2dba4927a90e3e263"
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        {
-          "hint": "three-quarter view",
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "793e607ed4bd0db8945f8ae8b6386aea5133b67017ab3cd9f9fd148a2b7d3d3a",
+        "outputs": {
+          "depth:az180_el15:depth.exr": "bd3bf9c8d966eb8bc7395070014af1415b020666ce810aec8744215fe427a758",
+          "depth:az180_el15:depth.png": "eddcd58ddcbdcf6e8f0259a4c4f58e247f960f6047f1c4844edfe60bffeb540f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
           "azimuth_deg": 300.0,
           "elevation_deg": 15.0,
-          "seeds": {
-            "11": 403
-          },
-          "prompt_id": "75ad8844-8477-446f-9f51-8ec6de462400",
-          "prompts": {
-            "4": "glowing pure white wrought iron candelabra frame and fittings, matte black candles, matte black base, three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
-          },
-          "models": [
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "d9a8d2ec1705b59912403e79e933709932478c91301a9a7329f0c3b71405d8ae",
+        "outputs": {
+          "depth:az300_el15:depth.exr": "800bffb204c8c660138edca99747f00d150c9ea5bcc11ceaf4a36f4775eb8b24",
+          "depth:az300_el15:depth.png": "7615912ac74a65071779b13100aa9ef7826a1c631d6f6ccc258e86f3d543a54f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "7302cb591e4406634bce5242813eaf080ce0c3265d6e857a15d55a6b1d21d060",
+        "outputs": {
+          "depth:az0_el-35:depth.exr": "efff10006dc4630d8142deaf52110dcaa56ef38068e6bb8fe5ea77d6f918dcb6",
+          "depth:az0_el-35:depth.png": "cf554e138496b0e8e26f05bf804bcbaceff949137ea779b4ad3ec842670a1de1"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "c2739e326c56e518f546db2b0e3024c7d1263317bd2ed38aaa7e633315405eb3",
+        "outputs": {
+          "depth:az30_el-35:depth.exr": "56c7c78b81f50a2f29890a8d32bb604a99b98fe2230a048d563a8b31b733aed0",
+          "depth:az30_el-35:depth.png": "f2df9fe26f25af9aa4a6eb43c3ba76f3135abfbfff9bd2623be0ec62c22c9ceb"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "ce53ca04d78ed29382bade487b9150a05f0b723d81cd55c843c44c630fae4311",
+        "outputs": {
+          "depth:az60_el-35:depth.exr": "7b8b91e8ef2330389c8833c542f98e9e140a52c795109fae56271bf16f0016a9",
+          "depth:az60_el-35:depth.png": "23162acf2a499c11e115d3f78350d7c967e3dc26c2aef5c65e60fd2348499251"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "f5cdef2fd2434525bef865aa9eaf5ccd38dedf6bd4815c53b7e1cedb67655548",
+        "outputs": {
+          "depth:az90_el-35:depth.exr": "bf0aed1fc66111af97527210cc24ca61c7cdd872ac9ae704ecf5c5f9e471834d",
+          "depth:az90_el-35:depth.png": "0af0d87907a22977f31ac7be47ea06c431c129c8c734d888891087574b3708b2"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "f28acb10e4a9bfc0689ddc990ead51212315a63711f686d2e23d7b30d1fe9371",
+        "outputs": {
+          "depth:az120_el-35:depth.exr": "e8e56a48ddbec792b71976daa2432e6e45d9a20e7c332eecef92e7055aa8b900",
+          "depth:az120_el-35:depth.png": "2dace82c69c5f841c93758b049ddaf55fae00993cfa1ddc116606b8964ca17b7"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "3fa378e08f160e0890189c19a7622ead7ced012f79aa547ffdc0370e136e2c42",
+        "outputs": {
+          "depth:az150_el-35:depth.exr": "09c63557c50e226cf670db6a3012fc7b36c697e12f9aa1c8924598ec39b78d52",
+          "depth:az150_el-35:depth.png": "e6b794e6d86589b6d9b1dce241a641c8b9c9e95fc64a58732a1ca5f98774b708"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "5776a15124fc74ba47b827a18fcb56e4f25f8b9cfadf128c8af7695b838dba34",
+        "outputs": {
+          "depth:az180_el-35:depth.exr": "50caeed7b4cea8a536889a18082a775479e31c5fc6947c859835d570f8c80618",
+          "depth:az180_el-35:depth.png": "e6ccd2597035a4e93cfe5470265a93f814ac91ebe85d95b41ba7dddf415f994c"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "1807216c6e5f55a852293c768bea84dd996c4bd8432f70b5209eb367a0330dd0",
+        "outputs": {
+          "depth:az210_el-35:depth.exr": "89628f2816dd71546ac2f3b747221361718a3f5a5e1e2d3e3411bd49c089a2ff",
+          "depth:az210_el-35:depth.png": "0ccb16ca8c5b582c0512a3d58befc4e41b7365280e231cfb6f0036f1cebd38d4"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "80bc2880bf72ec591adcdfeca529585b8335a2f5cd242617b562612375cf1c6f",
+        "outputs": {
+          "depth:az240_el-35:depth.exr": "3569f927694ae03f0464515c1441c30be4b57a16c4a89785b5957fc1c2c595cf",
+          "depth:az240_el-35:depth.png": "f09c8c14b16630c2f01bd5cb28f8f0d5ae959357eec67fccc0daa4276a475d13"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "ac9bc403e5188d7fd6a21fa60b11bdffa627e0d7127f616b6f10a33d94ac0b4a",
+        "outputs": {
+          "depth:az270_el-35:depth.exr": "ab5cea00863e29ddb8017b8e79bd2d9889155be02043be054ad02366b2ef2eff",
+          "depth:az270_el-35:depth.png": "aadfb486748c1df260cf9bb160fda2b03c196ed1c0c54ea2cac6c6e3f5d9fb4a"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "0332b9a2749eda96a124af0576476e4db299c78ce51ee89fe5e94ea01c57704b",
+        "outputs": {
+          "depth:az300_el-35:depth.exr": "dea7c92943d321c74994999ccf91ad6d536cece72289c511543203e05734ece3",
+          "depth:az300_el-35:depth.png": "f215e4ff8fe4ae6f51997b08a64ec33d44a989668c718caaabf7bb46c9e7a1e6"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": -35.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "9e9b8255bfc8696008783248ee019befa2add59a730ccf1fa77d15244d436a6a",
+        "outputs": {
+          "depth:az330_el-35:depth.exr": "d68f06c991b2bc6401624ad77a9a014f125cf1a00524e866296255697f717e8e",
+          "depth:az330_el-35:depth.png": "4d0d4536f17f5e73686dd2ffa886c190ddb7d698985d3b0038c478d53295fabe"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "5fbd6aea9055e4364a98bc03c02238294dedfd1c7b427e6bb5172b6141c0f541",
+        "outputs": {
+          "depth:az30_el15:depth.exr": "6aeb4337172a201c7d02066735888b52e968db256ba1f1dba69dba10a32b0bed",
+          "depth:az30_el15:depth.png": "5055dbd561af304b02ed55f8e8015b03610c510c888be1013256fe6ba9390a56"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "fb169df0ce44b380cb263ad0d2c902801321801ae554162e729da802d6fe092d",
+        "outputs": {
+          "depth:az90_el15:depth.exr": "441d78cc9f54e1bd39bd9548eaff0ffe74395cb6d9598b5e02014dcbf47a6eb2",
+          "depth:az90_el15:depth.png": "33a6cb938e5ab186c28ef9100ebe5fd15ba5457dd54a8c1114b65a98604ff88f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "37ccefd777cbedbc30f61c5e0c1a56c1d047a3fd4f4ce4c659d6c385a207d41f",
+        "outputs": {
+          "depth:az120_el15:depth.exr": "e583560938bfcc0ec3fae0e00a3c2466437728e3965f6da76194f4523fe4f264",
+          "depth:az120_el15:depth.png": "cb9c8b0c18c3b294d00137930f58582331375622036f5019c36e30f38c039298"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "0e27508773fb76627f901a2fb13310b5c15649a71db5a3a17ee282009208e159",
+        "outputs": {
+          "depth:az150_el15:depth.exr": "e49acbea4b2770afaf23c9f0758e9a77c0ac823a465e3eb7722f08020959695d",
+          "depth:az150_el15:depth.png": "1f1835feb3d8c43ac61552fa744880a09abc4fadc13297e49d4f0b80ca57b3d5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "c4c1a5aa32adec251314c6582b1d582a142c884ee2bbd2879411d61b689ecc52",
+        "outputs": {
+          "depth:az210_el15:depth.exr": "3e25d8a1a9ebc27cd7dd5cf157cd72e54be1a2a80baca4ccfe4ff8637fd5b348",
+          "depth:az210_el15:depth.png": "065881b5951040aa91cffd2b9bd9c2ea6be29edd4b213055852de1f3530229cd"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "f02418acefa8516c55ebc3a45943d8d4967185b0868bccb7ee2cc2b72f0f8a0f",
+        "outputs": {
+          "depth:az240_el15:depth.exr": "3aa0bd28e70121865f5347f7a992880e0d25cfabbc059e1e9e8580cc45ebb3f3",
+          "depth:az240_el15:depth.png": "f85a76cbc857a1963ccea251dc455cf99206c548118db05d39aaad26c58f2e63"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "944298b1ed95e9bcb8c7c66c2c84ceee6bae2783cfe842f50faadc2a1ed591bd",
+        "outputs": {
+          "depth:az270_el15:depth.exr": "de90ef281f55030e1befc85ef3c1e9ce556e214b750a4a712f2536626e5933e4",
+          "depth:az270_el15:depth.png": "86cbc87dadac08f336292c7feb63637fd6edc64a2b3e8e0606772ebc16eb8221"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 15.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "025ffb3f914bcd044acbd81ee03139c130ba504d5d9d1a109fc65237d6f6d69b",
+        "outputs": {
+          "depth:az330_el15:depth.exr": "4121ab3b1a8b0aead346e94904ac74a03f5ad7d605e6f4a0764e465b83da4ca8",
+          "depth:az330_el15:depth.png": "935be61b91eb3bb6ddfb1b0d5ba872f2ef7b13f5ca5d4093971a1476e172b0d6"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "879c7edc406dee14facbeceb710147c653d40768c9f5e5a93d11cd048776fa19",
+        "outputs": {
+          "depth:az0_el55:depth.exr": "0e3bb9218f7fb626725ae15b08ace8ffe8db2e0c09b1e7337eafab518b8e009b",
+          "depth:az0_el55:depth.png": "9ab4fe20ed749df83e5e8d36fe38e2d38ca5dcf9a456fc352ce36d7db3f2cd64"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "4681339c502186087ba0c9b0de1c54fe3f479c15ce35efadb9a994c25bfabb53",
+        "outputs": {
+          "depth:az30_el55:depth.exr": "dd06459092fae9017e39a5148508cfad165efd37d9aa1d92451d570bc2365c3c",
+          "depth:az30_el55:depth.png": "31d72712b6e650949aac6b331bdd7a090dbd8fb207fda7c0d7d8d7047127b75f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "3854a3f3d4f808e773673014a32252f1038b0293edc6810493ec87af4e792704",
+        "outputs": {
+          "depth:az60_el55:depth.exr": "265274cf5ada6ff28c50d6f3ecad75777a8e65e5e6ae1be858402ac818ee9faf",
+          "depth:az60_el55:depth.png": "20ea1da39924b1d0f89be413eedae90b0093a913605de73744761945ef5a054f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "70ccfca079c52f425fc12afde77ea4ca0bacf1c399ebea176bbec71efb96110b",
+        "outputs": {
+          "depth:az90_el55:depth.exr": "b0423136ec50006fb47fd535e13df9ae149f07e989ab0e8f5455664b8fd7136c",
+          "depth:az90_el55:depth.png": "5620ad98902d261facb826d8d45425aea7a233f73ac07c4d2660da162ea4b7e5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "33b741af661bcb46fb8d2bd982bab9933d0c3ab0850a3a941f48de4d58819b97",
+        "outputs": {
+          "depth:az120_el55:depth.exr": "d841790ff26a7c1a4adf91ac177e0986f8f106a6a4e3d85968359e880fad11e6",
+          "depth:az120_el55:depth.png": "889c4a408d23640304becb502388bab15fc20f6e8d050668cac5cea9ee0fea69"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "b84cd28b3bba1198a2b0212367f9b03d2c10a7725c3e7520c4fbb213526bdb2d",
+        "outputs": {
+          "depth:az150_el55:depth.exr": "68b87fafbd5a8c21899d628aef5a850343fae247922003db516a4a1f0741a9c3",
+          "depth:az150_el55:depth.png": "95409be06d1130eed447dbdf700464fb242b68f08c7cb701301521230f6bba7a"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "46c294c6697afb7726ed3672932c8e21135b4805450a33e832cd01ae8a5efd05",
+        "outputs": {
+          "depth:az180_el55:depth.exr": "3f79ffcfb757ed848d9dc1a2168b3bb550a73ff2913b59fd362bdeb71e6b7998",
+          "depth:az180_el55:depth.png": "53ba771d13939542b078f4f0fc356c84807582f183951c084c9ec0ac60e33c1e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "ea6ed51b15f1b8b2bed3bfd8a80f3a7b0ef273b177a97ea2fc652730e0f88d69",
+        "outputs": {
+          "depth:az210_el55:depth.exr": "2e3b16cc034544759b1d4cc23e04d93b0117543a6731f4fe71eb8eb4ff0e9466",
+          "depth:az210_el55:depth.png": "0cb8f992b43a1b3a6536936e7314c00f8494bed76ff039d3929415ef2c676293"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "c7ff4a957040f9fd3d5fcde2cdfa5c96b76ecb8789d30dfb55703d2e8c2eccaa",
+        "outputs": {
+          "depth:az240_el55:depth.exr": "a10ef71412cda9ba5224fba957e1a63d6768bac365ded6676acfc4a27c8940c9",
+          "depth:az240_el55:depth.png": "498929cc7667b05aca9c3a1d2eb1f35709ac980856b9b20857e924028eb5a78e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "d0b6861ad20aa9da4f4e019724eb96e7cc898513f14877b3c77defaba4e4fd13",
+        "outputs": {
+          "depth:az270_el55:depth.exr": "fca3e5a344e1816300f41911c7437793c56e40e408d0c227670cdde5eb9389bb",
+          "depth:az270_el55:depth.png": "8563bba9d9b34fcc07e5d75f0aeff15ece0fda29eca325563a42ff12abb527b8"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "7ef384bc365498b0698cf09357034e878e15bcfdff3cfdf4718bf7c13c2838c6",
+        "outputs": {
+          "depth:az300_el55:depth.exr": "5165050b1dfa9b36f6efd9a533316707bfa9d53a6e91463d06024c4498f61a32",
+          "depth:az300_el55:depth.png": "ba981ad25fa9048b4ec4e64d61f54509a96edb8f5fc5f6682e30878c9e19b36c"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 55.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "cf09d4cd14b448ca6ddabfa7d765d26270380beb0cb56e49240d516a4fcd4133",
+        "outputs": {
+          "depth:az330_el55:depth.exr": "a76bbcf9a84eb094fba0551f26dead40e1c2b23783d1ff67d289b6816a063905",
+          "depth:az330_el55:depth.png": "3bf059a9b2472d5a0bd54da8c9dcf1be6637ae31cc0a10258c95c93798528a10"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el75",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 75.0,
+          "view_res": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2"
+        },
+        "key": "cdbde7ae223ac23ce61cad7d653fb0da74dc6504f45224ab2396c5d500fbfc31",
+        "outputs": {
+          "depth:az0_el75:depth.exr": "1e695d60e94748cf0d30b8c5474f03f12bd16bc5ca9ef8481c7ef0a5717c95bc",
+          "depth:az0_el75:depth.png": "5e71879456d87fb4ee39fda9f91378f433d60d039283ff9209f4ceef98c77795"
+        },
+        "measurements": {},
+        "elapsed_s": 0.1,
+        "hit": false
+      },
+      {
+        "stage": "nbv",
+        "unit": null,
+        "version": "c3c174ba00ca6db061899aa0276ff8e21bc733febd447e0daa8a0da70b8fd50a",
+        "params": {
+          "azimuths": [
+            0,
+            60,
+            180,
+            300
+          ],
+          "elevation_deg": 15.0,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2",
+          "atlas:pos.npy": "a0e271253fd1b239155cb2cc47607c4e9c406a5f29a2ddda0b37e4fffe172744",
+          "atlas:nrm.npy": "f60d29f0342124c6908da2b3b73320900e538419dbb49e328d4ed4c1eabe9d13",
+          "atlas:island.npy": "cca4b431462b152f5e9580613c1895e9ab4b22bcd79604a4f49bc263b0bececd",
+          "depth:az0_el15:depth.exr": "ba0f0382f66312c6a1603d5719d3c57c0f5b11c04dc872859eef69ed7a2e2121",
+          "depth:az60_el15:depth.exr": "9cb175fa43b5a88a534a8e7f81378650234090ccfcb034616aad4086134f3302",
+          "depth:az180_el15:depth.exr": "bd3bf9c8d966eb8bc7395070014af1415b020666ce810aec8744215fe427a758",
+          "depth:az300_el15:depth.exr": "800bffb204c8c660138edca99747f00d150c9ea5bcc11ceaf4a36f4775eb8b24",
+          "depth:az0_el-35:depth.exr": "efff10006dc4630d8142deaf52110dcaa56ef38068e6bb8fe5ea77d6f918dcb6",
+          "depth:az30_el-35:depth.exr": "56c7c78b81f50a2f29890a8d32bb604a99b98fe2230a048d563a8b31b733aed0",
+          "depth:az60_el-35:depth.exr": "7b8b91e8ef2330389c8833c542f98e9e140a52c795109fae56271bf16f0016a9",
+          "depth:az90_el-35:depth.exr": "bf0aed1fc66111af97527210cc24ca61c7cdd872ac9ae704ecf5c5f9e471834d",
+          "depth:az120_el-35:depth.exr": "e8e56a48ddbec792b71976daa2432e6e45d9a20e7c332eecef92e7055aa8b900",
+          "depth:az150_el-35:depth.exr": "09c63557c50e226cf670db6a3012fc7b36c697e12f9aa1c8924598ec39b78d52",
+          "depth:az180_el-35:depth.exr": "50caeed7b4cea8a536889a18082a775479e31c5fc6947c859835d570f8c80618",
+          "depth:az210_el-35:depth.exr": "89628f2816dd71546ac2f3b747221361718a3f5a5e1e2d3e3411bd49c089a2ff",
+          "depth:az240_el-35:depth.exr": "3569f927694ae03f0464515c1441c30be4b57a16c4a89785b5957fc1c2c595cf",
+          "depth:az270_el-35:depth.exr": "ab5cea00863e29ddb8017b8e79bd2d9889155be02043be054ad02366b2ef2eff",
+          "depth:az300_el-35:depth.exr": "dea7c92943d321c74994999ccf91ad6d536cece72289c511543203e05734ece3",
+          "depth:az330_el-35:depth.exr": "d68f06c991b2bc6401624ad77a9a014f125cf1a00524e866296255697f717e8e",
+          "depth:az30_el15:depth.exr": "6aeb4337172a201c7d02066735888b52e968db256ba1f1dba69dba10a32b0bed",
+          "depth:az90_el15:depth.exr": "441d78cc9f54e1bd39bd9548eaff0ffe74395cb6d9598b5e02014dcbf47a6eb2",
+          "depth:az120_el15:depth.exr": "e583560938bfcc0ec3fae0e00a3c2466437728e3965f6da76194f4523fe4f264",
+          "depth:az150_el15:depth.exr": "e49acbea4b2770afaf23c9f0758e9a77c0ac823a465e3eb7722f08020959695d",
+          "depth:az210_el15:depth.exr": "3e25d8a1a9ebc27cd7dd5cf157cd72e54be1a2a80baca4ccfe4ff8637fd5b348",
+          "depth:az240_el15:depth.exr": "3aa0bd28e70121865f5347f7a992880e0d25cfabbc059e1e9e8580cc45ebb3f3",
+          "depth:az270_el15:depth.exr": "de90ef281f55030e1befc85ef3c1e9ce556e214b750a4a712f2536626e5933e4",
+          "depth:az330_el15:depth.exr": "4121ab3b1a8b0aead346e94904ac74a03f5ad7d605e6f4a0764e465b83da4ca8",
+          "depth:az0_el55:depth.exr": "0e3bb9218f7fb626725ae15b08ace8ffe8db2e0c09b1e7337eafab518b8e009b",
+          "depth:az30_el55:depth.exr": "dd06459092fae9017e39a5148508cfad165efd37d9aa1d92451d570bc2365c3c",
+          "depth:az60_el55:depth.exr": "265274cf5ada6ff28c50d6f3ecad75777a8e65e5e6ae1be858402ac818ee9faf",
+          "depth:az90_el55:depth.exr": "b0423136ec50006fb47fd535e13df9ae149f07e989ab0e8f5455664b8fd7136c",
+          "depth:az120_el55:depth.exr": "d841790ff26a7c1a4adf91ac177e0986f8f106a6a4e3d85968359e880fad11e6",
+          "depth:az150_el55:depth.exr": "68b87fafbd5a8c21899d628aef5a850343fae247922003db516a4a1f0741a9c3",
+          "depth:az180_el55:depth.exr": "3f79ffcfb757ed848d9dc1a2168b3bb550a73ff2913b59fd362bdeb71e6b7998",
+          "depth:az210_el55:depth.exr": "2e3b16cc034544759b1d4cc23e04d93b0117543a6731f4fe71eb8eb4ff0e9466",
+          "depth:az240_el55:depth.exr": "a10ef71412cda9ba5224fba957e1a63d6768bac365ded6676acfc4a27c8940c9",
+          "depth:az270_el55:depth.exr": "fca3e5a344e1816300f41911c7437793c56e40e408d0c227670cdde5eb9389bb",
+          "depth:az300_el55:depth.exr": "5165050b1dfa9b36f6efd9a533316707bfa9d53a6e91463d06024c4498f61a32",
+          "depth:az330_el55:depth.exr": "a76bbcf9a84eb094fba0551f26dead40e1c2b23783d1ff67d289b6816a063905",
+          "depth:az0_el75:depth.exr": "1e695d60e94748cf0d30b8c5474f03f12bd16bc5ca9ef8481c7ef0a5717c95bc"
+        },
+        "key": "f61e6c581b41412f872f6497f3044b298c0532f577ce1076b52d11f2356ab020",
+        "outputs": {
+          "nbv:extras.json": "8486cedd448d93d37a8f6c58de8c43e0016e3df3ae3f5a73eb17cf13673a41ce",
+          "nbv:reachable.npy": "9b057c9a0a456f611762517e7ed31d82b6f8cb2def2d4bada732935108af311a"
+        },
+        "measurements": {},
+        "elapsed_s": 5.6,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_0",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
+          "view_hints": [
+            "front view",
+            "back view"
+          ],
+          "canvas_seed": 400,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az0_el15:depth.png": "1a33c9dcf6075bc2c5ec5f50ed4726b2b1b784e4ea5b1212406e590bb37dc66d",
+          "depth:az180_el15:depth.png": "eddcd58ddcbdcf6e8f0259a4c4f58e247f960f6047f1c4844edfe60bffeb540f"
+        },
+        "key": "c380f3f5cc7ce7e60ac718ea86c230ea34cd34f90f296950e187287f8c1f73cc",
+        "outputs": {
+          "generate:canvas_0:canvas.png": "ee05c0d83f1b1a19b098877416b42d532b4205fe7ce9445426e7422798c80066",
+          "generate:canvas_0:manifest.json": "f5a608e055f63acfa8b98f56d2e7f8121d7b1864da87814fb64ab1e5d05d161c",
+          "generate:canvas_0:gen_0.png": "d9557c602d1851734dcaa5e01a295ab17aef5fa97e4f21bf34cad581c70f712a",
+          "generate:canvas_0:gen_1.png": "f37ce7a0a5c30de4187a0f9792fbfed5083852fd5aebec102321914c3a3a7df8"
+        },
+        "measurements": {},
+        "elapsed_s": 35.2,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_1",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
+          "view_hints": [
+            "three-quarter view",
+            "three-quarter view"
+          ],
+          "canvas_seed": 401,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az60_el15:depth.png": "11c68a930600c9e18c9561d764928194399707e78e96c4feb315ac552ea30a3a",
+          "depth:az300_el15:depth.png": "7615912ac74a65071779b13100aa9ef7826a1c631d6f6ccc258e86f3d543a54f"
+        },
+        "key": "f45061c165bcb10bea0ad6396efb0bfaa0db92dbe7426d88ba8aee0bb576c6ef",
+        "outputs": {
+          "generate:canvas_1:canvas.png": "39cf7c8114d43639513991e3f684c8d768e88621247104afd6a9e7548a3e16e1",
+          "generate:canvas_1:manifest.json": "8a08361d73807cfac8b407c43e377eea366879fb72f0057050b86099a021116f",
+          "generate:canvas_1:gen_0.png": "fbb4fa236cba41768c1457f85ddb9a671636616010e04347515755547dbb0d6f",
+          "generate:canvas_1:gen_1.png": "6c00789ff8c9e25cf2b8e86373f9fca0e6a4973f4143db523256d7d58bada0b8"
+        },
+        "measurements": {},
+        "elapsed_s": 27.2,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_2",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
+          "view_hints": [
+            "back view, seen from below",
+            "front view, seen from above"
+          ],
+          "canvas_seed": 402,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az210_el-35:depth.png": "0ccb16ca8c5b582c0512a3d58befc4e41b7365280e231cfb6f0036f1cebd38d4",
+          "depth:az330_el55:depth.png": "3bf059a9b2472d5a0bd54da8c9dcf1be6637ae31cc0a10258c95c93798528a10"
+        },
+        "key": "67ae57acbcab2d5f35d4c41dc74644c033f491e97d43e7deec4c67148aed06d3",
+        "outputs": {
+          "generate:canvas_2:canvas.png": "5237b3634e817b78448c2e91ea8a3925c1dedbfcb090cfb67d3d6103552a80dc",
+          "generate:canvas_2:manifest.json": "cffe1f23898ea9cd531fa29999d06a1034394be5755b5063c4d46510a741ed9a",
+          "generate:canvas_2:gen_0.png": "6dba9814e8532b331e3a306e98f0eb78b9102a2f7f1d1a824625134d10f7fabc",
+          "generate:canvas_2:gen_1.png": "440a75ee9cab181555fa82e077b619cf5b4767e57ed46d14db0e478e22a5ddfa"
+        },
+        "measurements": {},
+        "elapsed_s": 29.2,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_3",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
+          "view_hints": [
+            "back view, seen from above",
+            "back view"
+          ],
+          "canvas_seed": 403,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az150_el55:depth.png": "95409be06d1130eed447dbdf700464fb242b68f08c7cb701301521230f6bba7a",
+          "depth:az210_el15:depth.png": "065881b5951040aa91cffd2b9bd9c2ea6be29edd4b213055852de1f3530229cd"
+        },
+        "key": "b7c133cfb86f17800db151dfe5493eca79837b51cf534a13547ab83ac273fc24",
+        "outputs": {
+          "generate:canvas_3:canvas.png": "4ff47665a583037eaca3f10a68e2e5c58dcca3f106c3c64b9724f0851daa97e8",
+          "generate:canvas_3:manifest.json": "8845949a268518bd202619e626440702550e6d42dd65e158781753113a1ed7a3",
+          "generate:canvas_3:gen_0.png": "763eae16660990dbe4bbbc2f1c4c80aa6ce60aac90f0f2cca7c67b0d0de1058b",
+          "generate:canvas_3:gen_1.png": "d5e6fc3f604a98ebfe3549d65354ef760a0b77a8eba631e71b4b375568e47c53"
+        },
+        "measurements": {},
+        "elapsed_s": 27.2,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_4",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
+          "view_hints": [
+            "back view, seen from above",
+            "front view"
+          ],
+          "canvas_seed": 404,
+          "width": 2048,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az210_el55:depth.png": "0cb8f992b43a1b3a6536936e7314c00f8494bed76ff039d3929415ef2c676293",
+          "depth:az30_el15:depth.png": "5055dbd561af304b02ed55f8e8015b03610c510c888be1013256fe6ba9390a56"
+        },
+        "key": "c9bc23bb7c3e4b8e2a2e1b9df50c58ed5d317751bc046fe290b4c2aaeb46f0b8",
+        "outputs": {
+          "generate:canvas_4:canvas.png": "93503de562177df3d9524a66d79c7dc3585f8de4a1aa047fbeab41cb25fa272d",
+          "generate:canvas_4:manifest.json": "d83464784107965764a7703b6e7a0f8f85db862d45bcb5ccfe426406b1d7e06b",
+          "generate:canvas_4:gen_0.png": "27687c00299dd890d506f88e411c64a1f3807093743507615bccb519c35283ee",
+          "generate:canvas_4:gen_1.png": "09e7ef46b49730413e75b5222756113d8894eb72dc235f4899506575b85a0c75"
+        },
+        "measurements": {},
+        "elapsed_s": 28.2,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_5",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "wrought iron candelabra shrine, standing votive candle stand, five bright pure white wax candles each in its own iron drip cup, evenly spaced, dark grey weathered iron, grey stone base, semi-realistic dark fantasy",
+          "view_hints": [
+            "back view"
+          ],
+          "canvas_seed": 405,
+          "width": 1024,
+          "height": 1024,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az150_el15:depth.png": "1f1835feb3d8c43ac61552fa744880a09abc4fadc13297e49d4f0b80ca57b3d5"
+        },
+        "key": "405ab5770cc8e2eb8939d464e8706d6f95f2d0cb5d47ec01925f33569b3dcd7d",
+        "outputs": {
+          "generate:canvas_5:canvas.png": "9edc6ba3b985c421013f3a365f5525116b297b6535e8d127e464b27758fe3ec8",
+          "generate:canvas_5:manifest.json": "265e1dba2f4256920ef7be8a4892fa77d7f839d77bb1debb1970769f4f328995",
+          "generate:canvas_5:gen_0.png": "311e7fe442714ba1560f13bf935d4cd5ba90f6adb88484cd2b89d145794ae3a1"
+        },
+        "measurements": {},
+        "elapsed_s": 16.1,
+        "hit": false
+      },
+      {
+        "stage": "blend",
+        "unit": null,
+        "version": "81f6c812fb0c61b19369c1cff64b62ae3db2a8b8fc6fdb907daa2cf6cced79e5",
+        "params": {
+          "albedo_source": "direct",
+          "views": [
             {
-              "node_id": "1",
-              "class_type": "UNETLoader",
-              "input": "unet_name",
-              "filename": "z_image_turbo_bf16.safetensors",
-              "sha256": null
+              "azimuth_deg": 0.0,
+              "elevation_deg": 15.0
             },
             {
-              "node_id": "2",
-              "class_type": "CLIPLoader",
-              "input": "clip_name",
-              "filename": "qwen_3_4b_fp8_mixed.safetensors",
-              "sha256": null
+              "azimuth_deg": 60.0,
+              "elevation_deg": 15.0
             },
             {
-              "node_id": "3",
-              "class_type": "VAELoader",
-              "input": "vae_name",
-              "filename": "ae.safetensors",
-              "sha256": null
+              "azimuth_deg": 180.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 300.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 210.0,
+              "elevation_deg": -35.0
+            },
+            {
+              "azimuth_deg": 330.0,
+              "elevation_deg": 55.0
+            },
+            {
+              "azimuth_deg": 150.0,
+              "elevation_deg": 55.0
+            },
+            {
+              "azimuth_deg": 210.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 210.0,
+              "elevation_deg": 55.0
+            },
+            {
+              "azimuth_deg": 30.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 150.0,
+              "elevation_deg": 15.0
             }
           ],
-          "depth_png_sha256": "d45b1e8de2bce99139d35dc861ee74df7b8c396801251053177468f0f2feb1f6",
-          "gen_png_sha256": "d449787537f5f7a6b7f61f11059fa41dcd987c9b71c6b729e814aad4a1028e78"
-        }
-      ],
-      "blend_coverage": 0.6088,
-      "metal_fraction": 0.2723
-    },
-    "base_bake_s": 105.0,
-    "normal_bake_s": 0.4,
-    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\candelabra-z\\cand_4\\textured.glb",
-    "mr_mask_bake_s": 94.7,
-    "textured_glb_sha256": "6c71dbca99a4461de1670df6f76134ea281052e3a3bab39b79fdc653ee5ec88e"
+          "numpy_cv2": "numpy 2.3.4 cv2 5.0.0"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2",
+          "atlas:pos.npy": "a0e271253fd1b239155cb2cc47607c4e9c406a5f29a2ddda0b37e4fffe172744",
+          "atlas:nrm.npy": "f60d29f0342124c6908da2b3b73320900e538419dbb49e328d4ed4c1eabe9d13",
+          "atlas:island.npy": "cca4b431462b152f5e9580613c1895e9ab4b22bcd79604a4f49bc263b0bececd",
+          "depth:az0_el15:depth.exr": "ba0f0382f66312c6a1603d5719d3c57c0f5b11c04dc872859eef69ed7a2e2121",
+          "depth:az60_el15:depth.exr": "9cb175fa43b5a88a534a8e7f81378650234090ccfcb034616aad4086134f3302",
+          "depth:az180_el15:depth.exr": "bd3bf9c8d966eb8bc7395070014af1415b020666ce810aec8744215fe427a758",
+          "depth:az300_el15:depth.exr": "800bffb204c8c660138edca99747f00d150c9ea5bcc11ceaf4a36f4775eb8b24",
+          "depth:az210_el-35:depth.exr": "89628f2816dd71546ac2f3b747221361718a3f5a5e1e2d3e3411bd49c089a2ff",
+          "depth:az330_el55:depth.exr": "a76bbcf9a84eb094fba0551f26dead40e1c2b23783d1ff67d289b6816a063905",
+          "depth:az150_el55:depth.exr": "68b87fafbd5a8c21899d628aef5a850343fae247922003db516a4a1f0741a9c3",
+          "depth:az210_el15:depth.exr": "3e25d8a1a9ebc27cd7dd5cf157cd72e54be1a2a80baca4ccfe4ff8637fd5b348",
+          "depth:az210_el55:depth.exr": "2e3b16cc034544759b1d4cc23e04d93b0117543a6731f4fe71eb8eb4ff0e9466",
+          "depth:az30_el15:depth.exr": "6aeb4337172a201c7d02066735888b52e968db256ba1f1dba69dba10a32b0bed",
+          "depth:az150_el15:depth.exr": "e49acbea4b2770afaf23c9f0758e9a77c0ac823a465e3eb7722f08020959695d",
+          "generate:canvas_0:gen_0.png": "d9557c602d1851734dcaa5e01a295ab17aef5fa97e4f21bf34cad581c70f712a",
+          "generate:canvas_1:gen_0.png": "fbb4fa236cba41768c1457f85ddb9a671636616010e04347515755547dbb0d6f",
+          "generate:canvas_0:gen_1.png": "f37ce7a0a5c30de4187a0f9792fbfed5083852fd5aebec102321914c3a3a7df8",
+          "generate:canvas_1:gen_1.png": "6c00789ff8c9e25cf2b8e86373f9fca0e6a4973f4143db523256d7d58bada0b8",
+          "generate:canvas_2:gen_0.png": "6dba9814e8532b331e3a306e98f0eb78b9102a2f7f1d1a824625134d10f7fabc",
+          "generate:canvas_2:gen_1.png": "440a75ee9cab181555fa82e077b619cf5b4767e57ed46d14db0e478e22a5ddfa",
+          "generate:canvas_3:gen_0.png": "763eae16660990dbe4bbbc2f1c4c80aa6ce60aac90f0f2cca7c67b0d0de1058b",
+          "generate:canvas_3:gen_1.png": "d5e6fc3f604a98ebfe3549d65354ef760a0b77a8eba631e71b4b375568e47c53",
+          "generate:canvas_4:gen_0.png": "27687c00299dd890d506f88e411c64a1f3807093743507615bccb519c35283ee",
+          "generate:canvas_4:gen_1.png": "09e7ef46b49730413e75b5222756113d8894eb72dc235f4899506575b85a0c75",
+          "generate:canvas_5:gen_0.png": "311e7fe442714ba1560f13bf935d4cd5ba90f6adb88484cd2b89d145794ae3a1"
+        },
+        "key": "7ddbccf40349e85a42287461f2921d2aaf92da9148cfa188465e81427e465628",
+        "outputs": {
+          "blend:base.png": "24ef833a594a7f37814a296a6e6389847f6edd441eb2b4c18bff73084947565b",
+          "blend:coverage.json": "60f24f247fcfc4b4b89dc60883ee121bb7c467f657b64a2db1d9d87891cdcbbc"
+        },
+        "measurements": {
+          "blend_coverage": 0.8706,
+          "hole_texels": 118215,
+          "max_hole_depth_frac": 0.0323
+        },
+        "elapsed_s": 4.6,
+        "hit": false
+      },
+      {
+        "stage": "bake_normal",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2",
+          "clean_hires.glb": "885c0fdfd939bcea21074a9c781f4f626157dca842676010ef0f87cdfcbfd9af"
+        },
+        "key": "8224211a7e9a0897ca3c95c5e720e168e8b20b1d8390f9fe8e17a6d72a6d3ecd",
+        "outputs": {
+          "bake_normal:normal.png": "0cb36928a66cccff825d52a141e1aa6ab8abed922fe1a1e10a1db38071db1556"
+        },
+        "measurements": {},
+        "elapsed_s": 0.3,
+        "hit": false
+      },
+      {
+        "stage": "bake_ao",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 1024,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2",
+          "clean_hires.glb": "885c0fdfd939bcea21074a9c781f4f626157dca842676010ef0f87cdfcbfd9af"
+        },
+        "key": "a9521c454d9d10301c6034b48c4bc741a0227a17769ad275a024b681ce1181da",
+        "outputs": {
+          "bake_ao:occlusion.png": "ffaad4c7b29ff5c80b45311408b4222dc87d317bc7e55d1edaa4b9467731356e"
+        },
+        "measurements": {},
+        "elapsed_s": 3.3,
+        "hit": false
+      },
+      {
+        "stage": "export",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "metallic": 0.0,
+          "roughness": 0.75,
+          "detail": false,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "8f0bbe5bb8bf3547d6f46b90131d961ddd07ca0fd446957d0ea903983cb686c2",
+          "blend:base.png": "24ef833a594a7f37814a296a6e6389847f6edd441eb2b4c18bff73084947565b",
+          "bake_normal:normal.png": "0cb36928a66cccff825d52a141e1aa6ab8abed922fe1a1e10a1db38071db1556",
+          "bake_ao:occlusion.png": "ffaad4c7b29ff5c80b45311408b4222dc87d317bc7e55d1edaa4b9467731356e"
+        },
+        "key": "f65357b85b976374b5cc63acb3101adc261b4eabc11838a69a16ebf7acc20c7a",
+        "outputs": {
+          "export:textured.glb": "ddb389e6df5398d019b9bab9510042c2d940d9451fc055e24eced695165867d5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.8,
+        "hit": false
+      }
+    ],
+    "elapsed_s_total": 182.4,
+    "textured_glb_sha256": "ddb389e6df5398d019b9bab9510042c2d940d9451fc055e24eced695165867d5"
   },
   "preprocess": {
-    "textured_glb_bytes": 3218224,
-    "final_glb_bytes": 3218200
+    "textured_glb_bytes": 4206432,
+    "final_glb_bytes": 4206408
   },
   "bake": {
-    "source": "final.glb",
-    "sha256": "45a077f03047dc16b806136de100462ed7318ae1fef4fe0a6e3d1dabeed1cbd2",
+    "source": "candelabra_shrine.glb",
+    "sha256": "ddb389e6df5398d019b9bab9510042c2d940d9451fc055e24eced695165867d5",
     "images": [
       {
         "index": 0,
@@ -508,17 +1480,17 @@
       },
       {
         "index": 1,
-        "slot": "base",
+        "slot": "ao",
         "file": "img1.dds"
       },
       {
         "index": 2,
-        "slot": "mr",
+        "slot": "base",
         "file": "img2.dds"
       }
     ]
   },
-  "final_glb_sha256": "45a077f03047dc16b806136de100462ed7318ae1fef4fe0a6e3d1dabeed1cbd2",
+  "final_glb_sha256": "ddb389e6df5398d019b9bab9510042c2d940d9451fc055e24eced695165867d5",
   "turntable": {
     "angles": 8,
     "size": "512x512",

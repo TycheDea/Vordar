@@ -1,6 +1,6 @@
 {
   "source": "cypress.glb",
-  "sha256": "6fa1865fe8431fbaf214fc94e58a0f879a2dfdd868f94aa55b360f1f5149cd12",
+  "sha256": "2434f723826becccc8762c283f3cd961ab6c433d9e648891e8851e1ccff2ca1a",
   "images": [
     {
       "index": 0,
@@ -9,12 +9,12 @@
     },
     {
       "index": 1,
-      "slot": "base",
+      "slot": "ao",
       "file": "img1.dds"
     },
     {
       "index": 2,
-      "slot": "mr",
+      "slot": "base",
       "file": "img2.dds"
     }
   ]

@@ -1,12 +1,163 @@
 {
   "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
   "seed": 21,
-  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21",
+  "candidate_dir": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\crucero\\cand_21",
   "concept": {
-    "mode": "skip-concept",
-    "source_image": "target\\prop-batch\\b3\\crucero\\ab\\zimage_seed0\\concept.png",
-    "source_image_sha256": "1c78a36231c4bc5a2065e21c80cbd42e306f27488145513e67cce4135981de78",
-    "concept_png_sha256": "1c78a36231c4bc5a2065e21c80cbd42e306f27488145513e67cce4135981de78"
+    "mode": "generated",
+    "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+    "comfy_manifest": {
+      "workflow": {
+        "1": {
+          "class_type": "UNETLoader",
+          "inputs": {
+            "unet_name": "z_image_turbo_bf16.safetensors",
+            "weight_dtype": "default"
+          }
+        },
+        "2": {
+          "class_type": "CLIPLoader",
+          "inputs": {
+            "clip_name": "qwen_3_4b_fp8_mixed.safetensors",
+            "type": "lumina2",
+            "device": "default"
+          }
+        },
+        "3": {
+          "class_type": "VAELoader",
+          "inputs": {
+            "vae_name": "ae.safetensors"
+          }
+        },
+        "4": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "clip": [
+              "2",
+              0
+            ],
+            "text": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, single object centered, plain grey background"
+          }
+        },
+        "5": {
+          "class_type": "ConditioningZeroOut",
+          "inputs": {
+            "conditioning": [
+              "4",
+              0
+            ]
+          }
+        },
+        "6": {
+          "class_type": "ModelSamplingAuraFlow",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "shift": 3.0
+          }
+        },
+        "7": {
+          "class_type": "EmptySD3LatentImage",
+          "inputs": {
+            "width": 1024,
+            "height": 1024,
+            "batch_size": 1
+          }
+        },
+        "8": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "6",
+              0
+            ],
+            "seed": 21,
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler_name": "res_multistep",
+            "scheduler": "simple",
+            "positive": [
+              "4",
+              0
+            ],
+            "negative": [
+              "5",
+              0
+            ],
+            "latent_image": [
+              "7",
+              0
+            ],
+            "denoise": 1.0
+          }
+        },
+        "9": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "8",
+              0
+            ],
+            "vae": [
+              "3",
+              0
+            ]
+          }
+        },
+        "10": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "9",
+              0
+            ],
+            "filename_prefix": "prop_concept"
+          }
+        }
+      },
+      "prompt_id": "0e8d0264-cdb3-40ba-bb6a-ec0b9444f32c",
+      "prompts": {
+        "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, single object centered, plain grey background"
+      },
+      "seed": {
+        "8": 21
+      },
+      "models": [
+        {
+          "node_id": "1",
+          "class_type": "UNETLoader",
+          "input": "unet_name",
+          "filename": "z_image_turbo_bf16.safetensors",
+          "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
+        },
+        {
+          "node_id": "2",
+          "class_type": "CLIPLoader",
+          "input": "clip_name",
+          "filename": "qwen_3_4b_fp8_mixed.safetensors",
+          "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
+        },
+        {
+          "node_id": "3",
+          "class_type": "VAELoader",
+          "input": "vae_name",
+          "filename": "ae.safetensors",
+          "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
+        }
+      ],
+      "outputs": [
+        {
+          "node_id": "10",
+          "output_kind": "images",
+          "filename": "prop_concept_00038_.png",
+          "subfolder": "",
+          "type": "output",
+          "saved_as": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\crucero\\cand_21\\concept_raw\\prop_concept_00038_.png"
+        }
+      ]
+    },
+    "concept_png_sha256": "12eeed69acf7ed87ee942d0c5d516b473a71866f4ae48811d8a14a9529637e4d"
   },
   "geometry": {
     "model": "Stable-X/Hi3DGen",
@@ -15,10 +166,10 @@
       "normal": "Stable-X/yoso-normal-v1-8-1",
       "birefnet": "ZhengPeng7/BiRefNet"
     },
-    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21\\concept.png",
-    "input_image_sha256": "1c78a36231c4bc5a2065e21c80cbd42e306f27488145513e67cce4135981de78",
-    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21\\concept_rgba.png",
-    "concept_rgba_sha256": "59a734b7f9dcb0d372da945763b35c4f4ea7b80a3f34136182a5c85478289ee4",
+    "input_image": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\crucero\\cand_21\\concept.png",
+    "input_image_sha256": "12eeed69acf7ed87ee942d0c5d516b473a71866f4ae48811d8a14a9529637e4d",
+    "concept_rgba": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\crucero\\cand_21\\concept_rgba.png",
+    "concept_rgba_sha256": "8c35869296bf437036f45293e54dd02d5ed9a5280757ac3bdbbb4319c3f39c51",
     "seed": 21,
     "steps": {
       "sparse_structure_sampler": 50,
@@ -26,289 +177,1218 @@
     },
     "torch_version": "2.7.1+cu128",
     "xformers_version": "0.0.31.post1",
-    "vertex_count": 170927,
-    "face_count": 341808,
+    "vertex_count": 95793,
+    "face_count": 191522,
     "peak_vram_allocated_gb": 11.380153856,
-    "raw_glb_sha256": "e061e34021b7d2a2a9ca8226085451e8d17727f27e0e54ca488317bcd9ceba4b"
+    "raw_glb_sha256": "6a3afcbf453ee2abd82f1ed1fbdb6ae17f2e9c185e2cb73e8f0e351a170bf52f"
   },
   "cleanup": {
-    "note": "no stats captured (cleanup_stats.json not found; output pre-existed this gen_prop.py run)",
-    "clean_glb_sha256": "d971bed918b1d67e141204bfcaf093e2d104774576b100715346d68c11fca0d2",
-    "clean_hires_glb_sha256": "cb4d140fdba30abb5c3f22e560cbf93bfe53abef5f1b84f6be11d17f62aad387"
+    "raw_tris": 191522,
+    "fragments_removed": 21,
+    "fragment_tris_removed": 168,
+    "hires_tris": 191354,
+    "clean_tris": 15000,
+    "height_target": 1.8,
+    "clean_height": 1.7993966341018677,
+    "clean_min_y": 0.0,
+    "uv_charts": 732,
+    "uv_utilization": 0.8262,
+    "hires_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\crucero\\cand_21\\clean_hires.glb",
+    "clean_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\rebuild\\crucero\\cand_21\\clean.glb",
+    "clean_glb_sha256": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded",
+    "clean_hires_glb_sha256": "6abb82938708433e3ff0bb9db058842b9b588ee6110cebaa14c827cad7bd6277"
   },
   "texture": {
-    "strategy": "multiview_controlnet_depth",
-    "front_axis": "-Y",
-    "workflow": "prop_multiview.json",
-    "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
-    "render_resolution": 1536,
-    "views": [
+    "stages": [
       {
-        "hint": "front view",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 15.0,
-        "canvas": 0,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 2100
+        "stage": "atlas",
+        "unit": null,
+        "version": "a143fcbc9615481a72471a791dc461de51f46b162ea1ae5d9a54181c98405234",
+        "params": {
+          "texture_size": 2048,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "320ab3da-2e3b-49aa-9b0b-bcebebc02813",
-        "prompts": {
-          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
-          }
-        ],
-        "depth_png_sha256": "087a8d2dcdbb4a4000364a8a98c5c73d729bcbf9434b4c932ba3873e2c72c9fd",
-        "gen_png_sha256": "b2b75bc81f0f4ce5d1f178801f0be820b36ee83e095f427b1ff59481330404d1"
+        "key": "b63bbc81cf02905a85e0cb555f80deaa6207bd44c55a46db687042e017d08b52",
+        "outputs": {
+          "atlas:pos.npy": "6ac41d6cc18e9e4f0e2dbac71bb64b83e1a5b464a56b1092ca84e8a3b921facb",
+          "atlas:nrm.npy": "7a92af6eefe7a55d35e889f89e335a21ae9d7eb3753b94955f7b6525b7bb01a5",
+          "atlas:island.npy": "2258fc33a450b76a4651323afccfd5a4b6a55e048602c2de857cdce770cab847"
+        },
+        "measurements": {},
+        "elapsed_s": 3.4,
+        "hit": true
       },
       {
-        "hint": "three-quarter view",
-        "azimuth_deg": 60.0,
-        "elevation_deg": 15.0,
-        "canvas": 1,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 2101
+        "stage": "depth",
+        "unit": "az0_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "3a475172-2b04-45cd-a1c8-628da37331dd",
-        "prompts": {
-          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: three-quarter view, right: three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
-          }
-        ],
-        "depth_png_sha256": "2acc45ce2e4cbb334b5403fbcd427effa1edb7658042fe604761d8c35b091a7e",
-        "gen_png_sha256": "9c411e6b326c28a9776dccb33ea3347d6a61fcb9dd270136192885c61959b1ee"
+        "key": "44cf4cf17711fb87c22cb263a7c54c157039377499a9dd7935568464bc7c658d",
+        "outputs": {
+          "depth:az0_el15:depth.exr": "e04d765d08e1392b94bdc282d674266ccbf1e6d08cd4ec97db97770ca553fee1",
+          "depth:az0_el15:depth.png": "42add5fe38e136b9e499da7f34979c236a547b089ed6ebb0f42025d2efef9937"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
       },
       {
-        "hint": "back view",
-        "azimuth_deg": 180.0,
-        "elevation_deg": 15.0,
-        "canvas": 0,
-        "canvas_slot": 1,
-        "seeds": {
-          "11": 2100
+        "stage": "depth",
+        "unit": "az60_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "320ab3da-2e3b-49aa-9b0b-bcebebc02813",
-        "prompts": {
-          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: front view, right: back view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
-          }
-        ],
-        "depth_png_sha256": "f3545c4b3b6c2fe8c38f03a734a0ecc76c7c4b2778d272a4d09c8ea2c41d5ef4",
-        "gen_png_sha256": "ae10c23cabf6805554a9f69d019c92edb24f1762a4dc99858de316f0c1f5eacd"
+        "key": "73e24a020dcc57d8692a7ac65bb558f13a5f18d277560f1d6e57ec1617392a56",
+        "outputs": {
+          "depth:az60_el15:depth.exr": "add9267cca3f28eebc6f12579721f897ca2da0c4814f3e40136d0fd0475d3868",
+          "depth:az60_el15:depth.png": "1fddd0c53f0dbdf66d6299ffe1ea1e9f0b09cd18bceca432ceda7116fb6fac8c"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
       },
       {
-        "hint": "three-quarter view",
-        "azimuth_deg": 300.0,
-        "elevation_deg": 15.0,
-        "canvas": 1,
-        "canvas_slot": 1,
-        "seeds": {
-          "11": 2101
+        "stage": "depth",
+        "unit": "az180_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "3a475172-2b04-45cd-a1c8-628da37331dd",
-        "prompts": {
-          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, two views of the same object side by side, left: three-quarter view, right: three-quarter view, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
-          }
-        ],
-        "depth_png_sha256": "3676eebcc7a6f5d926663002d9eaa3563a0630907b3baa629de193a3c082bad4",
-        "gen_png_sha256": "dba04f84dc6bf2159d9239ff14bed0d93b0dcfb4fd6f3d82027d1688f4dd8958"
+        "key": "3fe090ee84023767b57b46deb9661feffe6c392caf4206418c4ce74565da2bde",
+        "outputs": {
+          "depth:az180_el15:depth.exr": "790f58fa145894c2c4e9b8bd4d24a3733e0c2f480239e004fa568c69e9bdadf4",
+          "depth:az180_el15:depth.png": "b536fe1c84c16eec833244da4047f32343d019549831cfdc6d1ae72f4d3f4902"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
       },
       {
-        "hint": "back view, seen from below",
-        "azimuth_deg": 150,
-        "elevation_deg": -35.0,
-        "canvas": 2,
-        "canvas_slot": 0,
-        "seeds": {
-          "11": 2102
+        "stage": "depth",
+        "unit": "az300_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
         },
-        "prompt_id": "d3f41e0f-e2a3-4cc0-a43e-fe223e41067c",
-        "prompts": {
-          "4": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings, back view, seen from below, flat even neutral studio lighting, single object centered, plain dark grey background"
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
         },
-        "models": [
-          {
-            "node_id": "1",
-            "class_type": "UNETLoader",
-            "input": "unet_name",
-            "filename": "z_image_turbo_bf16.safetensors",
-            "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6"
-          },
-          {
-            "node_id": "2",
-            "class_type": "CLIPLoader",
-            "input": "clip_name",
-            "filename": "qwen_3_4b_fp8_mixed.safetensors",
-            "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15"
-          },
-          {
-            "node_id": "3",
-            "class_type": "VAELoader",
-            "input": "vae_name",
-            "filename": "ae.safetensors",
-            "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"
-          }
-        ],
-        "depth_png_sha256": "446d51b0cf63bd536f4580dfc3cb3517cf6f0026134f97a310f9fabefc291128",
-        "gen_png_sha256": "98deb1841d42bd6b349143f4960c8c19ca19bfa9637a6664b5fa53d6f6de4914"
+        "key": "a3e943d30cf08fcab63d2715d9eda7efa2bc21c589715d6e0f471f1c319c4eb2",
+        "outputs": {
+          "depth:az300_el15:depth.exr": "cec9846ea8b2bacbbc10a96730d2bfa7783c86fcf9c1e7eb10c3e381a1bd85c7",
+          "depth:az300_el15:depth.png": "9a99107e9892463f9f0d4352ad03afeb4953ec430803295afbd4909ec1623ee1"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "11e59547546e643c5309fab32d0b456fa316b482829a26ece4b3f77690cf2ccc",
+        "outputs": {
+          "depth:az0_el-35:depth.exr": "02de3730a098f9722d2f9da5431f50e476c119db60b19205efd4463402ff7e26",
+          "depth:az0_el-35:depth.png": "fa7b42ce225a8009d61735a94e3f0aa0caac3a60307d211195f413ec574d545b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "5f0270c6c9324a6cdcfe660e004d56838fd93245b7d06d7adb76bd51df6208e8",
+        "outputs": {
+          "depth:az30_el-35:depth.exr": "d5f495559c45b5d7e9a81cfe6bf7de0264d54e1a833d8cb52946391ccecc26e2",
+          "depth:az30_el-35:depth.png": "895fe7ec201affdbbef973c073b5dc8e3253fb59fe14b66428e78778532e7928"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "257848afa59f7a92d3994d9ad364c4c188a0110796fe43e96417ecff0b69796c",
+        "outputs": {
+          "depth:az60_el-35:depth.exr": "c79dfdebe0b17f84f9d89c338c48001ba9b177844bfd635eb0f39d9b103415e3",
+          "depth:az60_el-35:depth.png": "fa926e1f8dd1f2f8457a579f204375f03d3e1d39ed0a28e7581688df0614f43b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "57a1ca9dd3b4929cd6389ca8acd44b534d1eeb0878f04192b92f3da44d0a3d11",
+        "outputs": {
+          "depth:az90_el-35:depth.exr": "7d268b684f68cb6c42291f1a8e18d23cae8f28f8bddc7317efc1838cfb7ee0f0",
+          "depth:az90_el-35:depth.png": "096200f79e6dec6cda6763e22f3525340d08da1354fa03b6a4ca3678585738c7"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "14f0d1dd1b1caedb92b734c680674c5a7fc77a751baaa65654dbb9f28e5dcffd",
+        "outputs": {
+          "depth:az120_el-35:depth.exr": "5116c4c50cc9bba6b6ae5c4f55f9b0d719f27a6aa3b1d1944ab8ba800f88aa7a",
+          "depth:az120_el-35:depth.png": "1e9230dd412403e3715d304eca417c76064aa07f08ad808deeed91cfdc8010ce"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "d02ad4588766e69ad3b7cede7179ec9de284408bc24cae0071a482fa99094629",
+        "outputs": {
+          "depth:az150_el-35:depth.exr": "ea1e3270f2ae51d6315bc9943fcca7186fe720e7fbc52752a85cb95ad8db1cb9",
+          "depth:az150_el-35:depth.png": "432647c8248717c55a7de6b551c312daf0031efe420613a501ed996deb8a0b44"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "4cac8c6f889977568af795abe5e2ba7b9281574cbea6688fdaff42a4cad2d176",
+        "outputs": {
+          "depth:az180_el-35:depth.exr": "1525e49a3959b4702cc97b52f7404ea1b091d7052e36f6f90a25856429d14354",
+          "depth:az180_el-35:depth.png": "8aa43ffeb3c93b0947e940f08e693c7f002299bdc3e1bd634df72b650ac23b3c"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "96b4c36ae3fb874375f529db47d8dff7d8f83e8f45b74689050acdf8ad0b3e24",
+        "outputs": {
+          "depth:az210_el-35:depth.exr": "10d19ab8ae340fd7022cf1948fbddfba4fd0e28439fdd85e5385ef16240d7ebd",
+          "depth:az210_el-35:depth.png": "10f55429782615bd5e2ae74747a1d9ef7ac5f5d1c92e063a8f346384017b1279"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "ca41c92afcd6f3e8743e0eeb1991552ced7c9ed5cb623a16a9a6cff3a56f744d",
+        "outputs": {
+          "depth:az240_el-35:depth.exr": "bc044031fa2a54d5f4e1bf392da71d5d55be4e1801a4140ff7a181479d4a8bac",
+          "depth:az240_el-35:depth.png": "8487501ba1f675e23cda6966cb20adf012baeb407b97a56152bc95f7e3e5a590"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "a5d520e8f13072c57f3af413f6a83b927085012f5e890535b3ba961f893cbf21",
+        "outputs": {
+          "depth:az270_el-35:depth.exr": "80af41663237dce113db7c88efff32013e185163b00e6350e1ada6b99468bc64",
+          "depth:az270_el-35:depth.png": "d487c3362b032c8b474216ac9ecc5be53e5e359aba2c13b34bbac365cbb3ef7e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "2744122ef0e5e338d07192efc8f418b738e321962a618071e9efa3e8a7c94897",
+        "outputs": {
+          "depth:az300_el-35:depth.exr": "a99abeb5fda0020534afc0d64d4c5ef9368dea0f65a3ba806e3c5f04bbc48a48",
+          "depth:az300_el-35:depth.png": "99813b442f90cf4589a0d93fc261f8f47a8aee2e827ef92cb3df9f95b672175f"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el-35",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": -35.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "a29455c90bd70f737dbe546d79fede9309672a616f3750569499594131165077",
+        "outputs": {
+          "depth:az330_el-35:depth.exr": "8c538189a53f5685fc7f6f28f9826433fb18536244f8ef8b1921de7c61369c2c",
+          "depth:az330_el-35:depth.png": "a1b15700f1e4d43c2d18cbb38cb02bc883047b4b3a3ad8bf05d33acaa23d3102"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "76a8bce3398f5bbe1da00948425b8aeb063c8862d7718a35fbb4887fa59da490",
+        "outputs": {
+          "depth:az30_el15:depth.exr": "a43992d5740d60ce0102ac5da52e746406d3cc021eabd8fca58f8031b6f641fc",
+          "depth:az30_el15:depth.png": "d0847525aa1016866ba297832a0462665c3c71129426509a2d8356f98b292c9b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "e4dcb117c6bd7df10e4724cc8dd48342a2cdd6b4ade2496f2914bf011b57775a",
+        "outputs": {
+          "depth:az90_el15:depth.exr": "ba5ff3bcad39069e17abe6692eedbfa27e6a9bfda998669c6092ca70a35a5229",
+          "depth:az90_el15:depth.png": "0b45c6a1fc6b5581415eb9fc03633d41aa690241dc72b2d4ae144898d4408b8c"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "1876549096edb8b6b575ad7059fbc0138a35f329be384775636b20a42cabc6ee",
+        "outputs": {
+          "depth:az120_el15:depth.exr": "d4b6ddf9299a09fb18583769650dfd0f167458ef4afede219463428affd7ef56",
+          "depth:az120_el15:depth.png": "4bbe81636666b2ac7aed99dc82d52c8d2d013a24826cc4b39de30041beeef28e"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "21c9649fa4e6c7a1f20e1cd81bb1d360f33315a2086a20680c85ea9126fe1169",
+        "outputs": {
+          "depth:az150_el15:depth.exr": "0e61aead916e616cb20470898928394fa2eb91fe796c414511f8340fdf270416",
+          "depth:az150_el15:depth.png": "5e7d873c8c240040dc5006e1452c9e0bd681a92e271534bc3bdc0a656011fa56"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "63af5018442d118b1aa9983567e540e9ce3f10f7053afe24afcf97be0a62f688",
+        "outputs": {
+          "depth:az210_el15:depth.exr": "425c6d121e1aa2c832e473193210965fcaffbacf804613fefcb3e3907fe82e56",
+          "depth:az210_el15:depth.png": "0feb66f4f30529a5214b9453ff88ea52889a35814ea45c4583a579070ac0c6b5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "d624953dbf5f7379d5dab2e8c1e2119508b1ec98c0e1cf22580007ead11aff8b",
+        "outputs": {
+          "depth:az240_el15:depth.exr": "779d67e85cdf0b16b69a24583bcb9696d9ca75b22f6278556229b12dd612a405",
+          "depth:az240_el15:depth.png": "cdc3bfb4eb852cece94e17706b51db6686e891be67493ab1a4ebbd20b58d101b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "806675ec5d3bb9a1b4139e1f58ff550c0a71e89ff525b93d7c6983624ba9d3f3",
+        "outputs": {
+          "depth:az270_el15:depth.exr": "5adc347d0c8d68a740b59643112a19f2eae07b62309a47c27def67873ba7878e",
+          "depth:az270_el15:depth.png": "ee5bfca35c57a12894383f251886e3f637e6424922fdabb917bcfbe09edbadb6"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el15",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 15.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "c68f2cf12ed649956330e17f293f68823fc91cec359335c515323cd76a7e4c16",
+        "outputs": {
+          "depth:az330_el15:depth.exr": "f24e5bd02779c16bf91cc58b57a44512f66bef959e5bd9394ddd8be5b4cd383d",
+          "depth:az330_el15:depth.png": "20818372d85ad14f850c6db08eeef0a05efa49e53602a8aeb90dc6f0c614a9b6"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "9dd6e9ec39d477aa569a4a1a765c6457680cea6bee861c46a79ff7cb7082a40b",
+        "outputs": {
+          "depth:az0_el55:depth.exr": "031d2b58c528d5968e6151069d7a659a0d8961117d4ece38157bc01380713030",
+          "depth:az0_el55:depth.png": "137cc0c0dccfea06e387679cb1d18ddfa4dd107dec327f2070250b802d408f57"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az30_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 30.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "708f3939a0179ab1e525de00d7941cf1647d47bcbfb8909128dd5abdba48d46d",
+        "outputs": {
+          "depth:az30_el55:depth.exr": "158dad94ad0d6ed6bf406f40a035e0e5536af3bdf44468e60a3f263679d729fc",
+          "depth:az30_el55:depth.png": "ee1f322c04b34334c5f79fc1c28808aa88d202f1665c1e404e45dc7a608f4db8"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az60_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 60.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "d4926b7f4cc498afbab20a1c65b34ac7864686a9078b430a2a421f593fd24461",
+        "outputs": {
+          "depth:az60_el55:depth.exr": "50631121ad757ae9135509cba50fd0b44cfd39f6bcc3452c016ac432f89d775c",
+          "depth:az60_el55:depth.png": "9f52235d11e6c69705629df2938068796f8ac303322ee2783d71bcc6116d7a6d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az90_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 90.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "df6852b53df0b1176bc56abe036bb013d8e5ff62efe9a4c13990513236d66e12",
+        "outputs": {
+          "depth:az90_el55:depth.exr": "bed1fb66c456c18614cd9e79ca7c2316a3847663a6beed80206bc078de538ded",
+          "depth:az90_el55:depth.png": "71a5fbd69ffb334f410bc1ae602f410b17040962f585a780b2f198cc62845269"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az120_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 120.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "e8f39ad4e186d598bf815c0e195a52449a0dd24aa1befb3d9169c50d180e4fab",
+        "outputs": {
+          "depth:az120_el55:depth.exr": "0c0c65fd2642f71bc9ff6b0fd9c91f1d15668dc7027859b6ff53cdbdc12214af",
+          "depth:az120_el55:depth.png": "48276e857981bc6fa907a5601c8fbd4c632fee0de181e6948926dfe2e48ade73"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az150_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 150.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "52d84c314bca00fc8ffdf66ab814928ab6b556dc23b3a62fbdaa58adff5c2bdb",
+        "outputs": {
+          "depth:az150_el55:depth.exr": "b378b047807c51c3d834c0d24bcc595953d6d0fbbd726ae5f2bfcb483771440b",
+          "depth:az150_el55:depth.png": "463cc1ef29c63f95b5ad65b67c24ce42eb156169e43fbc5e1fc43cb60ad444df"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az180_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 180.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "5174c93f44b7329990131581bfbbf20b3a2196d020193088bb3467056f1357b2",
+        "outputs": {
+          "depth:az180_el55:depth.exr": "aecb212739c636a2f8c79105abd533b5ae5f2707d62f0ff4bc8d7cfbb1ad22cf",
+          "depth:az180_el55:depth.png": "9ec955cbed0bff5db15f291c99a28b0b4fdf21104d2002ab6cd0352715f81881"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az210_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 210.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "5dfe504f437bb857789159865a01aa1f65a9ea6b2aa3444d7170c63650c9db18",
+        "outputs": {
+          "depth:az210_el55:depth.exr": "5d3efc03c9c5dd7f8f66f661e005812791f48b788f52b50cfdcb6cfae5882e15",
+          "depth:az210_el55:depth.png": "dbcbec2631bade55335e920c4c0ae4e57b84773a50bccdaed770ab7133e051c9"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az240_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 240.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "b00e2b19cda68ec85e1913ea734b9bfc0cf8ffb39a40b97036ce316e2efc00ed",
+        "outputs": {
+          "depth:az240_el55:depth.exr": "8eb97311b397438c74ead7b051fdaa03e17cf1e4c1ec362e09246853ec2aed50",
+          "depth:az240_el55:depth.png": "8da518e7a73b42ab8742acea687c4bd195b5292084ec298115e2d97a99c3c05d"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az270_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 270.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "f58e633f3dae6d5e86af7542eca53df4f473ef0bda89334aff50773e9d624fe0",
+        "outputs": {
+          "depth:az270_el55:depth.exr": "9e0bfe014b9498369e9e7ac7bd7a342caf702d3faa1fb3c64e1e875fb7c07ee8",
+          "depth:az270_el55:depth.png": "aa9108befb8c206beea11255e35e471cb8d7f067b3cac7f839dc5eaf7d18c87b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az300_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 300.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "bba5185513f57256c9d4bef30847bd9ca2e41d6095f526ba1920c26a4788d0e2",
+        "outputs": {
+          "depth:az300_el55:depth.exr": "a4b3c7bc3ef7eb2c9cef56f52a552cc25cee3d6311f103b03f4bf607b5332827",
+          "depth:az300_el55:depth.png": "92c3028cf7f8f930c3e56c096acf685436d84dbe7e924c0ca7fb7eb79945b76b"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az330_el55",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 330.0,
+          "elevation_deg": 55.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "9cff7ede20ea4486b6ec575104a8765cf78cdbaee94b30cd4d3189f83c6215c6",
+        "outputs": {
+          "depth:az330_el55:depth.exr": "e4170594773309347cf55e1e99e229d1fdf628a2062f778931b7992f35e1fb43",
+          "depth:az330_el55:depth.png": "35da884b1de994b8ccd6fbd1e80ab646ebd938bc6ccff8f58b0fb78e69c165e5"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "depth",
+        "unit": "az0_el75",
+        "version": "35497d8c65c38a14175642e9a456fa72a5fcdd14834efab718a705f49ad88080",
+        "params": {
+          "azimuth_deg": 0.0,
+          "elevation_deg": 75.0,
+          "view_res": 1536,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded"
+        },
+        "key": "53b34d85099271f024059f6aa942a73fda0658bd8e11548e3a3c4c21f8da46bb",
+        "outputs": {
+          "depth:az0_el75:depth.exr": "8f110b5432d8651f3f5e41ecc5407df59700296271ec4469589e29c0ca807d77",
+          "depth:az0_el75:depth.png": "850722e5eb4a18bed4b5ce7172f00d6a963f7df3d314beb1a10e0717cd849fe6"
+        },
+        "measurements": {},
+        "elapsed_s": 0.2,
+        "hit": true
+      },
+      {
+        "stage": "nbv",
+        "unit": null,
+        "version": "c3c174ba00ca6db061899aa0276ff8e21bc733febd447e0daa8a0da70b8fd50a",
+        "params": {
+          "azimuths": [
+            0,
+            60,
+            180,
+            300
+          ],
+          "elevation_deg": 15.0,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded",
+          "atlas:pos.npy": "6ac41d6cc18e9e4f0e2dbac71bb64b83e1a5b464a56b1092ca84e8a3b921facb",
+          "atlas:nrm.npy": "7a92af6eefe7a55d35e889f89e335a21ae9d7eb3753b94955f7b6525b7bb01a5",
+          "atlas:island.npy": "2258fc33a450b76a4651323afccfd5a4b6a55e048602c2de857cdce770cab847",
+          "depth:az0_el15:depth.exr": "e04d765d08e1392b94bdc282d674266ccbf1e6d08cd4ec97db97770ca553fee1",
+          "depth:az60_el15:depth.exr": "add9267cca3f28eebc6f12579721f897ca2da0c4814f3e40136d0fd0475d3868",
+          "depth:az180_el15:depth.exr": "790f58fa145894c2c4e9b8bd4d24a3733e0c2f480239e004fa568c69e9bdadf4",
+          "depth:az300_el15:depth.exr": "cec9846ea8b2bacbbc10a96730d2bfa7783c86fcf9c1e7eb10c3e381a1bd85c7",
+          "depth:az0_el-35:depth.exr": "02de3730a098f9722d2f9da5431f50e476c119db60b19205efd4463402ff7e26",
+          "depth:az30_el-35:depth.exr": "d5f495559c45b5d7e9a81cfe6bf7de0264d54e1a833d8cb52946391ccecc26e2",
+          "depth:az60_el-35:depth.exr": "c79dfdebe0b17f84f9d89c338c48001ba9b177844bfd635eb0f39d9b103415e3",
+          "depth:az90_el-35:depth.exr": "7d268b684f68cb6c42291f1a8e18d23cae8f28f8bddc7317efc1838cfb7ee0f0",
+          "depth:az120_el-35:depth.exr": "5116c4c50cc9bba6b6ae5c4f55f9b0d719f27a6aa3b1d1944ab8ba800f88aa7a",
+          "depth:az150_el-35:depth.exr": "ea1e3270f2ae51d6315bc9943fcca7186fe720e7fbc52752a85cb95ad8db1cb9",
+          "depth:az180_el-35:depth.exr": "1525e49a3959b4702cc97b52f7404ea1b091d7052e36f6f90a25856429d14354",
+          "depth:az210_el-35:depth.exr": "10d19ab8ae340fd7022cf1948fbddfba4fd0e28439fdd85e5385ef16240d7ebd",
+          "depth:az240_el-35:depth.exr": "bc044031fa2a54d5f4e1bf392da71d5d55be4e1801a4140ff7a181479d4a8bac",
+          "depth:az270_el-35:depth.exr": "80af41663237dce113db7c88efff32013e185163b00e6350e1ada6b99468bc64",
+          "depth:az300_el-35:depth.exr": "a99abeb5fda0020534afc0d64d4c5ef9368dea0f65a3ba806e3c5f04bbc48a48",
+          "depth:az330_el-35:depth.exr": "8c538189a53f5685fc7f6f28f9826433fb18536244f8ef8b1921de7c61369c2c",
+          "depth:az30_el15:depth.exr": "a43992d5740d60ce0102ac5da52e746406d3cc021eabd8fca58f8031b6f641fc",
+          "depth:az90_el15:depth.exr": "ba5ff3bcad39069e17abe6692eedbfa27e6a9bfda998669c6092ca70a35a5229",
+          "depth:az120_el15:depth.exr": "d4b6ddf9299a09fb18583769650dfd0f167458ef4afede219463428affd7ef56",
+          "depth:az150_el15:depth.exr": "0e61aead916e616cb20470898928394fa2eb91fe796c414511f8340fdf270416",
+          "depth:az210_el15:depth.exr": "425c6d121e1aa2c832e473193210965fcaffbacf804613fefcb3e3907fe82e56",
+          "depth:az240_el15:depth.exr": "779d67e85cdf0b16b69a24583bcb9696d9ca75b22f6278556229b12dd612a405",
+          "depth:az270_el15:depth.exr": "5adc347d0c8d68a740b59643112a19f2eae07b62309a47c27def67873ba7878e",
+          "depth:az330_el15:depth.exr": "f24e5bd02779c16bf91cc58b57a44512f66bef959e5bd9394ddd8be5b4cd383d",
+          "depth:az0_el55:depth.exr": "031d2b58c528d5968e6151069d7a659a0d8961117d4ece38157bc01380713030",
+          "depth:az30_el55:depth.exr": "158dad94ad0d6ed6bf406f40a035e0e5536af3bdf44468e60a3f263679d729fc",
+          "depth:az60_el55:depth.exr": "50631121ad757ae9135509cba50fd0b44cfd39f6bcc3452c016ac432f89d775c",
+          "depth:az90_el55:depth.exr": "bed1fb66c456c18614cd9e79ca7c2316a3847663a6beed80206bc078de538ded",
+          "depth:az120_el55:depth.exr": "0c0c65fd2642f71bc9ff6b0fd9c91f1d15668dc7027859b6ff53cdbdc12214af",
+          "depth:az150_el55:depth.exr": "b378b047807c51c3d834c0d24bcc595953d6d0fbbd726ae5f2bfcb483771440b",
+          "depth:az180_el55:depth.exr": "aecb212739c636a2f8c79105abd533b5ae5f2707d62f0ff4bc8d7cfbb1ad22cf",
+          "depth:az210_el55:depth.exr": "5d3efc03c9c5dd7f8f66f661e005812791f48b788f52b50cfdcb6cfae5882e15",
+          "depth:az240_el55:depth.exr": "8eb97311b397438c74ead7b051fdaa03e17cf1e4c1ec362e09246853ec2aed50",
+          "depth:az270_el55:depth.exr": "9e0bfe014b9498369e9e7ac7bd7a342caf702d3faa1fb3c64e1e875fb7c07ee8",
+          "depth:az300_el55:depth.exr": "a4b3c7bc3ef7eb2c9cef56f52a552cc25cee3d6311f103b03f4bf607b5332827",
+          "depth:az330_el55:depth.exr": "e4170594773309347cf55e1e99e229d1fdf628a2062f778931b7992f35e1fb43",
+          "depth:az0_el75:depth.exr": "8f110b5432d8651f3f5e41ecc5407df59700296271ec4469589e29c0ca807d77"
+        },
+        "key": "d94430cce68a6abb79e22dcee68e664dc749186e2b162aa2d960cf0e32f37573",
+        "outputs": {
+          "nbv:extras.json": "7e16dc8ce9d1925bd6ebf91db435e65b4be6e7ce9797619a25c2c5a31e9f5551",
+          "nbv:reachable.npy": "9efdc96e397269636e2f243375645c56a5b08005fd9ef5953cbb32e6dbb9eb3e"
+        },
+        "measurements": {},
+        "elapsed_s": 20.3,
+        "hit": true
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_0",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+          "view_hints": [
+            "front view",
+            "back view"
+          ],
+          "canvas_seed": 2100,
+          "width": 3072,
+          "height": 1536,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az0_el15:depth.png": "42add5fe38e136b9e499da7f34979c236a547b089ed6ebb0f42025d2efef9937",
+          "depth:az180_el15:depth.png": "b536fe1c84c16eec833244da4047f32343d019549831cfdc6d1ae72f4d3f4902"
+        },
+        "key": "a6660906cc260ad8f8016c15fb7b1b42181d989b5fa64600fbacbaa728125ce2",
+        "outputs": {
+          "generate:canvas_0:canvas.png": "9ea702b93adfaf9582a4fd465534d45b43f22f5da0cefa6d31b2db1fe1ff74a5",
+          "generate:canvas_0:manifest.json": "b2977e45f9ade142f84771e2864c2e18c2669c3003d691516fccca2fd24a3f3e",
+          "generate:canvas_0:gen_0.png": "93686ab26a9ae3cd9bb6a86f17dcb9a5f7be19ccbf511b9d98aa963043dfaddc",
+          "generate:canvas_0:gen_1.png": "9957ffcdb1ec122d23ec2e2e6de47249d88e70ddfa7f87ccf565f97e46399dbf"
+        },
+        "measurements": {},
+        "elapsed_s": 73.1,
+        "hit": true
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_1",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+          "view_hints": [
+            "three-quarter view",
+            "three-quarter view"
+          ],
+          "canvas_seed": 2101,
+          "width": 3072,
+          "height": 1536,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az60_el15:depth.png": "1fddd0c53f0dbdf66d6299ffe1ea1e9f0b09cd18bceca432ceda7116fb6fac8c",
+          "depth:az300_el15:depth.png": "9a99107e9892463f9f0d4352ad03afeb4953ec430803295afbd4909ec1623ee1"
+        },
+        "key": "e573501ba9a0b04bb73ba5ae877148f0c422b07075b6b56157638d41274ce0ee",
+        "outputs": {
+          "generate:canvas_1:canvas.png": "af48fbee19bdb9408ba975ae0427c4cb11f4d15aca7fe2f42d1a608a3514b72a",
+          "generate:canvas_1:manifest.json": "162987b38fb5c52030d088cc060f9aa9ffe8d4e40566a999d4bfc997233b2ac3",
+          "generate:canvas_1:gen_0.png": "d6783cdfd4fed76c736f81c4dfb96a14ba7c6671ed9d8fdab2c6d0f450d6b308",
+          "generate:canvas_1:gen_1.png": "b398c740f5b933261e9c2720ef1437077e15b65213db89ef0c09cffd9d11ba23"
+        },
+        "measurements": {},
+        "elapsed_s": 74.3,
+        "hit": true
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_2",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+          "view_hints": [
+            "back view, seen from below",
+            "three-quarter view, seen from above"
+          ],
+          "canvas_seed": 2102,
+          "width": 3072,
+          "height": 1536,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az150_el-35:depth.png": "432647c8248717c55a7de6b551c312daf0031efe420613a501ed996deb8a0b44",
+          "depth:az60_el55:depth.png": "9f52235d11e6c69705629df2938068796f8ac303322ee2783d71bcc6116d7a6d"
+        },
+        "key": "7bcec82403021f36e71639e0a6b51ffd0f0afc88c7e172a0edbb35f199297e21",
+        "outputs": {
+          "generate:canvas_2:canvas.png": "f04c27cadead6029e57bff1f23bf58838f056d8be87b62c92a3c41b74f8c1f2a",
+          "generate:canvas_2:manifest.json": "85ccdac5b834e6921f4e8449a75a860fcec1e8dd48aa339ffeae77cce777d924",
+          "generate:canvas_2:gen_0.png": "4a56159a57e772029208f9485158c73cb98b372457ab04cd6a382ca4bd336607",
+          "generate:canvas_2:gen_1.png": "b7284eff73c4e1533e17c160c692f902b255b1a60ceec1b710dda30d8f794b90"
+        },
+        "measurements": {},
+        "elapsed_s": 73.4,
+        "hit": false
+      },
+      {
+        "stage": "generate",
+        "unit": "canvas_3",
+        "version": "e04e0e3cdbf64d4ce1c921dff2b34b2151a3f2c36e7b8b4a6c4bc021494ef941",
+        "params": {
+          "subject": "weathered stone wayside cross, pale sun-bleached limestone, soot-darkened carvings",
+          "view_hints": [
+            "front view, seen from above",
+            "three-quarter view"
+          ],
+          "canvas_seed": 2103,
+          "width": 3072,
+          "height": 1536,
+          "comfy": "comfyui 700821e1364eaab0e8f21c538a2131719fec57bf torch 2.13.0+cu130 13.0"
+        },
+        "inputs": {
+          "workflow:prop_multiview.json": "59bad70a845e9f4f4cf77d5a542733b2eebd06bd64eafe9a0d8d8951dc1f1463",
+          "model:z_image_turbo_bf16.safetensors": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+          "model:qwen_3_4b_fp8_mixed.safetensors": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+          "model:ae.safetensors": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+          "depth:az0_el55:depth.png": "137cc0c0dccfea06e387679cb1d18ddfa4dd107dec327f2070250b802d408f57",
+          "depth:az240_el15:depth.png": "cdc3bfb4eb852cece94e17706b51db6686e891be67493ab1a4ebbd20b58d101b"
+        },
+        "key": "a49eb7e0cd244996d88d8f83ddf909c578969d4127da3a9e39dd18b49d9597a2",
+        "outputs": {
+          "generate:canvas_3:canvas.png": "c88af3e6e91725aeeb074c04a6c3b0a14bf62f01a7387c1b8b51b822e669987f",
+          "generate:canvas_3:manifest.json": "2143c9d9fe100f30961488907a8b52142d9bb70dd46f450dec6e36638bb8a2b7",
+          "generate:canvas_3:gen_0.png": "a84ad79b6ac96d0f97468a98599596a90504bcf3f9956850665e880480f3fc56",
+          "generate:canvas_3:gen_1.png": "3e52bf00ba9e5685ee947e767b50f4ed63ead3c12a1f62cad713672c664477e9"
+        },
+        "measurements": {},
+        "elapsed_s": 71.3,
+        "hit": false
+      },
+      {
+        "stage": "blend",
+        "unit": null,
+        "version": "81f6c812fb0c61b19369c1cff64b62ae3db2a8b8fc6fdb907daa2cf6cced79e5",
+        "params": {
+          "albedo_source": "direct",
+          "views": [
+            {
+              "azimuth_deg": 0.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 60.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 180.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 300.0,
+              "elevation_deg": 15.0
+            },
+            {
+              "azimuth_deg": 150.0,
+              "elevation_deg": -35.0
+            },
+            {
+              "azimuth_deg": 60.0,
+              "elevation_deg": 55.0
+            },
+            {
+              "azimuth_deg": 0.0,
+              "elevation_deg": 55.0
+            },
+            {
+              "azimuth_deg": 240.0,
+              "elevation_deg": 15.0
+            }
+          ],
+          "numpy_cv2": "numpy 2.3.4 cv2 5.0.0"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded",
+          "atlas:pos.npy": "6ac41d6cc18e9e4f0e2dbac71bb64b83e1a5b464a56b1092ca84e8a3b921facb",
+          "atlas:nrm.npy": "7a92af6eefe7a55d35e889f89e335a21ae9d7eb3753b94955f7b6525b7bb01a5",
+          "atlas:island.npy": "2258fc33a450b76a4651323afccfd5a4b6a55e048602c2de857cdce770cab847",
+          "depth:az0_el15:depth.exr": "e04d765d08e1392b94bdc282d674266ccbf1e6d08cd4ec97db97770ca553fee1",
+          "depth:az60_el15:depth.exr": "add9267cca3f28eebc6f12579721f897ca2da0c4814f3e40136d0fd0475d3868",
+          "depth:az180_el15:depth.exr": "790f58fa145894c2c4e9b8bd4d24a3733e0c2f480239e004fa568c69e9bdadf4",
+          "depth:az300_el15:depth.exr": "cec9846ea8b2bacbbc10a96730d2bfa7783c86fcf9c1e7eb10c3e381a1bd85c7",
+          "depth:az150_el-35:depth.exr": "ea1e3270f2ae51d6315bc9943fcca7186fe720e7fbc52752a85cb95ad8db1cb9",
+          "depth:az60_el55:depth.exr": "50631121ad757ae9135509cba50fd0b44cfd39f6bcc3452c016ac432f89d775c",
+          "depth:az0_el55:depth.exr": "031d2b58c528d5968e6151069d7a659a0d8961117d4ece38157bc01380713030",
+          "depth:az240_el15:depth.exr": "779d67e85cdf0b16b69a24583bcb9696d9ca75b22f6278556229b12dd612a405",
+          "generate:canvas_0:gen_0.png": "93686ab26a9ae3cd9bb6a86f17dcb9a5f7be19ccbf511b9d98aa963043dfaddc",
+          "generate:canvas_1:gen_0.png": "d6783cdfd4fed76c736f81c4dfb96a14ba7c6671ed9d8fdab2c6d0f450d6b308",
+          "generate:canvas_0:gen_1.png": "9957ffcdb1ec122d23ec2e2e6de47249d88e70ddfa7f87ccf565f97e46399dbf",
+          "generate:canvas_1:gen_1.png": "b398c740f5b933261e9c2720ef1437077e15b65213db89ef0c09cffd9d11ba23",
+          "generate:canvas_2:gen_0.png": "4a56159a57e772029208f9485158c73cb98b372457ab04cd6a382ca4bd336607",
+          "generate:canvas_2:gen_1.png": "b7284eff73c4e1533e17c160c692f902b255b1a60ceec1b710dda30d8f794b90",
+          "generate:canvas_3:gen_0.png": "a84ad79b6ac96d0f97468a98599596a90504bcf3f9956850665e880480f3fc56",
+          "generate:canvas_3:gen_1.png": "3e52bf00ba9e5685ee947e767b50f4ed63ead3c12a1f62cad713672c664477e9"
+        },
+        "key": "28e310cd886d14dae3a58e046ae10eeb4146168b300740d307ee4f1f56bc0801",
+        "outputs": {
+          "blend:base.png": "c9ed441d7b285ad152ef8084934ed4fb1567534aaad4bd82c418ce489f7e7653",
+          "blend:coverage.json": "71b724c9a0be373395665ae9dc28f76b1a7b904ecc8abd551b5788b026b94076"
+        },
+        "measurements": {
+          "blend_coverage": 0.7303,
+          "hole_texels": 752912,
+          "max_hole_depth_frac": 0.0558
+        },
+        "elapsed_s": 13.8,
+        "hit": false
+      },
+      {
+        "stage": "bake_normal",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 2048,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded",
+          "clean_hires.glb": "6abb82938708433e3ff0bb9db058842b9b588ee6110cebaa14c827cad7bd6277"
+        },
+        "key": "b5096403b4fd5986fca2edf4fe44631ee0aa2ef9459fd1fbdf20760d62ecf4f4",
+        "outputs": {
+          "bake_normal:normal.png": "1490450694eef29f9f6d3c000bfecd74edf73d2c1b50b024de03e797790cb37a"
+        },
+        "measurements": {},
+        "elapsed_s": 1.0,
+        "hit": false
+      },
+      {
+        "stage": "bake_ao",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "texture_size": 2048,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded",
+          "clean_hires.glb": "6abb82938708433e3ff0bb9db058842b9b588ee6110cebaa14c827cad7bd6277"
+        },
+        "key": "ec4706f9d66df50f2f9e311b3e919114fd8fd997636b5b757a5a294719418ce5",
+        "outputs": {
+          "bake_ao:occlusion.png": "2189612c4c21c56dbb0300d5a8ceacec4ee1104c12c096ab148b5f976e24b8ca"
+        },
+        "measurements": {},
+        "elapsed_s": 14.0,
+        "hit": false
+      },
+      {
+        "stage": "export",
+        "unit": null,
+        "version": "f4a2ccce171dabc39ef757b009aa73785879de3de17c3b926aed5d79d3de9071",
+        "params": {
+          "metallic": 0.0,
+          "roughness": 0.85,
+          "detail": true,
+          "blender": "5.2.0 LTS fbe6228777e7"
+        },
+        "inputs": {
+          "clean.glb": "9d8433a1b99dd25a839e1aafbdfe3b8e9ed528a984c03334b65950635116fded",
+          "blend:base.png": "c9ed441d7b285ad152ef8084934ed4fb1567534aaad4bd82c418ce489f7e7653",
+          "bake_normal:normal.png": "1490450694eef29f9f6d3c000bfecd74edf73d2c1b50b024de03e797790cb37a",
+          "bake_ao:occlusion.png": "2189612c4c21c56dbb0300d5a8ceacec4ee1104c12c096ab148b5f976e24b8ca"
+        },
+        "key": "cfc1122104bc653d153654cdb3df303a3473bf4c19a951828fd79d446ae4b19c",
+        "outputs": {
+          "export:textured.glb": "637bfe035acd8cbaa639ecf6dd5be3049fe495fc84167a1e0a9d075d3bb073c6"
+        },
+        "measurements": {},
+        "elapsed_s": 0.4,
+        "hit": false
       }
     ],
-    "extra_views": [
-      {
-        "hint": "back view, seen from below",
-        "azimuth_deg": 150,
-        "elevation_deg": -35.0,
-        "predicted_gain_texels": 266371,
-        "predicted_gain_frac": 0.0929
-      }
-    ],
-    "pbr_estimator": {
-      "model": "xanderhuang/material_estimator",
-      "steps": 50,
-      "resolution": 768,
-      "estimated_views": [
-        0,
-        1,
-        2,
-        3,
-        4
-      ],
-      "elapsed_s": 47.0,
-      "views": [
-        {
-          "seed": 21000,
-          "albedo_sha256": "2810bc8abc765cf1b2b05668b3dbafcb3a316abae66e8a1cfb974882be901620",
-          "rm_sha256": "10c7eb588a77c394b5646efa35b0087425851b974d6c93cd32dcc467b470c8db"
-        },
-        {
-          "seed": 21001,
-          "albedo_sha256": "f9c7f588f2d186cfefc96754dd418a2bcf3153a8e0a52c8c59ff61229a386bc4",
-          "rm_sha256": "479cc1e43092d2a732b1913af91fc63933a31020692b6683b11b75cd79244cb5"
-        },
-        {
-          "seed": 21002,
-          "albedo_sha256": "15aca569874b63ee020042457aed616afc5c3fdb40ae36779546f636661bf9e1",
-          "rm_sha256": "37b7db98f8920c827a5212b84d65d7c24b2ddd71bde1a6d66463efb1f3c46c11"
-        },
-        {
-          "seed": 21003,
-          "albedo_sha256": "a1190b72c56168473c399ee896ceaafb67e1e1891ac32ba1383317cdd04939f4",
-          "rm_sha256": "d6233bbf5b2ef1d648723461a380b2dfb9f10aeab608a2ef620068b9c4ad1779"
-        },
-        {
-          "seed": 21004,
-          "albedo_sha256": "b4a8262b5b8331cfd4f539a252a3dfa2e5a28c091df87dd319a41df6144460e8",
-          "rm_sha256": "80a6ca326510c5bc44dd0c65a505186254b99b31ddb0d49ef69e3fe9bfdd0605"
-        }
-      ]
-    },
-    "weight_exponent": 2.0,
-    "occlusion_eps": 0.02,
-    "edge_pad_px": 8,
-    "depth_dilate_px": 5,
-    "blend_coverage": 0.5743,
-    "hole_texels": 1221079,
-    "dielectric": true,
-    "metal_fraction": 0.0241,
-    "texture_size": 2048,
-    "base_bake_s": 258.5,
-    "normal_bake_s": 0.8,
-    "textured_glb": "C:\\Users\\egm_8\\IdeaProjects\\vordar\\target\\prop-batch\\b3\\crucero\\cand_21\\textured.glb",
-    "textured_glb_sha256": "3cd8efe435e1d4632a82806715fdffc2a6d1b96fadff7379d631ff27d39e6e8d"
+    "elapsed_s_total": 352.4,
+    "textured_glb_sha256": "637bfe035acd8cbaa639ecf6dd5be3049fe495fc84167a1e0a9d075d3bb073c6"
   },
   "preprocess": {
-    "textured_glb_bytes": 10544288,
-    "final_glb_bytes": 10544260
+    "textured_glb_bytes": 13094800,
+    "final_glb_bytes": 13094772
   },
   "bake": {
-    "source": "final.glb",
-    "sha256": "e0dbb896299b14f0bdbb2f67aa4224d07c6b04f70ba18d94c231b8fbed2892d3",
+    "source": "crucero.glb",
+    "sha256": "637bfe035acd8cbaa639ecf6dd5be3049fe495fc84167a1e0a9d075d3bb073c6",
     "images": [
       {
         "index": 0,
@@ -317,17 +1397,17 @@
       },
       {
         "index": 1,
-        "slot": "base",
+        "slot": "ao",
         "file": "img1.dds"
       },
       {
         "index": 2,
-        "slot": "mr",
+        "slot": "base",
         "file": "img2.dds"
       }
     ]
   },
-  "final_glb_sha256": "e0dbb896299b14f0bdbb2f67aa4224d07c6b04f70ba18d94c231b8fbed2892d3",
+  "final_glb_sha256": "637bfe035acd8cbaa639ecf6dd5be3049fe495fc84167a1e0a9d075d3bb073c6",
   "turntable": {
     "angles": 8,
     "size": "512x512",

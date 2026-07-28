@@ -1,6 +1,6 @@
 {
   "source": "broken_column.glb",
-  "sha256": "681c6b20d7d032ef66837f6203adb95e14d241459d7c8608334a73fe7bfcec63",
+  "sha256": "cd04662db215406f88e58a93efad67028114809a6478113c4802955b7288dd45",
   "images": [
     {
       "index": 0,
@@ -9,12 +9,12 @@
     },
     {
       "index": 1,
-      "slot": "base",
+      "slot": "ao",
       "file": "img1.dds"
     },
     {
       "index": 2,
-      "slot": "mr",
+      "slot": "base",
       "file": "img2.dds"
     }
   ]
