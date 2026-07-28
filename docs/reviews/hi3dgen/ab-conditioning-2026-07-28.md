@@ -73,7 +73,7 @@ between the two normals over the object: **2.5 deg (candelabra, p95 7.8) /
 ("detail pixels" = the top decile of conditioning-image luminance gradient
 inside the object — folds, ornament, thin edges.)
 
-### Radial spectrum says the opposite, and it is the decisive evidence
+### Radial spectrum — invalid as evidence (correction, see below)
 
 Fraction of spectral energy per ring (fraction of Nyquist), Hann-windowed:
 
@@ -84,11 +84,20 @@ Fraction of spectral energy per ring (fraction of Nyquist), Hann-windowed:
 | crucero | 768 | 0.99260 | 0.00560 | 0.00145 | **0.00032** |
 | crucero | 1024 | 0.99065 | 0.00563 | 0.00200 | **0.00146** |
 
-The top octave is exactly the band a 768-processed map cannot legitimately
-occupy — 768/1024 = 0.75 of Nyquist. There 1024 carries **3.9x** (candelabra)
-and **4.6x** (crucero) the energy. The 0.5–0.75 ring agrees (+34%, +38%). The
-same ordering holds on the auto-selected high-detail ROI
-(candelabra 0.00643 vs 0.00176; crucero 0.00197 vs 0.00056).
+**Correction (finding 7, hi3dgen reworks queue):** this section originally
+called the top-octave gap "the decisive evidence" for 1024, reasoning that a
+768-processed map cannot legitimately occupy that band. That premise is
+false — both arms denoise at 768 (`--normal-resolution` selects only the
+resample chain wrapped around the same 768 YOSO pass; `processing_resolution`
+never reaches the pipeline). So neither arm carries legitimate signal above
+0.75 of the 1024-frame Nyquist; the entire top-octave gap above is resample
+artifact — LANCZOS overshoot and mask-edge ringing from the 768 arm's two
+extra 8-bit PIL resamples, not denoised detail unique to 1024. The numbers in
+the table are real measurements and are left as recorded, but they support no
+conclusion about which arm resolves more detail. The 0.5–0.75 ring and the
+high-detail-ROI numbers below are the same artifact, not corroboration.
+(candelabra 0.00643 vs 0.00176; crucero 0.00197 vs 0.00056 — unchanged
+figures, same caveat.)
 
 Meanwhile coarse relief is flat: gradient magnitude after a sigma=3 blur is
 0.0545 (768) vs 0.0541 (1024) on candelabra and 0.0334 vs 0.0324 on crucero —
@@ -148,12 +157,22 @@ Full `prop_hi3dgen.py` runs, seed 20260728, `--normal-resolution` 768 vs 1024:
 
 ## Recommendation (the call is the user's)
 
-**Set `--normal-resolution` default to 1024.** It is the predictor's own
-default, it removes two resampling steps from the stage, it carries ~4x the
-genuine top-octave energy on both subjects, it visibly resolves the thin
-ornament and stone-chip detail the dark-fantasy vocabulary is built on, it
-produces materially more geometric relief on the ornament-heavy subject and no
-regression on the other, and it costs nothing measurable in time or VRAM.
+**Set `--normal-resolution` default to 1024.** The predictor still denoises
+at 768 in both arms (see the radial-spectrum correction above), so the
+top-octave energy gap is not the reason. The reason that holds: 1024 is the
+strictly cleaner resample chain around the same 768 denoise — one float,
+pre-quantization resample each way instead of 768's two lossy 8-bit LANCZOS
+passes (including an upsample of an already-quantized, hard-masked map) — at
+identical cost. That chain difference is what the zoom panels and the
+angular-difference numbers in Axis 1 actually show: it visibly resolves the
+thin ornament and stone-chip detail the dark-fantasy vocabulary is built on,
+it produces materially more geometric relief on the ornament-heavy subject
+and no regression on the other, and it costs nothing measurable in time or
+VRAM. For future normal-map comparisons, use the angular-domain suite (mean/
+p95 angular difference, detail-pixel angular gradient, speckle fraction) as
+the instrument, not the radial spectrum — it is invalid whenever the two
+arms being compared share a denoising resolution but differ in resample
+chain, which is the situation here.
 
 **Leave `--crop-from-original` off.** It is provably a no-op while concepts are
 generated at 1024x1024. Revisit it in the same breath as any decision to raise

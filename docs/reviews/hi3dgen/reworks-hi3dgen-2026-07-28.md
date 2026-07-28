@@ -16,7 +16,7 @@ fork we own.
 
 Queue (single cross-file sequence, mirrored from the fixes file):
 finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
-finding 7 → finding 8 → finding 9 → finding 10 → finding 11 → finding 12 →
+finding 7 → ~~finding 8~~ → finding 9 → finding 10 → finding 11 → finding 12 →
 finding 13 → finding 14 → finding 15 → finding 16 → finding 17 → **rework 1** →
 finding 18 → finding 19 → finding 20 → finding 21 → finding 22 → finding 23 →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
@@ -93,8 +93,20 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `7/10` — a quality knob the queue believes it has already tuned, and does not have.
 - **Cost:** `4/10` — small plumbing change, plus a re-run of finding 12's A/B under §8.
 - **Path:** plumb `processing_resolution` → confirm the manifest resolution matches the denoiser's actual working size → re-run the 768/1024 grid on the same two subjects.
+- **Status (2026-07-28):** CONFIRMED — `--normal-resolution` never reaches the
+  denoiser; both arms of every past grid denoised at 768. Still open: the Path
+  above (plumb `processing_resolution` through, then re-run the 768/1024 grid
+  with the angular instrument and ≥2 repeats per cell). The instrument dispute
+  raised alongside this finding is settled: the radial-spectrum top-octave
+  reading in `ab-conditioning-2026-07-28.md` was measuring resample artifact,
+  not denoised detail, and is corrected there; the angular-domain suite
+  (mean/p95 angular difference, detail-pixel angular gradient, speckle
+  fraction) is the instrument for future normal-map comparisons. The default
+  stays `--normal-resolution 1024` meanwhile — it is the strictly cleaner
+  resample chain around the same 768 denoise, independent of this finding's
+  outcome — and is not a defense against the re-run above.
 
-### 8. The local normal-predictor load in `prop_hi3dgen.py` is dead code; every run silently takes the network fallback
+### ~~8. The local normal-predictor load in `prop_hi3dgen.py` is dead code; every run silently takes the network fallback~~
 - **Evidence:** Measured while running audit finding 13's A/B. `scripts/ai-pipeline/prop_hi3dgen.py:290-305` calls `torch.hub.load(<local snapshot>, …, source="local", pretrained=True, …)`, but neither `hub:hubconf.py` entrypoint (`StableNormal`, `StableNormal_turbo`) accepts a `pretrained` argument — the call raises `TypeError: StableNormal_turbo() got an unexpected keyword argument 'pretrained'` on every invocation, is swallowed by the bare `except Exception`, and the fallback `torch.hub.load("hugoycj/StableNormal", …, trust_repo=True)` runs instead. Reproduced directly: dropping `pretrained=True` makes the local branch load successfully.
 - **Ideal:** The offline-pinned local snapshot is what loads; the network branch is a real fallback that never fires in normal operation.
 - **Gap:** The intended offline path has never executed. `HF_HUB_OFFLINE=1` guards HF hub fetches but not `torch.hub`'s GitHub resolution, so the fallback is one cache eviction away from a network fetch (or a hard failure) inside a pipeline that is supposed to be reproducible offline. The bare `except Exception` is what hides it.
@@ -102,3 +114,4 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `5/10` — reproducibility/offline guarantee, no output change today.
 - **Cost:** `1/10`
 - **Path:** delete the kwarg → run one candidate and confirm no `Using cache found in` / network resolution for the StableNormal repo → decide the fallback's fate.
+- **Done (2026-07-28):** `pretrained=True` and the network-fallback try/except both deleted; the local `source="local"` load now succeeds unconditionally (verified: `StableNormal_turbo` loads clean, no network resolution). The snapshot's `.py` files are now pinned in `models.sha256` under `Hi3DGen/StableNormal-hub/` with a matching `check_weights.py` root (54/54 OK).

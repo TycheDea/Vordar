@@ -23,6 +23,10 @@ os.environ["SPCONV_ALGO"] = "native"
 # hard guard against silently falling back to a network fetch (e.g. a repo
 # id typo) rather than failing loudly.
 os.environ["HF_HUB_OFFLINE"] = "1"
+# Required by torch.use_deterministic_algorithms for CUDA >= 10.2's
+# deterministic cuBLAS GEMM/matmul kernels; must be set before the CUDA
+# context is created.
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
 import random
 import subprocess
@@ -286,23 +290,13 @@ def main():
     normal_load_kwargs = {"yoso_version": YOSO_VERSION}
     if args.normal_model == "full":
         normal_load_kwargs["diffusion_version"] = STABLE_NORMAL_DIFFUSION_VERSION
-    try:
-        normal_predictor = torch.hub.load(
-            os.path.join(torch.hub.get_dir(), STABLE_NORMAL_HUB_SNAPSHOT),
-            normal_entrypoint,
-            source="local",
-            local_cache_dir=str(REPO_DIR / "weights"),
-            pretrained=True,
-            **normal_load_kwargs,
-        )
-    except Exception:
-        normal_predictor = torch.hub.load(
-            "hugoycj/StableNormal",
-            normal_entrypoint,
-            trust_repo=True,
-            local_cache_dir=str(REPO_DIR / "weights"),
-            **normal_load_kwargs,
-        )
+    normal_predictor = torch.hub.load(
+        os.path.join(torch.hub.get_dir(), STABLE_NORMAL_HUB_SNAPSHOT),
+        normal_entrypoint,
+        source="local",
+        local_cache_dir=str(REPO_DIR / "weights"),
+        **normal_load_kwargs,
+    )
 
     t_loaded = time.perf_counter()
     resident = {"after_load": resident_gib()}

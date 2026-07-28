@@ -24,6 +24,8 @@ PREFIX_ROOTS = [
      "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4"),
     ("Hi3DGen/DINOv2/",
      Path.home() / ".cache" / "torch" / "hub" / "checkpoints"),
+    ("Hi3DGen/StableNormal-hub/",
+     Path.home() / ".cache" / "torch" / "hub" / "hugoycj_StableNormal_main"),
     ("Hi3DGen/",
      Path(r"C:\tools\Hi3DGen\Hi3DGen\weights")),
 ]
