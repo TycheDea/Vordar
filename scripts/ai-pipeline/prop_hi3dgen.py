@@ -212,11 +212,11 @@ def check_matte(rgba: Image.Image) -> float:
 
 def matte_concept(pipeline: Hi3DGenPipeline, image: Image.Image) -> Image.Image:
     """BiRefNet background-removal matte at the concept image's own
-    resolution/framing -- mirrors preprocess_image()'s internal
-    resize-if-large + mask steps but stops short of its bbox crop/pad/resize,
-    so the alpha lines up pixel-for-pixel with the untouched concept image. This is what the texturing stage (prop_texture.py)
-    projects: it needs the object's silhouette and the sampled pixels to
-    come from the same frame, not Hi3DGen's cropped/centered working copy."""
+    resolution/framing. Mirrors preprocess_image()'s internal resize-if-large
+    + mask steps but stops short of bbox crop/pad/resize, so the alpha lines
+    up pixel-for-pixel with the untouched concept image. Used as the
+    conditioning source for preprocess_image(), which accepts RGBA and reuses
+    the matte directly instead of re-running BiRefNet."""
     rgb = image.convert("RGB")
     max_size = max(rgb.size)
     scale = min(1, 1024 / max_size)
