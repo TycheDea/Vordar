@@ -470,7 +470,18 @@ StableNormal's YOSO predictor's own internal `torch.hub.load` on first run,
 into the default torch hub cache, and is reused on every run after.
 
 SHA256 for every downloaded weight file: `scripts/ai-pipeline/models.sha256`
-(one `Hi3DGen/<relative-path>` line per file).
+(one `Hi3DGen/<relative-path>` line per file). Verify them against disk
+(offline, no GPU, no server) before a generation batch:
+
+```
+python scripts/ai-pipeline/check_weights.py
+```
+
+Re-hashes every `Hi3DGen/...` manifest line against its real root from the
+table above (Hi3DGen's own `weights/`, the BiRefNet HF hub snapshot, or the
+DINOv2 torch hub checkpoint cache). Exit 0 = every file matches; non-zero
+prints each offending path with its expected vs. actual hash, or flags a
+missing file.
 
 ### Scripts
 
@@ -642,7 +653,10 @@ generation with a provided image — re-rolls geometry and everything
 downstream of it without spending a new Z-Image concept. **One seed per
 command:** one invocation is one candidate; a batch is the caller looping
 seeds across separate foreground invocations, never one script call for N
-candidates, so every command stays under the shell's timeout budget.
+candidates, so every command stays under the shell's timeout budget. Run
+`check_weights.py` (above) once before starting a seed batch — a corrupted or
+swapped Hi3DGen weight fails every candidate the same way, and the manifest
+check is seconds, not a wasted geometry stage.
 **VRAM sequencing (forced by the 11.5 GiB Hi3DGen peak above): ComfyUI must
 never be up while a geometry stage runs.** Every ComfyUI stage owns its
 server lifecycle (`comfy_run.server()`): the concept stage and the
