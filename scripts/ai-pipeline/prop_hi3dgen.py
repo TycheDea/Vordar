@@ -52,6 +52,11 @@ from hi3dgen.pipelines import Hi3DGenPipeline  # noqa: E402
 GEOMETRY_WEIGHTS = REPO_DIR / "weights" / "trellis-normal-v0-1"
 NORMAL_WEIGHTS_REPO = "Stable-X/yoso-normal-v1-8-1"
 YOSO_VERSION = "yoso-normal-v1-8-1"
+# The full pipeline warm-starts its multi-step SD refinement from the YOSO
+# estimate above, so both weight sets load together (hub:hubconf.py StableNormal()).
+STABLE_NORMAL_FULL_REPO = "Stable-X/stable-normal-v0-1"
+STABLE_NORMAL_DIFFUSION_VERSION = "stable-normal-v0-1"
+NORMAL_ENTRYPOINTS = {"turbo": "StableNormal_turbo", "full": "StableNormal"}
 BIREFNET_REPO = "ZhengPeng7/BiRefNet"
 BIREFNET_REVISION = "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4"
 STABLE_NORMAL_HUB_SNAPSHOT = "hugoycj_StableNormal_main"
@@ -218,6 +223,8 @@ def main():
     parser.add_argument("--ss-cfg", type=float, default=SS_CFG_DEFAULT, help="Sparse structure stage CFG guidance strength.")
     parser.add_argument("--slat-cfg", type=float, default=SLAT_CFG_DEFAULT, help="Structured latent stage CFG guidance strength.")
     parser.add_argument("--normal-resolution", type=int, default=NORMAL_RESOLUTION_DEFAULT, help="StableNormal processing resolution.")
+    parser.add_argument("--normal-model", choices=sorted(NORMAL_ENTRYPOINTS), default="turbo", help="StableNormal predictor: single-step turbo (fast) or the full two-stage SD-based refinement (slower, sharper high-frequency detail).")
+    parser.add_argument("--normal-steps", type=int, default=None, help="Override the normal predictor's denoising steps (turbo is a fixed single step regardless of this value).")
     parser.add_argument("--crop-from-original", action="store_true", help="Take the object crop from full-resolution pixels instead of the <=1024 matte copy.")
     args = parser.parse_args()
     args.out = args.out.resolve()
@@ -232,22 +239,26 @@ def main():
     hi3dgen_pipeline.cuda()
     preload_birefnet(hi3dgen_pipeline)
 
+    normal_entrypoint = NORMAL_ENTRYPOINTS[args.normal_model]
+    normal_load_kwargs = {"yoso_version": YOSO_VERSION}
+    if args.normal_model == "full":
+        normal_load_kwargs["diffusion_version"] = STABLE_NORMAL_DIFFUSION_VERSION
     try:
         normal_predictor = torch.hub.load(
             os.path.join(torch.hub.get_dir(), STABLE_NORMAL_HUB_SNAPSHOT),
-            "StableNormal_turbo",
-            yoso_version=YOSO_VERSION,
+            normal_entrypoint,
             source="local",
             local_cache_dir=str(REPO_DIR / "weights"),
             pretrained=True,
+            **normal_load_kwargs,
         )
     except Exception:
         normal_predictor = torch.hub.load(
             "hugoycj/StableNormal",
-            "StableNormal_turbo",
+            normal_entrypoint,
             trust_repo=True,
-            yoso_version=YOSO_VERSION,
             local_cache_dir=str(REPO_DIR / "weights"),
+            **normal_load_kwargs,
         )
 
     t_loaded = time.perf_counter()
@@ -273,7 +284,10 @@ def main():
     # hi3dgen_pipeline.run() below reseeds again for its own stages, the same
     # global-RNG convention it already uses internally.
     torch.manual_seed(seed)
-    normal_image = normal_predictor(image, resolution=args.normal_resolution, match_input_resolution=True, data_type="object")
+    normal_image = normal_predictor(
+        image, resolution=args.normal_resolution, match_input_resolution=True,
+        data_type="object", num_inference_steps=args.normal_steps,
+    )
     # The normal map is the geometry stage's only input: keeping it splits a
     # bad mesh into "the normal predictor saw it wrong" vs "the sampler built
     # it wrong", which the mesh alone cannot distinguish.
@@ -314,6 +328,7 @@ def main():
         "weights": {
             "geometry": str(GEOMETRY_WEIGHTS),
             "normal": NORMAL_WEIGHTS_REPO,
+            "normal_diffusion": STABLE_NORMAL_FULL_REPO if args.normal_model == "full" else None,
             "birefnet": BIREFNET_REPO,
         },
         "input_image": str(args.image),
@@ -323,6 +338,8 @@ def main():
         "normal": str(normal_path),
         "normal_sha256": hashlib.sha256(normal_path.read_bytes()).hexdigest(),
         "normal_resolution": args.normal_resolution,
+        "normal_model": args.normal_model,
+        "normal_steps": args.normal_steps,
         "crop_from_original": args.crop_from_original,
         "seed": seed,
         "sampler_params": {"sparse_structure": ss_params, "slat": slat_params},
