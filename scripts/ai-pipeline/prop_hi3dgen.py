@@ -283,7 +283,7 @@ def main():
         "face_count": int(trimesh_mesh.faces.shape[0]),
         "vram": vram,
     }
-    (args.out / "generation_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (args.out / "hi3dgen_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     if vram["peak_reserved_gib"] > 0.9 * vram["total_gib"]:
         print(

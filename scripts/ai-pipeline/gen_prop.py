@@ -144,16 +144,11 @@ def stage_geometry(cand_dir: Path, seed: int) -> dict:
     raw_glb = cand_dir / "raw.glb"
     concept_rgba = cand_dir / "concept_rgba.png"
     hi3dgen_manifest_path = cand_dir / "hi3dgen_manifest.json"
-    if raw_glb.exists() and concept_rgba.exists():
+    if raw_glb.exists() and concept_rgba.exists() and hi3dgen_manifest_path.exists():
         print(f"geometry: skip (exists) -> {raw_glb}")
     else:
         concept_png = cand_dir / "concept.png"
         run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png, "--out", cand_dir, "--seed", seed], cwd=HI3DGEN_REPO)
-        # prop_hi3dgen.py writes <out>/generation_manifest.json -- move it
-        # aside immediately so that filename stays reserved for this script's
-        # own chained manifest (step 7); otherwise the aggregate step would
-        # overwrite this stage's provenance and re-runs couldn't recover it.
-        (cand_dir / "generation_manifest.json").replace(hi3dgen_manifest_path)
         print(f"geometry: generated -> {raw_glb}")
     meta = read_or_note(hi3dgen_manifest_path)
     meta["raw_glb_sha256"] = sha256_file(raw_glb)
