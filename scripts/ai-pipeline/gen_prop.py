@@ -16,7 +16,8 @@ Every ComfyUI stage owns its server lifecycle (comfy_run.server()): the
 concept stage and the multiview texture strategy (inside prop_texture.py)
 each start a headless server and stop it before returning, so the chain
 runs unattended and ComfyUI is never up while the geometry stage runs
-(A3.4's measured 11.5 GiB Hi3DGen peak). An external ComfyUI server is
+(Hi3DGen peaked 10.6-12.3 GiB of the 12 GiB card across the shipped props,
+the top of that spread already over it). An external ComfyUI server is
 refused, not reused: the chain can't stop somebody else's server before
 geometry.
 """

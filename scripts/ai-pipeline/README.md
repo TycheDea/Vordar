@@ -513,11 +513,18 @@ is written, since a degenerate matte would otherwise reconstruct the
 background as geometry in this script's own `preprocess_image` step, the
 matte's only consumer. Writes `<out>/raw.glb` (bare geometry — texturing is
 a later stage), `<out>/concept_rgba.png` (the BiRefNet-matted concept at the
-input's own framing), and `<out>/generation_manifest.json`. `--steps`
+input's own framing), `<out>/normal.png` (the predicted normal map — the
+geometry stage's only input, so it separates a normal-stage failure from a
+sampler one), and `<out>/generation_manifest.json`. `--steps`
 overrides both sampler stages
 uniformly; omitted, each stage keeps `app.py`'s own default (50
-sparse-structure / 6 slat). Peak VRAM measured at 11.5 GiB of 12 — see the
-VRAM sequencing rule under `gen_prop.py` below.
+sparse-structure / 6 slat). Peak VRAM measured at 10.6–12.3 GiB of 12 across
+the shipped props — see the VRAM sequencing rule under `gen_prop.py` below.
+The manifest records the run end to end: fork revision + dirty flag, the
+post-merge sampler params, the normal map's hash, the per-stage `elapsed_s`
+split, resolved attention/spconv backends, the dep versions that decide mesh
+geometry, and GiB VRAM peaks (allocated and reserved) with a warning past 90%
+of the card.
 
 **2. `prop_cleanup.py`** — Blender headless normalize + decimate:
 
@@ -657,7 +664,7 @@ candidates, so every command stays under the shell's timeout budget. Run
 `check_weights.py` (above) once before starting a seed batch — a corrupted or
 swapped Hi3DGen weight fails every candidate the same way, and the manifest
 check is seconds, not a wasted geometry stage.
-**VRAM sequencing (forced by the 11.5 GiB Hi3DGen peak above): ComfyUI must
+**VRAM sequencing (forced by the 10.6–12.3 GiB Hi3DGen peak above): ComfyUI must
 never be up while a geometry stage runs.** Every ComfyUI stage owns its
 server lifecycle (`comfy_run.server()`): the concept stage and the
 multiview texture stage's generation passes each start a headless server
@@ -774,7 +781,8 @@ armature's space, by scale + translation. `client/vordar-client/src/
 weapons.rs:204`'s socket matrix bakes exactly that cm→m scale; applying or
 clearing the armature transform breaks weapon sockets silently.
 
-**VRAM sequencing:** Hi3DGen peaks 11.4–11.5 GiB of 12 (A3/A4-measured) —
+**VRAM sequencing:** Hi3DGen peaks 10.6–12.3 GiB of 12 (shipped-prop spread,
+the top of it already over the card) —
 ComfyUI must be fully stopped before any geometry stage runs.
 `gen_character.py` (below) owns this by construction: the concept stage and
 the multiview texture stage each start and stop their own headless ComfyUI

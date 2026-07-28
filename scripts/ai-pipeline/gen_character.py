@@ -25,7 +25,8 @@ Every ComfyUI stage owns its server lifecycle (comfy_run.server(),
 gen_prop.py's convention): the concept stage and the multiview texture
 stage each start a headless server and stop it before returning, so the
 chain runs unattended and ComfyUI is never up while geometry (Hi3DGen,
-11.4-11.5 GiB peak, A3.4/A4.3-measured) runs. An external ComfyUI server
+10.6-12.3 GiB peak of the 12 GiB card, the top of that spread already over
+it) runs. An external ComfyUI server
 is refused, not reused. The rig stage's SkinTokens skin step also uses
 the GPU (3.7 GiB peak, A1b-measured) but never overlaps ComfyUI or
 Hi3DGen by construction; preprocess, bake, and review-render stages are

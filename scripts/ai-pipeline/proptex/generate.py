@@ -5,7 +5,7 @@ workflow, and splits the decoded canvas back into per-slot crops
 
 This module imports no bpy: a Cycles render inside the comfy_run.server()
 block its caller holds open would violate the VRAM sequencing that block
-itself refuses to share, an 11.5 GiB Hi3DGen peak that cannot coexist with
+itself refuses to share, a 10.6-12.3 GiB Hi3DGen peak that cannot coexist with
 the ComfyUI process. Keeping Blender out of the file makes that structural
 rather than remembered.
 
