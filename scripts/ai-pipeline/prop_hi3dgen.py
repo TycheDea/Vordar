@@ -51,8 +51,18 @@ from PIL import Image
 REPO_DIR = Path(r"C:\tools\Hi3DGen\Hi3DGen")
 sys.path.insert(0, str(REPO_DIR))
 from hi3dgen.modules import attention as hi3dgen_attention  # noqa: E402
+from hi3dgen.modules import sparse as hi3dgen_sparse  # noqa: E402
 from hi3dgen.modules.sparse import conv as hi3dgen_sparse_conv  # noqa: E402
 from hi3dgen.pipelines import Hi3DGenPipeline  # noqa: E402
+
+# flash_attn has no Windows wheel, so xformers is a hard single-wheel
+# dependency for sparse attention; a resolved value other than "xformers"
+# means the torch/xformers pairing didn't come up the way ATTN_BACKEND asked,
+# and letting that ride would only surface ~90s into the geometry stage.
+assert hi3dgen_sparse.ATTN == "xformers", (
+    f"hi3dgen.modules.sparse.ATTN resolved to {hi3dgen_sparse.ATTN!r}, expected 'xformers' "
+    "(ATTN_BACKEND env var / torch-xformers wheel mismatch?)"
+)
 
 GEOMETRY_WEIGHTS = REPO_DIR / "weights" / "trellis-normal-v0-1"
 NORMAL_WEIGHTS_REPO = "Stable-X/yoso-normal-v1-8-1"
@@ -387,6 +397,7 @@ def main():
         "sampler_params": {"sparse_structure": ss_params, "slat": slat_params},
         "backends": {
             "attn": hi3dgen_attention.BACKEND,
+            "sparse_attn": hi3dgen_sparse.ATTN,
             "spconv_algo": hi3dgen_sparse_conv.SPCONV_ALGO,
         },
         "versions": {
