@@ -499,7 +499,7 @@ site, so install into its per-user modules dir:
 ```
 
 **1. `prop_hi3dgen.py`** — image → untextured geometry (Hi3DGen venv,
-`cwd=C:\tools\Hi3DGen\Hi3DGen`):
+cwd-independent):
 
 ```
 C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--steps N]

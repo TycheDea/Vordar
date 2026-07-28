@@ -59,7 +59,6 @@ PREPROCESS_PROP_MJS = SCRIPT_DIR / "preprocess_prop.mjs"
 BAKE_TEXTURES_MJS = REPO_ROOT / "scripts" / "asset-pipeline" / "bake_textures.mjs"
 
 HI3DGEN_PYTHON = Path(r"C:\tools\Hi3DGen\venv\Scripts\python.exe")
-HI3DGEN_REPO = Path(r"C:\tools\Hi3DGen\Hi3DGen")
 SKINTOKENS_PYTHON = Path(r"C:\tools\SkinTokens\venv\Scripts\python.exe")
 SKINTOKENS_REPO = Path(r"C:\tools\SkinTokens\SkinTokens")
 BLENDER = Path(r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
@@ -183,8 +182,7 @@ def stage_geometry(cand_dir: Path, seed: int) -> dict:
         print(f"geometry: skip (exists) -> {raw_glb}")
     else:
         concept_png = cand_dir / "concept.png"
-        # Use absolute paths since subprocess runs with cwd=HI3DGEN_REPO
-        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png.resolve(), "--out", cand_dir.resolve(), "--seed", seed], cwd=HI3DGEN_REPO)
+        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png, "--out", cand_dir, "--seed", seed])
         print(f"geometry: generated -> {raw_glb}")
     meta = read_or_note(hi3dgen_manifest_path)
     meta["raw_glb_sha256"] = sha256_file(raw_glb)

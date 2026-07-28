@@ -45,7 +45,6 @@ PREPROCESS_PROP_MJS = SCRIPT_DIR / "preprocess_prop.mjs"
 BAKE_TEXTURES_MJS = REPO_ROOT / "scripts" / "asset-pipeline" / "bake_textures.mjs"
 
 HI3DGEN_PYTHON = Path(r"C:\tools\Hi3DGen\venv\Scripts\python.exe")
-HI3DGEN_REPO = Path(r"C:\tools\Hi3DGen\Hi3DGen")
 BLENDER = Path(r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
 
 TURNTABLE_ANGLES = 8
@@ -148,7 +147,7 @@ def stage_geometry(cand_dir: Path, seed: int) -> dict:
         print(f"geometry: skip (exists) -> {raw_glb}")
     else:
         concept_png = cand_dir / "concept.png"
-        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png, "--out", cand_dir, "--seed", seed], cwd=HI3DGEN_REPO)
+        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png, "--out", cand_dir, "--seed", seed])
         print(f"geometry: generated -> {raw_glb}")
     meta = read_or_note(hi3dgen_manifest_path)
     meta["raw_glb_sha256"] = sha256_file(raw_glb)
@@ -268,9 +267,9 @@ def main():
                              "sweeps geometry seeds without paying for texturing)")
     args = parser.parse_args()
 
-    # Resolve once here: stage_geometry and stage_turntable run their
-    # subprocess under cwd=HI3DGEN_REPO / cwd=REPO_ROOT respectively, so a
-    # relative --out would otherwise resolve against the wrong directory.
+    # Resolve once here: stage_turntable runs its subprocess under
+    # cwd=REPO_ROOT, so a relative --out would otherwise resolve against
+    # the wrong directory.
     args.out = args.out.resolve()
     contract = resolve(args.asset)
 

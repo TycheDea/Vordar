@@ -5,10 +5,8 @@ to_trimesh export. Transcribes C:\\tools\\Hi3DGen\\Hi3DGen\\app.py's working
 recipe (generate_3d), minus gradio. Texturing is a later pipeline stage --
 this script's output is bare geometry.
 
-Run under the Hi3DGen venv, cwd=C:\\tools\\Hi3DGen\\Hi3DGen (weights/,
-torch.hub's local snapshots, and hi3dgen's internal relative-path lookups
-all resolve from there -- this script's own path may be absolute, it lives
-outside that tree):
+Run under the Hi3DGen venv; cwd-independent (all weight/output paths
+resolve against REPO_DIR or the parsed args, not the working directory):
 C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--steps N]
 """
 import argparse
@@ -163,6 +161,8 @@ def main():
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--steps", type=int, default=None, help="Overrides both sampler stages uniformly; omit for app.py's per-stage defaults (50/6).")
     args = parser.parse_args()
+    args.out = args.out.resolve()
+    args.image = args.image.resolve()
 
     seed = args.seed if args.seed is not None else random.randint(0, 2**32 - 1)
     ss_steps = args.steps if args.steps is not None else SS_SAMPLING_STEPS_DEFAULT
@@ -181,7 +181,7 @@ def main():
             "StableNormal_turbo",
             yoso_version=YOSO_VERSION,
             source="local",
-            local_cache_dir="./weights",
+            local_cache_dir=str(REPO_DIR / "weights"),
             pretrained=True,
         )
     except Exception:
@@ -190,7 +190,7 @@ def main():
             "StableNormal_turbo",
             trust_repo=True,
             yoso_version=YOSO_VERSION,
-            local_cache_dir="./weights",
+            local_cache_dir=str(REPO_DIR / "weights"),
         )
 
     t_loaded = time.perf_counter()
