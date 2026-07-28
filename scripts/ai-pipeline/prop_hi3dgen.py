@@ -62,18 +62,12 @@ STABLE_NORMAL_HUB_SNAPSHOT = "hugoycj_StableNormal_main"
 # one shared number.
 SS_SAMPLING_STEPS_DEFAULT = 50
 SLAT_SAMPLING_STEPS_DEFAULT = 6
-# CFG guidance strength both stages ran at before these flags existed --
-# weights/trellis-normal-v0-1/pipeline.json's checkpoint default (5.0 for
-# both stages), inherited silently through the sampler_params merge below.
-# Kept as the default so adding explicit control is behaviour-neutral until
-# a measured A/B picks a different value.
+# CFG guidance strength from weights/trellis-normal-v0-1/pipeline.json's
+# checkpoint defaults (5.0), not from the fork's Gradio demo (3.0).
 SS_CFG_DEFAULT = 5.0
 SLAT_CFG_DEFAULT = 5.0
-# StableNormal's processing resolution. The predictor's own signature default
-# is 1024; 768 is the value the Hi3DGen Gradio demo passes. Kept as the
-# default so adding explicit control is behaviour-neutral until a measured
-# A/B picks a different value.
-NORMAL_RESOLUTION_DEFAULT = 768
+# StableNormal's signature default (1024) resolves fine detail that 768 smears.
+NORMAL_RESOLUTION_DEFAULT = 1024
 
 GIB = 1024 ** 3
 
