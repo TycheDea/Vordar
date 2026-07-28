@@ -17,10 +17,9 @@
 #     the atlas and blended with facing weights and depth-occlusion
 #     tests; island texels no view covered are Telea-inpainted. Coverage
 #     is purely geometric, so before generating anything the stage
-#     greedily adds up to MV_EXTRA_MAX extra views (azimuth/elevation
-#     candidate grid, Text2Tex-style next-best-view) whenever one would
-#     retire texels from a hole component deeper than the coverage gate
-#     allows.
+#     greedily adds extra views (azimuth/elevation candidate grid,
+#     Text2Tex-style next-best-view) whenever one would retire texels
+#     from a hole component deeper than the coverage gate allows.
 #   - normal map = real high-to-low Cycles bake from <hires.glb> onto the
 #     atlas UVs (prop_cleanup.py keeps both meshes rigidly aligned).
 #   - occlusion map = Cycles AO bake, same selected-to-active rig as the

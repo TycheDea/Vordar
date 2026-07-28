@@ -48,7 +48,6 @@ class CoverageFailure(Exception):
 
 
 # Coverage-driven extra views (clean-room Text2Tex next-best-view):
-MV_EXTRA_MAX = 2  # at most one extra canvas (two side-by-side views)
 MV_EXTRA_CANDIDATE_AZIMUTHS = tuple(range(0, 360, 30))
 MV_EXTRA_CANDIDATE_ELEVATIONS = (-35.0, 15.0, 55.0)  # on standing props the
 # uncovered set is dominated by DOWN-facing texels (cup/arm/base undersides:
@@ -196,7 +195,7 @@ def pick_extra_views(views, depths, cands, cand_depths, rig, pos, nrm, island):
     extra_meta = []
     live = list(range(len(cands)))
     cur = offending(wsum)
-    while len(extra_meta) < MV_EXTRA_MAX and live and cur[1] > 0:
+    while live and cur[1] > 0:
         gains = [tuple(c - n for c, n in zip(cur, offending(wsum + weights[j])))
                  for j in live]
         best = max(range(len(live)), key=gains.__getitem__)
