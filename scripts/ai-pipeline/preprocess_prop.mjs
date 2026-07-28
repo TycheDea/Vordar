@@ -1,6 +1,6 @@
 // Generated-prop gltf-transform pass: prune + dedup + texture resize to the
 // dimension/size caps below.
-// Defaults are the prop caps (VQ-B2); the character chain overrides
+// Defaults are the prop caps (VQ-B5); the character chain overrides
 // --max-bytes to the 16 MB character cap.
 // Run: node preprocess_prop.mjs <textured.glb> <final.glb> [--max-bytes N] [--max-dim N]
 import { NodeIO } from '@gltf-transform/core';
@@ -8,8 +8,8 @@ import { prune, dedup, textureCompress } from '@gltf-transform/functions';
 import { statSync, renameSync, rmSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 
-const DEFAULT_MAX_TEXTURE_DIM = 1024;
-const DEFAULT_MAX_OUT_BYTES = 8 * 1024 * 1024;
+const DEFAULT_MAX_TEXTURE_DIM = 2048;
+const DEFAULT_MAX_OUT_BYTES = 32 * 1024 * 1024;
 
 const positional = [];
 let maxTextureDim = DEFAULT_MAX_TEXTURE_DIM;

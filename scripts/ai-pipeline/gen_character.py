@@ -72,7 +72,7 @@ CLIPS_DIR = MIXAMO_DIR / "clips"
 # under plain system Python and mixamo_rig.py imports bpy.
 TARGET_HEIGHT = 1.744
 TRI_BUDGET = 30000
-# VQ-B2's character file cap (docs/visual-quality.md), vs the 8 MB prop
+# VQ-B2's character file cap (docs/visual-quality.md), vs the 32 MB prop
 # default preprocess_prop.mjs otherwise applies.
 MAX_BYTES = 16 * 1024 * 1024
 # At 2048 the packed final.glb hits 18.97 MB, over the MAX_BYTES cap (VQ-B2);

@@ -854,7 +854,7 @@ fixed at 4, the validated 12 GB setting).
 ### `preprocess_prop.mjs` — character caps
 
 `--max-bytes N` and `--max-dim N` (both optional; defaults are the prop
-caps, 8 MB / 1024) let the character chain raise the byte ceiling to
+caps, 32 MB / 2048) let the character chain raise the byte ceiling to
 VQ-B2's 16 MB while keeping textures at 1024: `--max-bytes 16777216`. The
 MPFB route also passes `--max-dim 1024` explicitly — at 2048 its two
 4096² robe source textures push `final.glb` to ~19 MB, over the cap.

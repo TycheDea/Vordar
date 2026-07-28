@@ -61,6 +61,8 @@ explicitly out of scope.
   *Test:* `content_lint.rs` (`race_models_expose_sockets`).
 - **VQ-B4** — Every clip named in a race `.ron` exists in the referenced `.glb`.
   *Test:* `content_lint.rs` (`race_clips_exist_in_gltf`).
+- **VQ-B5** — Generated props: ≤ 32 MB on disk.
+  *Test:* `content_lint.rs` (`prop_models_within_byte_budget`).
 
 ## C. Materials & textures (machine-checked)
 

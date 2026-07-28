@@ -15,6 +15,7 @@ use vordar_game::player::race::{RaceLibrary, RaceModel};
 
 const MAX_JOINTS: usize = 64; // engine palette cap per rig (VQ-B2)
 const MAX_MODEL_BYTES: u64 = 16 * 1024 * 1024; // VQ-B2
+const MAX_PROP_BYTES: u64 = 32 * 1024 * 1024; // VQ-B5
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
@@ -712,4 +713,37 @@ fn prop_material_matches_surface_class() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+/// Every `.glb` under `dir`, recursing through subdirectories.
+fn find_glbs(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{dir:?}: {e}")).flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            find_glbs(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("glb") {
+            out.push(path);
+        }
+    }
+}
+
+/// VQ-B5: every shipped prop glb is within the prop disk budget.
+#[test]
+fn prop_models_within_byte_budget() {
+    let root = repo_root();
+    let props_dir = root.join("content/models/props");
+    assert!(props_dir.exists(), "content/models/props missing at {props_dir:?}");
+
+    let mut glbs = Vec::new();
+    find_glbs(&props_dir, &mut glbs);
+    assert!(!glbs.is_empty(), "no prop glbs found under {props_dir:?}");
+
+    for path in glbs {
+        let bytes = std::fs::metadata(&path).unwrap().len();
+        assert!(
+            bytes <= MAX_PROP_BYTES,
+            "VQ-B5: prop {} is {bytes} bytes (cap {MAX_PROP_BYTES})",
+            path.strip_prefix(&root).unwrap_or(&path).display()
+        );
+    }
 }

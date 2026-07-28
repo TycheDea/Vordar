@@ -265,7 +265,7 @@ def main():
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
                         help="Half to mirror in prop_cleanup.py's plane-aligned frame")
     parser.add_argument("--max-bytes", type=int, default=None,
-                        help="preprocess_prop.mjs's final.glb size assert (default 8 MB, "
+                        help="preprocess_prop.mjs's final.glb size assert (default 32 MB, "
                              "the prop cap)")
     parser.add_argument("--through", choices=STAGES, default="turntable",
                         help="Stop after this stage (batch triage: --through cleanup "
