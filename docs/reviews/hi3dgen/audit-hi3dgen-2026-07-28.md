@@ -45,6 +45,13 @@ finding 18 → finding 19 → finding 20 → finding 21 → finding 22 → findi
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
 Parked: rework 5 (gate: finding 24's measurement shows extraction is a
 dominant wall-clock share).
+Reordered 2026-07-28 by user decision, after finding 13's code half measured
+peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
+system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before
+finding 13's A/B, which cannot be measured on a thrashing card. Remaining
+order is finding 17 → finding 13 A/B → finding 14 → finding 15 → finding 16 →
+**rework 1** → …. This also resolves the note's conflict with finding 16's own
+Path, which requires finding 17 to land first.
 
 ### 1. Push the fork's work to the Tyche3DGen remote — nothing is backed up
 - **Evidence:** `git branch -r` in the fork lists only `origin/HEAD` and `origin/main`; zero `fork/*` refs exist. `git log origin/main..main` is empty, so 100% of our work is the two local-only commits `750397b` and `53472a1` — including the measurement work in `750397b`'s commit message that would be expensive to redo. Losing this machine loses the fork's entire delta.

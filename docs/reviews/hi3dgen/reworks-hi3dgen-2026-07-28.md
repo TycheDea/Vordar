@@ -22,6 +22,13 @@ finding 18 → finding 19 → finding 20 → finding 21 → finding 22 → findi
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
 Parked: rework 5 (gate: finding 24's measurement shows extraction is a
 dominant wall-clock share).
+Reordered 2026-07-28 by user decision, after finding 13's code half measured
+peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
+system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before
+finding 13's A/B, which cannot be measured on a thrashing card. Remaining
+order is finding 17 → finding 13 A/B → finding 14 → finding 15 → finding 16 →
+**rework 1** → …. This also resolves the note's conflict with finding 16's own
+Path, which requires finding 17 to land first.
 
 ### 1. Solid-interior extraction: land the hollow-shell fix with a validation harness
 - **Evidence:** Every mesh the fork ships is a closed double-walled hollow shell: `fork:hi3dgen/representations/mesh/utils_cube.py:78` stamps the dense 257³ grid `sdf=+1` ("outside") and scatters predicted SDF onto surface-voxel corners only, so interior cells stay "outside" and marching cubes extracts an inner wall. Measured on real output: ray-crossing histograms dominated by 4 (not 2); implied wall thickness ~3.3 voxels; enclosed-interior area 37–50% of every shipped prop (audit finding 15). Two fork branches attack this: `fix-hollow-shell-extraction` (`750397b`, +20 lines, `scipy.ndimage.label` reachability flood on the positive field, commit message carries full validation — 55.2%→0.0% inward-facing area, volume 0.14x→1.03x on a synthetic sphere, plate-stack regression bit-identical, 0.25–0.29 s cost, plus a rejected alternative documented with its 4.9x-volume failure numbers) and `solidify-shell-interior` (`53472a1`, +68 lines, four stacked morphology heuristics, zero validation data, `behind_surface`'s "nothing outside satisfies this" claim fails on non-convex geometry like the void between a character's legs, ~3–5× the runtime). The two merge textually clean but would double-fill the field — they are alternatives, not complements. Neither has a committed test; `750397b`'s harness exists only as commit-message prose. The fill also runs unconditionally on the training path (no flag, no `training` guard), and a genuinely sealed hollow input now extracts solid (documented behaviour change with no escape hatch).
