@@ -41,7 +41,7 @@ Queue (single cross-file sequence; reworks live in
 ~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
 ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
 ~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
-~~finding 17~~ → ~~finding 15~~ → finding 16 → **rework 1** →
+~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → **rework 1** →
 finding 18 → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
 Done 2026-07-28 (findings 15, 19–23, commits `23c7063`..`f2015e7`; findings 19–23
@@ -54,6 +54,11 @@ finding 19's `concept_rgba` is not dead output — `matte_concept()` feeds
 is blocked on rework 9 (stale coverage bakes); its audit-side rescale of
 `world_area_m2` was cut rather than kept, since regeneration — not a correction
 factor — is what makes shipped height match the registry.
+Done 2026-07-28 (finding 16, commit `5eea012`). premise-falsified: the ~64 s
+fixed cost measured 28.9 s (25.2 s model load) on a warm page cache, so the
+per-extra-candidate saving is 29-64 s depending on cache state, not a flat 64 s.
+`--normal-model full` is refused with 2+ seeds: its normal map is seed-dependent,
+so it cannot share one prediction across a batch.
 Done 2026-07-28 (findings 1–14 + 17, commits `4e5dfaa`..`a77c156`). Measured
 outcomes that diverged from the findings' premises: finding 11's sampler A/B
 found cfg and SLAT-step changes indistinguishable (defaults kept); finding 13's
