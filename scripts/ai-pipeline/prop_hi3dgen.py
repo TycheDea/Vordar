@@ -396,6 +396,7 @@ def main():
             "spconv": spconv.__version__,
             "trimesh": trimesh.__version__,
             "skimage": skimage.__version__,
+            "numpy": np.__version__,
         },
         "elapsed_s": {
             "load": t_loaded - t_start,
