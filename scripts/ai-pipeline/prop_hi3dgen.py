@@ -5,9 +5,14 @@ to_trimesh export. Transcribes C:\\tools\\Hi3DGen\\Hi3DGen\\app.py's working
 recipe (generate_3d), minus gradio. Texturing is a later pipeline stage --
 this script's output is bare geometry.
 
+--seed is repeatable: each seed is one candidate under <out>/cand_<seed>/,
+and every candidate in a run shares the model load, the matte and the normal
+prediction, none of which depend on the seed. A candidate whose outputs are
+already on disk is skipped, so an interrupted run resumes.
+
 Run under the Hi3DGen venv; cwd-independent (all weight/output paths
 resolve against REPO_DIR or the parsed args, not the working directory):
-C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F]
+C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N ...] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F]
 """
 import argparse
 import hashlib
@@ -91,6 +96,10 @@ NORMAL_RESOLUTION_DEFAULT = 1024
 
 GIB = 1024 ** 3
 
+# The artefacts a finished candidate directory holds; the manifest is written
+# last, so its presence is what makes a skip safe.
+CANDIDATE_OUTPUTS = ("raw.glb", "concept_rgba.png", "normal.png", "hi3dgen_manifest.json")
+
 
 def hi3dgen_id():
     """The Hi3DGen checkout's identity, the toolchain string this stage
@@ -143,21 +152,37 @@ def staged(pipeline: Hi3DGenPipeline, *names: str):
 
 
 @torch.no_grad()
-def staged_run(pipeline: Hi3DGenPipeline, image: Image.Image, seed: int,
-               ss_params: dict, slat_params: dict):
-    """Hi3DGenPipeline.run(preprocess_image=False) with every stage's weights
-    resident only while that stage runs. Call order and seeding point match
-    run()'s, and the sampled stages must stay inside no_grad -- the mesh
-    extractor calls .numpy() on the decoded field."""
+def staged_cond(pipeline: Hi3DGenPipeline, image: Image.Image) -> dict:
+    """Hi3DGenPipeline.run()'s conditioning step, with the encoder resident
+    only while it runs. It is a function of the image alone, so every
+    candidate reuses one call; running it before any seeding is what run()
+    does too, and is safe because the seeding point below resets the
+    generators outright rather than continuing them."""
     with staged(pipeline, "image_cond_model"):
-        cond = pipeline.get_cond([image])
+        return pipeline.get_cond([image])
+
+
+@torch.no_grad()
+def staged_sample(pipeline: Hi3DGenPipeline, cond: dict, seed: int,
+                  ss_params: dict, slat_params: dict):
+    """One candidate's geometry, with each stage's weights resident only while
+    that stage runs. Call order and seeding point match
+    Hi3DGenPipeline.run()'s, and the sampled stages must stay inside no_grad
+    -- the mesh extractor calls .numpy() on the decoded field.
+
+    Both samplers draw their noise from the default CPU generator
+    (torch.randn(...) then .to(device)) and torch.manual_seed replaces that
+    generator's state outright, so a candidate's noise stream is a function of
+    its own seed and nothing that ran before it. The returned digest is that
+    state, the comparable a single-candidate run at the same seed reproduces."""
     torch.manual_seed(seed)
+    rng_state_sha256 = hashlib.sha256(torch.random.get_rng_state().numpy().tobytes()).hexdigest()
     with staged(pipeline, "sparse_structure_flow_model", "sparse_structure_decoder"):
         coords = pipeline.sample_sparse_structure(cond, 1, ss_params)
     with staged(pipeline, "slat_flow_model"):
         slat = pipeline.sample_slat(cond, coords, slat_params)
     with staged(pipeline, "slat_decoder_mesh"):
-        return pipeline.decode_slat(slat, ["mesh"])
+        return pipeline.decode_slat(slat, ["mesh"]), rng_state_sha256
 
 
 def preload_birefnet(pipeline: Hi3DGenPipeline) -> None:
@@ -271,8 +296,9 @@ def check_mesh(mesh_result, trimesh_mesh: trimesh.Trimesh) -> dict:
 def main():
     parser = argparse.ArgumentParser(description="Hi3DGen image -> raw untextured glb geometry.")
     parser.add_argument("image", type=Path)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--out", type=Path, required=True, help="Batch directory; each candidate lands in <out>/cand_<seed>/")
+    parser.add_argument("--seed", type=int, action="append", dest="seeds", metavar="N",
+                        help="Repeatable: one candidate per seed, all sharing this run's model load and normal prediction.")
     parser.add_argument("--ss-steps", type=int, default=SS_SAMPLING_STEPS_DEFAULT, help="Sparse structure stage sampling steps.")
     parser.add_argument("--slat-steps", type=int, default=SLAT_SAMPLING_STEPS_DEFAULT, help="Structured latent stage sampling steps.")
     parser.add_argument("--ss-cfg", type=float, default=SS_CFG_DEFAULT, help="Sparse structure stage CFG guidance strength.")
@@ -285,14 +311,34 @@ def main():
     args.out = args.out.resolve()
     args.image = args.image.resolve()
 
-    seed = args.seed if args.seed is not None else random.randint(0, 2**32 - 1)
+    seeds = args.seeds if args.seeds else [random.randint(0, 2**32 - 1)]
+    if len(set(seeds)) != len(seeds):
+        parser.error(f"repeated --seed value in {seeds}: two candidates would write the same cand_<seed>/ directory")
+    if len(seeds) > 1 and args.normal_model == "full":
+        # The full predictor initialises its prediction latent from noise
+        # (stablenormal.pipeline_stablenormal's prepare_latents), so its
+        # normal map is a function of the seed. Only the turbo predictor's
+        # latent is the deterministic image latent, which is what lets one
+        # prediction serve every candidate.
+        parser.error("--normal-model full takes a single --seed: its normal map is seed-dependent, "
+                     "so it cannot be shared across candidates")
 
-    args.out.mkdir(parents=True, exist_ok=True)
+    cand_dirs = {seed: args.out / f"cand_{seed}" for seed in seeds}
+    pending = [seed for seed in seeds
+               if not all((cand_dirs[seed] / name).exists() for name in CANDIDATE_OUTPUTS)]
+    for seed in seeds:
+        if seed not in pending:
+            print(f"cand_{seed}: skip (exists) -> {cand_dirs[seed]}")
+    if not pending:
+        print(f"OK: all {len(seeds)} candidate(s) already complete under {args.out}")
+        return
+    for seed in pending:
+        cand_dirs[seed].mkdir(parents=True, exist_ok=True)
 
     t_start = time.perf_counter()
     hi3dgen_pipeline = Hi3DGenPipeline.from_pretrained(GEOMETRY_WEIGHTS)
     # The device the geometry stages run on; their weights stay on the CPU
-    # until staged_run() brings each one over for its own stage.
+    # until staged_cond()/staged_sample() bring each one over for its stage.
     hi3dgen_pipeline.device = torch.device("cuda")
     preload_birefnet(hi3dgen_pipeline)
 
@@ -317,8 +363,8 @@ def main():
         check_matte(concept_rgba)
     except DegenerateMatteError as e:
         sys.exit(f"prop_hi3dgen: {e}")
-    concept_rgba_path = args.out / "concept_rgba.png"
-    concept_rgba.save(concept_rgba_path)
+    for seed in pending:
+        concept_rgba.save(cand_dirs[seed] / "concept_rgba.png")
     # concept_rgba already carries the real matte, so preprocess_image()'s
     # has_alpha branch reuses it directly instead of running BiRefNet again:
     # the matte above is the model's last consumer in this process, and its
@@ -331,12 +377,12 @@ def main():
     )
     image = hi3dgen_pipeline.preprocess_image(conditioning_source, resolution=1024)
     t_preprocessed = time.perf_counter()
-    # app.py never seeds this stage (YOSONormalsPipeline draws from the
-    # ambient RNG, no generator= plumbed through hubconf's Predictor), so a
-    # same-seed re-run doesn't reproduce the same normal map without this --
-    # hi3dgen_pipeline.run() below reseeds again for its own stages, the same
-    # global-RNG convention it already uses internally.
-    torch.manual_seed(seed)
+    # The predictor draws from the ambient RNG (no generator= plumbed through
+    # hubconf's Predictor), so only seeding here makes the full predictor's
+    # normal map reproduce across runs. A multi-seed run is turbo-only, whose
+    # prediction is the deterministic image latent and so is one map for every
+    # candidate; the geometry stages reseed per candidate either way.
+    torch.manual_seed(seeds[0])
     normal_image = normal_predictor(
         image, resolution=args.normal_resolution, match_input_resolution=True,
         data_type="object", num_inference_steps=args.normal_steps,
@@ -344,8 +390,8 @@ def main():
     # The normal map is the geometry stage's only input: keeping it splits a
     # bad mesh into "the normal predictor saw it wrong" vs "the sampler built
     # it wrong", which the mesh alone cannot distinguish.
-    normal_path = args.out / "normal.png"
-    normal_image.save(normal_path)
+    for seed in pending:
+        normal_image.save(cand_dirs[seed] / "normal.png")
     t_normal = time.perf_counter()
     # normal_image is a PIL image, so the predictor's weights have no consumer
     # past this point and must not ride the geometry stage's peak.
@@ -359,71 +405,97 @@ def main():
     # with, not just the steps/cfg this script asked for.
     ss_params = {**hi3dgen_pipeline.sparse_structure_sampler_params, "steps": args.ss_steps, "cfg_strength": args.ss_cfg}
     slat_params = {**hi3dgen_pipeline.slat_sampler_params, "steps": args.slat_steps, "cfg_strength": args.slat_cfg}
-    outputs = staged_run(hi3dgen_pipeline, normal_image, seed, ss_params, slat_params)
-    t_geometry = time.perf_counter()
-    mesh_result = outputs["mesh"][0]
-    trimesh_mesh = mesh_result.to_trimesh(transform_pose=True)
-    try:
-        mesh_stats = check_mesh(mesh_result, trimesh_mesh)
-    except DegenerateMeshError as e:
-        sys.exit(f"prop_hi3dgen: {e}")
-
-    raw_glb_path = args.out / "raw.glb"
-    trimesh_mesh.export(str(raw_glb_path))
-    t_end = time.perf_counter()
-
-    vram = vram_peaks()
-    vram["resident_gib"] = resident
-    manifest = {
-        "model": "Stable-X/Hi3DGen",
-        "hi3dgen": hi3dgen_id(),
-        "weights": {
-            "geometry": str(GEOMETRY_WEIGHTS),
-            "normal": NORMAL_WEIGHTS_REPO,
-            "normal_diffusion": STABLE_NORMAL_FULL_REPO if args.normal_model == "full" else None,
-            "birefnet": BIREFNET_REPO,
-        },
-        "input_image": str(args.image),
-        "input_image_sha256": hashlib.sha256(args.image.read_bytes()).hexdigest(),
-        "concept_rgba": str(concept_rgba_path),
-        "concept_rgba_sha256": hashlib.sha256(concept_rgba_path.read_bytes()).hexdigest(),
-        "normal": str(normal_path),
-        "normal_sha256": hashlib.sha256(normal_path.read_bytes()).hexdigest(),
-        "normal_resolution": args.normal_resolution,
-        "normal_model": args.normal_model,
-        "normal_steps": args.normal_steps,
-        "crop_from_original": args.crop_from_original,
-        "seed": seed,
-        "sampler_params": {"sparse_structure": ss_params, "slat": slat_params},
-        "backends": {
-            "attn": hi3dgen_attention.BACKEND,
-            "sparse_attn": hi3dgen_sparse.ATTN,
-            "spconv_algo": hi3dgen_sparse_conv.SPCONV_ALGO,
-        },
-        "versions": {
-            "torch": torch.__version__,
-            "cuda": torch.version.cuda,
-            "xformers": xformers.__version__,
-            "spconv": spconv.__version__,
-            "trimesh": trimesh.__version__,
-            "skimage": skimage.__version__,
-            "numpy": np.__version__,
-        },
-        "elapsed_s": {
-            "load": t_loaded - t_start,
-            "preprocess": t_preprocessed - t_loaded,
-            "normal": t_normal - t_preprocessed,
-            "geometry": t_geometry - t_normal,
-            "export": t_end - t_geometry,
-            "total": t_end - t_start,
-        },
-        "vertex_count": mesh_stats["vertex_count"],
-        "face_count": mesh_stats["face_count"],
-        "degenerate_face_count": mesh_stats["degenerate_face_count"],
-        "vram": vram,
+    cond = staged_cond(hi3dgen_pipeline, normal_image)
+    t_cond = time.perf_counter()
+    # Paid once for the whole run, and repeated into every candidate's
+    # manifest so each record stands alone.
+    shared_elapsed_s = {
+        "load": t_loaded - t_start,
+        "preprocess": t_preprocessed - t_loaded,
+        "normal": t_normal - t_preprocessed,
+        "cond": t_cond - t_normal,
     }
-    (args.out / "hi3dgen_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
+    for position, seed in enumerate(pending):
+        cand_dir = cand_dirs[seed]
+        t_cand = time.perf_counter()
+        outputs, rng_state_sha256 = staged_sample(hi3dgen_pipeline, cond, seed, ss_params, slat_params)
+        t_geometry = time.perf_counter()
+        mesh_result = outputs["mesh"][0]
+        trimesh_mesh = mesh_result.to_trimesh(transform_pose=True)
+        try:
+            mesh_stats = check_mesh(mesh_result, trimesh_mesh)
+        except DegenerateMeshError as e:
+            sys.exit(f"prop_hi3dgen: cand_{seed}: {e}")
+
+        raw_glb_path = cand_dir / "raw.glb"
+        trimesh_mesh.export(str(raw_glb_path))
+        t_cand_end = time.perf_counter()
+
+        concept_rgba_path = cand_dir / "concept_rgba.png"
+        normal_path = cand_dir / "normal.png"
+        vram = vram_peaks()
+        vram["resident_gib"] = resident
+        manifest = {
+            "model": "Stable-X/Hi3DGen",
+            "hi3dgen": hi3dgen_id(),
+            "weights": {
+                "geometry": str(GEOMETRY_WEIGHTS),
+                "normal": NORMAL_WEIGHTS_REPO,
+                "normal_diffusion": STABLE_NORMAL_FULL_REPO if args.normal_model == "full" else None,
+                "birefnet": BIREFNET_REPO,
+            },
+            "input_image": str(args.image),
+            "input_image_sha256": hashlib.sha256(args.image.read_bytes()).hexdigest(),
+            "concept_rgba": str(concept_rgba_path),
+            "concept_rgba_sha256": hashlib.sha256(concept_rgba_path.read_bytes()).hexdigest(),
+            "normal": str(normal_path),
+            "normal_sha256": hashlib.sha256(normal_path.read_bytes()).hexdigest(),
+            "normal_resolution": args.normal_resolution,
+            "normal_model": args.normal_model,
+            "normal_steps": args.normal_steps,
+            "crop_from_original": args.crop_from_original,
+            "seed": seed,
+            # Which candidate of which run produced this mesh, and the RNG
+            # state its samplers started from: identical to the state a run
+            # of this seed alone reaches, whatever the batch position.
+            "batch": {"seeds": seeds, "generated": pending, "position": position},
+            "sampler_rng_state_sha256": rng_state_sha256,
+            "sampler_params": {"sparse_structure": ss_params, "slat": slat_params},
+            "backends": {
+                "attn": hi3dgen_attention.BACKEND,
+                "sparse_attn": hi3dgen_sparse.ATTN,
+                "spconv_algo": hi3dgen_sparse_conv.SPCONV_ALGO,
+            },
+            "versions": {
+                "torch": torch.__version__,
+                "cuda": torch.version.cuda,
+                "xformers": xformers.__version__,
+                "spconv": spconv.__version__,
+                "trimesh": trimesh.__version__,
+                "skimage": skimage.__version__,
+                "numpy": np.__version__,
+            },
+            "elapsed_s": {
+                **shared_elapsed_s,
+                "geometry": t_geometry - t_cand,
+                "export": t_cand_end - t_geometry,
+                "candidate": t_cand_end - t_cand,
+            },
+            "vertex_count": mesh_stats["vertex_count"],
+            "face_count": mesh_stats["face_count"],
+            "degenerate_face_count": mesh_stats["degenerate_face_count"],
+            "vram": vram,
+        }
+        (cand_dir / "hi3dgen_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        print(
+            f"OK: wrote {raw_glb_path} ({manifest['vertex_count']} verts, {manifest['face_count']} faces, "
+            f"peak_vram={vram['peak_allocated_gib']:.2f} GiB allocated / "
+            f"{vram['peak_reserved_gib']:.2f} GiB reserved, {manifest['elapsed_s']['candidate']:.1f} s)"
+        )
+
+    t_end = time.perf_counter()
     if vram["peak_reserved_gib"] > 0.9 * vram["total_gib"]:
         print(
             f"WARNING: peak VRAM {vram['peak_reserved_gib']:.2f} GiB reserved of "
@@ -432,9 +504,8 @@ def main():
             file=sys.stderr,
         )
     print(
-        f"OK: wrote {raw_glb_path} ({manifest['vertex_count']} verts, {manifest['face_count']} faces, "
-        f"peak_vram={vram['peak_allocated_gib']:.2f} GiB allocated / "
-        f"{vram['peak_reserved_gib']:.2f} GiB reserved, {manifest['elapsed_s']['total']:.1f} s)"
+        f"OK: {len(pending)} candidate(s) under {args.out} in {t_end - t_start:.1f} s "
+        f"(shared setup {t_cond - t_start:.1f} s, of which model load {shared_elapsed_s['load']:.1f} s)"
     )
 
 

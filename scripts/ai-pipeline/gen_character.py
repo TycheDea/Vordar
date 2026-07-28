@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Character generation chain assembly (Phase A4.8): concept -> geometry ->
 cleanup -> texture -> rig+clips -> preprocess+bake -> review renders ->
-chained manifest. One invocation = one candidate under <out>/cand_<seed>/.
-Plain system Python -- this script only subprocess-orchestrates the
-per-stage tools, each of which runs under its own venv/interpreter
-(Hi3DGen venv, Blender, node, cargo). gen_prop.py's skeleton (A3.9),
-extended with the two character-only stages: rig transplant (A4.4) and
-multi-clip review renders (A4.5).
+chained manifest. One --seed = one candidate under <out>/cand_<seed>/, and
+--seed repeats. Plain system Python -- this script only
+subprocess-orchestrates the per-stage tools, each of which runs under its
+own venv/interpreter (Hi3DGen venv, Blender, node, cargo). gen_prop.py's
+skeleton (A3.9), extended with the two character-only stages: rig
+transplant (A4.4) and multi-clip review renders (A4.5).
 
-Every stage is skipped if its output already exists, so re-running the same
-command resumes rather than restarts. Any stage's non-zero exit aborts the
-whole chain with that stage named -- no silent fallbacks. The one stage
+Every stage is skipped per candidate if its output already exists, so
+re-running the same command resumes rather than restarts. Any stage's
+non-zero exit aborts the whole chain with that stage named -- no silent
+fallbacks. The one stage
 whose failure carries extra context is rig: a rig-quality-gate failure is a
 recorded candidate outcome (A4.4), so the abort message includes the gate's
 stats alongside the exit code, not just the stage name.
@@ -18,7 +19,7 @@ stats alongside the exit code, not just the stage name.
 MR is the character_skin surface class's registry contract (proptex.registry).
 
 Run:
-  python scripts/ai-pipeline/gen_character.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>] [--height M]
+  python scripts/ai-pipeline/gen_character.py --asset <name> --seed N [--seed M ...] --out <dir> [--skip-concept <image.png>] [--height M]
   python scripts/ai-pipeline/gen_character.py --mpfb --out <dir> [--height M]
 
 Every ComfyUI stage owns its server lifecycle (comfy_run.server(),
@@ -174,20 +175,40 @@ def stage_concept(cand_dir: Path, subject: str, seed: int, skip_concept: Path) -
     return meta
 
 
-def stage_geometry(cand_dir: Path, seed: int) -> dict:
-    raw_glb = cand_dir / "raw.glb"
-    concept_rgba = cand_dir / "concept_rgba.png"
-    hi3dgen_manifest_path = cand_dir / "hi3dgen_manifest.json"
-    if raw_glb.exists() and concept_rgba.exists() and hi3dgen_manifest_path.exists():
-        print(f"geometry: skip (exists) -> {raw_glb}")
-    else:
-        concept_png = cand_dir / "concept.png"
-        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png, "--out", cand_dir, "--seed", seed])
-        print(f"geometry: generated -> {raw_glb}")
-    meta = read_or_note(hi3dgen_manifest_path)
-    meta["raw_glb_sha256"] = sha256_file(raw_glb)
-    meta["concept_rgba_sha256"] = sha256_file(concept_rgba)
-    return meta
+def geometry_done(cand_dir: Path) -> bool:
+    return all((cand_dir / name).exists()
+               for name in ("raw.glb", "concept_rgba.png", "normal.png", "hi3dgen_manifest.json"))
+
+
+def stage_geometry(out: Path, cand_dirs: dict, concept_sha256: dict) -> dict:
+    """One prop_hi3dgen.py process per group of pending candidates sharing a
+    concept image: the model load and the normal prediction are the bulk of a
+    candidate's cost and neither depends on the seed, but the normal map does
+    depend on the image, so candidates drawn from different concepts cannot
+    share a process."""
+    pending = [seed for seed, cand_dir in cand_dirs.items() if not geometry_done(cand_dir)]
+    for seed, cand_dir in cand_dirs.items():
+        if seed not in pending:
+            print(f"geometry: skip (exists) -> {cand_dir / 'raw.glb'}")
+
+    groups = {}
+    for seed in pending:
+        groups.setdefault(concept_sha256[seed], []).append(seed)
+    for group in groups.values():
+        cmd = [HI3DGEN_PYTHON, PROP_HI3DGEN, cand_dirs[group[0]] / "concept.png", "--out", out]
+        for seed in group:
+            cmd += ["--seed", seed]
+        run(cmd)
+        for seed in group:
+            print(f"geometry: generated -> {cand_dirs[seed] / 'raw.glb'}")
+
+    metas = {}
+    for seed, cand_dir in cand_dirs.items():
+        meta = read_or_note(cand_dir / "hi3dgen_manifest.json")
+        meta["raw_glb_sha256"] = sha256_file(cand_dir / "raw.glb")
+        meta["concept_rgba_sha256"] = sha256_file(cand_dir / "concept_rgba.png")
+        metas[seed] = meta
+    return metas
 
 
 def stage_cleanup(cand_dir: Path, height: float) -> dict:
@@ -366,14 +387,16 @@ def main():
     # this same chain drives in A4.9.
     sys.stdout.reconfigure(line_buffering=True)
 
-    parser = argparse.ArgumentParser(description="Generate one character candidate through the full A4 chain.")
+    parser = argparse.ArgumentParser(description="Generate one character candidate per seed through the full A4 chain.")
     parser.add_argument("--asset", default=None,
                         help="Registered asset name (content/models/assets.json); resolves "
                              "the subject prompt and material contract (proptex.registry). "
                              "Omit with --mpfb")
     parser.add_argument("--out", type=Path, required=True,
-                        help="Batch directory; the candidate lands in <out>/cand_<seed>/ (<out>/cand_mpfb/ with --mpfb)")
-    parser.add_argument("--seed", type=int, default=None, help="Required unless --mpfb")
+                        help="Batch directory; each candidate lands in <out>/cand_<seed>/ (<out>/cand_mpfb/ with --mpfb)")
+    parser.add_argument("--seed", type=int, action="append", dest="seeds", metavar="N",
+                        help="Repeatable: one candidate per seed, required unless --mpfb; candidates "
+                             "sharing a concept image run their geometry stage in a single Hi3DGen process")
     parser.add_argument("--skip-concept", type=Path, default=None, metavar="IMAGE",
                         help="Bypass concept generation with a provided image (re-roll geometry without re-rolling the concept)")
     parser.add_argument("--height", type=float, default=TARGET_HEIGHT,
@@ -385,7 +408,7 @@ def main():
     if args.mpfb:
         if args.asset is not None:
             parser.error("--mpfb takes no --asset: the parametric body has no prompt")
-        if args.seed is not None:
+        if args.seeds is not None:
             parser.error("--mpfb takes no --seed: the parametric body has no seed")
         if args.skip_concept is not None:
             parser.error("--mpfb takes no --skip-concept: the parametric body has no concept stage")
@@ -411,38 +434,46 @@ def main():
 
     if args.asset is None:
         parser.error("the following arguments are required: --asset")
-    if args.seed is None:
+    if args.seeds is None:
         parser.error("the following arguments are required: --seed")
+    if len(set(args.seeds)) != len(args.seeds):
+        parser.error(f"repeated --seed value in {args.seeds}: two candidates would share one cand_<seed>/ directory")
 
     contract = resolve(args.asset)
 
-    cand_dir = args.out / f"cand_{args.seed}"
-    cand_dir.mkdir(parents=True, exist_ok=True)
+    cand_dirs = {seed: args.out / f"cand_{seed}" for seed in args.seeds}
+    for cand_dir in cand_dirs.values():
+        cand_dir.mkdir(parents=True, exist_ok=True)
 
-    concept = stage_concept(cand_dir, contract.subject, args.seed, args.skip_concept)
-    geometry = stage_geometry(cand_dir, args.seed)
-    cleanup = stage_cleanup(cand_dir, args.height)
-    texture = stage_texture(cand_dir, args.asset, args.seed)
-    rig = stage_rig(cand_dir, args.height, args.seed)
-    preprocess_bake = stage_preprocess_bake(cand_dir, max_dim=MAX_DIM)  # final.glb, needed by the review stage below
-    review = stage_review(cand_dir)
+    concepts = {seed: stage_concept(cand_dirs[seed], contract.subject, seed, args.skip_concept)
+                for seed in args.seeds}
+    concept_sha256 = {seed: concepts[seed]["concept_png_sha256"] for seed in args.seeds}
+    geometry = stage_geometry(args.out, cand_dirs, concept_sha256)
 
-    manifest = {
-        "subject": contract.subject,
-        "seed": args.seed,
-        "height": args.height,
-        "candidate_dir": str(cand_dir),
-        "concept": concept,
-        "geometry": geometry,
-        "cleanup": cleanup,
-        "texture": texture,
-        "rig": rig,
-        **preprocess_bake,
-        "review": review,
-    }
-    manifest_path = cand_dir / "generation_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"OK: wrote {manifest_path}")
+    for seed in args.seeds:
+        cand_dir = cand_dirs[seed]
+        cleanup = stage_cleanup(cand_dir, args.height)
+        texture = stage_texture(cand_dir, args.asset, seed)
+        rig = stage_rig(cand_dir, args.height, seed)
+        preprocess_bake = stage_preprocess_bake(cand_dir, max_dim=MAX_DIM)  # final.glb, needed by the review stage below
+        review = stage_review(cand_dir)
+
+        manifest = {
+            "subject": contract.subject,
+            "seed": seed,
+            "height": args.height,
+            "candidate_dir": str(cand_dir),
+            "concept": concepts[seed],
+            "geometry": geometry[seed],
+            "cleanup": cleanup,
+            "texture": texture,
+            "rig": rig,
+            **preprocess_bake,
+            "review": review,
+        }
+        manifest_path = cand_dir / "generation_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"OK: wrote {manifest_path}")
 
 
 if __name__ == "__main__":

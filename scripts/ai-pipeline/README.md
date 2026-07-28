@@ -502,7 +502,7 @@ site, so install into its per-user modules dir:
 cwd-independent):
 
 ```
-C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py <image.png> --out <dir> [--seed N] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F]
+C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py <image.png> --out <dir> [--seed N ...] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F]
 ```
 
 BiRefNet matte → opaque-fraction refusal gate → StableNormal-turbo normal
@@ -511,11 +511,12 @@ no usable alpha (opaque fraction ≥ 0.995 — BiRefNet did nothing, a raw RGB
 image) or no opaque pixels at all exits non-zero before `concept_rgba.png`
 is written, since a degenerate matte would otherwise reconstruct the
 background as geometry in this script's own `preprocess_image` step, the
-matte's only consumer. Writes `<out>/raw.glb` (bare geometry — texturing is
-a later stage), `<out>/concept_rgba.png` (the BiRefNet-matted concept at the
-input's own framing), `<out>/normal.png` (the predicted normal map — the
-geometry stage's only input, so it separates a normal-stage failure from a
-sampler one), and `<out>/hi3dgen_manifest.json`. `--ss-steps`/`--slat-steps`
+matte's only consumer. Writes `<out>/cand_<seed>/raw.glb` (bare geometry —
+texturing is a later stage), `<out>/cand_<seed>/concept_rgba.png` (the
+BiRefNet-matted concept at the input's own framing),
+`<out>/cand_<seed>/normal.png` (the predicted normal map — the geometry
+stage's only input, so it separates a normal-stage failure from a sampler
+one), and `<out>/cand_<seed>/hi3dgen_manifest.json`. `--ss-steps`/`--slat-steps`
 and `--ss-cfg`/`--slat-cfg` control each stage's sampling steps and CFG
 guidance strength independently; omitted, they keep the current effective
 defaults (50/6 steps, 5.0/5.0 CFG). Peak VRAM measured at 10.6–12.3 GiB of 12 across
@@ -525,6 +526,21 @@ post-merge sampler params, the normal map's hash, the per-stage `elapsed_s`
 split, resolved attention/spconv backends, the dep versions that decide mesh
 geometry, and GiB VRAM peaks (allocated and reserved) with a warning past 90%
 of the card.
+
+**`--seed` repeats, and each seed is a candidate sharing one process.** The
+model load, the matte and the turbo normal prediction depend on the image
+and not on the seed, so a run pays them once and then samples geometry per
+seed: a 2-seed run measured 56.2 s total against 28.9 s of shared setup
+(25.2 s of it model load, on a warm page cache) plus 14.0 s and 12.9 s of
+per-candidate geometry, so each extra seed costs only its own sampling. A
+candidate whose four outputs are already on disk is skipped, so an
+interrupted run resumes; the manifest's `batch` block records which run and
+which position produced the mesh, and `sampler_rng_state_sha256` is the RNG
+state its samplers started from — identical to the state a run of that seed
+alone reaches, since seeding replaces the generator rather than continuing
+it. `--normal-model full` takes a single seed: that predictor initialises
+its latent from noise, so its normal map is seed-dependent and cannot be
+shared.
 
 **2. `prop_cleanup.py`** — Blender headless normalize + decimate:
 
@@ -646,21 +662,24 @@ without the flag silently applied a real sRGB decode to already-linear mr/
 normal data (measured: roughness mean 0.55 raw → 0.26 installed, matching
 the sRGB EOTF at that value).
 
-**5. `gen_prop.py`** — chain assembly, one candidate per invocation:
+**5. `gen_prop.py`** — chain assembly, one candidate per seed:
 
 ```
-python scripts/ai-pipeline/gen_prop.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>]
+python scripts/ai-pipeline/gen_prop.py --asset <name> --seed N [--seed M ...] --out <dir> [--skip-concept <image.png>]
 ```
 
 Runs concept → geometry → cleanup → texture → preprocess+bake → turntable →
-chained `generation_manifest.json`; every stage is skipped if its output
-already exists, so a second identical invocation exits in under a second
-instead of regenerating. `--skip-concept <image.png>` bypasses concept
+chained `generation_manifest.json`; every stage is skipped per candidate if
+its output already exists, so a second identical invocation exits in under a
+second instead of regenerating. `--skip-concept <image.png>` bypasses concept
 generation with a provided image — re-rolls geometry and everything
-downstream of it without spending a new Z-Image concept. **One seed per
-command:** one invocation is one candidate; a batch is the caller looping
-seeds across separate foreground invocations, never one script call for N
-candidates, so every command stays under the shell's timeout budget. Run
+downstream of it without spending a new Z-Image concept. **`--seed` repeats:**
+the geometry stage runs one Hi3DGen process per group of pending candidates
+sharing a concept image, so a `--skip-concept` sweep pays the model load
+once for the whole sweep while candidates drawn from different concepts
+still get a process each (the normal map depends on the image). Budget the
+wall time accordingly — a multi-seed command runs for as long as all its
+candidates take. Run
 `check_weights.py` (above) once before starting a seed batch — a corrupted or
 swapped Hi3DGen weight fails every candidate the same way, and the manifest
 check is seconds, not a wasted geometry stage.
@@ -884,12 +903,13 @@ MPFB route also passes `--max-dim 1024` explicitly — at 2048 its two
 ### `gen_character.py` — chain assembly
 
 ```
-python scripts/ai-pipeline/gen_character.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>] [--height M]
+python scripts/ai-pipeline/gen_character.py --asset <name> --seed N [--seed M ...] --out <dir> [--skip-concept <image.png>] [--height M]
 python scripts/ai-pipeline/gen_character.py --mpfb --out <dir> [--height M]
 ```
 
-One invocation = one candidate, resumable stage by stage exactly like
-`gen_prop.py`. The default (AI) chain: concept → geometry → cleanup →
+One `--seed` = one candidate and `--seed` repeats, resumable stage by stage
+and batching the geometry stage exactly like `gen_prop.py`. The default (AI)
+chain: concept → geometry → cleanup →
 texture (multiview, always) → rig (`char_rig.py fit` → `char_skin.py` →
 `char_rig.py finish`) → preprocess+bake → review renders → chained
 `generation_manifest.json`, landing under `<out>/cand_<seed>/`. `--mpfb`

@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Prop generation chain assembly (Phase A3.9): concept -> geometry ->
 cleanup -> texture -> preprocess+bake -> turntable -> chained manifest. One
-invocation = one candidate under <out>/cand_<seed>/. Plain system Python --
-this script only subprocess-orchestrates the per-stage tools, each of which
-runs under its own venv/interpreter (Hi3DGen venv, Blender, node, cargo).
+--seed = one candidate under <out>/cand_<seed>/, and --seed repeats. Plain
+system Python -- this script only subprocess-orchestrates the per-stage
+tools, each of which runs under its own venv/interpreter (Hi3DGen venv,
+Blender, node, cargo).
 
-Every stage is skipped if its output already exists, so re-running the same
-command resumes rather than restarts. Any stage's non-zero exit aborts the
-whole chain with that stage named -- no silent fallbacks.
+Every stage is skipped per candidate if its output already exists, so
+re-running the same command resumes rather than restarts. Any stage's
+non-zero exit aborts the whole chain with that stage named -- no silent
+fallbacks.
 
 Run:
-  python scripts/ai-pipeline/gen_prop.py --asset <name> --seed N --out <dir> [--skip-concept <image.png>]
+  python scripts/ai-pipeline/gen_prop.py --asset <name> --seed N [--seed M ...] --out <dir> [--skip-concept <image.png>]
 
 Every ComfyUI stage owns its server lifecycle (comfy_run.server()): the
 concept stage and the multiview texture strategy (inside prop_texture.py)
@@ -139,20 +141,40 @@ def stage_concept(cand_dir: Path, subject: str, seed: int, skip_concept: Path) -
     return meta
 
 
-def stage_geometry(cand_dir: Path, seed: int) -> dict:
-    raw_glb = cand_dir / "raw.glb"
-    concept_rgba = cand_dir / "concept_rgba.png"
-    hi3dgen_manifest_path = cand_dir / "hi3dgen_manifest.json"
-    if raw_glb.exists() and concept_rgba.exists() and hi3dgen_manifest_path.exists():
-        print(f"geometry: skip (exists) -> {raw_glb}")
-    else:
-        concept_png = cand_dir / "concept.png"
-        run([HI3DGEN_PYTHON, PROP_HI3DGEN, concept_png, "--out", cand_dir, "--seed", seed])
-        print(f"geometry: generated -> {raw_glb}")
-    meta = read_or_note(hi3dgen_manifest_path)
-    meta["raw_glb_sha256"] = sha256_file(raw_glb)
-    meta["concept_rgba_sha256"] = sha256_file(concept_rgba)
-    return meta
+def geometry_done(cand_dir: Path) -> bool:
+    return all((cand_dir / name).exists()
+               for name in ("raw.glb", "concept_rgba.png", "normal.png", "hi3dgen_manifest.json"))
+
+
+def stage_geometry(out: Path, cand_dirs: dict, concept_sha256: dict) -> dict:
+    """One prop_hi3dgen.py process per group of pending candidates sharing a
+    concept image: the model load and the normal prediction are the bulk of a
+    candidate's cost and neither depends on the seed, but the normal map does
+    depend on the image, so candidates drawn from different concepts cannot
+    share a process."""
+    pending = [seed for seed, cand_dir in cand_dirs.items() if not geometry_done(cand_dir)]
+    for seed, cand_dir in cand_dirs.items():
+        if seed not in pending:
+            print(f"geometry: skip (exists) -> {cand_dir / 'raw.glb'}")
+
+    groups = {}
+    for seed in pending:
+        groups.setdefault(concept_sha256[seed], []).append(seed)
+    for group in groups.values():
+        cmd = [HI3DGEN_PYTHON, PROP_HI3DGEN, cand_dirs[group[0]] / "concept.png", "--out", out]
+        for seed in group:
+            cmd += ["--seed", seed]
+        run(cmd)
+        for seed in group:
+            print(f"geometry: generated -> {cand_dirs[seed] / 'raw.glb'}")
+
+    metas = {}
+    for seed, cand_dir in cand_dirs.items():
+        meta = read_or_note(cand_dir / "hi3dgen_manifest.json")
+        meta["raw_glb_sha256"] = sha256_file(cand_dir / "raw.glb")
+        meta["concept_rgba_sha256"] = sha256_file(cand_dir / "concept_rgba.png")
+        metas[seed] = meta
+    return metas
 
 
 def stage_cleanup(cand_dir: Path, height_m: float, symmetrize: bool, symmetrize_keep: str) -> dict:
@@ -247,12 +269,14 @@ def main():
     # this same chain drives in A3.10.
     sys.stdout.reconfigure(line_buffering=True)
 
-    parser = argparse.ArgumentParser(description="Generate one prop candidate through the full A3 chain.")
+    parser = argparse.ArgumentParser(description="Generate one prop candidate per seed through the full A3 chain.")
     parser.add_argument("--asset", required=True,
                         help="Registered asset name (content/models/assets.json); resolves "
                              "the subject prompt and material contract (proptex.registry)")
-    parser.add_argument("--out", type=Path, required=True, help="Batch directory; the candidate lands in <out>/cand_<seed>/")
-    parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument("--out", type=Path, required=True, help="Batch directory; each candidate lands in <out>/cand_<seed>/")
+    parser.add_argument("--seed", type=int, action="append", dest="seeds", required=True, metavar="N",
+                        help="Repeatable: one candidate per seed; candidates sharing a concept image "
+                             "run their geometry stage in a single Hi3DGen process")
     parser.add_argument("--skip-concept", type=Path, default=None, metavar="IMAGE",
                         help="Bypass concept generation with a provided image (re-roll geometry without re-rolling the concept)")
     parser.add_argument("--symmetrize", action="store_true",
@@ -273,30 +297,41 @@ def main():
     args.out = args.out.resolve()
     contract = resolve(args.asset)
 
-    cand_dir = args.out / f"cand_{args.seed}"
-    cand_dir.mkdir(parents=True, exist_ok=True)
+    if len(set(args.seeds)) != len(args.seeds):
+        parser.error(f"repeated --seed value in {args.seeds}: two candidates would share one cand_<seed>/ directory")
+    cand_dirs = {seed: args.out / f"cand_{seed}" for seed in args.seeds}
+    for cand_dir in cand_dirs.values():
+        cand_dir.mkdir(parents=True, exist_ok=True)
 
     stop = STAGES.index(args.through)
-    manifest = {
-        "subject": contract.subject,
-        "seed": args.seed,
-        "candidate_dir": str(cand_dir),
-        "concept": stage_concept(cand_dir, contract.subject, args.seed, args.skip_concept),
-    }
+    manifests = {}
+    for seed in args.seeds:
+        manifests[seed] = {
+            "subject": contract.subject,
+            "seed": seed,
+            "candidate_dir": str(cand_dirs[seed]),
+            "concept": stage_concept(cand_dirs[seed], contract.subject, seed, args.skip_concept),
+        }
     if stop >= STAGES.index("geometry"):
-        manifest["geometry"] = stage_geometry(cand_dir, args.seed)
-    if stop >= STAGES.index("cleanup"):
-        manifest["cleanup"] = stage_cleanup(cand_dir, contract.height_m, args.symmetrize, args.symmetrize_keep)
-    if stop >= STAGES.index("texture"):
-        manifest["texture"] = stage_texture(cand_dir, args.asset, args.seed)
-    if stop >= STAGES.index("preprocess"):
-        # final.glb, needed by the turntable stage below
-        manifest.update(stage_preprocess_bake(cand_dir, contract.texture_size, args.max_bytes))
-    if stop >= STAGES.index("turntable"):
-        manifest["turntable"] = stage_turntable(cand_dir)
-    manifest_path = cand_dir / "generation_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"OK: wrote {manifest_path}")
+        concept_sha256 = {seed: manifests[seed]["concept"]["concept_png_sha256"] for seed in args.seeds}
+        for seed, meta in stage_geometry(args.out, cand_dirs, concept_sha256).items():
+            manifests[seed]["geometry"] = meta
+
+    for seed in args.seeds:
+        cand_dir = cand_dirs[seed]
+        manifest = manifests[seed]
+        if stop >= STAGES.index("cleanup"):
+            manifest["cleanup"] = stage_cleanup(cand_dir, contract.height_m, args.symmetrize, args.symmetrize_keep)
+        if stop >= STAGES.index("texture"):
+            manifest["texture"] = stage_texture(cand_dir, args.asset, seed)
+        if stop >= STAGES.index("preprocess"):
+            # final.glb, needed by the turntable stage below
+            manifest.update(stage_preprocess_bake(cand_dir, contract.texture_size, args.max_bytes))
+        if stop >= STAGES.index("turntable"):
+            manifest["turntable"] = stage_turntable(cand_dir)
+        manifest_path = cand_dir / "generation_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"OK: wrote {manifest_path}")
 
 
 if __name__ == "__main__":
