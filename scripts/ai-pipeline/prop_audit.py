@@ -47,6 +47,7 @@ FIELDS = [
     "albedo_luma_p1", "albedo_luma_p50", "albedo_luma_p99", "albedo_blown_frac", "albedo_sat",
     "normal_lap_std", "normal_flat_frac",
     "island_frac",
+    "shipped_height_m",
     "atlas_px_per_m", "placed_px_per_m", "world_area_m2", "atlas_w", "atlas_h",
     "roughness_factor", "metallic_factor", "base_color_factor",
     "blend_coverage", "hole_frac",
@@ -56,7 +57,7 @@ PRECISION = {
     "roughness_mean": 3, "roughness_std": 3, "metallic_mean": 3, "ao_mean": 3,
     "albedo_luma_p1": 3, "albedo_luma_p50": 3, "albedo_luma_p99": 3, "albedo_blown_frac": 3, "albedo_sat": 3,
     "normal_lap_std": 3, "normal_flat_frac": 3, "island_frac": 3,
-    "atlas_px_per_m": 1, "placed_px_per_m": 1, "world_area_m2": 2,
+    "atlas_px_per_m": 1, "placed_px_per_m": 1, "world_area_m2": 2, "shipped_height_m": 3,
     "roughness_factor": 2, "metallic_factor": 2,
     "blend_coverage": 4, "hole_frac": 4, "baked_fraction_ts": 4,
 }
@@ -140,6 +141,16 @@ def mesh_areas(gltf, buffers):
         uv_total += 0.5 * float(np.abs((u1[:, 0] - u0[:, 0]) * (u2[:, 1] - u0[:, 1])
                                         - (u2[:, 0] - u0[:, 0]) * (u1[:, 1] - u0[:, 1])).sum())
     return world_total, uv_total
+
+
+def mesh_height_m(gltf, buffers):
+    """World-space Y-extent (glTF's up axis via export_yup) across every
+    mesh-bearing node, in the glb's own baked units -- the shipped size a
+    prop actually renders at, independent of any registry field."""
+    ys = np.concatenate([(pos * scale)[:, 1] for pos, _uv, _tris, scale in iter_prims(gltf, buffers)])
+    if ys.size == 0:
+        return None
+    return float(ys.max() - ys.min())
 
 
 def island_mask(gltf, buffers, w, h):
@@ -373,6 +384,13 @@ def measure_prop(prop_dir, scales, assets):
     row["ao_bound"] = "occlusionTexture" in material
 
     world_area, uv_area = mesh_areas(gltf, buffers)
+    if asset.get("kind") == "generated":
+        target_height = asset.get("height_m")
+        if target_height is None:
+            print(f"error: asset {prop_dir.name!r} is kind=generated but has no height_m in {ASSETS_JSON}", file=sys.stderr)
+            sys.exit(1)
+        shipped_height = mesh_height_m(gltf, buffers)
+        row["shipped_height_m"] = shipped_height
     row["world_area_m2"] = world_area
     atlas_slot = next((s for s in ("base_color", "normal", "metallic_roughness", "occlusion") if s in slots), None)
     mask = None

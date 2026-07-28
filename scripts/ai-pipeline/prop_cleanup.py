@@ -29,7 +29,7 @@
 # decision-gate data, never silently patched.
 #
 # Usage: blender --background --python prop_cleanup.py -- \
-#            <raw.glb> <clean.glb> [--height M] [--tri-budget N]
+#            <raw.glb> <clean.glb> --height M [--tri-budget N]
 
 import argparse
 import json
@@ -335,7 +335,7 @@ def main():
     parser = argparse.ArgumentParser(prog="prop_cleanup.py")
     parser.add_argument("raw_glb")
     parser.add_argument("clean_glb")
-    parser.add_argument("--height", type=float, default=1.8)
+    parser.add_argument("--height", type=float, required=True)
     parser.add_argument("--tri-budget", type=int, default=15000)
     parser.add_argument("--symmetrize", action="store_true")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
