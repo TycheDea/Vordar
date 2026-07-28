@@ -133,9 +133,13 @@ def check_matte(rgba: Image.Image) -> float:
     matte did nothing -- a raw RGB image, alpha == 255) or no opaque pixels
     at all. preprocess_image() is this matte's only surviving consumer, and
     a degenerate one there reconstructs the background as geometry -- silent
-    degeneration, not a fit. Returns the measured opaque fraction."""
+    degeneration, not a fit. Returns the measured opaque fraction.
+
+    The threshold is preprocess_image()'s own bbox test (alpha > 0.8 * 255):
+    pixels below it are outside the crop the pipeline derives, so a matte
+    this gate accepts on softer pixels is one preprocess_image would reject."""
     alpha = np.asarray(rgba.convert("RGBA"))[:, :, 3]
-    opaque = alpha > 0.1 * 255
+    opaque = alpha > 0.8 * 255
     opaque_fraction = float(opaque.mean())
     if opaque_fraction >= 0.995:
         raise DegenerateMatteError(
@@ -150,9 +154,8 @@ def check_matte(rgba: Image.Image) -> float:
 def matte_concept(pipeline: Hi3DGenPipeline, image: Image.Image) -> Image.Image:
     """BiRefNet background-removal matte at the concept image's own
     resolution/framing -- mirrors preprocess_image()'s internal
-    resize-if-large + mask steps but stops short of its bbox crop/pad/resize/
-    premultiply, so the alpha lines up pixel-for-pixel with the untouched
-    concept image. This is what the texturing stage (prop_texture.py)
+    resize-if-large + mask steps but stops short of its bbox crop/pad/resize,
+    so the alpha lines up pixel-for-pixel with the untouched concept image. This is what the texturing stage (prop_texture.py)
     projects: it needs the object's silhouette and the sampled pixels to
     come from the same frame, not Hi3DGen's cropped/centered working copy."""
     rgb = image.convert("RGB")
