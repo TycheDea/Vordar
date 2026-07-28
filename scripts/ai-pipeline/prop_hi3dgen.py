@@ -28,6 +28,7 @@ import random
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -103,6 +104,46 @@ def vram_peaks():
         "peak_allocated_gib": torch.cuda.max_memory_allocated() / GIB,
         "peak_reserved_gib": torch.cuda.max_memory_reserved() / GIB,
     }
+
+
+def resident_gib() -> float:
+    """Live (not cached) device allocation right now, the figure a free has to
+    move for the freed weights to actually be gone."""
+    return torch.cuda.memory_allocated() / GIB
+
+
+@contextmanager
+def staged(pipeline: Hi3DGenPipeline, *names: str):
+    """Hold only the named models on pipeline.device for the block, then park
+    them back on the CPU and drop the freed blocks. The stages read their
+    weights in disjoint windows, so nothing is gained by having them resident
+    together and a card this size cannot hold the sum."""
+    for name in names:
+        pipeline.models[name].to(pipeline.device)
+    try:
+        yield
+    finally:
+        for name in names:
+            pipeline.models[name].to("cpu")
+        torch.cuda.empty_cache()
+
+
+@torch.no_grad()
+def staged_run(pipeline: Hi3DGenPipeline, image: Image.Image, seed: int,
+               ss_params: dict, slat_params: dict):
+    """Hi3DGenPipeline.run(preprocess_image=False) with every stage's weights
+    resident only while that stage runs. Call order and seeding point match
+    run()'s, and the sampled stages must stay inside no_grad -- the mesh
+    extractor calls .numpy() on the decoded field."""
+    with staged(pipeline, "image_cond_model"):
+        cond = pipeline.get_cond([image])
+    torch.manual_seed(seed)
+    with staged(pipeline, "sparse_structure_flow_model", "sparse_structure_decoder"):
+        coords = pipeline.sample_sparse_structure(cond, 1, ss_params)
+    with staged(pipeline, "slat_flow_model"):
+        slat = pipeline.sample_slat(cond, coords, slat_params)
+    with staged(pipeline, "slat_decoder_mesh"):
+        return pipeline.decode_slat(slat, ["mesh"])
 
 
 def preload_birefnet(pipeline: Hi3DGenPipeline) -> None:
@@ -236,7 +277,9 @@ def main():
 
     t_start = time.perf_counter()
     hi3dgen_pipeline = Hi3DGenPipeline.from_pretrained(GEOMETRY_WEIGHTS)
-    hi3dgen_pipeline.cuda()
+    # The device the geometry stages run on; their weights stay on the CPU
+    # until staged_run() brings each one over for its own stage.
+    hi3dgen_pipeline.device = torch.device("cuda")
     preload_birefnet(hi3dgen_pipeline)
 
     normal_entrypoint = NORMAL_ENTRYPOINTS[args.normal_model]
@@ -262,6 +305,7 @@ def main():
         )
 
     t_loaded = time.perf_counter()
+    resident = {"after_load": resident_gib()}
 
     image = Image.open(args.image).convert("RGBA")
     concept_rgba = matte_concept(hi3dgen_pipeline, image)
@@ -272,7 +316,12 @@ def main():
     concept_rgba_path = args.out / "concept_rgba.png"
     concept_rgba.save(concept_rgba_path)
     # concept_rgba already carries the real matte, so preprocess_image()'s
-    # has_alpha branch reuses it directly instead of running BiRefNet again.
+    # has_alpha branch reuses it directly instead of running BiRefNet again:
+    # the matte above is the model's last consumer in this process, and its
+    # weights must not ride the geometry stage's peak.
+    del hi3dgen_pipeline.birefnet_model
+    torch.cuda.empty_cache()
+    resident["after_birefnet_free"] = resident_gib()
     conditioning_source = (
         full_res_conditioning_source(image, concept_rgba) if args.crop_from_original else concept_rgba
     )
@@ -294,6 +343,11 @@ def main():
     normal_path = args.out / "normal.png"
     normal_image.save(normal_path)
     t_normal = time.perf_counter()
+    # normal_image is a PIL image, so the predictor's weights have no consumer
+    # past this point and must not ride the geometry stage's peak.
+    del normal_predictor
+    torch.cuda.empty_cache()
+    resident["after_normal_free"] = resident_gib()
 
     # Both samplers merge their checkpoint params (cfg_interval, rescale_t,
     # from weights/*/pipeline.json) under whatever run() is handed. Merging
@@ -301,14 +355,7 @@ def main():
     # with, not just the steps/cfg this script asked for.
     ss_params = {**hi3dgen_pipeline.sparse_structure_sampler_params, "steps": args.ss_steps, "cfg_strength": args.ss_cfg}
     slat_params = {**hi3dgen_pipeline.slat_sampler_params, "steps": args.slat_steps, "cfg_strength": args.slat_cfg}
-    outputs = hi3dgen_pipeline.run(
-        normal_image,
-        seed=seed,
-        formats=["mesh"],
-        preprocess_image=False,
-        sparse_structure_sampler_params=ss_params,
-        slat_sampler_params=slat_params,
-    )
+    outputs = staged_run(hi3dgen_pipeline, normal_image, seed, ss_params, slat_params)
     t_geometry = time.perf_counter()
     mesh_result = outputs["mesh"][0]
     trimesh_mesh = mesh_result.to_trimesh(transform_pose=True)
@@ -322,6 +369,7 @@ def main():
     t_end = time.perf_counter()
 
     vram = vram_peaks()
+    vram["resident_gib"] = resident
     manifest = {
         "model": "Stable-X/Hi3DGen",
         "hi3dgen": hi3dgen_id(),

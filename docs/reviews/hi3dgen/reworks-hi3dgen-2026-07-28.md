@@ -75,3 +75,12 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `7/10`
 - **Cost:** `7/10`
 - **Path:** gate first (audit finding 24) → strike or plan.
+
+### 6. Same-seed geometry is not reproducible; every A/B in this queue is reading noise it has not bounded
+- **Evidence:** Measured while verifying audit finding 17. Three turbo runs of `scripts/ai-pipeline/prop_hi3dgen.py` on the same concept (`target/prop-batch/candelabra-z/cand_5/concept.png`) at `--seed 5`: 541220, 541286, 541242 vertices — and the last two came from byte-identical code, so the spread is not the fix under test. The normal map is bit-identical across all three (`normal_sha256 b70414b1…`), so the divergence is entirely in the geometry stage: `torch.scatter_reduce` in `fork:hi3dgen/representations/mesh/utils_cube.py:cubes_to_verts` and the sparse convs accumulate in nondeterministic float order, which shifts the SDF field enough to move the marching-cubes iso-surface.
+- **Ideal:** A seed pins the mesh, so an A/B between two configurations measures the configuration. Failing that, the queue knows the size of the noise floor and reports differences against it.
+- **Gap:** `prop_hi3dgen.py` already reseeds the normal stage specifically so a same-seed re-run reproduces (`prop_hi3dgen.py`, comment above `torch.manual_seed(seed)`), which sets an expectation the geometry stage does not meet. The A/B reports in this folder (`ab-sampler-*`, `ab-conditioning-*`) compare single runs per arm with no repeat baseline, so any effect smaller than ~0.01% of vertex count — and, more importantly, any unquantified effect on the visual metrics — is indistinguishable from run-to-run drift.
+- **Suggestion:** Two parts, decide which. (a) Force determinism: `torch.use_deterministic_algorithms(True)` plus `CUBLAS_WORKSPACE_CONFIG`, and check whether spconv's `native` algo and `scatter_reduce` have deterministic paths at acceptable cost — if they do, the seed becomes a real pin. (b) If determinism is unaffordable, measure the noise floor once (N repeats on 2–3 subjects, per metric the A/Bs use) and require every future A/B to report its delta against that floor.
+- **Outcome:** `7/10` — every remaining comparison in this campaign depends on it.
+- **Cost:** `4/10` — (a) is a flag plus a compatibility check; (b) is GPU time (§8 go-ahead) plus a convention.
+- **Path:** try (a) first on one candidate — if `use_deterministic_algorithms` runs at all, repeat 3× and confirm identical vertex counts; fall back to (b). Sequence before the next A/B in the queue.
