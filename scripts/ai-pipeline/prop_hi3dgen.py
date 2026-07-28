@@ -69,6 +69,11 @@ SLAT_SAMPLING_STEPS_DEFAULT = 6
 # a measured A/B picks a different value.
 SS_CFG_DEFAULT = 5.0
 SLAT_CFG_DEFAULT = 5.0
+# StableNormal's processing resolution. The predictor's own signature default
+# is 1024; 768 is the value the Hi3DGen Gradio demo passes. Kept as the
+# default so adding explicit control is behaviour-neutral until a measured
+# A/B picks a different value.
+NORMAL_RESOLUTION_DEFAULT = 768
 
 GIB = 1024 ** 3
 
@@ -169,6 +174,18 @@ def matte_concept(pipeline: Hi3DGenPipeline, image: Image.Image) -> Image.Image:
     return Image.fromarray(rgba)
 
 
+def full_res_conditioning_source(image: Image.Image, concept_rgba: Image.Image) -> Image.Image:
+    """The matte's alpha carried back onto the untouched full-resolution RGB,
+    so preprocess_image()'s bbox crop is taken from original pixels instead of
+    the <=1024 copy BiRefNet had to run on. Identity when the concept image is
+    already within 1024 on its longest side, which is where the whole pipeline
+    sits today."""
+    rgba = image.convert("RGBA")
+    alpha = concept_rgba.getchannel("A").resize(rgba.size, Image.Resampling.LANCZOS)
+    rgba.putalpha(alpha)
+    return rgba
+
+
 def check_mesh(mesh_result, trimesh_mesh: trimesh.Trimesh) -> dict:
     """Refuse degenerate raw geometry before it reaches decimation/xatlas
     three stages downstream, where it currently surfaces as a confusing
@@ -206,6 +223,8 @@ def main():
     parser.add_argument("--slat-steps", type=int, default=SLAT_SAMPLING_STEPS_DEFAULT, help="Structured latent stage sampling steps.")
     parser.add_argument("--ss-cfg", type=float, default=SS_CFG_DEFAULT, help="Sparse structure stage CFG guidance strength.")
     parser.add_argument("--slat-cfg", type=float, default=SLAT_CFG_DEFAULT, help="Structured latent stage CFG guidance strength.")
+    parser.add_argument("--normal-resolution", type=int, default=NORMAL_RESOLUTION_DEFAULT, help="StableNormal processing resolution.")
+    parser.add_argument("--crop-from-original", action="store_true", help="Take the object crop from full-resolution pixels instead of the <=1024 matte copy.")
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.image = args.image.resolve()
@@ -249,7 +268,10 @@ def main():
     concept_rgba.save(concept_rgba_path)
     # concept_rgba already carries the real matte, so preprocess_image()'s
     # has_alpha branch reuses it directly instead of running BiRefNet again.
-    image = hi3dgen_pipeline.preprocess_image(concept_rgba, resolution=1024)
+    conditioning_source = (
+        full_res_conditioning_source(image, concept_rgba) if args.crop_from_original else concept_rgba
+    )
+    image = hi3dgen_pipeline.preprocess_image(conditioning_source, resolution=1024)
     t_preprocessed = time.perf_counter()
     # app.py never seeds this stage (YOSONormalsPipeline draws from the
     # ambient RNG, no generator= plumbed through hubconf's Predictor), so a
@@ -257,7 +279,7 @@ def main():
     # hi3dgen_pipeline.run() below reseeds again for its own stages, the same
     # global-RNG convention it already uses internally.
     torch.manual_seed(seed)
-    normal_image = normal_predictor(image, resolution=768, match_input_resolution=True, data_type="object")
+    normal_image = normal_predictor(image, resolution=args.normal_resolution, match_input_resolution=True, data_type="object")
     # The normal map is the geometry stage's only input: keeping it splits a
     # bad mesh into "the normal predictor saw it wrong" vs "the sampler built
     # it wrong", which the mesh alone cannot distinguish.
@@ -306,6 +328,8 @@ def main():
         "concept_rgba_sha256": hashlib.sha256(concept_rgba_path.read_bytes()).hexdigest(),
         "normal": str(normal_path),
         "normal_sha256": hashlib.sha256(normal_path.read_bytes()).hexdigest(),
+        "normal_resolution": args.normal_resolution,
+        "crop_from_original": args.crop_from_original,
         "seed": seed,
         "sampler_params": {"sparse_structure": ss_params, "slat": slat_params},
         "backends": {
