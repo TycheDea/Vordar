@@ -4,6 +4,9 @@
 #   - strips loose fragments whose bbox diagonal is under 2% of the whole
 #     mesh's (sparse-lattice floaters); runs BEFORE normalization so a
 #     floater can't skew the height/ground fit
+#   - strips interior faces: a face with no ray escaping the mesh from just
+#     outside its own surface can never reach a camera, so it is removed
+#     before the tri budget and UV atlas are spent describing it
 #   - uniform-scales to --height, origin at the footprint centroid (bbox
 #     center of the ground-contact band), mesh bottom exactly at y=0 in
 #     the exported +Y-up glb — zone props sit on the ground plane via
@@ -58,6 +61,13 @@ UV_ATLAS_PADDING_PX = 4
 # Rays cast through the bbox to measure two_crossing_ray_fraction: enough
 # samples to average out the sampling noise a single ray direction carries.
 RAY_SAMPLE_COUNT = 200
+# Interior-face visibility test: rays cast per face over the outward
+# hemisphere to decide whether any of them escapes the mesh.
+INTERIOR_RAY_COUNT = 64
+# Ray origin offset along the face normal, as a fraction of the mesh's
+# bbox diagonal -- clears the originating face without biasing the test
+# toward nearby parallel geometry.
+INTERIOR_RAY_EPS_FRACTION = 1e-4
 
 
 def fail(msg):
@@ -146,6 +156,67 @@ def geometry_health(me):
         "component_count": component_count,
         "two_crossing_ray_fraction": round(two_crossings / RAY_SAMPLE_COUNT, 4),
     }
+
+
+def _hemisphere_dirs(count):
+    """`count` unit directions over a hemisphere around local +Z,
+    deterministic; direction 0 is +Z itself so a genuinely exterior face --
+    which typically sees open space along its own normal -- escapes on the
+    first ray instead of paying for the rest."""
+    rng = np.random.default_rng(0)
+    z = np.concatenate(([1.0], rng.uniform(0.0, 1.0, count - 1)))
+    phi = np.concatenate(([0.0], rng.uniform(0.0, 2 * np.pi, count - 1)))
+    r = np.sqrt(np.clip(1.0 - z * z, 0.0, 1.0))
+    return np.stack([r * np.cos(phi), r * np.sin(phi), z], axis=1)
+
+
+def strip_interior_faces(obj, me):
+    """Deletes faces no ray escapes the mesh from: sample INTERIOR_RAY_COUNT
+    directions over the outward hemisphere from a point just off each
+    face's surface (+eps along its normal); a face where every one of them
+    re-enters the mesh is enclosed by other geometry and unreachable by any
+    camera. bpy.ops.mesh.select_interior_faces() runs first as a cheap
+    filter -- faces whose edges are shared by more than two faces, caught
+    from edge topology alone with no raycasting -- but it cannot see a
+    manifold inner wall welded to the outer shell at its silhouette edges,
+    which only the raycast test catches. Returns the triangle count removed."""
+    tris_before = tri_count(me)
+
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="DESELECT")
+    bpy.ops.mesh.select_interior_faces()
+    bpy.ops.object.mode_set(mode="OBJECT")
+    interior = {p.index for p in me.polygons if p.select}
+
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.faces.ensure_lookup_table()
+    bvh = BVHTree.FromBMesh(bm)
+    eps = INTERIOR_RAY_EPS_FRACTION * bbox_diag([obj])
+    dirs = _hemisphere_dirs(INTERIOR_RAY_COUNT)
+
+    for f in bm.faces:
+        if f.index in interior:
+            continue
+        n = f.normal
+        if n.length_squared < 1e-12:
+            continue
+        n = n.normalized()
+        t1 = n.orthogonal().normalized()
+        t2 = n.cross(t1)
+        origin = f.calc_center_median() + n * eps
+        if not any(bvh.ray_cast(origin, t1 * x + t2 * y + n * z)[0] is None
+                  for x, y, z in dirs):
+            interior.add(f.index)
+
+    if interior:
+        bmesh.ops.delete(bm, geom=[bm.faces[i] for i in interior], context="FACES")
+        bm.to_mesh(me)
+        me.update()
+    bm.free()
+
+    return tris_before - tri_count(me)
 
 
 def export_glb(path):
@@ -324,6 +395,11 @@ def main():
     if areas.sum() < 1e-8:
         fail("zero-area mesh")
 
+    # ---- interior faces out, before any budget is spent describing them ----
+    interior_tris_removed = strip_interior_faces(obj, me)
+    if len(me.polygons) == 0:
+        fail("interior-face strip removed the entire mesh")
+
     # ---- scale to target height (Blender Z = exported glTF +Y) ----
     co = vert_coords(me)
     raw_height = float(co[:, 2].max() - co[:, 2].min())
@@ -380,6 +456,7 @@ def main():
         "raw_tris": raw_tris,
         "fragments_removed": len(drop),
         "fragment_tris_removed": fragment_tris,
+        "interior_tris_removed": interior_tris_removed,
         "hires_tris": hires_tris,
         "clean_tris": clean_tris,
         "height_target": args.height,
