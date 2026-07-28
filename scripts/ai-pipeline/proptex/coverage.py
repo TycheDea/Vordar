@@ -49,9 +49,6 @@ class CoverageFailure(Exception):
 
 # Coverage-driven extra views (clean-room Text2Tex next-best-view):
 MV_EXTRA_MAX = 2  # at most one extra canvas (two side-by-side views)
-MV_EXTRA_MIN_GAIN = 0.03  # an extra view must newly cover >=3% of island
-# texels; below that a pick only trims rims off charts the set already reaches
-# and moves no hole component's extrapolation depth
 MV_EXTRA_CANDIDATE_AZIMUTHS = tuple(range(0, 360, 30))
 MV_EXTRA_CANDIDATE_ELEVATIONS = (-35.0, 15.0, 55.0)  # on standing props the
 # uncovered set is dominated by DOWN-facing texels (cup/arm/base undersides:
@@ -132,9 +129,8 @@ def coverage_stats(covered, island):
 
 def rank_candidates(cands, cand_depths, rig, pos, nrm, target, top_n=3):
     """Candidate directions ranked by how many `target` texels they would
-    newly cover, restricted to those with any overlap at all -- the same
-    per-candidate scoring pick_extra_views uses, against a caller-chosen
-    target mask instead of the full uncovered set."""
+    newly cover, restricted to those with any overlap at all -- the refusal
+    diagnostic's scoring, against a caller-chosen target mask."""
     scored = []
     for (spec, cand), depth in zip(cands, cand_depths):
         gain = int(covered_mask(view_coverage([cand], [depth], rig, pos, nrm), target).sum())
@@ -166,40 +162,54 @@ def extra_candidates(views, rig):
 
 
 def pick_extra_views(views, depths, cands, cand_depths, rig, pos, nrm, island):
-    """Greedy next-best-view pick over the candidate set: coverage is purely
-    geometric (facing/frustum/occlusion, never the generated pixels), so
-    extras are picked before any generation and a re-run re-derives the same
-    picks. Returns `(extra_meta, reachable)`: one entry per pick (its
-    direction and the gain it was predicted to add), and the island texels
-    the base view set or any raw candidate direction can see -- interior
-    texels no direction ever reaches are excluded from `reachable`
-    regardless of which candidates end up picked, since a component made of
-    only those texels has no view that could ever cover it. `cand_depths` is
-    iterated exactly once, so it may be a generator that loads one
-    candidate's depth at a time."""
-    base_covered = covered_mask(view_coverage(views, depths, rig, pos, nrm), island)
-    uncovered = island & ~base_covered
-    masks = [covered_mask(view_coverage([cand], [depth], rig, pos, nrm), island)
-             for (_, cand), depth in zip(cands, cand_depths)]
-    reachable = base_covered.copy()
-    for m in masks:
-        reachable |= m
+    """Greedy next-best-view pick over the candidate set, scored by the
+    coverage gate's own statistic: a candidate is ranked by the offending
+    texels it would retire (texels of hole components over
+    MAX_HOLE_DEPTH_FRAC within island & reachable, measured by
+    `hole_component_depths` on the mask the pick would produce), ties
+    broken by offending components retired, then by candidate order -- so
+    a re-run re-derives the same picks. Coverage is purely geometric
+    (facing/frustum/occlusion, never the generated pixels), so extras are
+    picked before any generation. The loop stops when the gate would pass
+    or no candidate improves it -- a pick that only trims area but moves
+    no offending component is never taken. Returns `(extra_meta,
+    reachable)`: one entry per pick (its direction and what it was
+    predicted to retire), and the island texels the base view set or any
+    raw candidate direction can see -- interior texels no direction ever
+    reaches are excluded from `reachable` regardless of which candidates
+    end up picked, since a component made of only those texels has no view
+    that could ever cover it. `cand_depths` is iterated exactly once, so
+    it may be a generator that loads one candidate's depth at a time."""
+    wsum = view_coverage(views, depths, rig, pos, nrm)
+    weights = [view_weight(cand, depth, rig, pos, nrm)[0]
+               for (_, cand), depth in zip(cands, cand_depths)]
+    reachable = covered_mask(wsum, island)
+    for w in weights:
+        reachable |= covered_mask(w, island)
+
+    def offending(wsum):
+        comps = hole_component_depths(covered_mask(wsum, island),
+                                      island & reachable)
+        over = [c for c in comps if c["depth_frac"] > MAX_HOLE_DEPTH_FRAC]
+        return sum(c["texels"] for c in over), len(over)
 
     extra_meta = []
-    island_total = int(island.sum())
-    while len(extra_meta) < MV_EXTRA_MAX and cands:
-        gains = [int((m & uncovered).sum()) for m in masks]
-        best = int(np.argmax(gains))
-        if gains[best] < MV_EXTRA_MIN_GAIN * island_total:
+    live = list(range(len(cands)))
+    cur = offending(wsum)
+    while len(extra_meta) < MV_EXTRA_MAX and live and cur[1] > 0:
+        gains = [tuple(c - n for c, n in zip(cur, offending(wsum + weights[j])))
+                 for j in live]
+        best = max(range(len(live)), key=gains.__getitem__)
+        if gains[best] <= (0, 0):
             break
-        spec, _ = cands[best]
-        uncovered &= ~masks[best]
-        cands = cands[:best] + cands[best + 1:]
-        masks = masks[:best] + masks[best + 1:]
+        j = live.pop(best)
+        wsum += weights[j]
+        cur = offending(wsum)
+        spec, _ = cands[j]
         extra_meta.append({
             "hint": spec[0], "azimuth_deg": spec[1], "elevation_deg": spec[2],
-            "predicted_gain_texels": gains[best],
-            "predicted_gain_frac": round(gains[best] / max(island_total, 1), 4),
+            "predicted_retired_texels": gains[best][0],
+            "predicted_retired_components": gains[best][1],
         })
     return extra_meta, reachable
 
