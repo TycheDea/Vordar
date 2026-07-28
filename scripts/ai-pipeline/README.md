@@ -453,7 +453,7 @@ Importing `Hi3DGenPipeline` (from `C:\tools\Hi3DGen\Hi3DGen`, with
 `ATTN_BACKEND=xformers SPCONV_ALGO=native` set) prints `[SPARSE] Backend:
 spconv, Attention: xformers`.
 
-**Weights** (~5.7 GB total; all MIT or Apache-2.0 — verdicts in
+**Weights** (~6.9 GB total; all MIT or Apache-2.0 — verdicts in
 `content/source/CREDITS.md`):
 
 | Repo | Role | Location |
@@ -462,12 +462,12 @@ spconv, Attention: xformers`.
 | `Stable-X/yoso-normal-v1-8-1` | StableNormal-turbo predictor (2.63 GB) | `C:\tools\Hi3DGen\Hi3DGen\weights\yoso-normal-v1-8-1` |
 | `ZhengPeng7/BiRefNet` | background removal (~0.44 GB) | standard HF cache (snapshot `e2bf8e4`) |
 | `hugoycj/StableNormal` (Apache-2.0 code, fork of `Stable-X/StableNormal`) | normal-predictor code | torch.hub snapshot `hugoycj_StableNormal_main` |
+| `facebookresearch/dinov2` | Hi3DGen's own `image_cond_model` (`dinov2_vitl14_reg`, 1.22 GB, `Hi3DGen/trellis-normal-v0-1/pipeline.json`), loaded every geometry run | torch.hub snapshot `facebookresearch_dinov2_main`, weights in the default torch hub checkpoint cache |
 
-One dependency the original plan missed: StableNormal's YOSO predictor pulls
-a DINOv2 backbone (`dinov2_vitl14_reg`, ~1.13 GB) via its own internal
-`torch.hub.load` on first run — not listed in Hi3DGen's `requirements.txt`,
-found running the first real smoke. It downloads into the default torch hub
-cache the first time `prop_hi3dgen.py` runs and is reused on every run after.
+One dependency the original plan missed: DINOv2 is not listed in Hi3DGen's
+`requirements.txt` — found running the first real smoke. It downloads via
+StableNormal's YOSO predictor's own internal `torch.hub.load` on first run,
+into the default torch hub cache, and is reused on every run after.
 
 SHA256 for every downloaded weight file: `scripts/ai-pipeline/models.sha256`
 (one `Hi3DGen/<relative-path>` line per file).

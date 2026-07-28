@@ -48,6 +48,7 @@ GEOMETRY_WEIGHTS = REPO_DIR / "weights" / "trellis-normal-v0-1"
 NORMAL_WEIGHTS_REPO = "Stable-X/yoso-normal-v1-8-1"
 YOSO_VERSION = "yoso-normal-v1-8-1"
 BIREFNET_REPO = "ZhengPeng7/BiRefNet"
+BIREFNET_REVISION = "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4"
 STABLE_NORMAL_HUB_SNAPSHOT = "hugoycj_StableNormal_main"
 
 # app.py's Advanced Settings slider defaults (Stage 1: Sparse Structure /
@@ -67,7 +68,10 @@ def preload_birefnet(pipeline: Hi3DGenPipeline) -> None:
     from transformers import AutoModelForImageSegmentation
 
     birefnet_model = AutoModelForImageSegmentation.from_pretrained(
-        BIREFNET_REPO, trust_remote_code=True, local_files_only=True
+        BIREFNET_REPO,
+        revision=BIREFNET_REVISION,
+        trust_remote_code=True,
+        local_files_only=True,
     ).to(pipeline.device)
     birefnet_model.eval()
     pipeline.birefnet_model = birefnet_model
