@@ -69,6 +69,13 @@ both arms denoise at 768. Finding 17 cut peak VRAM 15.57→7.41 GiB reserved and
 wall time 39%. Two defects found in-path were fixed at `a77c156`.
 Parked: rework 5 (gate: finding 24's measurement shows extraction is a
 dominant wall-clock share).
+In progress: rework 1, step 1 of 8 done (`plan-rework1-solid-interior-2026-07-28.md`
+approved at `3c35a7b`; harness landed red in the fork at `e62ca75`, `ImportError:
+fill_enclosed_sdf`, all four cases proven 4/4 against a scratch reference flood).
+Resume at step 2. Execution waves: 1 → 2 → (3 ∥ 5) → 4 → 6 → (7 ∥ 8); steps 3 and 4
+share `utils_cube.py`/`cube2mesh.py` and cannot overlap. Step 6 carries the plan's
+single §8 GPU smoke (~2 min), already approved. Reworks 10 and 11 were queued from
+step 1.
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
 peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
 system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before
