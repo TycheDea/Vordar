@@ -34,10 +34,12 @@ import sys
 import traceback
 from pathlib import Path
 
+import bmesh
 import bpy
 import numpy as np
 import xatlas
-from mathutils import Matrix
+from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
 
 # Loose islands under 2% of the mesh's bbox diagonal (~4 cm on a 1.8 m
 # prop) are generation floaters — far below any feature that reads at
@@ -53,6 +55,9 @@ CONTACT_BAND_FRACTION = 0.025
 # under the normal bake's margin=8 dilation.
 UV_ATLAS_RESOLUTION = 1024
 UV_ATLAS_PADDING_PX = 4
+# Rays cast through the bbox to measure two_crossing_ray_fraction: enough
+# samples to average out the sampling noise a single ray direction carries.
+RAY_SAMPLE_COUNT = 200
 
 
 def fail(msg):
@@ -74,6 +79,73 @@ def tri_count(me):
 def bbox_diag(objs):
     corners = np.array([c for o in objs for c in o.bound_box])
     return float(np.linalg.norm(corners.max(axis=0) - corners.min(axis=0)))
+
+
+def geometry_health(me):
+    """Watertightness/topology diagnostics on the final mesh. A boundary
+    edge borders exactly one face (a hole); euler_number is V-E+F, which
+    is 2 for a closed genus-0 manifold and departs from it under
+    non-manifold or open topology; component_count is the number of
+    vertex-connectivity islands; two_crossing_ray_fraction is the share
+    of random rays through the bbox whose face-crossing count is 2, the
+    signature a closed surface gives any ray that enters and exits once."""
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+
+    boundary_edge_count = sum(1 for e in bm.edges if len(e.link_faces) == 1)
+    euler_number = len(bm.verts) - len(bm.edges) + len(bm.faces)
+
+    visited = set()
+    component_count = 0
+    for seed in bm.verts:
+        if seed.index in visited:
+            continue
+        component_count += 1
+        stack = [seed]
+        visited.add(seed.index)
+        while stack:
+            v = stack.pop()
+            for e in v.link_edges:
+                other = e.other_vert(v)
+                if other.index not in visited:
+                    visited.add(other.index)
+                    stack.append(other)
+
+    bvh = BVHTree.FromBMesh(bm)
+    co = np.array([v.co for v in bm.verts])
+    bbox_min, bbox_max = co.min(axis=0), co.max(axis=0)
+    diag = float(np.linalg.norm(bbox_max - bbox_min))
+    margin = 0.25 * diag
+    rng = np.random.default_rng(0)
+    two_crossings = 0
+    for _ in range(RAY_SAMPLE_COUNT):
+        origin = Vector(rng.uniform(bbox_min - margin, bbox_max + margin))
+        target = Vector(rng.uniform(bbox_min, bbox_max))
+        direction = (target - origin).normalized()
+        crossings = 0
+        o, remaining = origin, diag + 2 * margin
+        for _ in range(64):
+            hit, _n, _i, dist = bvh.ray_cast(o, direction, remaining)
+            if hit is None:
+                break
+            crossings += 1
+            remaining -= dist + 1e-6
+            o = hit + direction * 1e-6
+            if remaining <= 0:
+                break
+        if crossings == 2:
+            two_crossings += 1
+
+    bm.free()
+    return {
+        "is_watertight": boundary_edge_count == 0,
+        "boundary_edge_count": boundary_edge_count,
+        "euler_number": euler_number,
+        "component_count": component_count,
+        "two_crossing_ray_fraction": round(two_crossings / RAY_SAMPLE_COUNT, 4),
+    }
 
 
 def export_glb(path):
@@ -318,6 +390,7 @@ def main():
         "hires_glb": str(hires),
         "clean_glb": str(clean),
     }
+    stats.update(geometry_health(me))
     if symmetrize_stats is not None:
         stats["symmetrize"] = symmetrize_stats
     print(json.dumps(stats))
