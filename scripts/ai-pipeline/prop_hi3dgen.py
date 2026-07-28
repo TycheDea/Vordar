@@ -21,6 +21,10 @@ import os
 # SPCONV_ALGO, extended to ATTN_BACKEND so the script needs no shell setup.
 os.environ["ATTN_BACKEND"] = "xformers"
 os.environ["SPCONV_ALGO"] = "native"
+# GEOMETRY_WEIGHTS below is a fully-populated local snapshot, so this is a
+# hard guard against silently falling back to a network fetch (e.g. a repo
+# id typo) rather than failing loudly.
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 import random
 import sys
@@ -40,7 +44,7 @@ REPO_DIR = Path(r"C:\tools\Hi3DGen\Hi3DGen")
 sys.path.insert(0, str(REPO_DIR))
 from hi3dgen.pipelines import Hi3DGenPipeline  # noqa: E402
 
-GEOMETRY_WEIGHTS = "Stable-X/trellis-normal-v0-1"
+GEOMETRY_WEIGHTS = REPO_DIR / "weights" / "trellis-normal-v0-1"
 NORMAL_WEIGHTS_REPO = "Stable-X/yoso-normal-v1-8-1"
 YOSO_VERSION = "yoso-normal-v1-8-1"
 BIREFNET_REPO = "ZhengPeng7/BiRefNet"
@@ -182,7 +186,7 @@ def main():
     manifest = {
         "model": "Stable-X/Hi3DGen",
         "weights": {
-            "geometry": GEOMETRY_WEIGHTS,
+            "geometry": str(GEOMETRY_WEIGHTS),
             "normal": NORMAL_WEIGHTS_REPO,
             "birefnet": BIREFNET_REPO,
         },

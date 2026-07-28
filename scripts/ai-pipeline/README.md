@@ -458,7 +458,7 @@ spconv, Attention: xformers`.
 
 | Repo | Role | Location |
 |---|---|---|
-| `Stable-X/trellis-normal-v0-1` | normal-conditioned geometry pipeline (2.65 GB) | `C:\tools\Hi3DGen\Hi3DGen\weights\trellis-normal-v0-1` |
+| `Stable-X/trellis-normal-v0-1` | normal-conditioned geometry pipeline (2.65 GB) | `C:\tools\Hi3DGen\Hi3DGen\weights\trellis-normal-v0-1` -- `prop_hi3dgen.py`'s actual load path (`GEOMETRY_WEIGHTS`, offline via `HF_HUB_OFFLINE=1`), not just a cache copy |
 | `Stable-X/yoso-normal-v1-8-1` | StableNormal-turbo predictor (2.63 GB) | `C:\tools\Hi3DGen\Hi3DGen\weights\yoso-normal-v1-8-1` |
 | `ZhengPeng7/BiRefNet` | background removal (~0.44 GB) | standard HF cache (snapshot `e2bf8e4`) |
 | `hugoycj/StableNormal` (Apache-2.0 code, fork of `Stable-X/StableNormal`) | normal-predictor code | torch.hub snapshot `hugoycj_StableNormal_main` |
