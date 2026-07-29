@@ -137,6 +137,53 @@ chapel_arch reads 1.0378 because the interior strip leaves a lace-like shell; th
 hires figure is 0.0747 against a 0.1138 baseline. A gate must name which mesh it
 reads, and 15k-tri decimation is not that mesh.
 
+Regression-checked across all seven props (`c9c695b`, `4310640`): every one
+processes, heights land, stats reconcile exactly. Fragment yields vary by two
+orders of magnitude — gravestone 2,292, olive_stump 1,807, chapel_arch 3,575,
+candelabra_shrine 13 — confirming the cull was catching almost nothing where it
+sat. `boundary_edges_per_face` on the final mesh ranges 0.0899 (crucero) to
+1.1944 (olive_stump); **no prop is watertight after cleanup**, which the next
+note explains.
+
+**Lead (1) answered 2026-07-29: the network's hollow output cannot be attacked at
+source. The representation cannot hold a solid.** Read-only investigation on the
+saved latents and the fork's own code:
+
+- **The SLat latent is a surface band and nothing else.** TRELLIS defines the
+  latent only on voxels *intersecting the surface*; coords come from thresholded
+  occupancy of the sparse-structure flow (`hi3dgen/pipelines/hi3dgen.py:309`) and
+  the decoder emits SDF only at 4³ subdivisions of those (`decoder_mesh.py:133`,
+  res 64 × 4 = **256³**, not 512³). Measured on `slat.pt`: chapel_arch's active
+  set is 14,757 voxels, 99.3% at chessboard depth 1; gravestone 100% at depth 1.
+  broken_column has **8,429 interior cells fully enclosed by its active shell and
+  carrying no latent at all**. Cells without a latent are stamped `+1` outside at
+  `utils_cube.py:95`. Solid is unrepresentable end to end — there is no tensor to
+  put it in.
+- **The head is a truncated SDF supervised only by renders.** `decoder_mesh.py:147`
+  is a bare `SparseLinear`, no distance normalization; TRELLIS trains it with L1
+  between rendered depth/normal maps and ground truth. Nothing in the loss ever
+  observes interior sign. Measured: corner values in `cubefeats.pt` occupy a
+  tight band [−0.137, 0.139] — a TSDF band, not a global distance field. Render
+  supervision cannot distinguish hollow from solid from outside, so even solid
+  training assets exert no pressure toward solid interiors.
+- **The inner wall carries no recoverable signal.** It is a parallel inward offset
+  of the outer wall — 4-crossing dense-SDF columns read wall 3 / cavity 18 / wall
+  3 voxels in the medians, uniform. chapel_arch's main component encloses 0.0206
+  units³ of material across 4.56 units² of surface: a skin. Discarding it is
+  correct; there is no solid in the model to extract.
+
+**The consequence that matters, and it inverts the problem.** The raw extraction
+is **already watertight**: chapel_arch's largest component is 99.96% of the mesh,
+**zero boundary edges, genus 86** — inner and outer wall are *one closed surface*
+welded through 86 handle tunnels. crucero likewise (genus 5, 99.95%). So
+connectivity cannot separate the inner wall (everything outside the main
+component is **308 faces** on chapel_arch, against the 259,061 `strip_interior_faces`
+deletes), and the non-watertightness, the boundary edges and the fragmentation are
+**all manufactured by `strip_interior_faces` itself**: cutting a face subset out of
+a closed genus-86 surface necessarily leaves open rims and islands. The pipeline
+takes a watertight mesh and shreds it. The open question is therefore not "how do
+we solidify" but "should the inner wall be deleted by per-face ray voting at all".
+
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
 had blocked — manifest `extraction` block present, peak reserved VRAM **6.787

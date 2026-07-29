@@ -146,6 +146,67 @@ chapel_arch reads 1.0378 because the interior strip leaves a lace-like shell; th
 hires figure is 0.0747 against a 0.1138 baseline. A gate must name which mesh it
 reads, and 15k-tri decimation is not that mesh.
 
+Done 2026-07-29 (this file's finding 16, **no code change** — the measurement
+cleared the default). Per-component solid-voxel counts computed on all seven
+saved latents through the production `sparse_cube2verts`/`get_dense_attrs` chain
+with the same 26-connectivity `drop_solid_floaters` uses
+(`target/prop-solid-validation/component_counts.json`). The debris ceiling is
+**5.48e-5** (a 52-voxel speck on broken_column); the real-geometry floor is
+**2.10e-4** (olive_stump's 268-voxel piece). `1e-4` sits at 1.07e-4, the geometric
+midpoint of that gap — where a fresh calibration on the shell-only denominator
+would land it anyway. The finding's premise (the denominator shrank) is true; its
+conclusion (the default is now miscalibrated) is **premise-falsified**, because the
+debris/geometry gap is an order of magnitude wide on both sides and the collapse
+did not move `1e-4` out of it. Tightest margin is broken_column at 1.8x. Harness
+still 3/3; CPU replays unchanged.
+
+Regression-checked across all seven props (`c9c695b`, `4310640`): every one
+processes, heights land, stats reconcile exactly. Fragment yields vary by two
+orders of magnitude — gravestone 2,292, olive_stump 1,807, chapel_arch 3,575,
+candelabra_shrine 13 — confirming the cull was catching almost nothing where it
+sat. `boundary_edges_per_face` on the final mesh ranges 0.0899 (crucero) to
+1.1944 (olive_stump); **no prop is watertight after cleanup**, which the next
+note explains.
+
+**Lead (1) answered 2026-07-29: the network's hollow output cannot be attacked at
+source. The representation cannot hold a solid.** Read-only investigation on the
+saved latents and the fork's own code:
+
+- **The SLat latent is a surface band and nothing else.** TRELLIS defines the
+  latent only on voxels *intersecting the surface*; coords come from thresholded
+  occupancy of the sparse-structure flow (`hi3dgen/pipelines/hi3dgen.py:309`) and
+  the decoder emits SDF only at 4³ subdivisions of those (`decoder_mesh.py:133`,
+  res 64 × 4 = **256³**, not 512³). Measured on `slat.pt`: chapel_arch's active
+  set is 14,757 voxels, 99.3% at chessboard depth 1; gravestone 100% at depth 1.
+  broken_column has **8,429 interior cells fully enclosed by its active shell and
+  carrying no latent at all**. Cells without a latent are stamped `+1` outside at
+  `utils_cube.py:95`. Solid is unrepresentable end to end — there is no tensor to
+  put it in.
+- **The head is a truncated SDF supervised only by renders.** `decoder_mesh.py:147`
+  is a bare `SparseLinear`, no distance normalization; TRELLIS trains it with L1
+  between rendered depth/normal maps and ground truth. Nothing in the loss ever
+  observes interior sign. Measured: corner values in `cubefeats.pt` occupy a
+  tight band [−0.137, 0.139] — a TSDF band, not a global distance field. Render
+  supervision cannot distinguish hollow from solid from outside, so even solid
+  training assets exert no pressure toward solid interiors.
+- **The inner wall carries no recoverable signal.** It is a parallel inward offset
+  of the outer wall — 4-crossing dense-SDF columns read wall 3 / cavity 18 / wall
+  3 voxels in the medians, uniform. chapel_arch's main component encloses 0.0206
+  units³ of material across 4.56 units² of surface: a skin. Discarding it is
+  correct; there is no solid in the model to extract.
+
+**The consequence that matters, and it inverts the problem.** The raw extraction
+is **already watertight**: chapel_arch's largest component is 99.96% of the mesh,
+**zero boundary edges, genus 86** — inner and outer wall are *one closed surface*
+welded through 86 handle tunnels. crucero likewise (genus 5, 99.95%). So
+connectivity cannot separate the inner wall (everything outside the main
+component is **308 faces** on chapel_arch, against the 259,061 `strip_interior_faces`
+deletes), and the non-watertightness, the boundary edges and the fragmentation are
+**all manufactured by `strip_interior_faces` itself**: cutting a face subset out of
+a closed genus-86 surface necessarily leaves open rims and islands. The pipeline
+takes a watertight mesh and shreds it. The open question is therefore not "how do
+we solidify" but "should the inner wall be deleted by per-face ray voting at all".
+
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
 had blocked — manifest `extraction` block present, peak reserved VRAM **6.787
@@ -325,7 +386,7 @@ Path, which requires finding 17 to land first.
 - **Cost:** `2/10` — one fixture in the existing plain-assert harness, seconds to run.
 - **Path:** build the thin-wall fixture → confirm it fails with line 90 in the state the successor rework rejects → land alongside that rework, not before it.
 
-### 16. `min_component_fraction`'s denominator collapsed with the interior fill, so `1e-4` drops fewer floaters than it was calibrated to
+### ~~16. `min_component_fraction`'s denominator collapsed with the interior fill, so `1e-4` drops fewer floaters than it was calibrated to~~
 
 - **Evidence:** Measured 2026-07-29 while deleting the interior-fill mechanism (successor to finding 13; the direction-count sweep in `plan-rework13-winding-solidification-2026-07-28.md` killed the fill, and `solidify_hidden_interior` is now gone from the fork). `drop_solid_floaters` (`fork:hi3dgen/representations/mesh/utils_cube.py`) thresholds every solid component at `min_fraction * total_solid_voxels`, and that total used to include the filled interior. With the fill gone it is the predicted shell alone. On the harness's r=30 sphere the total solid voxel count is **18,640** and the detached 8-voxel blob is **4.29e-4** of it, the 369-voxel rod **1.94e-2**. Directly measured consequence: `case_floater_blob_dropped`, green at `1e-4` for the entire life of the fill, came back `body_count=3` (blob surviving) on the first post-deletion run and only returns green at a fraction above 4.29e-4 — it now runs at `FLOATER_FRACTION = 3e-3` in `fork:tests/test_extraction_contract.py`, the geometric mean of the two fixtures' shares. On real props the same denominator shrink is the fill's measured volume inflation, 1.671x (candelabra_shrine) to 3.214x (chapel_arch) per that plan's step-3 table.
 - **Ideal:** `min_component_fraction`'s shipped default is calibrated against the solid voxel count the extractor actually produces, so the floater sizes it deletes on real props are a stated absolute range rather than an accident of what the interior fill used to add to the denominator.
