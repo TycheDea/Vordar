@@ -4,9 +4,12 @@ mesh against its multi-view concept art, ahead of texturing.
 
 Projects the mesh with the same ortho camera convention proptex/views.py
 uses for the retexture rig (mv_view's d/f/s/u construction, MV_ELEVATION_DEG
-elevation), so silhouette comparisons here are apples-to-apples with what
-the ControlNet-depth stage will actually see. Runs outside Blender, so the
-convention is mirrored in plain numpy rather than imported.
+elevation, Z-up), so silhouette comparisons here are apples-to-apples with
+what the ControlNet-depth stage will actually see. Runs outside Blender, so
+the convention is mirrored in plain numpy rather than imported -- and since
+trimesh.load keeps the raw glTF Y-up frame instead of the Y-up->Z-up
+conversion Blender's glTF importer applies, main() converts vertices
+(x, y, z) -> (x, -z, y) once at load, before any camera math runs.
 
 Run under the Hi3DGen venv (trimesh/numpy/opencv-python-headless are
 pinned there, no new dependency):
@@ -28,10 +31,22 @@ NORM_PX = 256
 ALPHA_THRESHOLD = 0.8 * 255  # preprocess_image's / check_matte's own bbox cut
 
 
+def load_mesh(path):
+    """Loads a mesh into the Z-up frame view_axes assumes. glTF is Y-up,
+    and trimesh.load keeps that raw frame where Blender's importer would
+    convert it, so the (x, y, z) -> (x, -z, y) rotation happens here."""
+    mesh = trimesh.load(str(path), force="mesh")
+    v = mesh.vertices
+    mesh.vertices = np.column_stack([v[:, 0], -v[:, 2], v[:, 1]])
+    return mesh
+
+
 def view_axes(az_deg, el_deg):
     """Camera right/up unit vectors for an az/el ortho view, mirroring
     proptex/views.py's mv_view (d = center->camera, f = -d, s = f x Z, u =
-    s x f) so renders here align with the retexture rig's convention."""
+    s x f) so renders here align with the retexture rig's convention. Assumes
+    a Z-up mesh frame (Blender's convention); callers must convert a raw
+    glTF (Y-up) mesh's vertices before rendering with this."""
     az, el = radians(az_deg), radians(el_deg)
     d = np.array([sin(az) * cos(el), -cos(az) * cos(el), sin(el)])
     f = -d
@@ -161,7 +176,7 @@ def main():
     parser.add_argument("--masks-dir", help="dump rendered/normalized masks here for eyeball checks")
     args = parser.parse_args()
 
-    mesh = trimesh.load(args.mesh, force="mesh")
+    mesh = load_mesh(args.mesh)
     rig = build_rig(mesh)
 
     masks_dir = Path(args.masks_dir) if args.masks_dir else None
