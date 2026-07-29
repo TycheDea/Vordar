@@ -545,12 +545,16 @@ shared.
 **2. `prop_cleanup.py`** — Blender headless normalize + decimate:
 
 ```
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_cleanup.py -- <raw.glb> <clean.glb> [--height M] [--tri-budget N]
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_cleanup.py -- <raw.glb> <clean.glb> --height M --asset NAME [--tri-budget N]
 ```
 
 Arg convention matches `mixamo_to_glb.py`: everything after `--` is the
-script's own argv. Strips loose floaters, scale/ground-normalizes to
-`--height` (default 1.8 m), decimates to `--tri-budget` (default 15000),
+script's own argv. `--asset` names a registered generated asset; the
+interior-face strip builds its candidate view set from that asset's
+azimuths, so a downloaded asset (which declares none) is refused. Welds
+coincident vertices, strips interior faces then the fragments that strip
+maroons, scale/ground-normalizes to `--height`, decimates to
+`--tri-budget` (default 15000),
 then xatlas-unwraps the decimated mesh into a single 1024-target UV atlas
 (`uv_charts`/`uv_utilization` in the stats line) — the layer every
 `prop_texture.py` bake targets, so the atlas is identical across texture

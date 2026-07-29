@@ -5,9 +5,12 @@
 #     carries duplicates at shared corners, and until they are merged every
 #     topology measure downstream — edge sharing, island connectivity,
 #     component_count — reports vertex bookkeeping rather than shape
-#   - strips interior faces: a face with no ray escaping the mesh from just
-#     outside its own surface can never reach a camera, so it is removed
-#     before the tri budget and UV atlas are spent describing it
+#   - strips interior faces: a face survives only if some view in the
+#     texturing baker's full candidate set both faces it and has
+#     unoccluded line of sight to it -- prop_texture.py's actual bake
+#     views are always a subset of that candidate set, so this can never
+#     delete a face the bake would have textured, before the tri budget
+#     and UV atlas are spent describing it
 #   - strips loose fragments whose bbox diagonal is under 2% of the whole
 #     mesh's; runs AFTER the interior strip, which is what maroons most of
 #     them (it deletes occluded faces and leaves single-triangle islands
@@ -35,7 +38,7 @@
 # decision-gate data, never silently patched.
 #
 # Usage: blender --background --python prop_cleanup.py -- \
-#            <raw.glb> <clean.glb> --height M [--tri-budget N]
+#            <raw.glb> <clean.glb> --height M --asset NAME [--tri-budget N]
 
 import argparse
 import json
@@ -49,6 +52,13 @@ import numpy as np
 import xatlas
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from proptex.coverage import (  # noqa: E402
+    MV_EXTRA_CANDIDATE_AZIMUTHS, MV_EXTRA_CANDIDATE_ELEVATIONS, MV_EXTRA_TOP_ELEVATION,
+)
+from proptex.registry import RegistryError, resolve  # noqa: E402
+from proptex.views import MV_ELEVATION_DEG, mv_camera_rig  # noqa: E402
 
 # Loose islands under 2% of the mesh's bbox diagonal (~4 cm on a 1.8 m
 # prop) are generation floaters — far below any feature that reads at
@@ -73,9 +83,6 @@ UV_ATLAS_PADDING_PX = 4
 # Rays cast through the bbox to measure two_crossing_ray_fraction: enough
 # samples to average out the sampling noise a single ray direction carries.
 RAY_SAMPLE_COUNT = 200
-# Interior-face visibility test: rays cast per face over the outward
-# hemisphere to decide whether any of them escapes the mesh.
-INTERIOR_RAY_COUNT = 64
 # Ray origin offset along the face normal, as a fraction of the mesh's
 # bbox diagonal -- clears the originating face without biasing the test
 # toward nearby parallel geometry.
@@ -232,60 +239,53 @@ def geometry_health(me):
     }
 
 
-def _hemisphere_dirs(count):
-    """`count` unit directions over a hemisphere around local +Z,
-    deterministic; direction 0 is +Z itself so a genuinely exterior face --
-    which typically sees open space along its own normal -- escapes on the
-    first ray instead of paying for the rest."""
-    rng = np.random.default_rng(0)
-    z = np.concatenate(([1.0], rng.uniform(0.0, 1.0, count - 1)))
-    phi = np.concatenate(([0.0], rng.uniform(0.0, 2 * np.pi, count - 1)))
-    r = np.sqrt(np.clip(1.0 - z * z, 0.0, 1.0))
-    return np.stack([r * np.cos(phi), r * np.sin(phi), z], axis=1)
+def _candidate_view_dirs(obj, azimuths):
+    """Toward-camera direction of every view in the texturing baker's full
+    candidate set: the resolved per-asset azimuths at MV_ELEVATION_DEG, the
+    coverage module's next-best-view grid, and its top view. Built with
+    mv_camera_rig on `obj` itself so the rig matches this mesh; only each
+    view's direction is used, and for an orthographic rig that direction
+    depends on azimuth/elevation alone, not on rig position or scale."""
+    specs = [(None, az, MV_ELEVATION_DEG) for az in azimuths]
+    specs += [(None, az, el)
+             for el in MV_EXTRA_CANDIDATE_ELEVATIONS
+             for az in MV_EXTRA_CANDIDATE_AZIMUTHS]
+    specs.append((None, 0.0, MV_EXTRA_TOP_ELEVATION))
+    views, _ = mv_camera_rig(obj, specs)
+    return [Vector(-v["f"]) for v in views]
 
 
-def strip_interior_faces(obj, me):
-    """Deletes faces no ray escapes the mesh from: sample INTERIOR_RAY_COUNT
-    directions over the outward hemisphere from a point just off each
-    face's surface (+eps along its normal); a face where every one of them
-    re-enters the mesh is enclosed by other geometry and unreachable by any
-    camera. bpy.ops.mesh.select_interior_faces() runs first as a cheap
-    filter -- faces whose edges are shared by more than two faces, caught
-    from edge topology alone with no raycasting -- but it cannot see a
-    manifold inner wall welded to the outer shell at its silhouette edges,
-    which only the raycast test catches. Returns the triangle count removed."""
+def strip_interior_faces(obj, me, azimuths):
+    """Deletes faces no candidate view both faces and sees: prop_texture.py
+    picks its actual bake views as a runtime subset of this same candidate
+    set, so deleting only what none of it can see can never remove a face
+    the bake would have textured. "Faces" is n . dir > 0 for the view
+    direction, matching proptex.atlas.view_weight's nonzero-blend-weight
+    condition; "sees" additionally requires a ray from the face's surface
+    (+eps along its normal) toward that direction to hit nothing. Returns
+    the triangle count removed."""
     tris_before = tri_count(me)
-
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="DESELECT")
-    bpy.ops.mesh.select_interior_faces()
-    bpy.ops.object.mode_set(mode="OBJECT")
-    interior = {p.index for p in me.polygons if p.select}
+    dirs = _candidate_view_dirs(obj, azimuths)
 
     bm = bmesh.new()
     bm.from_mesh(me)
     bm.faces.ensure_lookup_table()
     bvh = BVHTree.FromBMesh(bm)
     eps = INTERIOR_RAY_EPS_FRACTION * bbox_diag([obj])
-    dirs = _hemisphere_dirs(INTERIOR_RAY_COUNT)
 
+    dead = []
     for f in bm.faces:
-        if f.index in interior:
-            continue
         n = f.normal
         if n.length_squared < 1e-12:
             continue
         n = n.normalized()
-        t1 = n.orthogonal().normalized()
-        t2 = n.cross(t1)
         origin = f.calc_center_median() + n * eps
-        if not any(bvh.ray_cast(origin, t1 * x + t2 * y + n * z)[0] is None
-                  for x, y, z in dirs):
-            interior.add(f.index)
+        if not any(n.dot(d) > 0 and bvh.ray_cast(origin, d)[0] is None
+                  for d in dirs):
+            dead.append(f)
 
-    if interior:
-        bmesh.ops.delete(bm, geom=[bm.faces[i] for i in interior], context="FACES")
+    if dead:
+        bmesh.ops.delete(bm, geom=dead, context="FACES")
         bm.to_mesh(me)
         me.update()
     bm.free()
@@ -410,12 +410,25 @@ def main():
     parser.add_argument("raw_glb")
     parser.add_argument("clean_glb")
     parser.add_argument("--height", type=float, required=True)
+    parser.add_argument("--asset", required=True,
+                        help="Registered asset name (content/models/assets.json); "
+                             "resolves the azimuths the interior-face strip's "
+                             "candidate view set is built from")
     parser.add_argument("--tri-budget", type=int, default=15000)
     parser.add_argument("--symmetrize", action="store_true")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
                         help="Half to mirror, in the plane-aligned frame "
                              "(pass as --symmetrize-keep=-x)")
     args = parser.parse_args(argv)
+
+    try:
+        contract = resolve(args.asset)
+    except RegistryError as e:
+        fail(str(e))
+    azimuths = getattr(contract, "azimuths", None)
+    if azimuths is None:
+        fail(f"asset {args.asset!r} has no azimuths (kind={contract.kind!r}, "
+             f"not a generated asset)")
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=args.raw_glb)
@@ -455,7 +468,7 @@ def main():
         fail("zero-area mesh")
 
     # ---- interior faces out, before any budget is spent describing them ----
-    interior_tris_removed = strip_interior_faces(obj, me)
+    interior_tris_removed = strip_interior_faces(obj, me, azimuths)
     if len(me.polygons) == 0:
         fail("interior-face strip removed the entire mesh")
 

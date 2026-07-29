@@ -177,7 +177,7 @@ def stage_geometry(out: Path, cand_dirs: dict, concept_sha256: dict) -> dict:
     return metas
 
 
-def stage_cleanup(cand_dir: Path, height_m: float, symmetrize: bool, symmetrize_keep: str) -> dict:
+def stage_cleanup(cand_dir: Path, asset: str, height_m: float, symmetrize: bool, symmetrize_keep: str) -> dict:
     clean_glb = cand_dir / "clean.glb"
     hires_glb = cand_dir / "clean_hires.glb"
     meta_path = cand_dir / "cleanup_stats.json"
@@ -185,7 +185,8 @@ def stage_cleanup(cand_dir: Path, height_m: float, symmetrize: bool, symmetrize_
         print(f"cleanup: skip (exists) -> {clean_glb}")
     else:
         raw_glb = cand_dir / "raw.glb"
-        cmd = [BLENDER, "--background", "--python", PROP_CLEANUP, "--", raw_glb, clean_glb, "--height", height_m]
+        cmd = [BLENDER, "--background", "--python", PROP_CLEANUP, "--", raw_glb, clean_glb,
+               "--height", height_m, "--asset", asset]
         if symmetrize:
             cmd += ["--symmetrize", f"--symmetrize-keep={symmetrize_keep}"]
         out = run_capture(cmd)
@@ -321,7 +322,7 @@ def main():
         cand_dir = cand_dirs[seed]
         manifest = manifests[seed]
         if stop >= STAGES.index("cleanup"):
-            manifest["cleanup"] = stage_cleanup(cand_dir, contract.height_m, args.symmetrize, args.symmetrize_keep)
+            manifest["cleanup"] = stage_cleanup(cand_dir, args.asset, contract.height_m, args.symmetrize, args.symmetrize_keep)
         if stop >= STAGES.index("texture"):
             manifest["texture"] = stage_texture(cand_dir, args.asset, seed)
         if stop >= STAGES.index("preprocess"):

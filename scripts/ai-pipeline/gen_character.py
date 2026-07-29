@@ -211,7 +211,7 @@ def stage_geometry(out: Path, cand_dirs: dict, concept_sha256: dict) -> dict:
     return metas
 
 
-def stage_cleanup(cand_dir: Path, height: float) -> dict:
+def stage_cleanup(cand_dir: Path, asset: str, height: float) -> dict:
     clean_glb = cand_dir / "clean.glb"
     hires_glb = cand_dir / "clean_hires.glb"
     meta_path = cand_dir / "cleanup_stats.json"
@@ -220,7 +220,8 @@ def stage_cleanup(cand_dir: Path, height: float) -> dict:
     else:
         raw_glb = cand_dir / "raw.glb"
         out = run_capture([BLENDER, "--background", "--python", PROP_CLEANUP, "--",
-                           raw_glb, clean_glb, "--height", height, "--tri-budget", TRI_BUDGET])
+                           raw_glb, clean_glb, "--height", height, "--tri-budget", TRI_BUDGET,
+                           "--asset", asset])
         meta_path.write_text(json.dumps(last_json_line(out), indent=2), encoding="utf-8")
         print(f"cleanup: generated -> {clean_glb}")
     meta = read_or_note(meta_path)
@@ -452,7 +453,7 @@ def main():
 
     for seed in args.seeds:
         cand_dir = cand_dirs[seed]
-        cleanup = stage_cleanup(cand_dir, args.height)
+        cleanup = stage_cleanup(cand_dir, args.asset, args.height)
         texture = stage_texture(cand_dir, args.asset, seed)
         rig = stage_rig(cand_dir, args.height, seed)
         preprocess_bake = stage_preprocess_bake(cand_dir, max_dim=MAX_DIM)  # final.glb, needed by the review stage below
