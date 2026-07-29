@@ -22,7 +22,7 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 > ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
 > ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ →
 > ~~finding 22~~ → ~~finding 23~~ → ~~finding 24~~ →
-> rework 2 → rework 3 → rework 4.**
+> rework 2 → rework 3 → rework 4 → rework 18.**
 
 The findings numbered in *this* file (10–17) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here. Where the
@@ -685,3 +685,56 @@ Path, which requires finding 17 to land first.
 - **Suggestion:** weld at a sub-voxel epsilon first, then strip, then cull, then normalize.
 - **Path:** DONE `c9c695b`. `weld_vertices` at `WELD_EPS_FRACTION = 1e-4` of the mesh bbox diagonal (0.79 mm at chapel_arch's 7.881 m, ~1/20 of the 512³ extraction voxel, so it can only merge what the generator emitted twice at one position). `cull_loose_fragments` reimplemented in bmesh over the flood fill `geometry_health` already had, rather than moving the `bpy.ops.mesh.separate(type="LOOSE")` block — separating 3,575 islands into Blender objects and rejoining them is that operator's pathological case. Measured on chapel_arch at `--height 5.497`: components 3,770 → **151**, face retention across the cull **98.0%**, stats reconcile exactly (773,574 − 16,021 weld − 259,061 strip − 9,563 cull = 488,929 hires).
 - **premise-falsified:** the predicted landing point was 46 components; the real one is 151, the residual islands all exceeding the cull's own threshold. No threshold was moved to reach the prediction. `uv_charts` moved only 4,519 → 4,096 — xatlas segments on curvature, not on island count — so the chart-count half of the expected win does not exist.
+- **Half of this finding was refuted 2026-07-29 (`feacbb0`).** The fix landed two
+  changes in one commit and credited the pair. Isolated as an A/B across all
+  seven props — cull already in its correct place, weld on vs off — the weld's
+  contribution is zero: identical raw component counts on 6 of 7 props and
+  identical final counts on all 7. The reordering was doing all the work. The
+  weld's stated premise is also false; the glTF arrives already sharing
+  vertices, so `remove_doubles` was merging genuinely distinct geometry, which
+  is why it manufactured 27 non-manifold edges and 36 boundary edges on
+  chapel_arch's main island out of a mesh that arrives with 0 and 4, and
+  collapsed 2–4% of the triangles. `weld_vertices` and `WELD_EPS_FRACTION` are
+  deleted. Numbers in the Path bullet above that include the weld (the 16,021
+  term, the 151 components, the 98.0% retention) are superseded by the table in
+  this file's queue note.
+
+### 18. Per-asset triangle budget (user-decides): the flat 15,000 over-serves small props and starves large ones
+- **Evidence:** `scripts/ai-pipeline/prop_cleanup.py`'s `--tri-budget` defaults to a flat 15,000 for every prop, and `gen_prop.py` never overrides it. Measured through the pipeline itself on all seven props at 5k/15k/30k/60k/120k (35 runs, `target/prop-solid-validation/tribudget/`, p99 clean→hires deviation at 80k surface samples per run): at the shipped 15,000 the deviation normalized by bbox diagonal spans **0.000369 (candelabra_shrine) to 0.002633 (cypress), a 7.1× range**. The same measurement is what forced `BAKE_RAY_DIAG_FRACTION` to become size-relative — this is that defect's root cause rather than its symptom.
+- **Ideal:** Every prop is decimated to the budget its own geometry needs to hold a chosen deviation, so the triangle budget buys the same visual fidelity everywhere instead of an accident of prop size.
+- **Gap:** The budget is uniform and the quality is not. candelabra_shrine currently gets 4× more fidelity than it needs while cypress gets less than half; nobody chose that split.
+- **Suggestion:** Per-asset `tri_budget` in `content/models/assets.json` (alongside `height_m`, same `_GENERATED_FIELDS` treatment audit finding 20 describes), threaded through `gen_prop.py`. **Do not derive it from a formula.** Measured budget needed for a uniform deviation, against prop size:
+
+| prop | bbox diag | hires area | needed @0.0015 | tris/m² implied |
+|---|---|---|---|---|
+| candelabra_shrine | 1.85 m | 2.3 m² | 4,993 | 2,140 |
+| gravestone | 1.91 m | 5.0 m² | 7,837 | 1,577 |
+| olive_stump | 2.04 m | 6.5 m² | 18,383 | 2,832 |
+| broken_column | 2.32 m | 7.1 m² | 11,170 | 1,574 |
+| crucero | 4.25 m | 15.5 m² | 9,531 | 615 |
+| chapel_arch | 7.88 m | 82.5 m² | 13,756 | 167 |
+| cypress | 13.44 m | 202.9 m² | 24,182 | 1,467 |
+
+  Neither diagonal nor surface area predicts it: olive_stump at 2.04 m needs
+  nearly twice crucero at 4.25 m, and the implied triangle density spans 17×.
+  The driver is geometric complexity — gnarled bark against a smooth cross —
+  which no size formula carries. The budget is therefore a per-asset
+  measurement, not a computed field.
+- **THE USER'S DECISION — the deviation target.** It is a free parameter and a visual one, so it is not the implementer's to pick. Totals across the seven props, against today's 105,000:
+
+| target p99/diag | total tris | vs today | what changes |
+|---|---|---|---|
+| 0.0020 | 66,322 | −37% | cypress and olive_stump improve; candelabra_shrine drops 15,000 → 4,051 |
+| 0.0015 | 89,852 | −14% | every prop at or better than today's worst; candelabra_shrine → 4,993 |
+| 0.0010 | 138,350 | +32% | every prop at or better than today's best except candelabra_shrine |
+| 0.0005 | 292,235 | +178% | diminishing — candelabra_shrine already measures 0.000014 at 120k |
+
+  Recommendation: **0.0015**. It is the only row that is both cheaper than today
+  in total and no worse than today on any prop, because the flat budget's waste
+  on the small props pays for the large ones. The reason it still needs the
+  user's eye is that it cuts candelabra_shrine to a third of its triangles on the
+  strength of a distance metric, and whether that reads at gameplay framing is
+  not a headless judgement.
+- **Outcome:** `6/10` — uniform fidelity per triangle spent, and it removes the size dependence that `BAKE_RAY_DIAG_FRACTION` now works around.
+- **Cost:** `2/10` — the measurement is already done and kept; the change is a registry field plus threading. Re-deriving `BAKE_RAY_DIAG_FRACTION` afterwards is part of it.
+- **Path:** user picks the target → write the per-asset budgets from the measured curve (never a formula) → thread `tri_budget` through `gen_prop.py` → re-run the seven props → re-derive `BAKE_RAY_DIAG_FRACTION` against the new deviation spread → in-engine look at candelabra_shrine and olive_stump before the budgets are considered settled.
