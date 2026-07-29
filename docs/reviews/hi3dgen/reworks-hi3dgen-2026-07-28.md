@@ -22,7 +22,13 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 > ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
 > ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ →
 > ~~finding 22~~ → ~~finding 23~~ → ~~finding 24~~ →
-> rework 2 → ~~rework 3~~ → ~~rework 4~~ → ~~rework 18~~.**
+> ~~rework 2~~ → ~~rework 3~~ → ~~rework 4~~ → ~~rework 18~~.**
+
+Rework 2 closed 2026-07-29, negative verdict, no code change beyond what
+step 2 already landed: `docs/reviews/hi3dgen/ab-multiview-2026-07-29.md`.
+Multi-view conditioning is not adopted; `--view`/`--mv-mode` stay plumbed,
+opt-in, and dormant, not wired into `gen_prop.py`/`gen_character.py`
+defaults.
 
 The findings numbered in *this* file (10–17, 19) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here. Where the
@@ -558,6 +564,16 @@ Path, which requires finding 17 to land first.
 - **Path:** try (a) first on one candidate — if `use_deterministic_algorithms` runs at all, repeat 3× and confirm identical vertex counts; fall back to (b). Sequence before the next A/B in the queue.
 - **Part (b) delivered 2026-07-29** (`a40dad8`, `docs/reviews/hi3dgen/noise-floor-2026-07-29.md`): 3 repeats × 3 subjects, per-metric floor with the three raw values, deviation floor at a 20k/80k/320k stability triple. Vertex-count floor 0.0089–0.0291%, with this finding's own 0.012% inside that range. Part (a) survives but its target is now localized: the three `ss_logits.npy` are **byte-identical per subject** (sha256 verified), so the sparse-structure stage is already bit-reproducible at a fixed seed and every measured spread enters downstream of it, in the SLat sampler and the extractor. A determinism attempt therefore only has to cover `scatter_reduce` and the SLat convs, not the whole chain. Also measured: `body_count`, `boundary_edge_count` and `main_euler_number` are **unresolved at this noise** — identical runs moved 9→11 bodies and 12→16→8 boundary edges — so no A/B may claim a topology-count effect below those spreads.
 
+**Part (a) measured 2026-07-29** (`docs/reviews/hi3dgen/ab-multiview-2026-07-29.md`,
+`target/mv-ab/noise_floor.json` `determinism_probe`): `torch.use_deterministic_algorithms(True)`
+is only partially effective. Three `--deterministic --seed 0` runs on
+chapel_arch — `det-r1` and `det-r2` byte-identical `raw.glb` (`fa35dc9748...`),
+`det-r3` differs (`a5d846e91e...`). 2 of 3 byte-identical; spconv sparse
+convolutions run outside `torch.use_deterministic_algorithms`, so the seed is
+still not a full pin. All 18 multi-view A/B candidates ran without
+`--deterministic` as a result, sharing one non-deterministic regime with the
+noise floor that adjudicates them.
+
 ### 7. `--normal-resolution` never reaches the denoiser: both normal pipelines process at 768 internally
 - **Evidence:** Measured while running audit finding 13's A/B. `hub:hubconf.py`'s `Predictor.__call__` resizes the input with `resize_image(img, resolution)` and then calls `self.model(img, match_input_resolution=…, **kwargs)`, where `kwargs` carries `num_inference_steps` only — `processing_resolution` is never passed. Both pipelines fall back to their own `default_processing_resolution`, which is `768` in the constructor signature of `hub:stablenormal/pipeline_yoso_normal.py:159` and `hub:stablenormal/pipeline_stablenormal.py:246`, and is not overridden by either checkpoint's `model_index.json`. So at `--normal-resolution 1024` the conditioning image is resized to 1024, downsampled by the pipeline to 768, denoised at 768, and upsampled back — the denoiser never sees more than 768 px in either arm. Corroborating measurement: with one instrument over all cells, the r768 arm carries *more* top-octave energy than r1024 (candelabra 0.0306 vs 0.0060, crucero 0.0112 vs 0.0019), the opposite of `ab-conditioning-2026-07-28.md`'s ordering — consistent with LANCZOS upsample ringing rather than with resolved detail.
 - **Ideal:** `--normal-resolution` sets the resolution the normal is actually denoised at, so the knob the queue adopted a default for is the knob it measured.
@@ -790,3 +806,21 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `6/10` -- the matte gate and the symmetry reading are worth keeping; the headline claim the instrument was built for is not obtainable this way, and recording that stops the next attempt from re-spending it.
 - **Cost:** `0/10` -- implemented and run; nothing further required.
 - **Path:** none outstanding.
+
+### 24. Silhouette IoU cannot resolve front from back — an orientation-robust fidelity metric is needed
+- **Evidence:** `docs/reviews/hi3dgen/ab-multiview-2026-07-29.md` (rework 2 step 8). `fit_yaw`'s argmax is degenerate: across the 18-candidate multi-view A/B, the gap between IoU at the fitted argmax and IoU at (argmax + 180 deg) runs 0.0014-0.1053, with 7 of 18 candidates below 0.01 — the same order as the cross-arm effects being claimed (0.0037-0.0081). All three `pilgrim_monk` `sv` candidates fit ~180 deg off (confirmed visually: the "front" render shows the monk's back), which inverted step 7's reported "MV beats sv on iou_front" into a front-vs-back comparison. This is the third instrument in this domain to fail on a front/back or panel-viewpoint distinction that turns out to be semantic rather than geometric (finding 23, `panel_matte_ab.py`, made the same discovery for concept-sheet panels: no silhouette or pixel statistic separates "the back of this object" from "the front of this object again").
+- **Ideal:** A fidelity metric for a multi-view A/B (or any future orientation-sensitive comparison) resolves which side of a near-symmetric silhouette it is looking at, so cross-arm deltas are not confoundable with which of two tied peaks the yaw fit happened to pick.
+- **Gap:** No orientation-robust instrument exists in this pipeline. Silhouette IoU is blind to it by construction — a standing figure's front and back silhouettes are near-identical by anatomy, and an arch or a stump reads similarly from opposite sides too.
+- **Suggestion:** Correlate rendered camera-space normals against Hi3DGen's own predicted `normal.png` (already written to every candidate directory) to break the 180-degree tie. The silhouette fit already localizes the peak pair (argmax and argmax+180), so only those two candidates need normal correlation, not a full azimuth sweep — 2 renders per candidate, not a re-run of the whole scan.
+- **Outcome:** `6/10` — unblocks any future orientation-sensitive A/B in this pipeline (multi-view conditioning, concept-sheet turnaround checks) that silhouette IoU cannot currently adjudicate.
+- **Cost:** `3/10` — two camera-space normal renders per candidate through the existing `proptex.views`/`mv_camera_rig` machinery, plus a correlation function; no new GPU generation.
+- **Path:** implement normal-map correlation in `mv_ab_metrics.py` at the argmax and argmax+180 candidates → validate on the 7 already-ambiguous candidates from this A/B (known ground truth: `pilgrim_monk` sv is back-fitted, MV arms are front-fitted) → only then would a re-run of the multi-view A/B be worth the GPU time.
+
+### 25. Same-subject noise floor covering `iou_back` / `iou_side`
+- **Evidence:** `docs/reviews/hi3dgen/ab-multiview-2026-07-29.md` (rework 2 step 8). `target/mv-ab/noise_floor.json`'s determinism probe only ran `--front`, so `iou_back` and `iou_side` have no measured noise floor at all — every value for those two metrics in both `ab.json` files was reported raw, with no claim rule applicable. Back/side fidelity is the rework's actual question and was never adjudicable by metric as a result; the verdict rests entirely on visual review instead (finding 24's front/back degeneracy separately voided `iou_front` too).
+- **Ideal:** A same-subject noise floor exists for `iou_back` and `iou_side`, so a future A/B can claim a back- or side-fidelity effect the way this one claimed `vertex_count`.
+- **Gap:** No repeat-candidate data has ever been collected with `--back`/`--side` mattes supplied to `mv_ab_metrics.py`.
+- **Suggestion:** 3 same-seed repeat candidates per subject (mirroring `noise_floor.json`'s existing 3-repeat design), run through `mv_ab_metrics.py --front --back --side` so `max_pairwise_abs_diff` is computed for all three IoU axes, not just front. Do on at least one prop and one character subject, since `pilgrim_monk`'s floor is currently borrowed cross-subject from chapel_arch.
+- **Outcome:** `5/10` — without it, no back/side metric claim is possible for any future multi-view (or other orientation-sensitive) A/B in this pipeline.
+- **Cost:** `2/10` — ~2 min GPU per repeat candidate, 6 candidates total (3 per subject) if both subjects are covered; reuses the existing `noise_floor.json` harness with `--back`/`--side` added to the metrics call.
+- **Path:** run 3 same-seed repeats per subject → `mv_ab_metrics.py --front --back --side` per candidate → record `max_pairwise_abs_diff` for `iou_back`/`iou_side` alongside the existing `iou_front` floor → update `noise-floor-2026-07-29.md`'s pre-registered thresholds if the two new axes need their own adjudication bar.

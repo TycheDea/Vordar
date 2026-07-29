@@ -45,7 +45,13 @@ Queue (single cross-file sequence; reworks live in
 > ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
 > ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ →
 > ~~finding 22~~ → ~~finding 23~~ → ~~finding 24~~ →
-> rework 2 → ~~rework 3~~ → ~~rework 4~~ → ~~rework 18~~.**
+> ~~rework 2~~ → ~~rework 3~~ → ~~rework 4~~ → ~~rework 18~~.**
+
+Rework 2 closed 2026-07-29, negative verdict, no code change beyond what
+step 2 already landed: `docs/reviews/hi3dgen/ab-multiview-2026-07-29.md`.
+Multi-view conditioning is not adopted; `--view`/`--mv-mode` stay plumbed,
+opt-in, and dormant, not wired into `gen_prop.py`/`gen_character.py`
+defaults.
 
 Done 2026-07-28 (findings 15, 19–23, commits `23c7063`..`f2015e7`; findings 19–23
 run out of queue order, pulled forward as file-disjoint parallel work while the
