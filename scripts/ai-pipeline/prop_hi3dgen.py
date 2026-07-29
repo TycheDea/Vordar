@@ -272,24 +272,36 @@ def check_mesh(mesh_result, trimesh_mesh: trimesh.Trimesh) -> dict:
     """Refuse degenerate raw geometry before it reaches decimation/xatlas
     three stages downstream, where it currently surfaces as a confusing
     Blender abort (prop_cleanup.py). Mirrors check_matte's refusal at the
-    input side. Returns the measured stats on success."""
+    input side.
+
+    Zero-area faces are the one degeneracy that does not condemn a
+    candidate: the GPU extractor's float reduction order varies between
+    runs, so a handful of exactly-coincident vertices in a mesh of
+    three-quarters of a million faces is an expected artifact. They are
+    dropped from trimesh_mesh in place and counted, so the count still
+    reaches the manifest and a rising trend stays visible. A mesh left with
+    no faces at all by that drop is still refused.
+
+    Returns the measured stats -- counts describe the mesh after the drop."""
     if not mesh_result.success:
         raise DegenerateMeshError(
             "Hi3DGen mesh extraction reported success=False (empty vertices or faces)")
-    vertices = trimesh_mesh.vertices
-    n_nonfinite = int((~np.isfinite(vertices)).any(axis=1).sum())
+    n_nonfinite = int((~np.isfinite(trimesh_mesh.vertices)).any(axis=1).sum())
     if n_nonfinite:
         raise DegenerateMeshError(f"{n_nonfinite} non-finite vertices in raw mesh")
+    degenerate = trimesh_mesh.area_faces <= 0
+    n_degenerate = int(degenerate.sum())
+    if n_degenerate:
+        trimesh_mesh.update_faces(~degenerate)
+        trimesh_mesh.remove_unreferenced_vertices()
+    if not len(trimesh_mesh.faces):
+        raise DegenerateMeshError(
+            f"all {n_degenerate} faces in raw mesh are zero-area (degenerate)")
     extents = trimesh_mesh.bounding_box.extents
     if not (extents > 0).all():
         raise DegenerateMeshError(f"degenerate bounding box extents {extents.tolist()}")
-    areas = trimesh_mesh.area_faces
-    n_degenerate = int((areas <= 0).sum())
-    if n_degenerate:
-        raise DegenerateMeshError(
-            f"{n_degenerate}/{len(areas)} zero-area (degenerate) faces in raw mesh")
     return {
-        "vertex_count": int(vertices.shape[0]),
+        "vertex_count": int(trimesh_mesh.vertices.shape[0]),
         "face_count": int(trimesh_mesh.faces.shape[0]),
         "degenerate_face_count": n_degenerate,
         "bbox_extents": extents.tolist(),

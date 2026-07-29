@@ -1,14 +1,17 @@
-"""check_matte's gate must agree with the Hi3DGen bbox test it feeds.
+"""check_matte's gate must agree with the Hi3DGen bbox test it feeds, and
+check_mesh must drop zero-area faces while still refusing broken geometry.
 
 Requires the Hi3DGen venv (prop_hi3dgen imports torch/hi3dgen at module
 scope); skipped under a plain interpreter:
 C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe -m unittest discover -s scripts/tests -t .
 """
 import sys
+import types
 import unittest
 from pathlib import Path
 
 import numpy as np
+import trimesh
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ai-pipeline"))
@@ -66,6 +69,54 @@ class PreprocessBackground(unittest.TestCase):
         self.assertGreater(int(edge.sum()), 0, "expected a resampled silhouette band")
         self.assertEqual(int(out[:, :, :3][edge].min()), 255,
                          "silhouette colour was dimmed by an implicit background")
+
+
+def box_with_degenerate_faces(n_degenerate):
+    """A 12-face box plus n_degenerate zero-area faces built from a vertex
+    duplicated at the same position, the shape the GPU extractor emits."""
+    box = trimesh.creation.box()
+    vertices = np.vstack([box.vertices, box.vertices[:1]])
+    dup = len(box.vertices)
+    faces = np.vstack([box.faces] + [[0, dup, 0]] * n_degenerate)
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+
+@unittest.skipIf(prop_hi3dgen is None, "needs the Hi3DGen venv")
+class CheckMeshDegenerateFaces(unittest.TestCase):
+    def setUp(self):
+        self.result = types.SimpleNamespace(success=True)
+
+    def test_zero_area_faces_are_dropped_and_counted(self):
+        mesh = box_with_degenerate_faces(2)
+        stats = prop_hi3dgen.check_mesh(self.result, mesh)
+        self.assertEqual(stats["degenerate_face_count"], 2)
+        self.assertEqual(stats["face_count"], 12)
+        self.assertEqual(len(mesh.faces), 12)
+        self.assertEqual(int((mesh.area_faces <= 0).sum()), 0)
+        self.assertEqual(stats["vertex_count"], len(mesh.vertices))
+
+    def test_clean_mesh_untouched(self):
+        mesh = box_with_degenerate_faces(0)
+        stats = prop_hi3dgen.check_mesh(self.result, mesh)
+        self.assertEqual(stats["degenerate_face_count"], 0)
+        self.assertEqual(stats["face_count"], 12)
+
+    def test_all_faces_degenerate_still_refused(self):
+        mesh = trimesh.Trimesh(
+            vertices=np.zeros((3, 3)), faces=np.array([[0, 1, 2]]), process=False)
+        with self.assertRaises(prop_hi3dgen.DegenerateMeshError):
+            prop_hi3dgen.check_mesh(self.result, mesh)
+
+    def test_non_finite_vertices_still_refused(self):
+        mesh = box_with_degenerate_faces(0)
+        mesh.vertices[0] = np.nan
+        with self.assertRaises(prop_hi3dgen.DegenerateMeshError):
+            prop_hi3dgen.check_mesh(self.result, mesh)
+
+    def test_failed_extraction_still_refused(self):
+        with self.assertRaises(prop_hi3dgen.DegenerateMeshError):
+            prop_hi3dgen.check_mesh(
+                types.SimpleNamespace(success=False), box_with_degenerate_faces(0))
 
 
 if __name__ == "__main__":
