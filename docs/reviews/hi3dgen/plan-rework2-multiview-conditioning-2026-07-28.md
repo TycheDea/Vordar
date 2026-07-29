@@ -2,73 +2,134 @@
 
 Source: `docs/reviews/hi3dgen/reworks-hi3dgen-2026-07-28.md` finding 2.
 Written 2026-07-29. Anchors: `fork:` = `C:/tools/Hi3DGen/Hi3DGen` (branch
-`vordar-fixes`, HEAD `c7389f5`), unprefixed = vordar-repo relative. Fork venv:
+`vordar-fixes`, HEAD `3488bbf`), unprefixed = vordar-repo relative. Fork venv:
 `C:\tools\Hi3DGen\venv\Scripts\python.exe`.
+
+Revised 2026-07-29 after reworks 3 and 4 landed under it (fork `4f99925`..
+`7fc354c`, vordar `153acfe`..`1c21a59`): the model path now lives in
+`fork:hi3dgen/headless.py`'s `Session` and `prop_hi3dgen.py` is CLI + gates +
+manifest, so steps 2 and 4 are re-aimed at that split. Goal, A/B design,
+user-decision framing and the §8 roster are unchanged. Step 1 is done (fork
+`3488bbf`).
 
 ## Ideal end state
 
 `prop_hi3dgen.py` accepts extra conditioning views (`--view back.png --view
-side.png`) and routes them through per-view matte → per-view StableNormal
-prediction → `get_cond([normals])` → the fork's already-written
-`inject_sampler_multi_image` contexts, with the mode and every view's
-provenance in the manifest. An A/B on one asymmetric prop and one character
-subject measures whether the extra views actually move the far half of the
-geometry toward the provided back/side images — with the same-seed GPU noise
-floor bounded *before* any difference is claimed. Both arms produce hollow
-shells (rework 1's closure: the SLat representation cannot hold a solid, every
-prop is a double-walled shell permanently), so every metric here is chosen to
-be valid on hollow meshes. The verdict decides whether production wiring
-(concept stages emitting view sets) is queued; that wiring is explicitly not
-this plan.
+side.png`) and routes them — via a multi-view-capable `Session` in the fork —
+through per-view matte → per-view StableNormal prediction → `get_cond(normals)`
+→ the fork's already-written `inject_sampler_multi_image` contexts, with the
+mode and every view's provenance in the manifest. An A/B on one asymmetric prop
+and one character subject measures whether the extra views actually move the
+far half of the geometry toward the provided back/side images — with the
+same-seed GPU noise floor bounded *before* any difference is claimed. Both arms
+produce hollow shells (rework 1's closure: the SLat representation cannot hold
+a solid, every prop is a double-walled shell permanently), so every metric here
+is chosen to be valid on hollow meshes. The verdict decides whether production
+wiring (concept stages emitting view sets) is queued; that wiring is explicitly
+not this plan.
 
 ## Design decisions
 
-**1. Integrate in vordar's staged path; reuse the fork's injection unchanged.**
-The finding says "we call single-image `run()` at `prop_hi3dgen.py:169`" — that
-is stale. Since finding 17, `prop_hi3dgen.py` reimplements the pipeline as
-`staged_cond()` / `staged_sample()` (`prop_hi3dgen.py:157-188`) so each model's
-weights are resident only during its stage (peak 6.79 GiB vs 15.57 before), and
-it passes `occupancy_threshold` explicitly. Calling `fork:run_multi_image`
-(`hi3dgen.py:455-487`) would throw all of that away. The right seam is:
-`inject_sampler_multi_image` (`fork:hi3dgen/pipelines/hi3dgen.py:397-452`) is a
-self-contained contextmanager that monkey-patches `sampler._inference_model`;
-we wrap vordar's existing `sample_sparse_structure` / `sample_slat` calls in it
-and change nothing in the fork's pipeline code. Verified compatible: both
-stages use `FlowEulerGuidanceIntervalSampler`
-(`fork:weights/trellis-normal-v0-1/pipeline.json:11,23`), whose
-`_inference_model` signature `(model, x_t, t, cond, neg_cond, cfg_strength,
-cfg_interval, **kwargs)` (`guidance_interval_mixin.py:33`) matches the
-multidiffusion replacement's signature exactly (`hi3dgen.py:429`).
-`run_multi_image` itself stays unused; rework 3 (headless API) absorbs or
-deletes it later.
+**1. The seam moved: multi-view capability lives in `Session`; the script
+contributes flags, gates, artifact names and manifest fields.** The plan as
+approved put the per-view loop and the injection call sites inside
+`prop_hi3dgen.py`'s `staged_cond`/`staged_sample`. Rework 3 deleted those
+helpers: the whole model path — load, staged weight residency, matte, normal
+prediction, conditioning, sampling — is now `fork:hi3dgen/headless.py`'s
+`Session` (`matte()` → `prepare()` → `sample(seed)`), and `prop_hi3dgen.py`
+(~249 lines) owns only CLI, gates and manifest. Multi-view is model-path work,
+so it belongs to `Session`. Exact signatures:
+
+- `Session.prepare(views, *, normal_resolution, normal_steps,
+  crop_from_original, seed) -> Prepared`, where `views` is an ordered list of
+  `(image, matte)` pairs, view 0 = front. Per view: conditioning source
+  (`_full_res_conditioning_source(image, matte)` when `crop_from_original`,
+  else the matte, exactly as today) → `preprocess_image(resolution=1024)`.
+  Then one `torch.manual_seed(seed)` followed by the per-view normal
+  predictions *in view order* — view 0's turbo prediction is byte-identical to
+  today's (same seed point, same first predictor call; turbo's latent is the
+  deterministic image latent). Then `get_cond(normal_images)` and
+  `cond["neg_cond"] = cond["neg_cond"][:1]` unconditionally — identity at one
+  view, since `get_cond` builds `neg_cond` as `zeros_like(cond)`
+  (`fork:hi3dgen/pipelines/hi3dgen.py:281-286`). `Prepared.normal_image`
+  becomes `Prepared.normal_images` (list, view order; swap rule — the script
+  is the only consumer). `Prepared.elapsed_s` keeps its three keys; `"normal"`
+  now covers all views' predictions.
+- `Session.sample(seed, *, …the nine existing axes…,
+  mv_mode: str = "multidiffusion") -> Candidate`. The view count is derived
+  from `self.cond["cond"].shape[0]` — no separate parameter to drift. At one
+  view the call path is exactly today's: **no injection context is entered**
+  (`contextlib.nullcontext`), so single-view identity is structural, not a
+  numerical accident. At >1 views, the `sample_sparse_structure` call is
+  wrapped in `pipeline.inject_sampler_multi_image('sparse_structure_sampler',
+  n_views, ss_params["steps"], mode=mv_mode)` and the `sample_slat` call in
+  the same for `'slat_sampler'` with `slat_params["steps"]` — each context
+  *inside* its existing `staged(...)` block (`fork:headless.py:310-313`), so
+  weight residency is unchanged. The merged param dicts already carry
+  `"steps"` (`fork:headless.py:299-306`), so the injection's `num_steps` is
+  exact by construction. `Candidate` is unchanged.
+- Rejected: calling `fork:run_multi_image`
+  (`fork:hi3dgen/pipelines/hi3dgen.py:469-502`) — it samples with every model
+  resident (no `staged()` windows), the 15.57 GiB peak finding 17 eliminated.
+  It stays as unused upstream reference; its body is the recipe `Session`
+  reproduces (`get_cond(images)`, `neg_cond[:1]`, one injection per sampler).
+  Rejected: `mv_mode` on `prepare` — the mode is a sampling-time knob; one
+  prepared cond legally samples in either mode.
+- Compatibility re-verified at `3488bbf`: both stages are
+  `FlowEulerGuidanceIntervalSampler`
+  (`fork:weights/trellis-normal-v0-1/pipeline.json:11,23`); the base
+  `_inference_model` multiplies `t` by 1000 and calls `model(x_t, t, cond)`
+  (`fork:hi3dgen/pipelines/samplers/flow_euler.py:61-63`), the mixin computes
+  `(1+cfg)·pred − cfg·neg_pred` inside `cfg_interval`
+  (`guidance_interval_mixin.py:33`), and the injected replacements match those
+  signatures — pinned since step 1 by `fork:tests/test_sampler_injection.py`.
+
+Two properties are non-negotiable, stated as verifiable predicates:
+
+- **P1 — single-view identity.** A run with no `--view` behaves byte-for-byte
+  as today: no injection context is entered, and the reference run reproduces
+  — `normal_sha256 ==
+  822b22e5c2529af6e601ceffc813a1120b73d90cd00265ed6b8d7e7965e98f8f` and
+  `face_count` within 1% of 768,804 (rework 3's parity smoke,
+  `target/prop-solid-validation/rework3-smoke/cand_0/`, reproduced 768,756 —
+  0.006% off — on the current codebase, so 1% is two orders above the measured
+  GPU noise, not a tuned band).
+- **P2 — manifest compatibility.** Every key of the reference manifest
+  (`target/prop-solid-validation/chapel_arch_e2e/cand_0/hi3dgen_manifest.json`)
+  survives with unchanged semantics; `elapsed_s` keeps the reference's seven
+  keys plus `extraction` (`0 < extraction < geometry`). Step 2's additions are
+  exactly `views` and `mv_mode` (plus `ss_active_voxels`, which rework 4 added
+  after the reference was written).
 
 **2. Conditioning views are per-view normal maps.** The pipeline conditions on
-the StableNormal bridge output, not RGB (`prop_hi3dgen.py:424`:
-`staged_cond(hi3dgen_pipeline, normal_image)`). So a view = matte
-(`matte_concept` + `check_matte`) → `preprocess_image(resolution=1024)` →
+the StableNormal bridge output, not RGB — `Session.prepare` encodes
+`get_cond([normal_image])` (`fork:headless.py:263-264`). So a view = matte
+(`Session.matte` + `check_matte`) → `preprocess_image(resolution=1024)` →
 turbo normal prediction → DINOv2 encoding. Turbo's prediction is the
 deterministic image latent (the reason multi-seed batching already shares one
 prediction), so per-view predictions add ~1 s each (measured `elapsed_s.normal`
 = 0.92 s, `target/prop-solid-validation/chapel_arch_e2e/cand_0/hi3dgen_manifest.json`).
 `--normal-model full` stays legal with `--view` under a single seed — its
-existing multi-seed refusal (`prop_hi3dgen.py:332-339`) is unchanged and
+existing multi-seed refusal (`prop_hi3dgen.py:159-166`) is unchanged and
 sufficient.
 
 **3. The noise floor is bounded by a determinism probe first, repeats second —
 and the A/B is paired by seed.** Rework 6 (unresolved) measured three same-seed
 runs at 541220/541286/541242 vertices from byte-identical code; a single-run
-A/B is unreadable against that. `CUBLAS_WORKSPACE_CONFIG` is already exported
-(`prop_hi3dgen.py:34`) but `torch.use_deterministic_algorithms` is called
-nowhere — the flag has never been tried. Whether it (a) errors on
-`scatter_reduce`/spconv ops, (b) runs but leaves spconv nondeterministic, or
-(c) pins the mesh, is a hypothesis whose test is step 4, priced at 3–6 runs of
-~1 min. If (c): the floor is exactly 0 and every later arm is single-run. If
-(a)/(b): the floor per metric is measured from the same 3 same-seed repeats,
-and the A/B claim rule becomes: per-seed delta (arm − baseline) must have the
-same sign at all 3 seeds AND its minimum magnitude must exceed that metric's
-measured floor. No expected magnitudes are pre-registered; if deltas land
-inside the floor the verdict is "indistinguishable at 3 seeds" and the next
-spend goes to the user, not to a quiet threshold move.
+A/B is unreadable against that. `CUBLAS_WORKSPACE_CONFIG` is already set at
+package import (`fork:hi3dgen/headless.py:15-19`) but
+`torch.use_deterministic_algorithms` is called nowhere in either repo
+(re-grepped 2026-07-29; the only hit is that env-var comment) — the flag has
+never been tried. Whether it (a) errors on `scatter_reduce`/spconv ops, (b)
+runs but leaves spconv nondeterministic, or (c) pins the mesh, is a hypothesis
+whose test is step 4, priced at 3–6 runs of ~1 min. If (c): the floor is
+exactly 0 and every later arm is single-run. If (a)/(b): the floor per metric
+is measured from the same 3 same-seed repeats, and the A/B claim rule becomes:
+per-seed delta (arm − baseline) must have the same sign at all 3 seeds AND its
+minimum magnitude must exceed that metric's measured floor. No expected
+magnitudes are pre-registered; if deltas land inside the floor the verdict is
+"indistinguishable at 3 seeds" and the next spend goes to the user, not to a
+quiet threshold move.
 
 **4. Metrics valid on hollow meshes, instrument validated analytically.** Both
 arms are hollow shells, so no volume, no watertightness, no interior criteria
@@ -156,148 +217,155 @@ none is registered by this plan.
 
 ## Findings (execution order)
 
-### 1. Fork: contract test for `inject_sampler_multi_image`
+### 1. Fork: contract test for `inject_sampler_multi_image` — DONE (fork `3488bbf`)
 
-- **Evidence:** `fork:hi3dgen/pipelines/hi3dgen.py:397-452` implements the two
-  conditioning modes as an untested contextmanager that monkey-patches
-  `sampler._inference_model`. Nothing in `fork:tests/` exercises it — the only
-  test module is `tests/test_extraction_contract.py` (plain asserts, no
-  pytest, run as `C:\tools\Hi3DGen\venv\Scripts\python.exe
-  tests/test_extraction_contract.py` from the fork root). Both production
-  samplers are `FlowEulerGuidanceIntervalSampler`
-  (`fork:weights/trellis-normal-v0-1/pipeline.json:11,23`); its base
-  `_inference_model` multiplies `t` by 1000 and calls `model(x_t, t, cond,
-  **kwargs)` (`fork:hi3dgen/pipelines/samplers/flow_euler.py:61-63`), and the
-  guidance-interval mixin computes `(1+cfg)·pred − cfg·neg_pred` inside
-  `cfg_interval` (`fork:hi3dgen/pipelines/samplers/guidance_interval_mixin.py:33-39`).
-- **Ideal:** A committed CPU-only test pins the injection's three behavioral
-  claims — stochastic round-robin order, multidiffusion's averaged-CFG
-  formula, and restoration on context exit — so step 2's plumbing rests on a
-  proven seam.
-- **Gap:** The mechanism this whole rework routes through has zero test
-  coverage; a silent signature drift (the injected functions duplicate the
-  mixin signatures by hand) would corrupt geometry rather than crash.
-- **Suggestion:** New `fork:tests/test_sampler_injection.py`, plain asserts,
-  same header/env conventions as `test_extraction_contract.py`
-  (`ATTN_BACKEND=xformers`, `SPCONV_ALGO=native`, `HF_HUB_OFFLINE=1`,
-  `sys.path` insert). No GPU, no weights: build a bare pipeline via
-  `p = Hi3DGenPipeline()` (its `__init__` returns early when `models is None`,
-  `fork:hi3dgen/pipelines/hi3dgen.py:57-58`), then
-  `p.sparse_structure_sampler = FlowEulerGuidanceIntervalSampler(sigma_min=1e-5)`.
-  Dummy model: a function `model(x_t, t, cond, **kw)` that appends
-  `float(cond[0,0,0])` to a call log and returns
-  `torch.full_like(x_t, float(cond[0,0,0]))`. Cond tensor `(3, 2, 4)` with
-  `cond[i] = i+1` everywhere; `neg = torch.zeros(1, 2, 4)`; `x_t =
-  torch.zeros(1, 2, 4)`.
-- **Path:**
-  1. **Stochastic:** inside
-     `p.inject_sampler_multi_image('sparse_structure_sampler', num_images=3,
-     num_steps=6, mode='stochastic')`, call `sampler.sample(model, noise=x_t,
-     cond=cond, neg_cond=neg, steps=6, cfg_strength=5.0, cfg_interval=(0.5,
-     1.0), verbose=False)`. Assert the call log's *positive*-cond entries (the
-     nonzero ids) are exactly `[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]` — one per step,
-     round-robin — and that every logged cond had batch size 1.
-  2. **Multidiffusion:** inside a fresh context with `mode='multidiffusion'`,
-     call `sampler._inference_model(model, x_t, t=0.75, cond=cond,
-     neg_cond=neg, cfg_strength=5.0, cfg_interval=(0.5, 1.0))` directly.
-     Expected: per-view preds are 1, 2, 3 → mean 2; neg pred 0; inside the
-     interval the result is `(1+5)·2 − 5·0 = 12`. Assert
-     `torch.allclose(out, torch.full_like(x_t, 12.0))`. Repeat at `t=0.3`
-     (outside `[0.5, 1.0]`): assert `allclose(out, full_like(x_t, 2.0))`.
-  3. **Restoration:** after each context exits, assert
-     `not hasattr(sampler, '_old_inference_model')` and that
-     `sampler._inference_model(model, x_t, t=0.75, cond=cond[:1],
-     neg_cond=neg, cfg_strength=5.0, cfg_interval=(0.5, 1.0))` returns
-     `full_like(x_t, 6.0)` — the original mixin math `(1+5)·1 − 5·0` — i.e.
-     behavior, not object identity (the contextmanager legitimately leaves a
-     bound-method instance attribute behind).
-  4. Run `C:\tools\Hi3DGen\venv\Scripts\python.exe
-     tests/test_sampler_injection.py` from `C:/tools/Hi3DGen/Hi3DGen` — the
-     new file must pass; also run `tests/test_extraction_contract.py`
-     (unchanged, 3/3) so the fork test suite stays green. Commit on
-     `vordar-fixes`. No vordar-repo files change; no cargo gate applies.
+Landed 2026-07-29. `fork:tests/test_sampler_injection.py` (plain asserts,
+CPU-only, no weights — a bare `Hi3DGenPipeline()` carrying a
+`FlowEulerGuidanceIntervalSampler` driven by a dummy model that logs and
+echoes its cond) pins the injection's three behavioral claims:
 
-### 2. `prop_hi3dgen.py`: opt-in multi-view CLI, per-view matte/normal, injected sampling
+- **stochastic**: positive-cond ids over 6 steps × 3 views are exactly
+  `[1, 2, 3, 1, 2, 3]`, one batch-1 cond per step;
+- **multidiffusion**: per-view preds 1/2/3 average to 2; inside
+  `cfg_interval` the output is `(1+5)·2 − 5·0 = 12`, outside it 2 — the
+  averaged-CFG formula verified at both branches;
+- **restoration**: after each context exits, `_old_inference_model` is gone
+  and `_inference_model` reproduces the original mixin math
+  (`(1+5)·1 − 5·0 = 6`) — behavior, not object identity.
 
-- **Evidence:** `scripts/ai-pipeline/prop_hi3dgen.py` is single-view end to
-  end: one `matte_concept`/`check_matte` (`:376-381`), one
-  `preprocess_image(resolution=1024)` (`:394`), one normal prediction
-  (`:402-405`), `staged_cond(pipeline, normal_image)` encoding exactly one
-  image (`:157-165`, `:424`), and `staged_sample` (`:168-188`) calling
-  `sample_sparse_structure`/`sample_slat` bare. The fork's
-  `run_multi_image` shows the multi-image recipe: `get_cond(images)`, then
-  `cond['neg_cond'] = cond['neg_cond'][:1]`, then each sampler wrapped in
-  `inject_sampler_multi_image(name, len(images), steps, mode)`
-  (`fork:hi3dgen/pipelines/hi3dgen.py:476-487`). vordar's merged param dicts
-  already carry `steps` explicitly (`:422-423`), so the injection's
-  `num_steps` is `ss_params["steps"]` / `slat_params["steps"]`.
+No defect found; the seam step 2 routes through is proven. Runs cwd-independent
+under the fork venv (the `sys.path`/env-var header conventions the original
+step text prescribed were themselves deleted by rework 3 at `84b88db` — fork
+tests import the editable-installed package directly).
+
+### 2. Multi-view `Session.prepare`/`sample` in the fork; `--view`/`--mv-mode`, per-view gates and manifest in `prop_hi3dgen.py`
+
+- **Evidence:** The model path is single-view end to end in
+  `fork:hi3dgen/headless.py`: `Session.matte(image)` (`:220-222`),
+  `Session.prepare(image, matte, *, …, seed)` (`:224-270`) predicts one
+  normal and encodes `get_cond([normal_image])` at `:263-264`, and
+  `Session.sample(seed, …)` (`:272-331`) calls
+  `sample_sparse_structure`/`sample_slat` bare inside `staged(...)` blocks
+  (`:310-313`) with merged param dicts that already carry `"steps"`
+  (`:299-306`). The script `scripts/ai-pipeline/prop_hi3dgen.py` mattes and
+  gates once (`:184-193`), prepares once (`:195-201`), saves `normal.png`
+  per candidate (`:205-206`), samples per seed (`:217-228`) and writes the
+  manifest (`:239-276`); CLI is `build_parser()` (`:112-132`) +
+  `sample_kwargs()` (`:135-147`); resume checks `CANDIDATE_OUTPUTS` (`:38`,
+  manifest written last). The multi-image recipe to reproduce is
+  `fork:hi3dgen/pipelines/hi3dgen.py:491-502` (`run_multi_image`):
+  `get_cond(images)`, then `cond['neg_cond'] = cond['neg_cond'][:1]`, then
+  each sampler wrapped in `inject_sampler_multi_image(name, len(images),
+  steps, mode)` — but `run_multi_image` itself holds every model resident and
+  stays unused (Design decisions §1).
 - **Ideal:** `prop_hi3dgen.py <front.png> --view back.png --view side.png
   --mv-mode multidiffusion --out D --seed N` runs the full staged path with
-  three conditioning views; a run without `--view` is byte-for-byte the
-  current single-view behavior; the manifest records every view's provenance
-  and the mode.
-- **Gap:** No CLI, no per-view processing loop, no injection call sites, no
-  manifest fields.
-- **Suggestion:** Changes confined to `prop_hi3dgen.py`:
-  - **CLI:** `--view PATH` (`action="append"`, `dest="extra_views"`,
-    `type=Path`, default `[]`) — the positional `image` is view 0 (front);
-    `--mv-mode` `choices=("stochastic", "multidiffusion")`,
-    `default="multidiffusion"` (only consulted when extra views exist).
-  - **Per-view loop:** build `views = [args.image] + args.extra_views`
-    (resolve each). For each view k: open RGBA → `matte_concept` →
-    `check_matte` (abort names the failing view) → save `concept_rgba.png`
-    for k=0 (unchanged name — downstream consumers keep working) and
-    `concept_rgba_v{k}.png` for k≥1 → conditioning source
-    (`full_res_conditioning_source` per view when `--crop-from-original`) →
-    `preprocess_image(resolution=1024)`. Free BiRefNet after the *last*
-    view's matte (move the existing `del` after the loop). Then one
-    `torch.manual_seed(seeds[0])` (as today, `:401`) and a normal prediction
-    per view in view order — turbo's latent is the deterministic image
-    latent, so the shared-across-seeds property is untouched; save
-    `normal.png` (k=0) / `normal_v{k}.png` (k≥1).
-  - **Conditioning:** generalize `staged_cond` to take a list:
-    `pipeline.get_cond(images)` then `cond["neg_cond"] =
-    cond["neg_cond"][:1]` unconditionally (identity for the single-view
-    case — `get_cond` builds `neg_cond` as `zeros_like(cond)`,
-    `fork:hi3dgen.py:271-276`).
-  - **Sampling:** `staged_sample` gains `n_views: int` and `mv_mode: str`;
-    when `n_views > 1` wrap the `sample_sparse_structure` call in
-    `pipeline.inject_sampler_multi_image('sparse_structure_sampler', n_views,
-    ss_params["steps"], mode=mv_mode)` and the `sample_slat` call in the same
-    for `'slat_sampler'` with `slat_params["steps"]` — each context *inside*
-    its existing `staged(...)` block so weight residency is unchanged.
-  - **Manifest:** add `"views"`: list of `{path, input_sha256,
-    concept_rgba_sha256, normal_sha256}` (one entry per view, view 0 first)
-    and `"mv_mode"`: the mode string when `len(views) > 1`, else `None`.
-    Existing top-level fields (`input_image`, `concept_rgba`, `normal`, their
-    hashes) keep describing view 0.
-  - Duplicate `--view` paths are allowed (the identity smoke below depends on
-    it); repeated seeds stay refused as today.
+  three conditioning views; a run without `--view` satisfies predicate P1
+  (single-view identity) and P2 (manifest compatibility) from Design
+  decisions §1; the manifest records every view's provenance and the mode.
+- **Gap:** `Session` takes exactly one view; the script has no `--view` CLI,
+  no per-view gate/artifact loop, no manifest fields.
+- **Suggestion:** One step, two repos — the fork's `prepare` signature change
+  and the script's call site must land together or the workspace is broken
+  between them.
+  - **Fork (`hi3dgen/headless.py`):**
+    - `prepare(views, *, normal_resolution, normal_steps, crop_from_original,
+      seed)` — `views` = ordered list of `(image, matte)` pairs. Loop per
+      view: `source = _full_res_conditioning_source(image, matte) if
+      crop_from_original else matte` → `preprocess_image(source,
+      resolution=1024)`. BiRefNet is freed once at the top (as today,
+      `:234-236` — all mattes happen before `prepare`). One
+      `torch.manual_seed(seed)`, then per-view normal predictions in view
+      order; free the predictor after the last (move the existing `del` after
+      the loop). `get_cond(normal_images)` then `cond["neg_cond"] =
+      cond["neg_cond"][:1]` unconditionally. Return
+      `Prepared(normal_images=[…], elapsed_s=…)` — the `normal_image` field
+      is renamed to `normal_images` (list), swap rule, no compat alias.
+    - `sample(seed, *, …, mv_mode="multidiffusion")` — `n_views =
+      self.cond["cond"].shape[0]`; build the two sampler contexts as
+      `pipeline.inject_sampler_multi_image('sparse_structure_sampler',
+      n_views, ss_params["steps"], mode=mv_mode)` /
+      `('slat_sampler', n_views, slat_params["steps"], mode=mv_mode)` when
+      `n_views > 1`, else `contextlib.nullcontext()`; enter each inside its
+      existing `staged(...)` block. Nothing else in `sample` changes;
+      `Candidate` is unchanged.
+  - **Script (`scripts/ai-pipeline/prop_hi3dgen.py`):**
+    - **CLI:** `--view PATH` (`action="append"`, `dest="extra_views"`,
+      `type=Path`, `default=[]`) — the positional `image` is view 0 (front);
+      `--mv-mode` `choices=("stochastic", "multidiffusion")`,
+      `default="multidiffusion"` (only consulted when extra views exist —
+      `Session.sample` ignores it at one view). `sample_kwargs()` gains
+      `"mv_mode": args.mv_mode` (it is a `Session.sample` kwarg; the
+      signature-bind test then covers it for free).
+    - **Per-view loop:** `views = [args.image] + [v.resolve() for v in
+      args.extra_views]`. For each view k: open RGBA → `session.matte` →
+      `check_matte` (the abort message names the failing view's path) → save
+      `concept_rgba.png` for k=0 (unchanged name — downstream consumers keep
+      working) and `concept_rgba_v{k}.png` for k≥1, per pending candidate.
+      Then `prepared = session.prepare([(image_k, matte_k)…], …)`; save
+      `prepared.normal_images[0]` as `normal.png` and `normal_images[k]` as
+      `normal_v{k}.png` (k≥1) per pending candidate.
+    - **Manifest:** add `"views"`: list of `{path, input_sha256,
+      concept_rgba_sha256, normal_sha256}` (one entry per view, view 0 first
+      — view 0's entry intentionally duplicates the top-level fields so the
+      list stands alone) and `"mv_mode"`: the mode string when
+      `len(views) > 1`, else `None`. Existing top-level fields
+      (`input_image`, `concept_rgba`, `normal`, their hashes) keep describing
+      view 0. `CANDIDATE_OUTPUTS` and the resume rule are untouched — the
+      manifest is written last, so a completed multi-view candidate always
+      has its `_v{k}` artifacts (existing semantics: flags are not part of
+      the skip key, same as every other axis today).
+    - Duplicate `--view` paths are allowed (the identity smoke below depends
+      on it); repeated seeds stay refused as today (`:157-158`).
 - **Path:**
-  1. Implement the above.
-  2. Single-view regression (no GPU): `python -c` import-and-argparse is not a
-     behavioral test — instead rely on the GPU smoke, which exercises both
-     modes of the changed code.
+  1. Implement the fork side, commit on `vordar-fixes`; implement the script
+     side in the same worker run (the two must land together).
+  2. Cheap behavioral tests, extending `scripts/tests/test_prop_hi3dgen.py`
+     (run: `C:\tools\Hi3DGen\venv\Scripts\python.exe -m unittest discover -s
+     scripts/tests -t .` from the vordar root): (a)
+     `build_parser().parse_args(["f.png","--out","b","--view","back.png",
+     "--view","side.png"])` yields `args.extra_views == [Path("back.png"),
+     Path("side.png")]` in order, and a parse without `--view` yields `[]`
+     with `args.mv_mode == "multidiffusion"`; (b) `--mv-mode bogus` raises
+     `SystemExit`; (c) `sample_kwargs(parse("--mv-mode","stochastic"))
+     ["mv_mode"] == "stochastic"` and the existing
+     `test_every_kwarg_is_a_sample_parameter` still binds every
+     `sample_kwargs` key to `Session.sample`'s signature — proving `mv_mode`
+     is a real `sample` parameter, not a stranded flag. Also run the four
+     fork test modules (`test_extraction_contract`, `test_preprocess_contract`,
+     `test_headless_contract`, `test_sampler_injection` — each as
+     `C:\tools\Hi3DGen\venv\Scripts\python.exe C:\tools\Hi3DGen\Hi3DGen\tests\<file>`)
+     so the fork suite stays green.
   3. **GPU identity smoke (~3 min, §8: two ~1 min candidates + shared
      ~30 s loads):** run
      `C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py
      target/prop-batch/b3/arch/cand_0/concept.png --out target/mv-ab/smoke-sv
      --seed 0`, then the same with `--view
      target/prop-batch/b3/arch/cand_0/concept.png --out target/mv-ab/smoke-dup
-     --mv-mode multidiffusion`. Assertions: both exit 0; `smoke-dup`'s
-     manifest has `mv_mode == "multidiffusion"` and `len(views) == 2` with
-     both `input_sha256` equal; `normal_v1.png` exists and its sha256 equals
-     `normal.png`'s (turbo is deterministic per image); and — the behavioral
-     core — with duplicated identical views, multidiffusion's averaged
-     prediction is mathematically the single-view prediction, so
-     `smoke-dup`'s `vertex_count` must be within 0.1% of `smoke-sv`'s (the
-     rework-6 same-seed spread measured 66 vertices in 541k ≈ 0.012%; 0.1%
-     is an order of magnitude above that floor and two below any real
-     conditioning change). Record both counts in the step's summary. If step
-     4 later proves determinism, this pair is re-assertable as bit-identical
-     `raw.glb` hashes — do not wait on that here.
-  4. Single-view arm check rides the same smoke: `smoke-sv`'s manifest must
-     carry `"mv_mode": null` and a one-entry `views` list.
+     --mv-mode multidiffusion`. Assertions: both exit 0; **P1:** `smoke-sv`'s
+     manifest has `normal_sha256 ==
+     822b22e5c2529af6e601ceffc813a1120b73d90cd00265ed6b8d7e7965e98f8f` and
+     `face_count` within 1% of 768,804 (rework 3's smoke reproduced 768,756 —
+     0.006% — on this codebase, so 1% is two orders above measured noise);
+     **P2:** every top-level key of
+     `target/prop-solid-validation/chapel_arch_e2e/cand_0/hi3dgen_manifest.json`
+     is present in `smoke-sv`'s manifest, `elapsed_s` holds the reference's
+     seven keys plus `extraction` with `0 < extraction < geometry`, and the
+     only keys beyond the reference's are `{ss_active_voxels, views,
+     mv_mode}`; `smoke-sv` carries `"mv_mode": null` and a one-entry `views`
+     list. `smoke-dup`'s manifest has `mv_mode == "multidiffusion"` and
+     `len(views) == 2` with both `input_sha256` equal; `normal_v1.png` exists
+     and its sha256 equals `normal.png`'s (turbo is deterministic per image);
+     and — the behavioral core — with duplicated identical views,
+     multidiffusion's averaged prediction is mathematically the single-view
+     prediction, so `smoke-dup`'s `vertex_count` must be within 0.1% of
+     `smoke-sv`'s (the rework-6 same-seed spread measured 66 vertices in
+     541k ≈ 0.012%; 0.1% is an order of magnitude above that floor and two
+     below any real conditioning change). Record both counts in the step's
+     summary. If step 4 later proves determinism, this pair is re-assertable
+     as bit-identical `raw.glb` hashes — do not wait on that here.
+  4. Two commits: fork on `vordar-fixes`, vordar-side. No Rust files change;
+     no cargo gate applies.
 
 ### 3. `mv_ab_metrics.py`: silhouette-IoU and raw-stats instrument
 
@@ -305,12 +373,13 @@ none is registered by this plan.
   camera convention to mirror is `proptex/views.py:54-67` (`mv_view`:
   direction `d = [sin az·cos el, −cos az·cos el, sin el]`, right `s =
   normalize(cross(f, [0,0,1]))`, up `u = cross(s, f)`, `f = −d`) and
-  `MV_ELEVATION_DEG = 15.0` (`views.py:20`). The Hi3DGen venv pins `trimesh
-  4.12.2`, `opencv-python-headless`, `numpy` (`fork:requirements.txt:19-25`),
+  `MV_ELEVATION_DEG = 15.0` (`views.py:20`). The Hi3DGen venv pins `trimesh`,
+  `numpy`, `opencv-python-headless` (`fork:requirements.txt:22-25`),
   so the script runs there with no new dependency. Concept masks come from
   production artifacts: `concept_rgba*.png` alpha, thresholded at
   `> 0.8·255` — the same cut `preprocess_image`'s bbox test and
-  `check_matte` use (`fork:hi3dgen.py:143`, `prop_hi3dgen.py:229`).
+  `check_matte` use (`fork:hi3dgen/pipelines/hi3dgen.py:131`,
+  `prop_hi3dgen.py:57-62`).
 - **Ideal:** `C:\tools\Hi3DGen\venv\Scripts\python.exe
   scripts/ai-pipeline/mv_ab_metrics.py <raw.glb> --front F.png [--back B.png]
   [--side S.png] --out metrics.json [--masks-dir DIR]` writes one JSON with
@@ -368,22 +437,36 @@ none is registered by this plan.
   unresolved): three same-seed turbo runs gave 541220/541286/541242 vertices
   from byte-identical code; the normal map was bit-identical, so the noise is
   entirely in the geometry stage (`scatter_reduce` + sparse convs).
-  `CUBLAS_WORKSPACE_CONFIG=":4096:8"` is already exported before CUDA init
-  (`prop_hi3dgen.py:31-34`) — set up *for* `use_deterministic_algorithms`,
-  which is called nowhere in the repo (grep verified). Whether the flag
-  errors, runs-but-doesn't-pin (spconv kernels are outside torch's flag), or
-  pins the mesh is unknown and unknowable without a GPU run.
+  `CUBLAS_WORKSPACE_CONFIG=":4096:8"` is already set before any CUDA work, at
+  package import (`fork:hi3dgen/headless.py:15-19`) — set up *for*
+  `torch.use_deterministic_algorithms`, which is called nowhere in either
+  repo (re-grepped 2026-07-29; the only hit is that comment).
+  `prop_hi3dgen.py` no longer imports torch at all (rework 3's parity gate
+  asserted exactly that), so the flag's mechanism belongs to `Session`, whose
+  `__init__` (`fork:headless.py:179-218`) runs before any weights load.
+  Whether the flag errors, runs-but-doesn't-pin (spconv kernels are outside
+  torch's flag), or pins the mesh is unknown and unknowable without a GPU
+  run.
 - **Ideal:** The A/B knows, per metric, the size of same-seed run-to-run
   noise — either exactly 0 (determinism proven) or a measured floor from
   repeats — before any cross-arm difference is read.
 - **Gap:** The flag is untried, and no A/B metric has ever been computed
   twice on the same configuration.
-- **Suggestion:** Add `--deterministic` to `prop_hi3dgen.py`: when set, call
-  `torch.use_deterministic_algorithms(True)` immediately after the torch
-  import block (before any model load), and record `"deterministic": true`
-  in the manifest. Then probe.
+- **Suggestion:** `Session.__init__` gains `deterministic: bool = False`; when
+  true it calls `torch.use_deterministic_algorithms(True)` first thing, before
+  any model load. `prop_hi3dgen.py` gains `--deterministic`
+  (`action="store_true"`), forwards it as
+  `headless.Session(normal_model=…, deterministic=args.deterministic)`, and
+  records `"deterministic": args.deterministic` in the manifest (a new key —
+  P2's key-set predicate was step 2's; from this step on the expected additions
+  include it). Then probe.
 - **Path:**
-  1. Implement the flag (a guarded call plus one manifest field).
+  1. Implement the flag: the guarded call in `Session.__init__` (fork,
+     `vordar-fixes`), the `--deterministic` flag + `Session` forward + one
+     manifest field (vordar). Cheap check: extend
+     `scripts/tests/test_prop_hi3dgen.py` with a parse assertion
+     (`args.deterministic` defaults False, True when flagged) and re-run the
+     unit suite.
   2. **Probe (§8: 3 GPU runs ≈ 3–4 min):** run
      `prop_hi3dgen.py target/prop-batch/b3/arch/cand_0/concept.png
      --deterministic --seed 0 --out target/mv-ab/det-r{1,2,3}` three times
@@ -422,7 +505,7 @@ none is registered by this plan.
   step is written for it and is replanned if the user picks otherwise.
   Machinery: `comfy_run.server()` + `comfy_run.run_workflow(workflow, dir)`
   (`scripts/ai-pipeline/comfy_run.py`), the `{subject}` placeholder
-  convention (`gen_prop.py:117-123` — text replace, then every `seed`/
+  convention (`gen_prop.py:117-122` — text replace, then every `seed`/
   `noise_seed` input overwritten), and `workflows/prop_concept.json` as the
   Z-Image-Turbo template (UNET `z_image_turbo_bf16`, CLIP
   `qwen_3_4b_fp8_mixed` as lumina2, `ae.safetensors` VAE, 8-step
@@ -464,20 +547,17 @@ none is registered by this plan.
      tier). A sheet where the three panels are plainly different objects
      after ~5 seeds is a measured negative for option B — report it and
      stop; the fallback recipe is the user's call, not an autonomous swap.
-  4. Behavioral check that is scriptable: each cropped panel, pushed through
-     `matte_concept`/`check_matte` (which step 6's runs do anyway), must
-     pass the matte gate — a panel whose matte fails would abort the A/B
-     run, so pre-flight each panel with a tiny driver:
-     `python -c` invoking `prop_hi3dgen.py`'s matte path is not available
-     standalone; instead simply let step 6's first run be the check and
-     re-cut the sheet if a view's matte aborts (the abort names the view,
-     per step 2).
+  4. Behavioral check that is scriptable: each cropped panel must pass the
+     matte gate, and step 6's first run is that check — `prop_hi3dgen.py`
+     mattes and `check_matte`-gates every view, and a failing view's abort
+     names its path (step 2), so a bad panel is caught before geometry is
+     paid and the sheet is re-cut.
 
 ### 6. A/B on the asymmetric prop (olive_stump subject)
 
 - **Evidence:** Arms and rule fixed by Design decisions §3/§6. Inputs from
   step 5: `target/mv-ab/olive_stump/view_{front,side,back}.png`. Per-run
-  cost measured: shared load ≈ 29 s warm, geometry ≈ 17 s/candidate
+  cost measured: shared load ≈ 28 s warm, geometry ≈ 17 s/candidate
   single-view (`chapel_arch_e2e/cand_0` manifest); multidiffusion multiplies
   the 50-step sparse-structure stage's model evals by (3 views + 1 neg)/2 ≈
   2×, so budget ≈ 35 s/candidate; +2 normal predictions ≈ +2 s per process.
@@ -526,12 +606,12 @@ none is registered by this plan.
 
 - **Evidence:** Identical harness to step 6; inputs
   `target/mv-ab/<character>/view_{front,side,back}.png` from step 5. The
-  character is the finding's stated motivation
-  (`gen_character.py:183-211` routes character geometry through the same
-  `prop_hi3dgen.py`, so a positive result here transfers to the character
-  chain without further mechanism work). Characters are where the back is
-  most *designed* (hair, hood, satchel, cloak) and where a single silhouette
-  under-constrains most.
+  character is the finding's stated motivation — `gen_character.py`'s
+  `stage_geometry` (`gen_character.py:183-207`) routes character geometry
+  through the same `prop_hi3dgen.py` process, so a positive result here
+  transfers to the character chain without further mechanism work.
+  Characters are where the back is most *designed* (hair, hood, satchel,
+  cloak) and where a single silhouette under-constrains most.
 - **Ideal:** The same paired table for the character subject, so the verdict
   rests on both an organic-asymmetric prop and a character.
 - **Gap:** As step 6.
@@ -555,7 +635,7 @@ none is registered by this plan.
   record), two `ab.json` tables, 18 contact sheets. The campaign's A/B
   report convention is `docs/reviews/hi3dgen/ab-<topic>-<date>.md`
   (`ab-sampler-2026-07-28.md`, `ab-conditioning-2026-07-28.md`). The queue
-  note in `reworks-hi3dgen-2026-07-28.md:23` lists **rework 2** unstruck;
+  note in `reworks-hi3dgen-2026-07-28.md:25` lists **rework 2** unstruck;
   rework 6's entry (finding 6) carries no probe result yet.
 - **Ideal:** One report that a later reader can re-derive the verdict from:
   the floor, every per-seed value, the claim rule as pre-registered, the
