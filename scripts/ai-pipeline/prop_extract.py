@@ -65,7 +65,7 @@ def main():
     )
 
     extractor = SparseFeatures2Mesh(
-        device=args.device, res=MESH_RESOLUTION, use_color=True
+        device=args.device, res=MESH_RESOLUTION
     )
 
     t_start = time.perf_counter()
