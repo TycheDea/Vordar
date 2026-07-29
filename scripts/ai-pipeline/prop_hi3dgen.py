@@ -12,7 +12,7 @@ already on disk is skipped, so an interrupted run resumes.
 
 Run under the Hi3DGen venv; cwd-independent (weight paths resolve against the
 installed hi3dgen package, outputs against the parsed args):
-C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N ...] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F] [--occupancy-threshold F]
+C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N ...] [--view <image.png> ...] [--mv-mode MODE] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F] [--occupancy-threshold F]
 
 Every geometry axis is a flag, and the manifest records the values the
 samplers actually ran with, so one sweep arm is one command line. The four
@@ -36,6 +36,16 @@ from hi3dgen import headless
 # The artefacts a finished candidate directory holds; the manifest is written
 # last, so its presence is what makes a skip safe.
 CANDIDATE_OUTPUTS = ("raw.glb", "concept_rgba.png", "normal.png", "hi3dgen_manifest.json")
+
+
+def view_artifact(stem: str, k: int) -> str:
+    """A view's artefact name: unsuffixed for view 0, so the front view keeps
+    the names downstream stages already read, and _v<k> for each extra view."""
+    return f"{stem}.png" if k == 0 else f"{stem}_v{k}.png"
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 class DegenerateMatteError(Exception):
@@ -129,6 +139,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--normal-model", choices=sorted(headless.NORMAL_ENTRYPOINTS), default="turbo", help="StableNormal predictor: single-step turbo (fast) or the full two-stage SD-based refinement (slower, sharper high-frequency detail).")
     parser.add_argument("--normal-steps", type=int, default=None, help="Override the normal predictor's denoising steps (turbo is a fixed single step regardless of this value).")
     parser.add_argument("--crop-from-original", action="store_true", help="Take the object crop from full-resolution pixels instead of the <=1024 matte copy.")
+    parser.add_argument("--view", type=Path, action="append", dest="extra_views", default=[], metavar="PATH",
+                        help="Repeatable: an additional conditioning view of the same subject. The positional image is view 0 (front); each --view is appended in the order given.")
+    parser.add_argument("--mv-mode", choices=("stochastic", "multidiffusion"), default="multidiffusion",
+                        help="How the samplers combine several conditioning views: multidiffusion averages every view's prediction each step, stochastic round-robins one view per step. Only consulted when --view is given.")
     return parser
 
 
@@ -144,6 +158,7 @@ def sample_kwargs(args) -> dict:
         "ss_rescale_t": args.ss_rescale_t,
         "slat_rescale_t": args.slat_rescale_t,
         "occupancy_threshold": args.occupancy_threshold,
+        "mv_mode": args.mv_mode,
     }
 
 
@@ -152,6 +167,9 @@ def main():
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.image = args.image.resolve()
+    # The positional image is view 0 (front); repeats are allowed, since two
+    # copies of one view are the identity check on the multi-view path.
+    view_paths = [args.image] + [view.resolve() for view in args.extra_views]
 
     seeds = args.seeds if args.seeds else [random.randint(0, 2**32 - 1)]
     if len(set(seeds)) != len(seeds):
@@ -181,29 +199,33 @@ def main():
     session = headless.Session(normal_model=args.normal_model)
     t_loaded = time.perf_counter()
 
-    image = Image.open(args.image).convert("RGBA")
-    concept_rgba = session.matte(image)
-    # Gated before prepare(), so a degenerate matte costs no normal prediction.
-    try:
-        check_matte(concept_rgba)
-    except DegenerateMatteError as e:
-        sys.exit(f"prop_hi3dgen: {e}")
-    for seed in pending:
-        concept_rgba.save(cand_dirs[seed] / "concept_rgba.png")
+    views = []
+    for k, view_path in enumerate(view_paths):
+        image = Image.open(view_path).convert("RGBA")
+        concept_rgba = session.matte(image)
+        # Gated before prepare(), so a degenerate matte costs no normal prediction.
+        try:
+            check_matte(concept_rgba)
+        except DegenerateMatteError as e:
+            sys.exit(f"prop_hi3dgen: {view_path}: {e}")
+        for seed in pending:
+            concept_rgba.save(cand_dirs[seed] / view_artifact("concept_rgba", k))
+        views.append((image, concept_rgba))
     t_matted = time.perf_counter()
 
     prepared = session.prepare(
-        image, concept_rgba,
+        views,
         normal_resolution=args.normal_resolution,
         normal_steps=args.normal_steps,
         crop_from_original=args.crop_from_original,
         seed=seeds[0],
     )
-    # The normal map is the geometry stage's only input: keeping it splits a
-    # bad mesh into "the normal predictor saw it wrong" vs "the sampler built
+    # The normal maps are the geometry stage's only input: keeping them splits
+    # a bad mesh into "the normal predictor saw it wrong" vs "the sampler built
     # it wrong", which the mesh alone cannot distinguish.
-    for seed in pending:
-        prepared.normal_image.save(cand_dirs[seed] / "normal.png")
+    for k, normal_image in enumerate(prepared.normal_images):
+        for seed in pending:
+            normal_image.save(cand_dirs[seed] / view_artifact("normal", k))
 
     # Paid once for the whole run, and repeated into every candidate's
     # manifest so each record stands alone.
@@ -230,6 +252,17 @@ def main():
 
         concept_rgba_path = cand_dir / "concept_rgba.png"
         normal_path = cand_dir / "normal.png"
+        # View 0's entry repeats the top-level fields on purpose, so the list
+        # is a complete record of the conditioning on its own.
+        view_records = [
+            {
+                "path": str(view_path),
+                "input_sha256": sha256_of(view_path),
+                "concept_rgba_sha256": sha256_of(cand_dir / view_artifact("concept_rgba", k)),
+                "normal_sha256": sha256_of(cand_dir / view_artifact("normal", k)),
+            }
+            for k, view_path in enumerate(view_paths)
+        ]
         # Outside every elapsed_s interval above: a dump is a diagnostic, and
         # its write must not land in a wall time a sweep arm is compared on.
         if args.dump_ss_logits:
@@ -240,11 +273,13 @@ def main():
             "model": "Stable-X/Hi3DGen",
             **session.identity(),
             "input_image": str(args.image),
-            "input_image_sha256": hashlib.sha256(args.image.read_bytes()).hexdigest(),
+            "input_image_sha256": view_records[0]["input_sha256"],
             "concept_rgba": str(concept_rgba_path),
-            "concept_rgba_sha256": hashlib.sha256(concept_rgba_path.read_bytes()).hexdigest(),
+            "concept_rgba_sha256": view_records[0]["concept_rgba_sha256"],
             "normal": str(normal_path),
-            "normal_sha256": hashlib.sha256(normal_path.read_bytes()).hexdigest(),
+            "normal_sha256": view_records[0]["normal_sha256"],
+            "views": view_records,
+            "mv_mode": args.mv_mode if len(view_paths) > 1 else None,
             "normal_resolution": args.normal_resolution,
             "normal_model": args.normal_model,
             "normal_steps": args.normal_steps,

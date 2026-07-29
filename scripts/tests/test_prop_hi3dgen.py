@@ -168,5 +168,31 @@ class SweepAxisPlumbing(unittest.TestCase):
         self.assertEqual(kwargs["occupancy_threshold"], -0.5)
 
 
+@unittest.skipIf(prop_hi3dgen is None, "needs the Hi3DGen venv")
+class MultiViewCli(unittest.TestCase):
+    """The positional image is view 0 and each --view appends after it, in the
+    order the conditioning encoder receives them."""
+
+    def parse(self, *argv):
+        return prop_hi3dgen.build_parser().parse_args(["concept.png", "--out", "batch", *argv])
+
+    def test_extra_views_collected_in_order(self):
+        args = self.parse("--view", "back.png", "--view", "side.png")
+        self.assertEqual(args.extra_views, [Path("back.png"), Path("side.png")])
+
+    def test_single_view_run_has_no_extra_views(self):
+        args = self.parse()
+        self.assertEqual(args.extra_views, [])
+        self.assertEqual(args.mv_mode, "multidiffusion")
+
+    def test_unknown_mv_mode_refused(self):
+        with self.assertRaises(SystemExit):
+            self.parse("--mv-mode", "bogus")
+
+    def test_mv_mode_reaches_sample_kwargs(self):
+        kwargs = prop_hi3dgen.sample_kwargs(self.parse("--mv-mode", "stochastic"))
+        self.assertEqual(kwargs["mv_mode"], "stochastic")
+
+
 if __name__ == "__main__":
     unittest.main()
