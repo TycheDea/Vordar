@@ -21,6 +21,17 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → **rework 1** →
 finding 18 → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
+The findings numbered in *this* file (10–15) are discoveries from rework
+execution and sit outside that mirrored queue; they are struck here.
+Done 2026-07-29 (this file's finding 14, commit `7d145cb`). `check_mesh` now
+drops zero-area faces and records the count in the manifest instead of aborting
+the run. The re-run measured the two assertions rework 1 step 6 left unmeasured:
+manifest `extraction` block present, peak reserved VRAM 6.787 GiB (≤ 8.0).
+premise-falsified in part: the re-run's mesh came out at 768804 faces against the
+aborted run's 768462 at the same seed — the GPU non-determinism this campaign
+already documents — and carried **0** zero-area faces, so it would have passed
+the old gate too. The drop-and-record path is proven by unit test, not by this
+run.
 Done 2026-07-28 (findings 15, 19–23, commits `23c7063`..`f2015e7`; findings 19–23
 run out of queue order, pulled forward as file-disjoint parallel work while the
 GPU-bound items serialized). Finding 15 raised `blend_coverage` 0.7303→0.9759 on
@@ -61,10 +72,11 @@ and eliminated: chapel_arch has 49 boundary-unreachable cells and crucero 11,
 against the 758,977 / 288,055 a solid interior needs, so the cavities are open
 rather than masked and no reachability criterion can find them. Direction (i) —
 solidification whose sign test does not consult the grid boundary — is the only
-remaining path. Steps 7 and 8 stay blocked until its predicates move. The GPU
-smoke never completed (rework 14), so the manifest block and VRAM bound are
-unmeasured. Reworks 10-12 were queued from steps 1 and 3, rework 15 from
-rework 13's measurement.
+remaining path. Steps 7 and 8 stay blocked until its predicates move. Step 6's
+GPU smoke aborted (rework 14, fixed at `7d145cb`); the re-run measured both
+assertions it had blocked — manifest `extraction` block present, peak reserved
+VRAM **6.787 GiB** against the `≤ 8.0` bound and the 7.41 baseline. Reworks 10-12
+were queued from steps 1 and 3, rework 15 from rework 13's measurement.
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
 peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
 system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before
