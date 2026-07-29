@@ -79,11 +79,15 @@ vordar carries `prop_extract.py` (`839763d`) and the manifest extraction block
 (volume ratios 1.0002/1.0000) against a required 30-55% reduction, and
 `interior_tris_removed / raw_tris` stays at 0.34/0.31/0.36 against a `≤ 0.02`
 bar. Artifact trail: `target/prop-solid-validation/`. Queued as rework 13, which
-decides whether steps 7-8 can proceed at all; its direction (ii) is the cheap
-discriminating experiment. Steps 7 and 8 are blocked on that decision — do not
-resume them against the current numbers. The GPU smoke never completed (rework
-14), so the manifest block and VRAM bound are unmeasured. Reworks 10-12 were
-queued from steps 1 and 3.
+decides whether steps 7-8 can proceed at all. Its direction (ii) is now measured
+and eliminated: chapel_arch has 49 boundary-unreachable cells and crucero 11,
+against the 758,977 / 288,055 a solid interior needs, so the cavities are open
+rather than masked and no reachability criterion can find them. Direction (i) —
+solidification whose sign test does not consult the grid boundary — is the only
+remaining path. Steps 7 and 8 stay blocked until its predicates move. The GPU
+smoke never completed (rework 14), so the manifest block and VRAM bound are
+unmeasured. Reworks 10-12 were queued from steps 1 and 3, rework 15 from
+rework 13's measurement.
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
 peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
 system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before

@@ -56,11 +56,15 @@ vordar carries `prop_extract.py` (`839763d`) and the manifest extraction block
 (volume ratios 1.0002/1.0000) against a required 30-55% reduction, and
 `interior_tris_removed / raw_tris` stays at 0.34/0.31/0.36 against a `≤ 0.02`
 bar. Artifact trail: `target/prop-solid-validation/`. Queued as rework 13, which
-decides whether steps 7-8 can proceed at all; its direction (ii) is the cheap
-discriminating experiment. Steps 7 and 8 are blocked on that decision — do not
-resume them against the current numbers. The GPU smoke never completed (rework
-14), so the manifest block and VRAM bound are unmeasured. Reworks 10-12 were
-queued from steps 1 and 3.
+decides whether steps 7-8 can proceed at all. Its direction (ii) is now measured
+and eliminated: chapel_arch has 49 boundary-unreachable cells and crucero 11,
+against the 758,977 / 288,055 a solid interior needs, so the cavities are open
+rather than masked and no reachability criterion can find them. Direction (i) —
+solidification whose sign test does not consult the grid boundary — is the only
+remaining path. Steps 7 and 8 stay blocked until its predicates move. The GPU
+smoke never completed (rework 14), so the manifest block and VRAM bound are
+unmeasured. Reworks 10-12 were queued from steps 1 and 3, rework 15 from
+rework 13's measurement.
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
 peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
 system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before
@@ -199,10 +203,21 @@ Path, which requires finding 17 to land first.
 - **Evidence:** Measured executing `plan-rework1-solid-interior` finding 6 (paired hollow/solid validation); full artifact trail under `target/prop-solid-validation/` (`summary.json` plus per-subject `extract_*.json` / `cleanup_*.json`). Fill-on CPU replay vs the saved hollow `raw.glb` baseline: chapel_arch face count 773576 → 773414 (**-0.021%**), trimesh volume ratio **1.0002**; crucero 341880 → 341766 (**-0.033%**), volume ratio **1.0000**; candelabra_shrine 334942 → **359880** (a **7.4% increase**), volume ratio **1.5244**. Device-matched `--no-fill-interior` CPU replays reproduce the GPU baselines to within 0.003% (773566 / 334938 / 341878), so this is not a CPU-vs-GPU confound — the fill genuinely has near-zero effect on two subjects. Downstream `prop_cleanup.py` confirms it: solid-run `interior_tris_removed / raw_tris` is **0.3409** (chapel_arch), **0.3113** (candelabra_shrine), **0.3608** (crucero) against a `≤ 0.02` success bar and a `> 0.05` park bar, and each is within 0.001 of its own hollow pair except candelabra_shrine, where the solid run strips *more* interior (0.3113 vs 0.2615). `two_crossing_ray_fraction` is flat across the pairs (0.405 vs 0.415; 0.28 vs 0.28; 0.415 vs 0.41 — ratios 0.98/1.00/1.01 against a required `≥ 2×`). chapel_arch's solid `euler_number` is **864**, not `≤ 0`, with `component_count` 3824. The mechanism is wired and does run (`fork:hi3dgen/representations/mesh/cube2mesh.py:380-385`; `body_count` moves 16→12 on chapel_arch, 11→34 on candelabra_shrine, 15→6 on crucero), so this is a premise failure, not a plumbing failure.
 - **Ideal:** The interior fill converts these props' hollow double walls into solid single shells, which is what `interior_tris_removed → 0` and a rising `two_crossing_ray_fraction` would show.
 - **Gap:** `fill_enclosed_sdf` fills only outside-valued cells with **no positive path to the grid boundary**, and additionally clears every cell the sparse scatter wrote (`fork:hi3dgen/representations/mesh/utils_cube.py:83-91`). On these real fields the cavity between the two walls is evidently not sealed in that sense at res 256 — either it drains to the boundary through the props' open mouths and through-openings (an arch, a wayside cross, a shrine are all topologically open), or the inter-wall gap is thin enough to be entirely covered by the active-voxel band the scatter wrote and therefore excluded by line 90. The synthetic harness cases all have genuinely sealed cavities, which is why they pass while real input does not. candelabra_shrine is the one subject where a real cavity existed (+52% volume) — and even there the face count rose, so the fill closed volume without removing inner wall.
-- **Suggestion:** Do not tune `min_component_fraction`, `iso_level` or `sdf_bias` to force these numbers — the reachability criterion itself is what does not match the defect. Two candidate directions, both needing a decision before code: (i) replace boundary-reachability with a signed-distance / winding-number solidification that does not depend on the cavity being sealed; (ii) keep the SDF-space pass but drop the line-90 exclusion of scatter-written cells and re-measure, on the hypothesis that the active-voxel band is masking a thin sealed gap. Direction (ii) is a one-line experiment against the artifacts already on disk and should be measured first, because it cheaply discriminates "not sealed" from "sealed but masked".
+- **Measured (direction (ii), settled):** Instrumenting `fill_enclosed_sdf` on the real 257³ field (16,974,593 cells) counts, per subject, the cells that are positive-and-boundary-unreachable *before* line 90 masks anything:
+
+  | | chapel_arch | candelabra_shrine | crucero |
+  |---|---|---|---|
+  | `n_unreachable` (pre-line-90) | **49** | **142,571** | **11** |
+  | of which scatter-written (line 90 clears) | 22 | 28,363 | 11 |
+  | `n_filled` today | 27 | 114,208 | 0 |
+  | largest unreachable components | 27, 11, 2, 1… | 116680, 12438, 6201, 6138… | 3, 2, 2, 1… |
+  | interior cells a solid fill must claim | **758,977** | 172,745 | **288,055** |
+
+  The anchor row is positive cells sandwiched by solid cells on all three axes, cross-checked against trimesh volume (hollow chapel_arch 0.02057 → 345k cells vs `n_negative` 410,607). chapel_arch is off by a factor of **15,000**, crucero by **26,000**, and both find confetti (largest components 27 and 3 cells) rather than a cavity. Deleting line 90 and re-running the three CPU replays confirms it: chapel_arch 773414 → 773250 faces (0.04% below hollow, volume ratio 1.0002), crucero 341766 → 341660 (0.06%, ratio 1.0000). Only candelabra_shrine moves — 359880 → **262342** faces (**21.7%** below hollow, volume ratio **1.583**, `is_watertight` true, `body_count` 34→5) — and that is the subject whose cavity was already sealed and already being filled, not a masked one. Harness stays 7/7 with line 90 deleted, but **bit-identically**, so the suite never exercises line 90 at all (filed as finding 15).
+- **Suggestion:** Do not tune `min_component_fraction`, `iso_level` or `sdf_bias` to force these numbers — the reachability criterion itself is what does not match the defect. Direction (ii) (dropping the line-90 exclusion) is now measured and eliminated as a fix: it buys 22 and 11 cells on the two failing props, 0.003% and 0.004% of what a solid interior needs. What remains is (i) — replace boundary-reachability with a signed-distance / generalized-winding-number solidification that does not depend on the cavity being sealed. The reason is structural rather than a tuning miss: an arch and a wayside cross are topologically open, so their inter-wall gap has a positive path to the grid boundary and **no reachability criterion at any resolution** will classify it as enclosed. Direction (ii)'s one-line deletion is independently worth keeping for candelabra_shrine, but it belongs to whatever replaces `fill_enclosed_sdf`, not ahead of it.
 - **Outcome:** `9/10` — this decides whether the solid-interior rework can land at all, or whether the hollow-shell defect needs a different instrument.
-- **Cost:** `5/10` — direction (ii) is one line plus three ~20 s CPU replays over saved latents; direction (i) is a real extraction-stage redesign.
-- **Path:** run direction (ii)'s one-line variant over the three saved latents in `target/prop-latents/` via `prop_extract.py` → compare `face_count` / `volume` against `target/prop-solid-validation/summary.json`'s `hollow_baseline_*` fields → if still flat, the cavities are open and direction (i) is required; if it moves, re-run the six `prop_cleanup.py` pairs and re-evaluate predicates (a)-(e).
+- **Cost:** `5/10` — an extraction-stage redesign; direction (ii) is spent.
+- **Path:** plan direction (i) as its own rework — a solidification pass whose sign test does not consult the grid boundary — then re-run the three CPU replays and the six `prop_cleanup.py` pairs and re-evaluate predicates (a)-(e). `plan-rework1-solid-interior` steps 7-8 stay blocked until those predicates move.
 
 ### 14. `prop_hi3dgen.py`'s zero-tolerance degenerate-face gate aborts a run over 2 faces in 768k
 
@@ -213,3 +228,13 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `6/10` — restores the ability to complete an end-to-end run and unblocks the two unmeasured smoke assertions.
 - **Cost:** `2/10` — one function in `prop_hi3dgen.py` plus one manifest field; verification is a single ~2 min GPU run.
 - **Path:** choose drop-and-record vs allowance → implement in `check_mesh` → re-run the smoke command above → assert `hi3dgen_manifest.json` contains the `"extraction"` block (`fill_interior: true`, `occupancy_threshold: 0.0`, `iso_level: 0.0`) and `vram.peak_reserved_gib ≤ 8.0` against the 7.41 GiB baseline.
+
+### 15. `test_interior_fill.py` never exercises the scatter-written exclusion the fill's central comment defends
+
+- **Evidence:** Measured executing finding 13's direction (ii). Deleting line 90 of `fill_enclosed_sdf` (`fork:hi3dgen/representations/mesh/utils_cube.py:90`) leaves all 7 harness cases passing with **bit-identical** metrics — `sphere` 1.0002/0.0000, `vessel` 1.0033/0.3916, `through_tunnel` 1.0049/0.1379, `plate_stack` 0 relabelled, `floater_blob_dropped` body=1, `floater_rod_survives` body=2, `iso_level` unchanged. The set `unreachable ∩ scatter-written` is empty in every synthetic fixture, so the line is inert under test. On real fields it is not inert: it clears 22 / 28,363 / 11 cells on the three props.
+- **Ideal:** The comment at `:79-82` states a behavioral claim — that flooding cells the scatter skipped cannot pass through an open mouth made of predicted outside values, so the exclusion is what keeps a through-hole from welding shut. A claim that load-bearing has a case that fails when it is violated.
+- **Gap:** Every fixture's sealed cavity sits wholly outside the active-voxel band, which is the one configuration where line 90 cannot fire. The suite therefore certifies neither that the exclusion is needed nor that removing it is safe; finding 13 had to measure on production latents to learn which. `through_tunnel` and `vessel` were written to catch exactly this and do not, because their walls are thin enough that the band never overlaps the cavity.
+- **Suggestion:** Add a fixture whose sealed cavity lies *inside* the scatter band — a thin-walled shell whose interior gap is narrower than the active-voxel width — and assert the line-90 behavior in whichever direction the finding-13 successor settles on. Do not delete the existing cases; they cover the disjoint configuration.
+- **Outcome:** `4/10` — closes a blind spot that already cost one wrong hypothesis, and any replacement for `fill_enclosed_sdf` inherits the same untested boundary.
+- **Cost:** `2/10` — one fixture in the existing plain-assert harness, seconds to run.
+- **Path:** build the thin-wall fixture → confirm it fails with line 90 in the state the successor rework rejects → land alongside that rework, not before it.
