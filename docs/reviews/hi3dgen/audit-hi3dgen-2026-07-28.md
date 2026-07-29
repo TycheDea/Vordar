@@ -253,6 +253,17 @@ because on this topology the property it tests is not the property we want.
 both subjects. The topological pre-filter contributes nothing; every deletion
 comes from the ray test alone. Dead code.
 
+*Two refinements from the fuller pass.* First, the discriminator replayed the
+**pre-weld** pipeline (it started before `c9c695b`), so its 263,759 is the old
+ordering's deleted count; with the weld in front the same prop deletes 259,061,
+because 16,021 duplicate-corner triangles no longer reach the strip. All
+fractions shift by well under 1% and no conclusion moves. Second, and against the
+stated suspicion: down-facing faces (`n_z < −0.5`) are **under**-represented in
+the visible-deleted set — 7.6% of it against 16.3% of the deleted set overall.
+They have to be, since a camera at +15° elevation can never face a downward
+normal. **The current test is not punching holes in the soffit.** The soffit only
+appears as a casualty of the *replacement*, which is where it would be fatal.
+
 *Where this leaves the design.* Deleting the inner wall is still correct in
 principle — finding 15 measured `blend_coverage` 0.7303 → 0.9759 on crucero from
 exactly this deletion, so keeping it and paying the tri and atlas budget is the
