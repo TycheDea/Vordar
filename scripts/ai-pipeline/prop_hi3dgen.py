@@ -12,7 +12,12 @@ already on disk is skipped, so an interrupted run resumes.
 
 Run under the Hi3DGen venv; cwd-independent (weight paths resolve against the
 installed hi3dgen package, outputs against the parsed args):
-C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N ...] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F]
+C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_hi3dgen.py <image.png> --out <dir> [--seed N ...] [--ss-steps N] [--slat-steps N] [--ss-cfg F] [--slat-cfg F] [--occupancy-threshold F]
+
+Every geometry axis is a flag, and the manifest records the values the
+samplers actually ran with, so one sweep arm is one command line. The four
+cfg-interval/rescale-t flags default to leaving the checkpoint's own value in
+place rather than to a number of this script's choosing.
 """
 import argparse
 import hashlib
@@ -104,7 +109,7 @@ def check_mesh(mesh_result, trimesh_mesh: trimesh.Trimesh) -> dict:
     }
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Hi3DGen image -> raw untextured glb geometry.")
     parser.add_argument("image", type=Path)
     parser.add_argument("--out", type=Path, required=True, help="Batch directory; each candidate lands in <out>/cand_<seed>/")
@@ -114,10 +119,36 @@ def main():
     parser.add_argument("--slat-steps", type=int, default=headless.SLAT_SAMPLING_STEPS_DEFAULT, help="Structured latent stage sampling steps.")
     parser.add_argument("--ss-cfg", type=float, default=headless.SS_CFG_DEFAULT, help="Sparse structure stage CFG guidance strength.")
     parser.add_argument("--slat-cfg", type=float, default=headless.SLAT_CFG_DEFAULT, help="Structured latent stage CFG guidance strength.")
+    parser.add_argument("--ss-cfg-interval-lo", type=float, default=None, help="Sparse structure stage: start of the timestep interval CFG is applied over. Unset keeps the checkpoint's interval.")
+    parser.add_argument("--slat-cfg-interval-lo", type=float, default=None, help="Structured latent stage: start of the timestep interval CFG is applied over. Unset keeps the checkpoint's interval.")
+    parser.add_argument("--ss-rescale-t", type=float, default=None, help="Sparse structure stage timestep rescaling. Unset keeps the checkpoint's value.")
+    parser.add_argument("--slat-rescale-t", type=float, default=None, help="Structured latent stage timestep rescaling. Unset keeps the checkpoint's value.")
+    parser.add_argument("--occupancy-threshold", type=float, default=headless.OCCUPANCY_THRESHOLD_DEFAULT, help="Decoded-occupancy cutoff a sparse structure cell must exceed to be kept; lower keeps more cells.")
+    parser.add_argument("--dump-ss-logits", action="store_true", help="Write the sparse structure stage's decoded occupancy grid to <cand>/ss_logits.npy, the distribution an --occupancy-threshold is placed against.")
     parser.add_argument("--normal-resolution", type=int, default=headless.NORMAL_RESOLUTION_DEFAULT, help="StableNormal processing resolution.")
     parser.add_argument("--normal-model", choices=sorted(headless.NORMAL_ENTRYPOINTS), default="turbo", help="StableNormal predictor: single-step turbo (fast) or the full two-stage SD-based refinement (slower, sharper high-frequency detail).")
     parser.add_argument("--normal-steps", type=int, default=None, help="Override the normal predictor's denoising steps (turbo is a fixed single step regardless of this value).")
     parser.add_argument("--crop-from-original", action="store_true", help="Take the object crop from full-resolution pixels instead of the <=1024 matte copy.")
+    return parser
+
+
+def sample_kwargs(args) -> dict:
+    """The geometry axes Session.sample() takes, as parsed."""
+    return {
+        "ss_steps": args.ss_steps,
+        "slat_steps": args.slat_steps,
+        "ss_cfg": args.ss_cfg,
+        "slat_cfg": args.slat_cfg,
+        "ss_cfg_interval_lo": args.ss_cfg_interval_lo,
+        "slat_cfg_interval_lo": args.slat_cfg_interval_lo,
+        "ss_rescale_t": args.ss_rescale_t,
+        "slat_rescale_t": args.slat_rescale_t,
+        "occupancy_threshold": args.occupancy_threshold,
+    }
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.image = args.image.resolve()
@@ -186,11 +217,7 @@ def main():
     for position, seed in enumerate(pending):
         cand_dir = cand_dirs[seed]
         t_cand = time.perf_counter()
-        cand = session.sample(
-            seed,
-            ss_steps=args.ss_steps, slat_steps=args.slat_steps,
-            ss_cfg=args.ss_cfg, slat_cfg=args.slat_cfg,
-        )
+        cand = session.sample(seed, **sample_kwargs(args))
         t_geometry = time.perf_counter()
         try:
             mesh_stats = check_mesh(cand.mesh_result, cand.mesh)
@@ -203,6 +230,10 @@ def main():
 
         concept_rgba_path = cand_dir / "concept_rgba.png"
         normal_path = cand_dir / "normal.png"
+        # Outside every elapsed_s interval above: a dump is a diagnostic, and
+        # its write must not land in a wall time a sweep arm is compared on.
+        if args.dump_ss_logits:
+            np.save(cand_dir / "ss_logits.npy", cand.ss_logits.numpy())
         vram = headless.vram_peaks()
         vram["resident_gib"] = session.resident
         manifest = {
@@ -226,6 +257,7 @@ def main():
             "sampler_rng_state_sha256": cand.rng_state_sha256,
             "sampler_params": cand.sampler_params,
             "extraction": cand.extraction,
+            "ss_active_voxels": cand.ss_active_voxels,
             "elapsed_s": {
                 **shared_elapsed_s,
                 "geometry": t_geometry - t_cand,

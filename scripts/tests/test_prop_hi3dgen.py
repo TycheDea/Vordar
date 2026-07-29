@@ -1,10 +1,13 @@
-"""check_matte's gate must agree with the Hi3DGen bbox test it feeds, and
-check_mesh must drop zero-area faces while still refusing broken geometry.
+"""check_matte's gate must agree with the Hi3DGen bbox test it feeds,
+check_mesh must drop zero-area faces while still refusing broken geometry, and
+every sweep axis the CLI exposes must reach the sampler it names.
 
 Requires the Hi3DGen venv (prop_hi3dgen imports torch/hi3dgen at module
 scope); skipped under a plain interpreter:
 C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe -m unittest discover -s scripts/tests -t .
 """
+import inspect
+import json
 import sys
 import types
 import unittest
@@ -18,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ai-pipeline"))
 
 try:
     import prop_hi3dgen
+    from hi3dgen import headless
     from hi3dgen.pipelines import Hi3DGenPipeline
 except ImportError as e:  # pragma: no cover - environment probe
     prop_hi3dgen = None
@@ -117,6 +121,51 @@ class CheckMeshDegenerateFaces(unittest.TestCase):
         with self.assertRaises(prop_hi3dgen.DegenerateMeshError):
             prop_hi3dgen.check_mesh(
                 types.SimpleNamespace(success=False), box_with_degenerate_faces(0))
+
+
+@unittest.skipIf(prop_hi3dgen is None, "needs the Hi3DGen venv")
+class SweepAxisPlumbing(unittest.TestCase):
+    """Each knob has to travel CLI -> sample_kwargs -> Session.sample -> the
+    sampler dict, which is the whole path a sweep arm varies."""
+
+    def parse(self, *argv):
+        return prop_hi3dgen.build_parser().parse_args(["concept.png", "--out", "batch", *argv])
+
+    def merged(self, kwargs, stage):
+        """The dict the named stage's sampler would run with, built by the
+        same helper Session.sample uses."""
+        spec = json.loads((headless.GEOMETRY_WEIGHTS / "pipeline.json").read_text())
+        base = spec["args"][f"{stage}_sampler"]["params"]
+        prefix = "ss" if stage == "sparse_structure" else "slat"
+        return headless.sampler_params(
+            base, steps=kwargs[f"{prefix}_steps"], cfg=kwargs[f"{prefix}_cfg"],
+            cfg_interval_lo=kwargs[f"{prefix}_cfg_interval_lo"],
+            rescale_t=kwargs[f"{prefix}_rescale_t"])
+
+    def test_every_kwarg_is_a_sample_parameter(self):
+        kwargs = prop_hi3dgen.sample_kwargs(self.parse())
+        inspect.signature(headless.Session.sample).bind(
+            headless.Session, 0, **kwargs)
+
+    def test_unflagged_run_keeps_checkpoint_sampler_values(self):
+        kwargs = prop_hi3dgen.sample_kwargs(self.parse())
+        for stage in ("sparse_structure", "slat"):
+            merged = self.merged(kwargs, stage)
+            self.assertEqual(merged["cfg_interval"], [0.5, 1.0], stage)
+            self.assertEqual(merged["rescale_t"], 3.0, stage)
+        self.assertEqual(kwargs["occupancy_threshold"], headless.OCCUPANCY_THRESHOLD_DEFAULT)
+
+    def test_flagged_run_overrides_only_the_named_stage(self):
+        kwargs = prop_hi3dgen.sample_kwargs(self.parse(
+            "--ss-cfg-interval-lo", "0.0", "--slat-rescale-t", "1.0",
+            "--occupancy-threshold", "-0.5"))
+        ss = self.merged(kwargs, "sparse_structure")
+        slat = self.merged(kwargs, "slat")
+        self.assertEqual(ss["cfg_interval"], (0.0, 1.0))
+        self.assertEqual(ss["rescale_t"], 3.0)
+        self.assertEqual(slat["cfg_interval"], [0.5, 1.0])
+        self.assertEqual(slat["rescale_t"], 1.0)
+        self.assertEqual(kwargs["occupancy_threshold"], -0.5)
 
 
 if __name__ == "__main__":
