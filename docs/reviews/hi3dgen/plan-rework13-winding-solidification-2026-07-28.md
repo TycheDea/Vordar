@@ -469,6 +469,47 @@ which step 5 records.
   beyond the artifacts under `target/` (which is gitignored — the step commits
   nothing).
 
+### 3. Measured 2026-07-29 — one subject parks
+
+Artifacts: `target/prop-solid-validation/<name>/extract_solid_v2.json`.
+
+| | faces (hollow) | reduction | band | vol ratio | band | volume | (b) bound |
+|---|---|---|---|---|---|---|---|
+| chapel_arch | 754,740 (773,566) | **2.43%** | 460–560k ✗ | **3.214** | 2.2–3.2 ✗ | 0.066115 | ≤0.0698 ✓ |
+| crucero | 230,452 (341,878) | 32.59% | 195–245k ✓ | **2.582** | 1.9–2.4 ✗ | 0.030757 | ≤0.0308 ✓ |
+| candelabra_shrine | 250,892 (334,938) | 25.09% | 230–270k ✓ | 1.671 | 1.4–1.8 ✓ | 0.025880 | ≤0.0264 ✓ |
+
+**(a)** chapel_arch parks on the 15% face-reduction floor. Two of three subjects
+land in band on faces; all three overshoot or top out on volume.
+
+**(b)** never trips — the 26-direction fill stays under the 6-direction bound on
+every subject, so there is no step-1 implementation bug of the kind (b) screens
+for. Note what (b) cannot do: it bounds the 26-direction fill by the 6-direction
+fill, and a sightline test too coarse to see out of a concavity is too coarse in
+both sets. (b) passing is not evidence that the filled cells are interior.
+
+**(c) the plan's premise is wrong, and it did not park on it.** "Marching cubes
+on a modified scalar field is closed by construction, so a `false` here means the
+field was corrupted" — chapel_arch and crucero both come back `is_watertight
+false`, but both were **already** `false` on the hollow CPU baseline. The
+solidification did not break watertightness; the inputs were never watertight.
+Body counts 16 → 3,700 (chapel_arch), 15 → 24 (crucero), 11 → 7
+(candelabra_shrine).
+
+**(d)** the sweep costs far more than the ~1 s budgeted: +15.67 s chapel_arch
+(38.50 vs 22.83), +7.05 s crucero, +6.96 s candelabra_shrine. Recorded for
+rework 5's extraction-time gate per the step's own instruction.
+
+**Open question this raises.** Volume climbing past its ceiling while face count
+barely moves and components explode is not the signature of filling a hollow
+core. If 26 directions cannot see out of a deep exterior concavity — under an
+arch, inside a cross crook — those cells read as hidden and get welded solid, and
+chapel_arch is both the most concave subject and the one that overshot. A
+direction-count sensitivity probe (26 → 98 → 342, strictly more permissive, so
+counts must fall monotonically) settles it: a stable count means the fill is
+genuinely enclosed interior, a collapsing one means the direction count is doing
+load-bearing work the design does not admit to.
+
 ### 4. Paired `prop_cleanup.py` runs and the predicate re-evaluation
 
 - **Evidence:** `scripts/ai-pipeline/prop_cleanup.py` strips camera-unreachable
