@@ -510,6 +510,49 @@ counts must fall monotonically) settles it: a stable count means the fill is
 genuinely enclosed interior, a collapsing one means the direction count is doing
 load-bearing work the design does not admit to.
 
+### Direction-count sensitivity: the mechanism has no stable answer
+
+Run 2026-07-29 to settle step 3's open question. Hidden-cell counts under
+strictly-nested direction sets (each a superset of the one above, so the
+monotone decrease is guaranteed by construction and was observed). The
+26-direction column reproduces the shipped `solidify_hidden_interior`
+cell-for-cell on all three subjects, and the generalized traversal reproduces
+`_escapes_along` exactly on a random grid.
+
+| directions | chapel_arch | crucero | candelabra_shrine |
+|---|---|---|---|
+| 26 (\|c\|≤1) | 690,882 — 1.000 | 283,407 — 1.000 | 162,787 — 1.000 |
+| 98 (primitive \|c\|≤2) | 141,562 — 0.205 | 222,101 — 0.784 | 161,064 — 0.989 |
+| 124 (all \|c\|≤2) | 94,857 — 0.137 | 198,370 — 0.700 | 160,564 — 0.986 |
+| 316 (primitive \|c\|≤3) | 5,944 — 0.0086 | 16,827 — 0.059 | 134,610 — 0.827 |
+| 342 (all \|c\|≤3) | 4,832 — 0.0070 | 14,627 — 0.052 | 127,707 — 0.785 |
+| 728 (all \|c\|≤4) | 284 — 0.0004 | 676 — 0.0024 | 41,022 — 0.252 |
+| 1330 (all \|c\|≤5) | **7** — 0.0000 | **6** — 0.0000 | 3,473 — 0.021 |
+
+**It does not converge; it collapses.** The limit is zero, not a plateau. A true
+straight-line visibility test fills essentially nothing on these props, because
+none of them has an enclosed interior cavity of any consequence. The volume the
+26-direction sweep claims is almost entirely **exterior concavity** that happens
+to block all 26 coarse sightlines — arch undersides, cross crooks.
+
+chapel_arch confirms the prediction exactly: the most concave subject, the one
+that overshot its volume ceiling and exploded to 3,700 bodies, is also the most
+direction-sensitive — 79.5% of its fill disappears at the first refinement.
+
+**Consequence, and it is larger than this plan.** `solidify_hidden_interior` has
+no principled direction count: any value is a tuning knob silently setting how
+much exterior concavity gets welded shut, and the correct limit does nothing.
+This is not a miscalibration to fix, and step 4 would only measure where one
+arbitrary point on a collapsing curve happens to land.
+
+It also generalizes past this mechanism. Rework 1's boundary-reachability flood
+and this plan's exposure sweep are both members of one family — *find the
+enclosed interior in the SDF grid and fill it* — and the family's premise is now
+measured false on real prop fields. The network emits a genuine hollow shell
+whose inner wall is real predicted surface, so there is no enclosed region for
+any SDF-space criterion to find. Steps 4 and 5 are moot as written; rework 1's
+steps 7-8 do not unblock by this route.
+
 ### 4. Paired `prop_cleanup.py` runs and the predicate re-evaluation
 
 - **Evidence:** `scripts/ai-pipeline/prop_cleanup.py` strips camera-unreachable
