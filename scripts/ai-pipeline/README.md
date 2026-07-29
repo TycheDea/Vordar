@@ -413,14 +413,12 @@ C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install --no-deps xformers==0.0.
 C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install C:\tools\TRELLIS\whl\cumm_cu128-0.7.13-cp311-cp311-win_amd64.whl
 C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install C:\tools\TRELLIS\whl\spconv_cu128-2.3.8-cp311-cp311-win_amd64.whl
 C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install diffusers==0.28.0 accelerate kornia==0.8.0 timm==1.0.28 transformers==4.46.3 huggingface_hub==0.24.6 pillow tqdm scipy trimesh numpy==1.26.4 scikit-image opencv-python-headless einops
+C:\tools\Hi3DGen\venv\Scripts\python.exe -m pip install -e C:\tools\Hi3DGen\Hi3DGen --no-deps
 ```
 
-Runtime env vars (same convention as TRELLIS, required for every run):
+The `--no-deps` flag installs the fork's editable source without pulling its declared dependencies (none exist in its `pyproject.toml`), since the GPU stack is already pinned above.
 
-```
-ATTN_BACKEND=xformers
-SPCONV_ALGO=native
-```
+Backend defaults are set inside the package (`SPCONV_ALGO=native` via `setdefault`; `ATTN_BACKEND=xformers` available as an env var override). Per-run env var preconditions are gone.
 
 Actually-installed versions, and why they diverge from the README's own pin
 set (torch 2.4.0/xformers 0.0.27.post2/spconv 2.3.6): this box's proven
@@ -449,9 +447,9 @@ C:\tools\Hi3DGen\venv\Scripts\python.exe -c "import torch, xformers.ops as xops;
 ```
 
 `xformers.info` must report no "Need to compile C++ extensions" warning.
-Importing `Hi3DGenPipeline` (from `C:\tools\Hi3DGen\Hi3DGen`, with
-`ATTN_BACKEND=xformers SPCONV_ALGO=native` set) prints `[SPARSE] Backend:
-spconv, Attention: xformers`.
+Importing `Hi3DGenPipeline` (with the venv activated) prints `[SPARSE]
+Backend: spconv, Attention: xformers` — no cwd or env var preconditions
+needed.
 
 **Weights** (~6.9 GB total; all MIT or Apache-2.0 — verdicts in
 `content/source/CREDITS.md`):
@@ -510,7 +508,7 @@ prediction → `Hi3DGenPipeline` geometry → `to_trimesh` export. A matte with
 no usable alpha (opaque fraction ≥ 0.995 — BiRefNet did nothing, a raw RGB
 image) or no opaque pixels at all exits non-zero before `concept_rgba.png`
 is written, since a degenerate matte would otherwise reconstruct the
-background as geometry in this script's own `preprocess_image` step, the
+background as geometry in the fork's `preprocess_image` step, the
 matte's only consumer. Writes `<out>/cand_<seed>/raw.glb` (bare geometry —
 texturing is a later stage), `<out>/cand_<seed>/concept_rgba.png` (the
 BiRefNet-matted concept at the input's own framing),
@@ -545,7 +543,7 @@ shared.
 **2. `prop_cleanup.py`** — Blender headless normalize + decimate:
 
 ```
-& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_cleanup.py -- <raw.glb> <clean.glb> --height M --asset NAME [--tri-budget N]
+& "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python scripts/ai-pipeline/prop_cleanup.py -- <raw.glb> <clean.glb> --height M --asset NAME --tri-budget N
 ```
 
 Arg convention matches `mixamo_to_glb.py`: everything after `--` is the
@@ -554,7 +552,7 @@ interior-face strip builds its candidate view set from that asset's
 azimuths, so a downloaded asset (which declares none) is refused. Welds
 coincident vertices, strips interior faces then the fragments that strip
 maroons, scale/ground-normalizes to `--height`, decimates to
-`--tri-budget` (default 15000),
+`--tri-budget` (passed per-asset from `content/models/assets.json`, not computed from prop size),
 then xatlas-unwraps the decimated mesh into a single 1024-target UV atlas
 (`uv_charts`/`uv_utilization` in the stats line) — the layer every
 `prop_texture.py` bake targets, so the atlas is identical across texture
