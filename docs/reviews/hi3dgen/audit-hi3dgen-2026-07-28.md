@@ -42,7 +42,7 @@ Queue (single cross-file sequence; reworks live in
 ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
 ~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
 ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → **rework 1** →
-finding 18 → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
+~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
 Done 2026-07-28 (findings 15, 19–23, commits `23c7063`..`f2015e7`; findings 19–23
 run out of queue order, pulled forward as file-disjoint parallel work while the
@@ -113,6 +113,21 @@ recovering it is worth the investigation even though tractability is unknown;
 ship-blocker now. Lead on (2): raw extraction reports 16 bodies and
 `cleanup_hollow.json` reports 3,824 components, so the shredding is a
 `prop_cleanup.py` defect rather than a generation defect.
+
+Done 2026-07-29 (finding 18, fork `973df9e`, vordar `482d41f`). Probe verdict
+**excise** — neither channel group is a texture prior (measurements in the
+finding). The dense attribute grid drops 257³×10 → 257³×4 (679.0 → 271.6 MB) and
+the cube-corner concat (N,8,10) → (N,8,4); CPU extraction time falls 40.6 s →
+26.5 s on chapel_arch and 22.5 s → 12.9 s on candelabra_shrine, a saving the
+finding did not anticipate. Replay geometry is unchanged exactly (386,614 v /
+773,518 f and 167,479 v / 334,938 f), harness 3/3, −76 lines.
+**Architectural constraint found in-path:** `SLatMeshDecoder.out_layer` is trained
+at `[101, 96]` in `slat_dec_mesh_swin8_B_64l8m256c_fp16.safetensors`, and
+`decoder_mesh.py` sizes it off `feats_channels`. Deleting the layout entry would
+have shrunk that to 53 and broken checkpoint loading. `feats_channels` therefore
+stays 101 — the frozen network keeps emitting the columns; only the scatter,
+interpolation and concat of them are gone, which is where the memory and time
+went. No training-path consumer exists in this fork.
 
 **Lead (2) settled and fixed 2026-07-29 (`c9c695b`), this file's finding 17.**
 Two ordering defects, not one. The raw mesh carries duplicate vertices at shared
