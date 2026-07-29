@@ -207,6 +207,28 @@ a closed genus-86 surface necessarily leaves open rims and islands. The pipeline
 takes a watertight mesh and shreds it. The open question is therefore not "how do
 we solidify" but "should the inner wall be deleted by per-face ray voting at all".
 
+**This constrains rework 1 step 8 before its data arrives.** Step 8 was to flip
+the geometry-health stats into fail-loud gates, `is_watertight` among them. But
+watertightness on the *cleaned* mesh is not a generation-health signal — it is a
+statement about our own cleanup, and it is false by construction for every prop
+(all seven measured non-watertight, `boundary_edges_per_face` 0.0899 crucero to
+1.1944 olive_stump) because the raw surface is closed and we cut faces out of it.
+Gating it would gate our own design decision. The signal is real one stage
+earlier: the *raw extraction* is watertight, and a raw mesh that came back open
+would be genuine generation failure. So step 8's watertight gate moves to the raw
+mesh or is dropped; it cannot stay where it is. This holds whichever strip
+survives, and is only escapable by closing the rims the strip opens — an approach
+nobody has measured and which carries its own free parameter.
+
+Not yet decided: whether `strip_interior_faces` keeps its 64-ray
+escape-to-infinity test, gets a bake-camera visibility test instead, or is
+denoised. Deleting the inner wall is correct in principle (finding 15 measured
+`blend_coverage` 0.7303 → 0.9759 on crucero from exactly this deletion, so
+keeping it and paying the tri/atlas budget is the worse option). The open
+question is only whether the current test deletes the *right* faces; a
+camera-visibility discriminator is measuring how much of the deleted set is
+actually camera-visible.
+
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
 had blocked — manifest `extraction` block present, peak reserved VRAM **6.787
