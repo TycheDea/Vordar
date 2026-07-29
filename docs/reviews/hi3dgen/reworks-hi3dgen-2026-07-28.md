@@ -103,8 +103,8 @@ surface, not a `get_dense_attrs` stamping artifact. Every criterion in the famil
 to find, and any direction count is a tuning knob silently setting how much
 exterior concavity gets welded shut.
 
-The mechanism is being deleted from the shipping path (`fill_interior` defaulted
-to `True`, so the welding was live). `drop_solid_floaters`, `iso_level`,
+The mechanism is deleted from the shipping path (`fill_interior` defaulted to
+`True`, so the welding was live): fork `5d4c9b0`, vordar `b4db6c6`, -347 lines. `drop_solid_floaters`, `iso_level`,
 `sdf_bias` and `occupancy_threshold` survive — they are independent of the fill.
 
 **What survives of rework 1.** Step 7 (re-derive `BAKE_MAX_RAY_DISTANCE_M`) is
