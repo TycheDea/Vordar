@@ -38,12 +38,15 @@ we own.
 
 Queue (single cross-file sequence; reworks live in
 `reworks-hi3dgen-2026-07-28.md`):
-~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
-~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
-~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
-~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
-~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
-~~finding 24~~ → **rework 2** → **rework 3** → **rework 4**.
+
+> **~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
+> ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
+> ~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
+> ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
+> ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ →
+> ~~finding 22~~ → ~~finding 23~~ → ~~finding 24~~ →
+> rework 2 → rework 3 → rework 4.**
+
 Done 2026-07-28 (findings 15, 19–23, commits `23c7063`..`f2015e7`; findings 19–23
 run out of queue order, pulled forward as file-disjoint parallel work while the
 GPU-bound items serialized). Finding 15 raised `blend_coverage` 0.7303→0.9759 on
@@ -166,7 +169,7 @@ saved latents and the fork's own code:
 
 - **The SLat latent is a surface band and nothing else.** TRELLIS defines the
   latent only on voxels *intersecting the surface*; coords come from thresholded
-  occupancy of the sparse-structure flow (`hi3dgen/pipelines/hi3dgen.py:309`) and
+  occupancy of the sparse-structure flow (`fork:hi3dgen/pipelines/hi3dgen.py:309`) and
   the decoder emits SDF only at 4³ subdivisions of those (`decoder_mesh.py:133`,
   res 64 × 4 = **256³**, not 512³). Measured on `slat.pt`: chapel_arch's active
   set is 14,757 voxels, 99.3% at chessboard depth 1; gravestone 100% at depth 1.

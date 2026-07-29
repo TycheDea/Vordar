@@ -15,12 +15,15 @@ fork we own.
 ## Findings (implementation order)
 
 Queue (single cross-file sequence, mirrored from the fixes file):
-~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
-~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
-~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
-~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
-~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
-~~finding 24~~ → **rework 2** → **rework 3** → **rework 4**.
+
+> **~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
+> ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
+> ~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
+> ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
+> ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ →
+> ~~finding 22~~ → ~~finding 23~~ → ~~finding 24~~ →
+> rework 2 → rework 3 → rework 4.**
+
 The findings numbered in *this* file (10–17) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here. Where the
 two numberings collide, this file's own are written "this file's finding N".
@@ -188,7 +191,7 @@ saved latents and the fork's own code:
 
 - **The SLat latent is a surface band and nothing else.** TRELLIS defines the
   latent only on voxels *intersecting the surface*; coords come from thresholded
-  occupancy of the sparse-structure flow (`hi3dgen/pipelines/hi3dgen.py:309`) and
+  occupancy of the sparse-structure flow (`fork:hi3dgen/pipelines/hi3dgen.py:309`) and
   the decoder emits SDF only at 4³ subdivisions of those (`decoder_mesh.py:133`,
   res 64 × 4 = **256³**, not 512³). Measured on `slat.pt`: chapel_arch's active
   set is 14,757 voxels, 99.3% at chessboard depth 1; gravestone 100% at depth 1.
