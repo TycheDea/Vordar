@@ -114,6 +114,29 @@ ship-blocker now. Lead on (2): raw extraction reports 16 bodies and
 `cleanup_hollow.json` reports 3,824 components, so the shredding is a
 `prop_cleanup.py` defect rather than a generation defect.
 
+**Lead (2) settled and fixed 2026-07-29 (`c9c695b`), this file's finding 17.**
+Two ordering defects, not one. The raw mesh carries duplicate vertices at shared
+corners, so neighbouring faces share no edge and every island count was reading
+vertex bookkeeping rather than shape — welding at a sub-voxel epsilon drops
+chapel_arch's raw count 3,824 → 1,012 with zero geometric change. And the
+loose-fragment cull ran *before* `strip_interior_faces`, the only stage that
+maroons fragments: where it sat it caught 14 islands / 204 tris, moved after the
+strip it catches **3,575 / 9,563**. Correct order is weld → strip → cull
+→ normalize. chapel_arch ends at **151 components**, 98% of faces kept, and
+the 15,000-tri budget no longer spends 21% of itself on dust. The residual 150
+islands each exceed the cull's own 158 mm threshold and were left alone rather
+than chased with a second threshold. `strip_interior_faces` is untouched: it
+remains the source of 100% of the fragmentation, and whether its 64-ray
+escape-to-infinity test is merely noisy or systematically biased is the separate
+open question a camera-visibility discriminator is measuring.
+
+`geometry_health` also gained `boundary_edges_per_face` (hole count normalized by
+main-island faces) as a **stat, not a gate** — the input rework 1 step 8 needs.
+Caveat for that step: it is computed on the *final decimated* mesh, where
+chapel_arch reads 1.0378 because the interior strip leaves a lace-like shell; the
+hires figure is 0.0747 against a 0.1138 baseline. A gate must name which mesh it
+reads, and 15k-tri decimation is not that mesh.
+
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
 had blocked — manifest `extraction` block present, peak reserved VRAM **6.787

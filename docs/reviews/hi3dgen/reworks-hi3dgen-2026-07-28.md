@@ -21,8 +21,9 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → **rework 1** →
 finding 18 → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
-The findings numbered in *this* file (10–16) are discoveries from rework
-execution and sit outside that mirrored queue; they are struck here.
+The findings numbered in *this* file (10–17) are discoveries from rework
+execution and sit outside that mirrored queue; they are struck here. Where the
+two numberings collide, this file's own are written "this file's finding N".
 Done 2026-07-29 (this file's findings 10, 11, 12 and 15; vordar `9b47c44`, fork
 `cc29648`, `c99bf4b`, `fe17cc2`). Findings 10-12 were all written against
 `fill_enclosed_sdf`, which rework 13 step 1 deleted; each premise was re-checked
@@ -121,6 +122,29 @@ recovering it is worth the investigation even though tractability is unknown;
 ship-blocker now. Lead on (2): raw extraction reports 16 bodies and
 `cleanup_hollow.json` reports 3,824 components, so the shredding is a
 `prop_cleanup.py` defect rather than a generation defect.
+
+**Lead (2) settled and fixed 2026-07-29 (`c9c695b`), this file's finding 17.**
+Two ordering defects, not one. The raw mesh carries duplicate vertices at shared
+corners, so neighbouring faces share no edge and every island count was reading
+vertex bookkeeping rather than shape — welding at a sub-voxel epsilon drops
+chapel_arch's raw count 3,824 → 1,012 with zero geometric change. And the
+loose-fragment cull ran *before* `strip_interior_faces`, the only stage that
+maroons fragments: where it sat it caught 14 islands / 204 tris, moved after the
+strip it catches **3,575 / 9,563**. Correct order is weld → strip → cull
+→ normalize. chapel_arch ends at **151 components**, 98% of faces kept, and
+the 15,000-tri budget no longer spends 21% of itself on dust. The residual 150
+islands each exceed the cull's own 158 mm threshold and were left alone rather
+than chased with a second threshold. `strip_interior_faces` is untouched: it
+remains the source of 100% of the fragmentation, and whether its 64-ray
+escape-to-infinity test is merely noisy or systematically biased is the separate
+open question a camera-visibility discriminator is measuring.
+
+`geometry_health` also gained `boundary_edges_per_face` (hole count normalized by
+main-island faces) as a **stat, not a gate** — the input rework 1 step 8 needs.
+Caveat for that step: it is computed on the *final decimated* mesh, where
+chapel_arch reads 1.0378 because the interior strip leaves a lace-like shell; the
+hires figure is 0.0747 against a 0.1138 baseline. A gate must name which mesh it
+reads, and 15k-tri decimation is not that mesh.
 
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
@@ -310,3 +334,11 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `4/10` — restores a calibrated floater drop; it is the only surviving grid-space cleanup after the fill's deletion, so its threshold is now load-bearing on its own.
 - **Cost:** `2/10` — three CPU extraction replays plus a one-line default; no GPU, no Blender.
 - **Path:** replay the three latents recording per-component solid voxel counts → identify the debris/geometry gap → set the default in `fork:hi3dgen/representations/mesh/cube2mesh.py` (and `decoder_mesh.py`'s `rep_config` fallback) → re-run `fork:tests/test_extraction_contract.py` (3/3, unchanged: its fraction is passed explicitly) → re-run the three replays and record `body_count`.
+
+### 17. `prop_cleanup.py` measured island topology before welding, and culled fragments before the stage that creates them
+- **Evidence:** `scripts/ai-pipeline/prop_cleanup.py` ran the loose-fragment cull immediately after import, ahead of `strip_interior_faces`; `geometry_health` flood-filled vertex connectivity on an unwelded mesh. Hi3DGen exports duplicate vertices at shared corners, so adjacent faces share no edge. chapel_arch: raw extraction reports 16 bodies, `cleanup_hollow.json` reports 3,824 components.
+- **Ideal:** one cull, placed where fragments exist; every topology measure taken on a mesh whose coincident vertices have been merged.
+- **Gap:** the cull caught 14 islands / 204 tris out of 773,566 where it sat. The 3,824 count was ~2/3 vertex bookkeeping and ~1/3 real marooned islands, and the tri budget was spending 21% of itself describing dust that decimation then preserved.
+- **Suggestion:** weld at a sub-voxel epsilon first, then strip, then cull, then normalize.
+- **Path:** DONE `c9c695b`. `weld_vertices` at `WELD_EPS_FRACTION = 1e-4` of the mesh bbox diagonal (0.79 mm at chapel_arch's 7.881 m, ~1/20 of the 512³ extraction voxel, so it can only merge what the generator emitted twice at one position). `cull_loose_fragments` reimplemented in bmesh over the flood fill `geometry_health` already had, rather than moving the `bpy.ops.mesh.separate(type="LOOSE")` block — separating 3,575 islands into Blender objects and rejoining them is that operator's pathological case. Measured on chapel_arch at `--height 5.497`: components 3,770 → **151**, face retention across the cull **98.0%**, stats reconcile exactly (773,574 − 16,021 weld − 259,061 strip − 9,563 cull = 488,929 hires).
+- **premise-falsified:** the predicted landing point was 46 components; the real one is 151, the residual islands all exceeding the cull's own threshold. No threshold was moved to reach the prediction. `uv_charts` moved only 4,519 → 4,096 — xatlas segments on curvature, not on island count — so the chart-count half of the expected win does not exist.
