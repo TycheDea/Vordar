@@ -69,13 +69,21 @@ both arms denoise at 768. Finding 17 cut peak VRAM 15.57→7.41 GiB reserved and
 wall time 39%. Two defects found in-path were fixed at `a77c156`.
 Parked: rework 5 (gate: finding 24's measurement shows extraction is a
 dominant wall-clock share).
-In progress: rework 1, step 1 of 8 done (`plan-rework1-solid-interior-2026-07-28.md`
-approved at `3c35a7b`; harness landed red in the fork at `e62ca75`, `ImportError:
-fill_enclosed_sdf`, all four cases proven 4/4 against a scratch reference flood).
-Resume at step 2. Execution waves: 1 → 2 → (3 ∥ 5) → 4 → 6 → (7 ∥ 8); steps 3 and 4
-share `utils_cube.py`/`cube2mesh.py` and cannot overlap. Step 6 carries the plan's
-single §8 GPU smoke (~2 min), already approved. Reworks 10 and 11 were queued from
-step 1.
+**PARKED: rework 1** at step 6 of 8 (`plan-rework1-solid-interior-2026-07-28.md`,
+approved at `3c35a7b`). Steps 1-5 landed and are green — fork `vordar-fixes`
+carries the harness (`e62ca75`), the sign-flood fill (`64f54ad`), SDF floater
+removal (`32572cd`) and the extraction knobs (`cf718c6`), 7/7 harness cases;
+vordar carries `prop_extract.py` (`839763d`) and the manifest extraction block
+(`18ae931`). Step 6's paired validation on real fields FAILED the premise:
+`fill_enclosed_sdf` moves chapel_arch -0.021% and crucero -0.033% in face count
+(volume ratios 1.0002/1.0000) against a required 30-55% reduction, and
+`interior_tris_removed / raw_tris` stays at 0.34/0.31/0.36 against a `≤ 0.02`
+bar. Artifact trail: `target/prop-solid-validation/`. Queued as rework 13, which
+decides whether steps 7-8 can proceed at all; its direction (ii) is the cheap
+discriminating experiment. Steps 7 and 8 are blocked on that decision — do not
+resume them against the current numbers. The GPU smoke never completed (rework
+14), so the manifest block and VRAM bound are unmeasured. Reworks 10-12 were
+queued from steps 1 and 3.
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
 peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
 system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before

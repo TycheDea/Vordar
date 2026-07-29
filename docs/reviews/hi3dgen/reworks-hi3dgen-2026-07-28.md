@@ -46,13 +46,21 @@ both arms denoise at 768. Finding 17 cut peak VRAM 15.57→7.41 GiB reserved and
 wall time 39%. Two defects found in-path were fixed at `a77c156`.
 Parked: rework 5 (gate: finding 24's measurement shows extraction is a
 dominant wall-clock share).
-In progress: rework 1, step 1 of 8 done (`plan-rework1-solid-interior-2026-07-28.md`
-approved at `3c35a7b`; harness landed red in the fork at `e62ca75`, `ImportError:
-fill_enclosed_sdf`, all four cases proven 4/4 against a scratch reference flood).
-Resume at step 2. Execution waves: 1 → 2 → (3 ∥ 5) → 4 → 6 → (7 ∥ 8); steps 3 and 4
-share `utils_cube.py`/`cube2mesh.py` and cannot overlap. Step 6 carries the plan's
-single §8 GPU smoke (~2 min), already approved. Reworks 10 and 11 were queued from
-step 1.
+**PARKED: rework 1** at step 6 of 8 (`plan-rework1-solid-interior-2026-07-28.md`,
+approved at `3c35a7b`). Steps 1-5 landed and are green — fork `vordar-fixes`
+carries the harness (`e62ca75`), the sign-flood fill (`64f54ad`), SDF floater
+removal (`32572cd`) and the extraction knobs (`cf718c6`), 7/7 harness cases;
+vordar carries `prop_extract.py` (`839763d`) and the manifest extraction block
+(`18ae931`). Step 6's paired validation on real fields FAILED the premise:
+`fill_enclosed_sdf` moves chapel_arch -0.021% and crucero -0.033% in face count
+(volume ratios 1.0002/1.0000) against a required 30-55% reduction, and
+`interior_tris_removed / raw_tris` stays at 0.34/0.31/0.36 against a `≤ 0.02`
+bar. Artifact trail: `target/prop-solid-validation/`. Queued as rework 13, which
+decides whether steps 7-8 can proceed at all; its direction (ii) is the cheap
+discriminating experiment. Steps 7 and 8 are blocked on that decision — do not
+resume them against the current numbers. The GPU smoke never completed (rework
+14), so the manifest block and VRAM bound are unmeasured. Reworks 10-12 were
+queued from steps 1 and 3.
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
 peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
 system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before
@@ -185,3 +193,23 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `2/10` — test-authoring friction only; no production or harness-correctness impact, both floater cases pass with the recalibrated fixture.
 - **Cost:** `1/10`.
 - **Path:** add the docstring note → no behavior change, no re-run required.
+
+### 13. The sealed-cavity premise fails on real prop fields: `fill_enclosed_sdf` changes almost nothing on 2 of 3 hard-topology props
+
+- **Evidence:** Measured executing `plan-rework1-solid-interior` finding 6 (paired hollow/solid validation); full artifact trail under `target/prop-solid-validation/` (`summary.json` plus per-subject `extract_*.json` / `cleanup_*.json`). Fill-on CPU replay vs the saved hollow `raw.glb` baseline: chapel_arch face count 773576 → 773414 (**-0.021%**), trimesh volume ratio **1.0002**; crucero 341880 → 341766 (**-0.033%**), volume ratio **1.0000**; candelabra_shrine 334942 → **359880** (a **7.4% increase**), volume ratio **1.5244**. Device-matched `--no-fill-interior` CPU replays reproduce the GPU baselines to within 0.003% (773566 / 334938 / 341878), so this is not a CPU-vs-GPU confound — the fill genuinely has near-zero effect on two subjects. Downstream `prop_cleanup.py` confirms it: solid-run `interior_tris_removed / raw_tris` is **0.3409** (chapel_arch), **0.3113** (candelabra_shrine), **0.3608** (crucero) against a `≤ 0.02` success bar and a `> 0.05` park bar, and each is within 0.001 of its own hollow pair except candelabra_shrine, where the solid run strips *more* interior (0.3113 vs 0.2615). `two_crossing_ray_fraction` is flat across the pairs (0.405 vs 0.415; 0.28 vs 0.28; 0.415 vs 0.41 — ratios 0.98/1.00/1.01 against a required `≥ 2×`). chapel_arch's solid `euler_number` is **864**, not `≤ 0`, with `component_count` 3824. The mechanism is wired and does run (`fork:hi3dgen/representations/mesh/cube2mesh.py:380-385`; `body_count` moves 16→12 on chapel_arch, 11→34 on candelabra_shrine, 15→6 on crucero), so this is a premise failure, not a plumbing failure.
+- **Ideal:** The interior fill converts these props' hollow double walls into solid single shells, which is what `interior_tris_removed → 0` and a rising `two_crossing_ray_fraction` would show.
+- **Gap:** `fill_enclosed_sdf` fills only outside-valued cells with **no positive path to the grid boundary**, and additionally clears every cell the sparse scatter wrote (`fork:hi3dgen/representations/mesh/utils_cube.py:83-91`). On these real fields the cavity between the two walls is evidently not sealed in that sense at res 256 — either it drains to the boundary through the props' open mouths and through-openings (an arch, a wayside cross, a shrine are all topologically open), or the inter-wall gap is thin enough to be entirely covered by the active-voxel band the scatter wrote and therefore excluded by line 90. The synthetic harness cases all have genuinely sealed cavities, which is why they pass while real input does not. candelabra_shrine is the one subject where a real cavity existed (+52% volume) — and even there the face count rose, so the fill closed volume without removing inner wall.
+- **Suggestion:** Do not tune `min_component_fraction`, `iso_level` or `sdf_bias` to force these numbers — the reachability criterion itself is what does not match the defect. Two candidate directions, both needing a decision before code: (i) replace boundary-reachability with a signed-distance / winding-number solidification that does not depend on the cavity being sealed; (ii) keep the SDF-space pass but drop the line-90 exclusion of scatter-written cells and re-measure, on the hypothesis that the active-voxel band is masking a thin sealed gap. Direction (ii) is a one-line experiment against the artifacts already on disk and should be measured first, because it cheaply discriminates "not sealed" from "sealed but masked".
+- **Outcome:** `9/10` — this decides whether the solid-interior rework can land at all, or whether the hollow-shell defect needs a different instrument.
+- **Cost:** `5/10` — direction (ii) is one line plus three ~20 s CPU replays over saved latents; direction (i) is a real extraction-stage redesign.
+- **Path:** run direction (ii)'s one-line variant over the three saved latents in `target/prop-latents/` via `prop_extract.py` → compare `face_count` / `volume` against `target/prop-solid-validation/summary.json`'s `hollow_baseline_*` fields → if still flat, the cavities are open and direction (i) is required; if it moves, re-run the six `prop_cleanup.py` pairs and re-evaluate predicates (a)-(e).
+
+### 14. `prop_hi3dgen.py`'s zero-tolerance degenerate-face gate aborts a run over 2 faces in 768k
+
+- **Evidence:** Measured executing `plan-rework1-solid-interior` finding 6's GPU smoke. `C:\tools\Hi3DGen\venv\Scripts\python.exe scripts/ai-pipeline/prop_hi3dgen.py target/prop-batch/b3/arch/cand_0/concept.png --out target/prop-solid-validation/chapel_arch_e2e --seed 0` exited with `prop_hi3dgen: cand_0: 2/768462 zero-area (degenerate) faces in raw mesh`. `check_mesh` (`scripts/ai-pipeline/prop_hi3dgen.py:286-290`) raises on `n_degenerate != 0` with no tolerance, and the abort happens before `raw.glb` and `hi3dgen_manifest.json` are written (`:438-505`), so only `concept_rgba.png` and `normal.png` landed. The fill is not the cause: zero-area face counts on the three fill-on CPU replays are **0**/773414, **0**/359880, **0**/341766. Record in `target/prop-solid-validation/gpu_smoke.json`.
+- **Ideal:** A 2-in-768462 zero-area face — 0.00026% of the mesh, and well inside what `prop_cleanup.py`'s decimation and xatlas pass absorbs — does not cost a full GPU generation run.
+- **Gap:** The gate's stated purpose (docstring at `:271-275`) is to refuse geometry that would surface as a confusing Blender abort three stages downstream. A handful of exactly-coincident vertices out of three-quarters of a million is not that class of failure; the GPU `scatter_reduce` path's nondeterministic float order (noted in `scripts/ai-pipeline/prop_extract.py:2-7`) makes such a face an expected occasional artifact rather than a broken candidate. As written the gate converts it into a lost run, and it blocked finding 6's manifest `"extraction"`-block and `vram.peak_reserved_gib ≤ 8.0` assertions, which remain unmeasured.
+- **Suggestion:** Decide a tolerance policy rather than silently relaxing the check: either drop degenerate faces from the mesh before export and record the dropped count in the manifest (preferred — downstream gets clean geometry and the artifact is still on record), or admit a small absolute/fractional allowance and keep failing above it. The count must reach the manifest either way, so a rising trend is visible.
+- **Outcome:** `6/10` — restores the ability to complete an end-to-end run and unblocks the two unmeasured smoke assertions.
+- **Cost:** `2/10` — one function in `prop_hi3dgen.py` plus one manifest field; verification is a single ~2 min GPU run.
+- **Path:** choose drop-and-record vs allowance → implement in `check_mesh` → re-run the smoke command above → assert `hi3dgen_manifest.json` contains the `"extraction"` block (`fill_interior: true`, `occupancy_threshold: 0.0`, `iso_level: 0.0`) and `vram.peak_reserved_gib ≤ 8.0` against the 7.41 GiB baseline.
