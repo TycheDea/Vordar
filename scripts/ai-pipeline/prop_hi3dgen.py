@@ -322,7 +322,6 @@ def main():
     parser.add_argument("--normal-model", choices=sorted(NORMAL_ENTRYPOINTS), default="turbo", help="StableNormal predictor: single-step turbo (fast) or the full two-stage SD-based refinement (slower, sharper high-frequency detail).")
     parser.add_argument("--normal-steps", type=int, default=None, help="Override the normal predictor's denoising steps (turbo is a fixed single step regardless of this value).")
     parser.add_argument("--crop-from-original", action="store_true", help="Take the object crop from full-resolution pixels instead of the <=1024 matte copy.")
-    parser.add_argument("--no-fill-interior", action="store_true", help="Disable the enclosed-interior fill and solid-floater drop, extracting the raw hollow-shell geometry.")
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.image = args.image.resolve()
@@ -357,8 +356,6 @@ def main():
     # until staged_cond()/staged_sample() bring each one over for its stage.
     hi3dgen_pipeline.device = torch.device("cuda")
     extractor = hi3dgen_pipeline.models["slat_decoder_mesh"].mesh_extractor
-    if args.no_fill_interior:
-        extractor.fill_interior = False
     preload_birefnet(hi3dgen_pipeline)
 
     normal_entrypoint = NORMAL_ENTRYPOINTS[args.normal_model]
@@ -483,7 +480,6 @@ def main():
             "sampler_params": {"sparse_structure": ss_params, "slat": slat_params},
             "extraction": {
                 "res": extractor.res,
-                "fill_interior": extractor.fill_interior,
                 "min_component_fraction": extractor.min_component_fraction,
                 "iso_level": extractor.iso_level,
                 "sdf_bias": extractor.sdf_bias,

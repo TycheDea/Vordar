@@ -21,7 +21,7 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → **rework 1** →
 finding 18 → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
-The findings numbered in *this* file (10–15) are discoveries from rework
+The findings numbered in *this* file (10–16) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here.
 Done 2026-07-29 (this file's findings 10, 11, 12 and 15; vordar `9b47c44`, fork
 `cc29648`, `c99bf4b`, `fe17cc2`). Findings 10-12 were all written against
@@ -35,6 +35,14 @@ helper variant" half of the Suggestion. Finding 15's in-band cavity fixture
 landed with rework 13 step 2 and is the suite's first case that discriminates
 between the two mechanisms (`body_count` 2 → 1, cavity confirmed
 scatter-written).
+**Correction, same day:** findings 11 and 15 were both superseded hours after
+landing, when the direction-count sweep killed the fill and its deletion took
+their subjects with it. Finding 15's fixture tested the fill's scatter-written
+boundary and is gone; finding 11's `embreex`/`rtree` pins are un-landed, their
+only consumer having been `inward_area_fraction`, the harness's hollow-shell
+metric, which died with the fill contract tests. Neither is re-queued — both are
+moot rather than pending. Findings 10 and 12 stand: 10 corrected a predecessor
+plan's prose and 12 documents `build_field`'s scatter padding, which survives.
 Done 2026-07-29 (this file's finding 14, commit `7d145cb`). `check_mesh` now
 drops zero-area faces and records the count in the manifest instead of aborting
 the run. The re-run measured the two assertions rework 1 step 6 left unmeasured:
@@ -292,3 +300,13 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `4/10` — closes a blind spot that already cost one wrong hypothesis, and any replacement for `fill_enclosed_sdf` inherits the same untested boundary.
 - **Cost:** `2/10` — one fixture in the existing plain-assert harness, seconds to run.
 - **Path:** build the thin-wall fixture → confirm it fails with line 90 in the state the successor rework rejects → land alongside that rework, not before it.
+
+### 16. `min_component_fraction`'s denominator collapsed with the interior fill, so `1e-4` drops fewer floaters than it was calibrated to
+
+- **Evidence:** Measured 2026-07-29 while deleting the interior-fill mechanism (successor to finding 13; the direction-count sweep in `plan-rework13-winding-solidification-2026-07-28.md` killed the fill, and `solidify_hidden_interior` is now gone from the fork). `drop_solid_floaters` (`fork:hi3dgen/representations/mesh/utils_cube.py`) thresholds every solid component at `min_fraction * total_solid_voxels`, and that total used to include the filled interior. With the fill gone it is the predicted shell alone. On the harness's r=30 sphere the total solid voxel count is **18,640** and the detached 8-voxel blob is **4.29e-4** of it, the 369-voxel rod **1.94e-2**. Directly measured consequence: `case_floater_blob_dropped`, green at `1e-4` for the entire life of the fill, came back `body_count=3` (blob surviving) on the first post-deletion run and only returns green at a fraction above 4.29e-4 — it now runs at `FLOATER_FRACTION = 3e-3` in `fork:tests/test_extraction_contract.py`, the geometric mean of the two fixtures' shares. On real props the same denominator shrink is the fill's measured volume inflation, 1.671x (candelabra_shrine) to 3.214x (chapel_arch) per that plan's step-3 table.
+- **Ideal:** `min_component_fraction`'s shipped default is calibrated against the solid voxel count the extractor actually produces, so the floater sizes it deletes on real props are a stated absolute range rather than an accident of what the interior fill used to add to the denominator.
+- **Gap:** `1e-4` was chosen when the denominator carried a filled interior. Nothing re-derived it when the fill was deleted, so the absolute size of a dropped component silently fell by the per-prop fill ratio (1.7-3.2x) — the mechanism still runs, still gates on `min_component_fraction > 0`, and still drops *something*, which is exactly why nothing catches the shift.
+- **Suggestion:** Measure the per-component solid voxel counts on the three saved latents under `target/prop-latents/<name>/` via `scripts/ai-pipeline/prop_extract.py`'s CPU replay (no GPU), then pick the default from the gap between real debris and real geometry rather than from the synthetic fixtures. Do not move the harness's `FLOATER_FRACTION` to match whatever is chosen: it is a bar placed to straddle two fixtures, not a copy of the production value, and coupling them would hide the next such drift. `plan-rework13-...` already listed this recalibration as a recorded candidate (`fragments_removed` 11 / 5 / 9 surviving into cleanup) and deferred it as out of scope.
+- **Outcome:** `4/10` — restores a calibrated floater drop; it is the only surviving grid-space cleanup after the fill's deletion, so its threshold is now load-bearing on its own.
+- **Cost:** `2/10` — three CPU extraction replays plus a one-line default; no GPU, no Blender.
+- **Path:** replay the three latents recording per-component solid voxel counts → identify the debris/geometry gap → set the default in `fork:hi3dgen/representations/mesh/cube2mesh.py` (and `decoder_mesh.py`'s `rep_config` fallback) → re-run `fork:tests/test_extraction_contract.py` (3/3, unchanged: its fraction is passed explicitly) → re-run the three replays and record `body_count`.

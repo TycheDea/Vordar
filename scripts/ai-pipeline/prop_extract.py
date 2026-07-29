@@ -8,7 +8,7 @@ extraction-stage changes.
 
 Run under the Hi3DGen venv; cwd-independent (weights/repo paths resolve
 against REPO_DIR or the parsed args, not the working directory):
-C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_extract.py <latents_dir> --out <dir> [--no-fill-interior] [--device cpu|cuda]
+C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_extract.py <latents_dir> --out <dir> [--device cpu|cuda]
 """
 import argparse
 import hashlib
@@ -49,8 +49,6 @@ def main():
     )
     parser.add_argument("latents_dir", type=Path)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--no-fill-interior", action="store_true",
-                        help="Skip interior-cavity filling; extract the hollow shell instead of a solid.")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
     args = parser.parse_args()
     latents_dir = args.latents_dir.resolve()
@@ -66,9 +64,8 @@ def main():
         coords=saved["coords"].to(args.device), feats=saved["feats"].to(args.device)
     )
 
-    fill_interior = not args.no_fill_interior
     extractor = SparseFeatures2Mesh(
-        device=args.device, res=MESH_RESOLUTION, use_color=True, fill_interior=fill_interior
+        device=args.device, res=MESH_RESOLUTION, use_color=True
     )
 
     t_start = time.perf_counter()
@@ -77,8 +74,7 @@ def main():
     trimesh_mesh = mesh_result.to_trimesh(transform_pose=True)
     elapsed_s = time.perf_counter() - t_start
 
-    out_name = "raw_hollow.glb" if args.no_fill_interior else "raw_solid.glb"
-    out_path = out_dir / out_name
+    out_path = out_dir / "raw.glb"
     trimesh_mesh.export(str(out_path))
 
     stats = {
@@ -87,7 +83,6 @@ def main():
         "volume": float(trimesh_mesh.volume),
         "body_count": int(trimesh_mesh.body_count),
         "is_watertight": bool(trimesh_mesh.is_watertight),
-        "fill_interior": fill_interior,
         "device": args.device,
         "elapsed_s": elapsed_s,
         "cubefeats_sha256": cubefeats_sha256,
