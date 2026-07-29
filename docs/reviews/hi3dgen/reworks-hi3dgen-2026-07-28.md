@@ -220,14 +220,70 @@ mesh or is dropped; it cannot stay where it is. This holds whichever strip
 survives, and is only escapable by closing the rims the strip opens — an approach
 nobody has measured and which carries its own free parameter.
 
-Not yet decided: whether `strip_interior_faces` keeps its 64-ray
-escape-to-infinity test, gets a bake-camera visibility test instead, or is
-denoised. Deleting the inner wall is correct in principle (finding 15 measured
-`blend_coverage` 0.7303 → 0.9759 on crucero from exactly this deletion, so
-keeping it and paying the tri/atlas budget is the worse option). The open
-question is only whether the current test deletes the *right* faces; a
-camera-visibility discriminator is measuring how much of the deleted set is
-actually camera-visible.
+**Measured 2026-07-29 — both offered options are refuted, and the real defect is
+a third thing.** The discriminator replayed `strip_interior_faces` read-only
+(deleted counts reproduce bit-exact: chapel_arch 263,759, crucero 123,308) and
+tested the deleted set against the bake rig read out of `prop_texture.py` itself.
+
+*Bias is small.* Of what the 64-ray test deletes, only **0.574%** (chapel_arch,
+1,513 faces) and **0.224%** (crucero, 276) is seen by any registry bake camera —
+0.20% and 0.08% of the whole mesh. There is no large camera-visible population
+being destroyed. It is not pure noise either: chapel_arch's 1,513 form **115
+contiguous patches** (against 1,469 clusters / 1,427 singletons for a random
+control of the same size), median facing cosine 0.89, the largest a ~50 cm patch
+of squarely-visible wall at springing height. A small *structured* leak where the
+concavity is deepest.
+
+*The camera-visibility replacement is refuted outright.* The declared bake set is
+four azimuths at a **single +15° elevation**. A face facing none of them is
+deleted before occlusion is even considered — **17,500 chapel_arch faces and
+32,491 crucero faces, 100% of them down-facing**. The arch soffit is in that set.
+Against the literal camera set the replacement would delete **123,398** faces
+(24.2%) to rescue 1,513 — 81:1 against — and is the one criterion guaranteed to
+destroy every downward surface on the model. Only the runtime-picked
+`MV_EXTRA_CANDIDATE_ELEVATIONS` grid covers the sphere, and a set picked per
+asset at runtime is not a fixed criterion at all. **Do not build this.**
+
+*The actual defect: `INTERIOR_RAY_COUNT = 64` is an unconverged knob.* Full
+re-runs at 64 / 256 / 1024 rays:
+
+| rays | chapel_arch deleted | of raw | crucero deleted | of raw |
+|---|---|---|---|---|
+| 64 | 263,759 | 34.1% | 123,308 | 36.1% |
+| 256 | 198,982 | 25.7% | 117,837 | 34.5% |
+| 1024 | 128,284 | **16.6%** | 105,999 | 31.0% |
+
+chapel_arch **halves** and the per-4×-refinement drop is not decaying (−8.4 pp
+then −9.1 pp of raw); crucero is still falling and *accelerating* (−1.6, −3.5).
+This is the 2026-07-29 SDF direction-count sweep again, one refinement generation
+slower. `interior_tris_removed` is a knob reading, not a measurement — which
+matters directly, because rework 13's declared success metric was built on its
+0.3409 baseline. Caveat raised by the measurer and worth keeping: `_hemisphere_dirs`
+draws `z` then `phi` from one seed-0 stream, so the 256-direction set is **not** a
+superset of the 64-direction set; unlike the SDF sweep's nested sets, monotonicity
+here is only statistically expected, and some row-to-row movement is draw luck.
+
+*Why it cannot converge, and this is the root cause.* The raw surface is closed
+and genus 86. Its inner wall is connected to the outside through 86 handle
+tunnels, so inner-wall faces genuinely **are** reachable by straight rays from
+outside — just rarely. More rays find more tunnels and keep more inner wall, so
+the limit of "escapes to infinity" is not "outer wall", it is "nearly everything".
+64 lands near the true inner-wall share (~1/3) by luck, not by principle. **No
+ray-count refinement of an escape-to-infinity test can separate the walls**,
+because on this topology the property it tests is not the property we want.
+
+*Also measured:* `bpy.ops.mesh.select_interior_faces()` returns **0 faces** on
+both subjects. The topological pre-filter contributes nothing; every deletion
+comes from the ray test alone. Dead code.
+
+*Where this leaves the design.* Deleting the inner wall is still correct in
+principle — finding 15 measured `blend_coverage` 0.7303 → 0.9759 on crucero from
+exactly this deletion, so keeping it and paying the tri and atlas budget is the
+worse option. But the criterion must be one that converges. The only well-posed
+statement of the strip's actual purpose is "remove what the texture stage cannot
+reach", whose ground truth is the bake's own per-asset view set — which is picked
+at runtime *after* cleanup, so adopting it is a pipeline-ordering change, not a
+knob change. **Open, and a scope decision rather than an engineering one.**
 
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
