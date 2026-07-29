@@ -16,6 +16,7 @@ import types
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 import trimesh
 
@@ -27,6 +28,41 @@ from hi3dgen.representations.mesh import SparseFeatures2Mesh
 MESH_RESOLUTION = 256
 
 
+def topo_stats(mesh: trimesh.Trimesh) -> dict:
+    """Topology diagnostics computed in trimesh, matching
+    prop_cleanup.py's geometry_health field-for-field: that function runs
+    under Blender's bpy and cannot be imported into this venv, so the two
+    reimplement the same vocabulary in different mesh libraries and must
+    agree exactly on shared inputs. A boundary edge borders exactly one
+    face; everything prefixed `main_` is restricted to the largest
+    vertex-connectivity island. Faces and edges never span islands, so an
+    island's membership is fully determined by its first vertex/edge
+    endpoint alone."""
+    edges = mesh.edges_sorted
+    uniq, counts = np.unique(edges, axis=0, return_counts=True)
+    boundary_edge_count = int(np.sum(counts == 1))
+    uniq_boundary = uniq[counts == 1]
+
+    components = trimesh.graph.connected_components(
+        uniq, nodes=np.arange(len(mesh.vertices)), min_len=1
+    )
+    components = sorted(components, key=len, reverse=True)
+    main = set(components[0].tolist())
+
+    main_faces = int(np.sum(np.isin(mesh.faces[:, 0], list(main))))
+    main_edges = int(np.sum(np.isin(uniq[:, 0], list(main))))
+    main_boundary = int(np.sum(np.isin(uniq_boundary[:, 0], list(main))))
+
+    return {
+        "boundary_edge_count": boundary_edge_count,
+        "component_count": len(components),
+        "main_face_fraction": round(main_faces / len(mesh.faces), 4),
+        "main_boundary_edge_count": main_boundary,
+        "main_euler_number": len(components[0]) - main_edges + main_faces,
+        "boundary_edges_per_face": round(main_boundary / main_faces, 4),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Replay SparseFeatures2Mesh extraction over a saved cubefeats.pt latent."
@@ -34,6 +70,9 @@ def main():
     parser.add_argument("latents_dir", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    parser.add_argument("--iso-level", type=float, default=0.0)
+    parser.add_argument("--sdf-bias", type=float, default=None)
+    parser.add_argument("--min-component-fraction", type=float, default=1e-4)
     args = parser.parse_args()
     latents_dir = args.latents_dir.resolve()
     out_dir = args.out.resolve()
@@ -49,7 +88,11 @@ def main():
     )
 
     extractor = SparseFeatures2Mesh(
-        device=args.device, res=MESH_RESOLUTION
+        device=args.device,
+        res=MESH_RESOLUTION,
+        min_component_fraction=args.min_component_fraction,
+        iso_level=args.iso_level,
+        sdf_bias=args.sdf_bias,
     )
 
     t_start = time.perf_counter()
@@ -72,6 +115,14 @@ def main():
         "cubefeats_sha256": cubefeats_sha256,
         "out_glb": str(out_path),
     }
+    stats.update(topo_stats(trimesh_mesh))
+    stats.update(
+        {
+            "iso_level": extractor.iso_level,
+            "sdf_bias": extractor.sdf_bias,
+            "min_component_fraction": extractor.min_component_fraction,
+        }
+    )
     print(json.dumps(stats))
 
 
