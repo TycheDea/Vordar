@@ -69,26 +69,56 @@ both arms denoise at 768. Finding 17 cut peak VRAM 15.57→7.41 GiB reserved and
 wall time 39%. Two defects found in-path were fixed at `a77c156`.
 Parked: rework 5 (gate: finding 24's measurement shows extraction is a
 dominant wall-clock share).
-**PARKED: rework 1** at step 6 of 8 (`plan-rework1-solid-interior-2026-07-28.md`,
-approved at `3c35a7b`). Steps 1-5 landed and are green — fork `vordar-fixes`
-carries the harness (`e62ca75`), the sign-flood fill (`64f54ad`), SDF floater
-removal (`32572cd`) and the extraction knobs (`cf718c6`), 7/7 harness cases;
-vordar carries `prop_extract.py` (`839763d`) and the manifest extraction block
-(`18ae931`). Step 6's paired validation on real fields FAILED the premise:
-`fill_enclosed_sdf` moves chapel_arch -0.021% and crucero -0.033% in face count
-(volume ratios 1.0002/1.0000) against a required 30-55% reduction, and
-`interior_tris_removed / raw_tris` stays at 0.34/0.31/0.36 against a `≤ 0.02`
-bar. Artifact trail: `target/prop-solid-validation/`. Queued as rework 13, which
-decides whether steps 7-8 can proceed at all. Its direction (ii) is now measured
-and eliminated: chapel_arch has 49 boundary-unreachable cells and crucero 11,
-against the 758,977 / 288,055 a solid interior needs, so the cavities are open
-rather than masked and no reachability criterion can find them. Direction (i) —
-solidification whose sign test does not consult the grid boundary — is the only
-remaining path. Steps 7 and 8 stay blocked until its predicates move. Step 6's
-GPU smoke aborted (rework 14, fixed at `7d145cb`); the re-run measured both
-assertions it had blocked — manifest `extraction` block present, peak reserved
-VRAM **6.787 GiB** against the `≤ 8.0` bound and the 7.41 baseline. Reworks 10-12
-were queued from steps 1 and 3, rework 15 from rework 13's measurement.
+**CLOSED 2026-07-29: reworks 1 and 13 both — SDF-space solidification is not
+viable on real prop fields.** Not parked; the whole approach family is
+eliminated by measurement, and no third member is worth trying.
+
+Rework 1 (`plan-rework1-solid-interior-2026-07-28.md`, approved `3c35a7b`)
+reached step 6 of 8, where its paired validation failed the premise:
+`fill_enclosed_sdf` moved chapel_arch -0.021% and crucero -0.033% in face count
+(volume ratios 1.0002/1.0000) against a required 30-55% reduction. Rework 13
+(`plan-rework13-winding-solidification-2026-07-28.md`, approved `5a43db9`)
+replaced it with 26-direction exposure and landed green at `fe17cc2`, 9/9
+harness. Step 3's real-field replay then parked chapel_arch at 2.43% face
+reduction against a 15% floor while volume rose 3.214× and bodies went 16 →
+3,700 — volume climbing without surface, which is what welding an *open*
+concavity looks like, not what filling a sealed core looks like.
+
+The settling measurement is a direction-count sweep (`029f59e`, full table in
+rework 13's plan). Refining 26 → 1330 directions collapses the filled-cell count
+from 690,882 to **7** on chapel_arch and 283,407 to **6** on crucero. It does not
+converge to a plateau; the limit is zero. A true straight-line visibility test
+fills nothing on these props because **none of them has an enclosed interior** —
+the network emits a genuine hollow shell whose inner wall is real predicted
+surface, not a `get_dense_attrs` stamping artifact. Every criterion in the family
+("find the enclosed interior in the SDF grid and fill it") therefore has nothing
+to find, and any direction count is a tuning knob silently setting how much
+exterior concavity gets welded shut.
+
+The mechanism is being deleted from the shipping path (`fill_interior` defaulted
+to `True`, so the welding was live). `drop_solid_floaters`, `iso_level`,
+`sdf_bias` and `occupancy_threshold` survive — they are independent of the fill.
+
+**What survives of rework 1.** Step 7 (re-derive `BAKE_MAX_RAY_DISTANCE_M`) is
+untouched by this result. Step 8 (flip the geometry-health stats to fail-loud
+gates) is now *more* relevant, not less: it is the gate that would refuse
+chapel_arch. Both are re-queued on their own merit rather than behind a
+solidification that will not arrive.
+
+**Where the effort goes instead** (user ruling 2026-07-29, both the more
+ambitious option of two): (1) attack the network's hollow output at source —
+the inner wall is ~a third of every extraction and is stripped downstream, so
+recovering it is worth the investigation even though tractability is unknown;
+(2) chase chapel_arch's 3,824-component / non-watertight cleanup output as a
+ship-blocker now. Lead on (2): raw extraction reports 16 bodies and
+`cleanup_hollow.json` reports 3,824 components, so the shredding is a
+`prop_cleanup.py` defect rather than a generation defect.
+
+Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
+aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
+had blocked — manifest `extraction` block present, peak reserved VRAM **6.787
+GiB** against the `≤ 8.0` bound and the 7.41 baseline. Reworks 10-12 were queued
+from steps 1 and 3 and are done; rework 15 landed inside rework 13 step 2.
 Reordered 2026-07-28 by user decision, after finding 13's code half measured
 peak VRAM at 16.74 GiB reserved on a 12 GiB card (every stage spilling to
 system memory, wall time 40.8 min vs turbo's 2.6): finding 17 runs before
