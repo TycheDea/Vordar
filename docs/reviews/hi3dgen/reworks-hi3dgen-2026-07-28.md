@@ -175,3 +175,13 @@ Path, which requires finding 17 to land first.
 - **Outcome:** `5/10` — makes the fill's contract re-runnable off this machine, which is the whole point of committing the harness.
 - **Cost:** `1/10`.
 - **Path:** pin both packages in the fork's requirements files → rebuild or `pip install -r` a clean venv → `python tests/test_interior_fill.py` selects `ray_pyembree` and each case's ray query stays sub-second.
+
+### 12. `box_sdf` voxel count through the production scatter chain does not equal the box's nominal edge length cubed
+
+- **Evidence:** Measured while implementing `plan-rework1-solid-interior` finding 3's floater cases. A `box_sdf` fixture spanning `(2,2,2)` to `(4,4,4)` (edge length 2, intended as a "2^3 blob") run through `build_field` → `fill_enclosed_sdf` rasterizes to 27 solid voxels (a 3x3x3 block), not 8: the `|f(cell centre)| < 1.0` band plus the cube-corner scatter in `sparse_cube2verts` pads roughly one grid cell onto each face. An edge-length-1, integer-aligned box `(2,2,2)`-`(3,3,3)` rasterizes to exactly 8 solid voxels instead. Confirmed with a direct voxel-count script against `hi3dgen.representations.mesh.utils_cube.fill_enclosed_sdf`.
+- **Ideal:** A test author can predict a `box_sdf` fixture's realized solid-voxel count directly from its nominal span, so threshold-relative assertions (e.g. "below `min_fraction × total`") can be sized without a calibration run.
+- **Gap:** The nominal-to-realized voxel count relationship depends on both box size and grid alignment (phase relative to the integer cell-center lattice), undocumented anywhere near `build_field` or `box_sdf`. `tests/test_interior_fill.py`'s floater cases had to be sized empirically rather than from the finding text's stated "2^3 ≈ 8 voxels", which turned out to require a differently-dimensioned box than the literal "2^3" phrasing suggested.
+- **Suggestion:** Add a one-line note to `build_field`'s docstring (or `box_sdf`'s) stating the padding behavior, so a future fixture author sizes boxes correctly on the first try instead of needing a calibration script.
+- **Outcome:** `2/10` — test-authoring friction only; no production or harness-correctness impact, both floater cases pass with the recalibrated fixture.
+- **Cost:** `1/10`.
+- **Path:** add the docstring note → no behavior change, no re-run required.
