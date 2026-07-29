@@ -18,9 +18,9 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 ~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
 ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~ → ~~finding 10~~ →
 ~~finding 11~~ → ~~finding 12~~ → ~~finding 13~~ → ~~finding 14~~ →
-~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → **rework 1** →
+~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
 ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~finding 22~~ → ~~finding 23~~ →
-finding 24 → **rework 2** → **rework 3** → **rework 4**.
+~~finding 24~~ → **rework 2** → **rework 3** → **rework 4**.
 The findings numbered in *this* file (10–17) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here. Where the
 two numberings collide, this file's own are written "this file's finding N".
@@ -366,11 +366,125 @@ gains a **required `--asset`**; `gen_prop.py` and `gen_character.py` thread it
 through, and a `kind="downloaded"` asset is refused outright since it declares no
 azimuths.
 
-**For rework 1 step 8:** the earlier recommendation of a boundary-edges-per-face
-gate at ≤0.005 was written against numbers that no longer exist. The measured
-range is now 0.0495 (crucero) to 0.4134 (olive_stump) on the final mesh. Any
-threshold must be re-derived from this table, and must still name which mesh it
-reads.
+**Rework 1 closed 2026-07-29 (steps 7 and 8, commits `feacbb0`, `cbecd72`).**
+Step 8 is refuted at its premise and step 7 changed shape. The measurement that
+settled both also deleted a pipeline stage.
+
+*The weld was doing nothing, and was doing harm.* Finding 17 landed two changes
+together — welding coincident vertices, and moving the fragment cull after the
+strip — and credited the pair with chapel_arch's 3,824 → 1,012 component drop.
+Re-run as a clean A/B across all seven props with the cull already in its correct
+place, the weld's contribution is **zero**: raw component counts are identical on
+6 of 7 (cypress 233 vs 235) and final component counts are identical on all
+seven. What it does contribute is damage. On chapel_arch's main island it
+manufactures 36 boundary edges and 27 non-manifold edges out of a mesh that
+arrives with 4 and 0; final boundary edges per face halve without it, 0.2297 →
+0.1471, and every prop improves. It also collapsed 2–4% of the triangles the
+budget is spent on (olive_stump 40,329). Its stated premise — that Hi3DGen
+exports duplicate corners so neighbouring faces share no edge — is false: the
+glTF arrives already sharing vertices, which is why the eps=0 arm of the sweep
+below is the *best* arm rather than the degenerate one. Deleted, −53 lines.
+
+Weld-epsilon sweep (chapel_arch main island; epsilon as a fraction of the bbox
+diagonal). The knob had never been swept:
+
+| eps | boundary edges | non-manifold edges | tris collapsed |
+|---|---|---|---|
+| 0 | 4 | 0 | 0 |
+| 2.5e-5 | 6 | 1 | 4,099 |
+| 5e-5 | 25 | 14 | 8,179 |
+| 1e-4 (shipped) | 40 | 27 | 16,021 |
+| 2e-4 | 75 | 62 | 31,910 |
+| 4e-4 | 172 | 150 | 64,546 |
+| 8e-4 | 370 | 424 | 129,826 |
+
+Monotone in the wrong direction at every refinement.
+
+*`geometry_health` was reporting a mixed quantity.* It counted boundary edges
+over the whole mesh and divided by the **main island's** face count, so a debris
+speck's rim read as a hole in the prop — which is why `raw_boundary_edges_per_face`
+first came back 0.0 on broken_column while the mesh carried 45 boundary edges.
+Main-island quantities are now computed on that island alone, `main_euler_number`
+with them (where it states a genus rather than a mixture), and the same stats are
+read a second time on the mesh as imported — the only point that still describes
+the network's output instead of our own cutting. `is_watertight` is gone as a
+field: it restated `boundary_edge_count == 0`.
+
+*Step 8's gate is not writable, and the reason is not missing data.* The gate was
+specified to catch "a hollow-shell regression". Lead (1) established that the
+hollow shell is architectural and permanent — every prop is one, always — so
+there is no regression for it to catch. The fallback of gating raw watertightness
+fails on its own measurement: the raw main island is closed on only 2 of 7 props
+(0, 0, 4, 12, 42, 68, 366 boundary edges), and its face fraction runs 0.658
+(candelabra_shrine, whose arms are genuinely separate bodies) to 1.0. Calibrating
+a fail-loud threshold across that spread from seven passing samples and zero
+failures is the guessed band `~/.claude/CLAUDE.md:14` forbids. **No threshold is
+installed.** What would make one writable is a corpus of failed generations to
+put a floor under; until that exists the corrected stats are the deliverable and
+they gate nothing.
+
+Post-weld-deletion baseline, all seven props
+(`target/prop-solid-validation/r1s78/`):
+
+| prop | raw main boundary edges | raw main face fraction | components | boundary edges / main face |
+|---|---|---|---|---|
+| broken_column | 0 | 0.9908 | 7 | 0.0784 |
+| candelabra_shrine | 0 | 0.6581 | 6 | 0.0395 |
+| chapel_arch | 4 | 0.9996 | 109 | 0.1471 |
+| crucero | 12 | 0.9995 | 8 | 0.0135 |
+| cypress | 366 | 0.9114 | 3 | 0.2839 |
+| gravestone | 68 | 1.0 | 12 | 0.0249 |
+| olive_stump | 42 | 0.9951 | 38 | 0.2079 |
+
+Every final-mesh figure improves against the pre-deletion table recorded above.
+
+*Step 7 found a live defect and changed the constant's shape.* Clean→hires
+deviation, measured at 20k/80k/320k surface samples per prop (p99 stable to 3e-4
+across that refinement, so the sample count is not deciding the answer):
+`BAKE_MAX_RAY_DISTANCE_M = 0.03` **clips on cypress**, which needs 0.0454 at p99
+and 0.0582 at p99.9 — roughly 1% of its normal-bake texels have been falling back
+to flat. candelabra_shrine needs 0.0111. A flat bound raised to cover cypress
+hands the smallest prop five times the reach it needs, and the spread is not
+noise: deviation tracks prop size because the triangle budget does not — every
+prop decimates to the same 15,000. Replaced by `BAKE_RAY_DIAG_FRACTION = 0.006`
+of the prop's own bbox diagonal, added to the cage extrusion at the call site;
+every prop clears its own p99.9 by ≥1.6×. Overshoot is safe by construction —
+Cycles takes the first hit, so extra ray length can only turn a miss into a hit,
+never corrupt one.
+
+| prop | bbox diag | p99 | p99.9 | needed (p99.9 + cage) | supplied |
+|---|---|---|---|---|---|
+| candelabra_shrine | 1.853 | 0.00068 | 0.00105 | 0.0111 | 0.0211 |
+| gravestone | 1.906 | 0.00184 | 0.00264 | 0.0126 | 0.0214 |
+| olive_stump | 2.047 | 0.00400 | 0.00553 | 0.0155 | 0.0223 |
+| broken_column | 2.317 | 0.00211 | 0.00324 | 0.0132 | 0.0239 |
+| crucero | 4.247 | 0.00431 | 0.00629 | 0.0163 | 0.0355 |
+| chapel_arch | 7.877 | 0.01188 | 0.01884 | 0.0288 | 0.0573 |
+| cypress | 13.414 | 0.03541 | 0.04822 | 0.0582 | 0.0905 |
+
+**Decided autonomously under the standing "best outcome" instruction, and worth
+the user's eye:** the approved plan's step 7 said to keep a single metre constant
+and scale it by 1.5 if the measurement demanded it. Measurement made that *form*
+indefensible, not just that value, so the constant became size-relative — the
+idiom `prop_cleanup.py` already uses for its own tolerances. Reversible; neither
+scope nor licensing.
+
+The deviation spread is itself a symptom: the flat `--tri-budget 15000` is what
+makes a 12 m cypress and a 1.2 m stump deviate by 52×. The per-asset triangle
+budget already queued as a quality finding is the root fix, and this constant
+should be re-derived once it lands. Deriving it now was still correct — cypress
+is clipping today.
+
+Artifacts: `target/prop-solid-validation/r1s78/` (per-prop `cleanup.json`,
+`bake_ray_derivation.json`) and `r1s78-noweld/` (the A/B arm).
+
+Done 2026-07-29 (finding 24, fork `c7389f5`, vordar `1d5c681`). A `perf_counter`
+around the extractor call, surfaced as `SparseFeatures2Mesh.last_extract_s` and
+recorded as `elapsed_s.extraction` in the per-candidate manifest — a
+**sub-interval** of `elapsed_s.geometry`, not a sibling, so the two must never be
+summed. Confirmed populated on a CPU replay; the number that decides rework 5's
+gate is the extraction share under the normal GPU path, which the next routine
+candidate run reports. Rework 5 stays parked until then.
 
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
