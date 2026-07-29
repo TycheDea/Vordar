@@ -56,10 +56,10 @@ from mathutils.bvhtree import BVHTree
 # are an order of magnitude larger.
 FRAGMENT_DIAG_FRACTION = 0.02
 # Coincident-vertex weld tolerance, as a fraction of the mesh's own bbox
-# diagonal: ~0.8 mm on the 7.9 m chapel arch, over an order of magnitude
-# under Hi3DGen's extraction voxel (diagonal/512 ~ 15 mm). The merge can
-# therefore only join vertices the generator emitted twice at one
-# position, never collapse a feature the grid was able to resolve.
+# diagonal: ~0.8 mm on the 7.9 m chapel arch, well under Hi3DGen's
+# extraction voxel (the dense grid is 256 cells across, ~31 mm here). The
+# merge can therefore only join vertices the generator emitted twice at
+# one position, never collapse a feature the grid was able to resolve.
 WELD_EPS_FRACTION = 1e-4
 # Ground-contact band: vertices within the bottom 2.5% of the target
 # height (~4.5 cm at 1.8 m) define the footprint the prop stands on.
