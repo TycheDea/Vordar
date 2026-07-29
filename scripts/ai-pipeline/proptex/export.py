@@ -29,7 +29,15 @@ AO_DISTANCE_M = 0.15  # Cycles' AO ray length defaults to 10 m (world
 # operator calls cannot drift apart.
 BAKE_NORMAL_SPACE = "TANGENT"
 BAKE_CAGE_EXTRUSION_M = 0.01
-BAKE_MAX_RAY_DISTANCE_M = 0.03
+# How far past the cage a bake ray may travel to find the hires surface,
+# as a fraction of the prop's own bbox diagonal. It has to be relative:
+# every prop is decimated to the same triangle budget, so clean-to-hires
+# deviation scales with the prop, and p99.9 measures 0.00057 of the
+# diagonal on the candelabra against 0.00359 on the 12 m cypress -- a
+# span no single metre bound covers. 0.006 clears the worst of those by
+# 1.6x. Overshoot cannot corrupt a texel: Cycles takes the first hit, so
+# extra length only ever turns a miss into a hit.
+BAKE_RAY_DIAG_FRACTION = 0.006
 BAKE_MARGIN_PX = 8
 
 
@@ -45,7 +53,9 @@ def _bake_to(clean, hires, image, atlas, **bake_args):
     select_only([clean, hires], clean)
     bpy.ops.object.bake(use_selected_to_active=True,
                         cage_extrusion=BAKE_CAGE_EXTRUSION_M,
-                        max_ray_distance=BAKE_MAX_RAY_DISTANCE_M,
+                        max_ray_distance=(BAKE_CAGE_EXTRUSION_M
+                                          + BAKE_RAY_DIAG_FRACTION
+                                          * clean.dimensions.length),
                         margin=BAKE_MARGIN_PX, use_clear=True, uv_layer=atlas,
                         **bake_args)
 
