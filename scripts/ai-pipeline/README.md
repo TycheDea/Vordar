@@ -428,12 +428,12 @@ kernels compiled, verified with the probe below); spconv `2.3.8` — its
 `cumm-cu128 <0.8.0,>=0.7.11` pin isn't on PyPI (PyPI only serves 0.8.2), so
 the local `cumm_cu128-0.7.13-cp311-cp311-win_amd64.whl` wheel from the
 TRELLIS fork must install **before** the spconv wheel above, or spconv pulls
-the incompatible PyPI cumm and breaks. `triton` (listed in
-`requirements.txt`) is omitted entirely — no official Windows wheel, and
+the incompatible PyPI cumm and breaks. `triton` (listed in Hi3DGen's
+upstream requirements) is omitted entirely — no official Windows wheel, and
 StableNormal-turbo never demanded it at runtime; `triton-windows` is the
 evidenced fallback if a future weight update does. Three more pins were
 forced once BiRefNet/YOSO's actual remote code ran (discovered running the
-first real smoke, not from `requirements.txt`): `timm` → `1.0.28` (BiRefNet
+first real smoke, not from any requirement list): `timm` → `1.0.28` (BiRefNet
 needs `timm.layers`, absent from the older `0.6.7`), `diffusers` →
 `0.28.0` (pinned to yoso's `model_index.json` version; newer diffusers
 removes an import path yoso needs), `huggingface_hub` → `0.24.6` (diffusers
@@ -463,7 +463,7 @@ needed.
 | `facebookresearch/dinov2` | Hi3DGen's own `image_cond_model` (`dinov2_vitl14_reg`, 1.22 GB, `Hi3DGen/trellis-normal-v0-1/pipeline.json`), loaded every geometry run | torch.hub snapshot `facebookresearch_dinov2_main`, weights in the default torch hub checkpoint cache |
 
 One dependency the original plan missed: DINOv2 is not listed in Hi3DGen's
-`requirements.txt` — found running the first real smoke. It downloads via
+upstream requirements — found running the first real smoke. It downloads via
 StableNormal's YOSO predictor's own internal `torch.hub.load` on first run,
 into the default torch hub cache, and is reused on every run after.
 
