@@ -320,6 +320,44 @@ structured leak is closed; and 41,609 currently-kept faces (8.2%) that no
 candidate view can reach are reclaimed. Expected new deleted count ~296k (38%)
 against the old 259k — recorded as a cross-check, **not** as a target to hit.
 
+**Landed `323c55c`, verified on all seven props.** chapel_arch measured 290,652
+(37.6% of raw) against the ~296k cross-check; nothing was adjusted to close the
+gap. The orientation floor is **0 faces on all seven**, confirming the soundness
+premise the design rests on.
+
+| prop | components | boundary edges / main face | interior tris removed |
+|---|---|---|---|
+| chapel_arch | 151 → **109** | 1.0378 → **0.3977** | 259,061 → 290,652 |
+| olive_stump | 85 → **38** | 1.1944 → **0.4134** | 245,926 → 374,574 |
+| gravestone | 31 → **12** | 0.1264 → **0.0772** | 306,953 → 311,199 |
+| crucero | 21 → **8** | 0.0899 → **0.0495** | 122,174 → 123,699 |
+| broken_column | 14 → **7** | 0.2605 → **0.2041** | 412,934 → 417,019 |
+| candelabra_shrine | 6 → 6 | 0.1136 → 0.1101 | 86,621 → 88,852 |
+| cypress | 3 → 3 | 0.2149 → **0.3016** | 27,103 → 31,405 |
+
+cypress is the one regression — its boundary edges per face rise 40% — and it is
+the prop whose deleted share is smallest (10.5% of raw). Not chased; recorded.
+olive_stump's deleted count jumps 52%, the largest move on the board: a gnarled
+stump has deep bark crevices no orthographic view can reach, and the strip's own
+premise is that what the baker cannot reach is not worth carrying. That premise
+is now load-bearing on a prop where it was not before, and is worth a look when
+olive_stump is next reviewed in engine.
+
+Implementation notes worth carrying: the worker found the facing condition in
+this note's own framing (`n·(−d) > 0`) sign-ambiguous against
+`atlas.view_weight`, and resolved it by reusing `view_weight`'s literal
+expression on `mv_camera_rig`'s own `v["f"]` rather than re-deriving the formula
+— the right call, and the reason the two stages cannot drift. `prop_cleanup.py`
+gains a **required `--asset`**; `gen_prop.py` and `gen_character.py` thread it
+through, and a `kind="downloaded"` asset is refused outright since it declares no
+azimuths.
+
+**For rework 1 step 8:** the earlier recommendation of a boundary-edges-per-face
+gate at ≤0.005 was written against numbers that no longer exist. The measured
+range is now 0.0495 (crucero) to 0.4134 (olive_stump) on the final mesh. Any
+threshold must be re-derived from this table, and must still name which mesh it
+reads.
+
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
 had blocked — manifest `extraction` block present, peak reserved VRAM **6.787
