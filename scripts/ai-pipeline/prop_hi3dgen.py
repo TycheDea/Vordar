@@ -143,6 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Repeatable: an additional conditioning view of the same subject. The positional image is view 0 (front); each --view is appended in the order given.")
     parser.add_argument("--mv-mode", choices=("stochastic", "multidiffusion"), default="multidiffusion",
                         help="How the samplers combine several conditioning views: multidiffusion averages every view's prediction each step, stochastic round-robins one view per step. Only consulted when --view is given.")
+    parser.add_argument("--deterministic", action="store_true",
+                        help="Ask torch for deterministic algorithms before any model load, to pin the geometry stage's run-to-run noise.")
     return parser
 
 
@@ -196,7 +198,7 @@ def main():
         cand_dirs[seed].mkdir(parents=True, exist_ok=True)
 
     t_start = time.perf_counter()
-    session = headless.Session(normal_model=args.normal_model)
+    session = headless.Session(normal_model=args.normal_model, deterministic=args.deterministic)
     t_loaded = time.perf_counter()
 
     views = []
@@ -284,6 +286,7 @@ def main():
             "normal_model": args.normal_model,
             "normal_steps": args.normal_steps,
             "crop_from_original": args.crop_from_original,
+            "deterministic": args.deterministic,
             "seed": seed,
             # Which candidate of which run produced this mesh, and the RNG
             # state its samplers started from: identical to the state a run

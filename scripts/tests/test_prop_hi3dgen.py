@@ -194,5 +194,17 @@ class MultiViewCli(unittest.TestCase):
         self.assertEqual(kwargs["mv_mode"], "stochastic")
 
 
+@unittest.skipIf(prop_hi3dgen is None, "needs the Hi3DGen venv")
+class DeterministicFlag(unittest.TestCase):
+    def parse(self, *argv):
+        return prop_hi3dgen.build_parser().parse_args(["concept.png", "--out", "batch", *argv])
+
+    def test_defaults_false(self):
+        self.assertFalse(self.parse().deterministic)
+
+    def test_flag_sets_true(self):
+        self.assertTrue(self.parse("--deterministic").deterministic)
+
+
 if __name__ == "__main__":
     unittest.main()
