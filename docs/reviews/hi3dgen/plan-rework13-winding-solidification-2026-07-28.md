@@ -165,6 +165,23 @@ solid". Consequences pinned by tests:
   intended policy for a prop pipeline and is the same policy
   `prop_cleanup.py:172-210` already applies in mesh space with 64 hemisphere
   rays — this plan moves it upstream, it does not invent it.
+
+  **Measured 2026-07-29, and the "all 26 directions" clause above is wrong.**
+  The bore admits a visibility bundle: 94.8% of the 57,747 `r<24` cells fill,
+  and the residual is one connected component of 3,011 cells anchored at the
+  bore mouth (volume ratio 2.0029 against a 2.05 full-fill ceiling — no inner
+  wall survives). Those cells have a clear line of sight out along at least one
+  of the 26 directions, so they are exposed *by definition*; sealing them is
+  exactly what `bowl_stays_open` and `through_tunnel` forbid. **Step 1's second
+  assertion `inward_area_fraction < 0.05` is struck.** It is not relaxed and not
+  replaced: it measures 0.3916 under `fill_enclosed_sdf` and 0.2005 under
+  exposure, failing in both states, so it never discriminated — while the volume
+  ratio separates them 1.0033 → 2.0029 against the `≥ 1.5` bar. `solid_case`'s
+  own docstring already excludes `inward_max` from shapes with a bore; the plan
+  applied it anyway. No substitute assertion is added, because every candidate
+  either passes under the broken mechanism too (the unfilled cavity is also one
+  component at the bore) or duplicates `bowl_stays_open`. Inward-facing area is
+  gated on real props at step 4, not on a bored synthetic.
 - A new `bowl` case (wide-mouth hemispherical shell) must stay **open**, taking
   over the openness guard `vessel` used to carry. Without it, nothing would
   catch a regression that fills every concavity.
@@ -291,9 +308,11 @@ which step 5 records.
      `build_field` itself is unchanged and still returns `(field, coords)`;
      step 2 needs `coords`. Rewrite the module docstring's second
      paragraph to state the new contract. Re-target `case_vessel`: rename it
-     `case_vessel_seals`, and assert **both** `mesh.volume / analytic_volume(vessel_sdf)
-     >= 1.5` **and** `inward_area_fraction(mesh) < 0.05` — the cavity is claimed
-     and the inner wall is gone. Leave `case_sphere` (`[0.95, 1.10]`,
+     `case_vessel_seals`, and assert `mesh.volume / analytic_volume(vessel_sdf)
+     >= 1.5` — the cavity is claimed. The second assertion this step originally
+     carried, `inward_area_fraction(mesh) < 0.05`, is struck; see the Ideal end
+     state's `vessel` entry for the measurement that struck it. Leave
+     `case_sphere` (`[0.95, 1.10]`,
      inward < 0.01), `case_plate_stack` (`torch.equal`), `case_through_tunnel`
      (`[0.90, 1.15]`), both floater cases and `case_iso_level` untouched in
      their assertions.
