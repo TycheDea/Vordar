@@ -14,6 +14,12 @@ conversion Blender's glTF importer applies, main() converts vertices
 Run under the Hi3DGen venv (trimesh/numpy/opencv-python-headless are
 pinned there, no new dependency):
 C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe scripts/ai-pipeline/mv_ab_metrics.py <raw.glb> --front F.png [--back B.png] [--side S.png] --out metrics.json [--masks-dir DIR]
+
+fitted_yaw_deg is only trustworthy when front_back_peak_gap exceeds the
+effect size being claimed from these metrics: a front/back-symmetric
+silhouette puts the true argmax and its (yaw+180) twin within noise of each
+other, so the scan can pick either one and iou_front alone cannot tell you
+which it picked.
 """
 import argparse
 import json
@@ -26,6 +32,8 @@ import trimesh
 
 MV_ELEVATION_DEG = 15.0  # matches proptex/views.py's MV_ELEVATION_DEG
 SCAN_STEP_DEG = 5
+REFINE_STEP_DEG = 1  # 5deg->1deg raised iou by up to +0.0051; 1deg->0.5deg moved it by at most +0.0003 (converged)
+REFINE_RANGE_DEG = 4  # +/- window around the coarse argmax the refine scan covers
 CANVAS_PX = 512
 NORM_PX = 256
 ALPHA_THRESHOLD = 0.8 * 255  # preprocess_image's / check_matte's own bbox cut
@@ -128,9 +136,21 @@ def load_concept_mask(png_path):
     return rgba[:, :, 3] > ALPHA_THRESHOLD
 
 
-def fit_yaw(mesh, rig, front_mask_norm, scan_step=SCAN_STEP_DEG, elevation=MV_ELEVATION_DEG):
+def fit_yaw(mesh, rig, front_mask_norm, scan_step=SCAN_STEP_DEG,
+            refine_step=REFINE_STEP_DEG, refine_range=REFINE_RANGE_DEG,
+            elevation=MV_ELEVATION_DEG):
+    """Coarse scan_step-degree sweep to localize the silhouette peak, then a
+    refine_step-degree sweep over the +/-refine_range neighbourhood of the
+    coarse argmax -- the coarse grid alone is not converged (see
+    REFINE_STEP_DEG's comment)."""
     best_az, best_iou = 0, -1.0
     for az in range(0, 360, scan_step):
+        val = iou(normalize_mask(render_mask(mesh, az, elevation, rig)), front_mask_norm)
+        if val > best_iou:
+            best_iou, best_az = val, az
+
+    for offset in range(-refine_range, refine_range + refine_step, refine_step):
+        az = (best_az + offset) % 360
         val = iou(normalize_mask(render_mask(mesh, az, elevation, rig)), front_mask_norm)
         if val > best_iou:
             best_iou, best_az = val, az
@@ -185,10 +205,14 @@ def main():
 
     front_norm = normalize_mask(load_concept_mask(args.front))
     yaw, iou_front = fit_yaw(mesh, rig, front_norm)
+    iou_at_yaw_plus_180 = iou(
+        normalize_mask(render_mask(mesh, (yaw + 180) % 360, MV_ELEVATION_DEG, rig)), front_norm)
 
     result = {
         "fitted_yaw_deg": yaw,
         "iou_front": iou_front,
+        "iou_at_yaw_plus_180": iou_at_yaw_plus_180,
+        "front_back_peak_gap": iou_front - iou_at_yaw_plus_180,
         "elevation_deg": MV_ELEVATION_DEG,
         "scan_step_deg": SCAN_STEP_DEG,
         "canvas_px": CANVAS_PX,

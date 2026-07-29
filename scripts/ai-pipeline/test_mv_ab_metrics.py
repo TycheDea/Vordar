@@ -74,6 +74,79 @@ def test_yaw_fit_recovers_grid_azimuth():
           f"(yaw={metrics['fitted_yaw_deg']}, iou_front={metrics['iou_front']:.4f})")
 
 
+def _asymmetric_mesh():
+    """A box with an off-center satellite tab, giving a silhouette with no
+    rotational symmetry -- unlike a plain box's, azimuth scans against its
+    own render have a single unambiguous argmax rather than a tied pair."""
+    body = trimesh.creation.box(extents=[1, 3, 1])
+    tab = trimesh.creation.box(extents=[0.8, 0.8, 0.8])
+    tab.apply_translation([0.9, 1.6, 0.0])
+    return body + tab
+
+
+def _fit_against_own_render(mesh, yaw_deg):
+    """Exports mesh to glb, renders its own silhouette at yaw_deg as the
+    --front reference, and runs it through the CLI entry point, returning
+    the parsed metrics.json."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        glb_path = tmp / "mesh.glb"
+        mesh.export(str(glb_path))
+
+        loaded = mvab.load_mesh(glb_path)
+        rig = mvab.build_rig(loaded)
+        mask = mvab.render_mask(loaded, az_deg=yaw_deg, el_deg=mvab.MV_ELEVATION_DEG, rig=rig)
+
+        front_path = tmp / "front.png"
+        rgba = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
+        rgba[:, :, :3] = 255
+        rgba[:, :, 3] = mask
+        cv2.imwrite(str(front_path), rgba)
+
+        out_path = tmp / "metrics.json"
+        subprocess.run(
+            [sys.executable, str(Path(__file__).resolve().parent / "mv_ab_metrics.py"),
+             str(glb_path), "--front", str(front_path), "--out", str(out_path)],
+            check=True,
+        )
+        return json.loads(out_path.read_text())
+
+
+def test_two_stage_fit_converges_off_grid():
+    """An asymmetric mesh's own silhouette at az=23 (not a multiple of
+    SCAN_STEP_DEG=5) must fit within 1 degree of 23 -- the coarse-only grid
+    can only return 20 or 25, both more than 1 degree off, so landing this
+    close proves the refine stage ran and converged."""
+    true_az = 23
+    metrics = _fit_against_own_render(_asymmetric_mesh(), true_az)
+
+    fitted = metrics["fitted_yaw_deg"]
+    assert abs(fitted - true_az) <= 1, (
+        f"expected refine to land within 1 degree of {true_az}, got {fitted}")
+    assert fitted not in (20, 25), (
+        f"fitted yaw {fitted} is a coarse-grid point -- refine did not move it")
+    print(f"test_two_stage_fit_converges_off_grid passed (fitted={fitted})")
+
+
+def test_front_back_peak_gap_flags_symmetry():
+    """A front/back-symmetric mesh (a plain box, identical silhouette at
+    yaw and yaw+180) must report a near-zero front_back_peak_gap; an
+    asymmetric one (the satellite-tab mesh) must report a comfortably
+    larger one. This is the guard that keeps the diagnostic honest."""
+    symmetric_metrics = _fit_against_own_render(trimesh.creation.box(extents=[1, 3, 1]), 30)
+    asymmetric_metrics = _fit_against_own_render(_asymmetric_mesh(), 30)
+
+    symmetric_gap = symmetric_metrics["front_back_peak_gap"]
+    asymmetric_gap = asymmetric_metrics["front_back_peak_gap"]
+
+    assert symmetric_gap < 0.01, (
+        f"expected a symmetric mesh's peak gap near zero, got {symmetric_gap}")
+    assert asymmetric_gap > 0.3, (
+        f"expected an asymmetric mesh's peak gap well above zero, got {asymmetric_gap}")
+    print(f"test_front_back_peak_gap_flags_symmetry passed "
+          f"(symmetric_gap={symmetric_gap:.4f}, asymmetric_gap={asymmetric_gap:.4f})")
+
+
 def test_gltf_y_up_box_renders_tall_not_wide():
     """A box tall along glTF's Y axis (extents=[1, 3, 1]), exported to .glb
     and loaded through the CLI's own trimesh.load path, must render taller
@@ -116,5 +189,7 @@ def test_gltf_y_up_box_renders_tall_not_wide():
 if __name__ == "__main__":
     test_analytic_projection_truth()
     test_yaw_fit_recovers_grid_azimuth()
+    test_two_stage_fit_converges_off_grid()
+    test_front_back_peak_gap_flags_symmetry()
     test_gltf_y_up_box_renders_tall_not_wide()
     print("all tests passed")
