@@ -6,36 +6,20 @@ its float order is deterministic where the GPU scatter_reduce path
 decode_slat() runs through is not, making this the A/B instrument for
 extraction-stage changes.
 
-Run under the Hi3DGen venv; cwd-independent (weights/repo paths resolve
-against REPO_DIR or the parsed args, not the working directory):
+Run under the Hi3DGen venv; cwd-independent:
 C:\\tools\\Hi3DGen\\venv\\Scripts\\python.exe <path-to-this-repo>\\scripts\\ai-pipeline\\prop_extract.py <latents_dir> --out <dir> [--device cpu|cuda]
 """
 import argparse
 import hashlib
 import json
-import os
 import types
-
-# Must be set before importing hi3dgen's modules (attention/sparse backends
-# read these at import time) -- same in-process pattern prop_hi3dgen.py uses.
-os.environ["ATTN_BACKEND"] = "xformers"
-os.environ["SPCONV_ALGO"] = "native"
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-
-import sys
 import time
 from pathlib import Path
 
 import torch
 import trimesh
 
-# hi3dgen is a plain repo checkout (not pip-installed), so it must be
-# importable as a top-level package -- cwd alone does not land on sys.path
-# for a `python script.py` invocation from elsewhere (prop_hi3dgen.py precedent).
-REPO_DIR = Path(r"C:\tools\Hi3DGen\Hi3DGen")
-sys.path.insert(0, str(REPO_DIR))
-from hi3dgen.representations.mesh import SparseFeatures2Mesh  # noqa: E402
+from hi3dgen.representations.mesh import SparseFeatures2Mesh
 
 # decoder_mesh.py's SLatMeshDecoder constructs its extractor with
 # res=resolution*4 where resolution=64, so 256 is the checkpoint's real
