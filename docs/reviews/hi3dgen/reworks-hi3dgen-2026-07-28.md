@@ -23,6 +23,18 @@ finding 18 → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ → ~~findin
 finding 24 → **rework 2** → **rework 3** → **rework 4**.
 The findings numbered in *this* file (10–15) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here.
+Done 2026-07-29 (this file's findings 10, 11, 12 and 15; vordar `9b47c44`, fork
+`cc29648`, `c99bf4b`, `fe17cc2`). Findings 10-12 were all written against
+`fill_enclosed_sdf`, which rework 13 step 1 deleted; each premise was re-checked
+against the replacement and survives — 10's baseline is fill-free, and 12's
+padding belongs to `build_field`'s band plus the corner scatter, not to the fill.
+Finding 10's pair reproduced exactly (`0.1712 / 0.4970`), so the plan's prose
+takes the measured numbers; its line 31 quote of `750397b`'s own carried
+validation is left attributed rather than overwritten, which is the "record the
+helper variant" half of the Suggestion. Finding 15's in-band cavity fixture
+landed with rework 13 step 2 and is the suite's first case that discriminates
+between the two mechanisms (`body_count` 2 → 1, cavity confirmed
+scatter-written).
 Done 2026-07-29 (this file's finding 14, commit `7d145cb`). `check_mesh` now
 drops zero-area faces and records the count in the manifest instead of aborting
 the run. The re-run measured the two assertions rework 1 step 6 left unmeasured:
