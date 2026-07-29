@@ -290,11 +290,35 @@ appears as a casualty of the *replacement*, which is where it would be fatal.
 *Where this leaves the design.* Deleting the inner wall is still correct in
 principle — finding 15 measured `blend_coverage` 0.7303 → 0.9759 on crucero from
 exactly this deletion, so keeping it and paying the tri and atlas budget is the
-worse option. But the criterion must be one that converges. The only well-posed
-statement of the strip's actual purpose is "remove what the texture stage cannot
-reach", whose ground truth is the bake's own per-asset view set — which is picked
-at runtime *after* cleanup, so adopting it is a pipeline-ordering change, not a
-knob change. **Open, and a scope decision rather than an engineering one.**
+worse option. But the criterion must be one that converges.
+
+**Decided 2026-07-29 and in flight: delete only what no view the baker is allowed
+to pick could see.** Taken autonomously under the user's standing "best outcome"
+instruction; reversible, and neither scope nor licensing.
+
+The criterion is the *candidate* view set, not the picked one: the per-asset
+azimuths at `MV_ELEVATION_DEG` (`registry.py:19`, `views.py:20`) union
+`MV_EXTRA_CANDIDATE_AZIMUTHS × MV_EXTRA_CANDIDATE_ELEVATIONS` plus the 75° top
+(`coverage.py:51-52`). `prop_texture.py` picks its actual bake views at runtime as
+a **subset** of that set, so deleting only what *no* candidate view sees can never
+delete a face the bake would have textured. That is what makes it sound rather
+than approximate, and it sidesteps the ordering problem entirely — the strip does
+not need to know which views were picked, only which ones were available.
+
+It also has no free parameter. The candidate set is the baker's own fixed
+enumeration, not a sample of a continuum, so there is nothing to refine and no
+convergence question to answer. That is the property both rejected options
+lacked.
+
+Measured support, from the discriminator's grid columns rather than assumed: the
+orientation floor — faces deleted purely for facing no candidate view — is **0**
+on both subjects, because the grid carries −35° elevation precisely for
+down-facing texels. The soffit is safe, which is exactly what killed the
+four-camera variant. Against the grid, currently-deleted-but-visible falls to
+9,215 (3.5%) on chapel_arch and 772 (0.63%) on crucero, so the 1,513-face
+structured leak is closed; and 41,609 currently-kept faces (8.2%) that no
+candidate view can reach are reclaimed. Expected new deleted count ~296k (38%)
+against the old 259k — recorded as a cross-check, **not** as a target to hit.
 
 Artifact trail throughout: `target/prop-solid-validation/`. Step 6's GPU smoke
 aborted (rework 14, fixed at `7d145cb`); the re-run measured both assertions it
