@@ -93,6 +93,9 @@ SS_CFG_DEFAULT = 5.0
 SLAT_CFG_DEFAULT = 5.0
 # StableNormal's signature default (1024) resolves fine detail that 768 smears.
 NORMAL_RESOLUTION_DEFAULT = 1024
+# Decoded-occupancy cutoff a sparse-structure cell must exceed to be kept
+# (hi3dgen.pipelines.hi3dgen.Hi3DGenPipeline.sample_sparse_structure's own default).
+OCCUPANCY_THRESHOLD = 0.0
 
 GIB = 1024 ** 3
 
@@ -164,7 +167,7 @@ def staged_cond(pipeline: Hi3DGenPipeline, image: Image.Image) -> dict:
 
 @torch.no_grad()
 def staged_sample(pipeline: Hi3DGenPipeline, cond: dict, seed: int,
-                  ss_params: dict, slat_params: dict):
+                  ss_params: dict, slat_params: dict, occupancy_threshold: float):
     """One candidate's geometry, with each stage's weights resident only while
     that stage runs. Call order and seeding point match
     Hi3DGenPipeline.run()'s, and the sampled stages must stay inside no_grad
@@ -178,7 +181,7 @@ def staged_sample(pipeline: Hi3DGenPipeline, cond: dict, seed: int,
     torch.manual_seed(seed)
     rng_state_sha256 = hashlib.sha256(torch.random.get_rng_state().numpy().tobytes()).hexdigest()
     with staged(pipeline, "sparse_structure_flow_model", "sparse_structure_decoder"):
-        coords = pipeline.sample_sparse_structure(cond, 1, ss_params)
+        coords = pipeline.sample_sparse_structure(cond, 1, ss_params, occupancy_threshold)
     with staged(pipeline, "slat_flow_model"):
         slat = pipeline.sample_slat(cond, coords, slat_params)
     with staged(pipeline, "slat_decoder_mesh"):
@@ -307,6 +310,7 @@ def main():
     parser.add_argument("--normal-model", choices=sorted(NORMAL_ENTRYPOINTS), default="turbo", help="StableNormal predictor: single-step turbo (fast) or the full two-stage SD-based refinement (slower, sharper high-frequency detail).")
     parser.add_argument("--normal-steps", type=int, default=None, help="Override the normal predictor's denoising steps (turbo is a fixed single step regardless of this value).")
     parser.add_argument("--crop-from-original", action="store_true", help="Take the object crop from full-resolution pixels instead of the <=1024 matte copy.")
+    parser.add_argument("--no-fill-interior", action="store_true", help="Disable the enclosed-interior fill and solid-floater drop, extracting the raw hollow-shell geometry.")
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.image = args.image.resolve()
@@ -340,6 +344,9 @@ def main():
     # The device the geometry stages run on; their weights stay on the CPU
     # until staged_cond()/staged_sample() bring each one over for its stage.
     hi3dgen_pipeline.device = torch.device("cuda")
+    extractor = hi3dgen_pipeline.models["slat_decoder_mesh"].mesh_extractor
+    if args.no_fill_interior:
+        extractor.fill_interior = False
     preload_birefnet(hi3dgen_pipeline)
 
     normal_entrypoint = NORMAL_ENTRYPOINTS[args.normal_model]
@@ -419,7 +426,7 @@ def main():
     for position, seed in enumerate(pending):
         cand_dir = cand_dirs[seed]
         t_cand = time.perf_counter()
-        outputs, rng_state_sha256 = staged_sample(hi3dgen_pipeline, cond, seed, ss_params, slat_params)
+        outputs, rng_state_sha256 = staged_sample(hi3dgen_pipeline, cond, seed, ss_params, slat_params, OCCUPANCY_THRESHOLD)
         t_geometry = time.perf_counter()
         mesh_result = outputs["mesh"][0]
         trimesh_mesh = mesh_result.to_trimesh(transform_pose=True)
@@ -462,6 +469,14 @@ def main():
             "batch": {"seeds": seeds, "generated": pending, "position": position},
             "sampler_rng_state_sha256": rng_state_sha256,
             "sampler_params": {"sparse_structure": ss_params, "slat": slat_params},
+            "extraction": {
+                "res": extractor.res,
+                "fill_interior": extractor.fill_interior,
+                "min_component_fraction": extractor.min_component_fraction,
+                "iso_level": extractor.iso_level,
+                "sdf_bias": extractor.sdf_bias,
+                "occupancy_threshold": OCCUPANCY_THRESHOLD,
+            },
             "backends": {
                 "attn": hi3dgen_attention.BACKEND,
                 "sparse_attn": hi3dgen_sparse.ATTN,
