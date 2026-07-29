@@ -22,9 +22,9 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 > ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
 > ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ →
 > ~~finding 22~~ → ~~finding 23~~ → ~~finding 24~~ →
-> rework 2 → rework 3 → rework 4 → rework 18.**
+> rework 2 → ~~rework 3~~ → rework 4 → ~~rework 18~~.**
 
-The findings numbered in *this* file (10–17) are discoveries from rework
+The findings numbered in *this* file (10–17, 19) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here. Where the
 two numberings collide, this file's own are written "this file's finding N".
 Done 2026-07-29 (this file's findings 10, 11, 12 and 15; vordar `9b47c44`, fork
@@ -699,7 +699,7 @@ Path, which requires finding 17 to land first.
   term, the 151 components, the 98.0% retention) are superseded by the table in
   this file's queue note.
 
-### 18. Per-asset triangle budget (user-decides): the flat 15,000 over-serves small props and starves large ones
+### ~~18. Per-asset triangle budget (user-decides): the flat 15,000 over-serves small props and starves large ones~~
 - **Evidence:** `scripts/ai-pipeline/prop_cleanup.py`'s `--tri-budget` defaults to a flat 15,000 for every prop, and `gen_prop.py` never overrides it. Measured through the pipeline itself on all seven props at 5k/15k/30k/60k/120k (35 runs, `target/prop-solid-validation/tribudget/`, p99 clean→hires deviation at 80k surface samples per run): at the shipped 15,000 the deviation normalized by bbox diagonal spans **0.000369 (candelabra_shrine) to 0.002633 (cypress), a 7.1× range**. The same measurement is what forced `BAKE_RAY_DIAG_FRACTION` to become size-relative — this is that defect's root cause rather than its symptom.
 - **Ideal:** Every prop is decimated to the budget its own geometry needs to hold a chosen deviation, so the triangle budget buys the same visual fidelity everywhere instead of an accident of prop size.
 - **Gap:** The budget is uniform and the quality is not. candelabra_shrine currently gets 4× more fidelity than it needs while cypress gets less than half; nobody chose that split.
