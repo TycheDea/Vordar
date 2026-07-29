@@ -1,12 +1,18 @@
 # Blender-headless: Hi3DGen raw prop mesh -> normalized clean.glb +
 # pre-decimation _hires.glb (Phase A3.5).
 #
-#   - strips loose fragments whose bbox diagonal is under 2% of the whole
-#     mesh's (sparse-lattice floaters); runs BEFORE normalization so a
-#     floater can't skew the height/ground fit
+#   - welds coincident vertices at a sub-voxel epsilon first: the raw mesh
+#     carries duplicates at shared corners, and until they are merged every
+#     topology measure downstream — edge sharing, island connectivity,
+#     component_count — reports vertex bookkeeping rather than shape
 #   - strips interior faces: a face with no ray escaping the mesh from just
 #     outside its own surface can never reach a camera, so it is removed
 #     before the tri budget and UV atlas are spent describing it
+#   - strips loose fragments whose bbox diagonal is under 2% of the whole
+#     mesh's; runs AFTER the interior strip, which is what maroons most of
+#     them (it deletes occluded faces and leaves single-triangle islands
+#     behind), and still before normalization so a floater cannot skew the
+#     height/ground fit
 #   - uniform-scales to --height, origin at the footprint centroid (bbox
 #     center of the ground-contact band), mesh bottom exactly at y=0 in
 #     the exported +Y-up glb — zone props sit on the ground plane via
@@ -49,6 +55,12 @@ from mathutils.bvhtree import BVHTree
 # game camera distance; real detached-looking parts (candle arms, wax)
 # are an order of magnitude larger.
 FRAGMENT_DIAG_FRACTION = 0.02
+# Coincident-vertex weld tolerance, as a fraction of the mesh's own bbox
+# diagonal: ~0.8 mm on the 7.9 m chapel arch, over an order of magnitude
+# under Hi3DGen's extraction voxel (diagonal/512 ~ 15 mm). The merge can
+# therefore only join vertices the generator emitted twice at one
+# position, never collapse a feature the grid was able to resolve.
+WELD_EPS_FRACTION = 1e-4
 # Ground-contact band: vertices within the bottom 2.5% of the target
 # height (~4.5 cm at 1.8 m) define the footprint the prop stands on.
 CONTACT_BAND_FRACTION = 0.025
@@ -86,9 +98,79 @@ def tri_count(me):
     return len(me.loop_triangles)
 
 
+def _diag(points):
+    """Bounding-box diagonal length of a point cloud."""
+    p = np.asarray(points, dtype=float)
+    return float(np.linalg.norm(p.max(axis=0) - p.min(axis=0)))
+
+
 def bbox_diag(objs):
-    corners = np.array([c for o in objs for c in o.bound_box])
-    return float(np.linalg.norm(corners.max(axis=0) - corners.min(axis=0)))
+    return _diag([c for o in objs for c in o.bound_box])
+
+
+def _components(bm):
+    """Vertex-connectivity islands as lists of BMVerts, largest first.
+    Only meaningful on a welded mesh: coincident-but-distinct vertices
+    share no edge, so they read as separate islands."""
+    bm.verts.ensure_lookup_table()
+    seen = set()
+    islands = []
+    for seed in bm.verts:
+        if seed.index in seen:
+            continue
+        seen.add(seed.index)
+        stack, island = [seed], [seed]
+        while stack:
+            v = stack.pop()
+            for e in v.link_edges:
+                other = e.other_vert(v)
+                if other.index not in seen:
+                    seen.add(other.index)
+                    stack.append(other)
+                    island.append(other)
+        islands.append(island)
+    islands.sort(key=len, reverse=True)
+    return islands
+
+
+def weld_vertices(me):
+    """Merges vertices coincident within WELD_EPS_FRACTION of the mesh's
+    bbox diagonal. Hi3DGen exports duplicates at shared corners, which
+    leaves neighbouring faces sharing no edge — so this must precede any
+    measurement or removal that reads edge topology. Merging also collapses
+    the faces whose corners were only distinct through the duplication.
+    Returns (vertices_removed, triangles_removed)."""
+    tris_before = tri_count(me)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    before = len(bm.verts)
+    dist = WELD_EPS_FRACTION * _diag([v.co for v in bm.verts])
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=dist)
+    removed = before - len(bm.verts)
+    bm.to_mesh(me)
+    me.update()
+    bm.free()
+    return removed, tris_before - tri_count(me)
+
+
+def cull_loose_fragments(me):
+    """Deletes vertex-connectivity islands whose bbox diagonal is under
+    FRAGMENT_DIAG_FRACTION of the whole mesh's: generation floaters, plus
+    the marooned survivors the interior-face strip leaves behind. Returns
+    (islands_removed, triangles_removed)."""
+    tris_before = tri_count(me)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    threshold = FRAGMENT_DIAG_FRACTION * _diag([v.co for v in bm.verts])
+    drop = [i for i in _components(bm)
+            if _diag([v.co for v in i]) < threshold]
+    if drop:
+        bmesh.ops.delete(bm, geom=[v for i in drop for v in i],
+                         context="VERTS")
+        bm.to_mesh(me)
+        me.update()
+    bm.free()
+    return len(drop), tris_before - tri_count(me)
 
 
 def geometry_health(me):
@@ -96,9 +178,12 @@ def geometry_health(me):
     edge borders exactly one face (a hole); euler_number is V-E+F, which
     is 2 for a closed genus-0 manifold and departs from it under
     non-manifold or open topology; component_count is the number of
-    vertex-connectivity islands; two_crossing_ray_fraction is the share
-    of random rays through the bbox whose face-crossing count is 2, the
-    signature a closed surface gives any ray that enters and exits once."""
+    vertex-connectivity islands; boundary_edges_per_face normalizes the
+    hole count by the size of the main island, so a lace-like shell
+    separates from a merely large one; two_crossing_ray_fraction is the
+    share of random rays through the bbox whose face-crossing count is 2,
+    the signature a closed surface gives any ray that enters and exits
+    once."""
     bm = bmesh.new()
     bm.from_mesh(me)
     bm.verts.ensure_lookup_table()
@@ -107,21 +192,9 @@ def geometry_health(me):
     boundary_edge_count = sum(1 for e in bm.edges if len(e.link_faces) == 1)
     euler_number = len(bm.verts) - len(bm.edges) + len(bm.faces)
 
-    visited = set()
-    component_count = 0
-    for seed in bm.verts:
-        if seed.index in visited:
-            continue
-        component_count += 1
-        stack = [seed]
-        visited.add(seed.index)
-        while stack:
-            v = stack.pop()
-            for e in v.link_edges:
-                other = e.other_vert(v)
-                if other.index not in visited:
-                    visited.add(other.index)
-                    stack.append(other)
+    islands = _components(bm)
+    main = {v.index for v in islands[0]}
+    main_faces = sum(1 for f in bm.faces if f.verts[0].index in main)
 
     bvh = BVHTree.FromBMesh(bm)
     co = np.array([v.co for v in bm.verts])
@@ -153,7 +226,8 @@ def geometry_health(me):
         "is_watertight": boundary_edge_count == 0,
         "boundary_edge_count": boundary_edge_count,
         "euler_number": euler_number,
-        "component_count": component_count,
+        "component_count": len(islands),
+        "boundary_edges_per_face": round(boundary_edge_count / main_faces, 4),
         "two_crossing_ray_fraction": round(two_crossings / RAY_SAMPLE_COUNT, 4),
     }
 
@@ -369,26 +443,11 @@ def main():
     if raw_tris == 0:
         fail("mesh has no faces")
 
-    # ---- loose fragments out, before any measurement trusts the bbox ----
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.mesh.separate(type="LOOSE")
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-    parts = [o for o in bpy.context.scene.objects if o.type == "MESH"]
-    threshold = FRAGMENT_DIAG_FRACTION * bbox_diag(parts)
-    keep = [o for o in parts if bbox_diag([o]) >= threshold]
-    drop = [o for o in parts if o not in keep]
-    fragment_tris = sum(tri_count(o.data) for o in drop)
-    for o in drop:
-        bpy.data.objects.remove(o, do_unlink=True)
-    obj = max(keep, key=lambda o: bbox_diag([o]))
-    for o in keep:
-        o.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-    if len(keep) > 1:
-        bpy.ops.object.join()
     me = obj.data
+
+    # ---- weld first: edge sharing, and every island count built on it,
+    # is vertex bookkeeping rather than shape until this runs ----
+    welded_verts_removed, welded_tris_removed = weld_vertices(me)
 
     areas = np.empty(len(me.polygons))
     me.polygons.foreach_get("area", areas)
@@ -399,6 +458,12 @@ def main():
     interior_tris_removed = strip_interior_faces(obj, me)
     if len(me.polygons) == 0:
         fail("interior-face strip removed the entire mesh")
+
+    # ---- then the fragments the strip just marooned, still ahead of
+    # normalization so no floater skews the height/ground fit ----
+    fragments_removed, fragment_tris = cull_loose_fragments(me)
+    if len(me.polygons) == 0:
+        fail("fragment cull removed the entire mesh")
 
     # ---- scale to target height (Blender Z = exported glTF +Y) ----
     co = vert_coords(me)
@@ -454,9 +519,11 @@ def main():
     co = vert_coords(me)
     stats = {
         "raw_tris": raw_tris,
-        "fragments_removed": len(drop),
-        "fragment_tris_removed": fragment_tris,
+        "welded_verts_removed": welded_verts_removed,
+        "welded_tris_removed": welded_tris_removed,
         "interior_tris_removed": interior_tris_removed,
+        "fragments_removed": fragments_removed,
+        "fragment_tris_removed": fragment_tris,
         "hires_tris": hires_tris,
         "clean_tris": clean_tris,
         "height_target": args.height,
