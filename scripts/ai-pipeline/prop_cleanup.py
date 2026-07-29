@@ -1,10 +1,6 @@
 # Blender-headless: Hi3DGen raw prop mesh -> normalized clean.glb +
 # pre-decimation _hires.glb (Phase A3.5).
 #
-#   - welds coincident vertices at a sub-voxel epsilon first: the raw mesh
-#     carries duplicates at shared corners, and until they are merged every
-#     topology measure downstream — edge sharing, island connectivity,
-#     component_count — reports vertex bookkeeping rather than shape
 #   - strips interior faces: a face survives only if some view in the
 #     texturing baker's full candidate set both faces it and has
 #     unoccluded line of sight to it -- prop_texture.py's actual bake
@@ -65,12 +61,6 @@ from proptex.views import MV_ELEVATION_DEG, mv_camera_rig  # noqa: E402
 # game camera distance; real detached-looking parts (candle arms, wax)
 # are an order of magnitude larger.
 FRAGMENT_DIAG_FRACTION = 0.02
-# Coincident-vertex weld tolerance, as a fraction of the mesh's own bbox
-# diagonal: ~0.8 mm on the 7.9 m chapel arch, well under Hi3DGen's
-# extraction voxel (the dense grid is 256 cells across, ~31 mm here). The
-# merge can therefore only join vertices the generator emitted twice at
-# one position, never collapse a feature the grid was able to resolve.
-WELD_EPS_FRACTION = 1e-4
 # Ground-contact band: vertices within the bottom 2.5% of the target
 # height (~4.5 cm at 1.8 m) define the footprint the prop stands on.
 CONTACT_BAND_FRACTION = 0.025
@@ -113,9 +103,7 @@ def bbox_diag(objs):
 
 
 def _components(bm):
-    """Vertex-connectivity islands as lists of BMVerts, largest first.
-    Only meaningful on a welded mesh: coincident-but-distinct vertices
-    share no edge, so they read as separate islands."""
+    """Vertex-connectivity islands as lists of BMVerts, largest first."""
     bm.verts.ensure_lookup_table()
     seen = set()
     islands = []
@@ -135,26 +123,6 @@ def _components(bm):
         islands.append(island)
     islands.sort(key=len, reverse=True)
     return islands
-
-
-def weld_vertices(me):
-    """Merges vertices coincident within WELD_EPS_FRACTION of the mesh's
-    bbox diagonal. Hi3DGen exports duplicates at shared corners, which
-    leaves neighbouring faces sharing no edge — so this must precede any
-    measurement or removal that reads edge topology. Merging also collapses
-    the faces whose corners were only distinct through the duplication.
-    Returns (vertices_removed, triangles_removed)."""
-    tris_before = tri_count(me)
-    bm = bmesh.new()
-    bm.from_mesh(me)
-    before = len(bm.verts)
-    dist = WELD_EPS_FRACTION * _diag([v.co for v in bm.verts])
-    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=dist)
-    removed = before - len(bm.verts)
-    bm.to_mesh(me)
-    me.update()
-    bm.free()
-    return removed, tris_before - tri_count(me)
 
 
 def cull_loose_fragments(me):
@@ -178,32 +146,35 @@ def cull_loose_fragments(me):
 
 
 def geometry_health(me):
-    """Watertightness/topology diagnostics on the final mesh. A boundary
-    edge borders exactly one face (a hole); euler_number is V-E+F, which
-    is 2 for a closed genus-0 manifold and departs from it under
-    non-manifold or open topology; component_count is the number of
-    vertex-connectivity islands; boundary_edges_per_face normalizes the
-    hole count by the size of the main island, so a lace-like shell
-    separates from a merely large one."""
+    """Topology diagnostics. A boundary edge borders exactly one face (a
+    hole). Everything prefixed `main_` is restricted to the largest
+    vertex-connectivity island, because debris islands carry open rims of
+    their own: mixing their boundary edges into a body measurement reads a
+    speck's rim as a hole in the prop. main_euler_number is V-E+F over that
+    island alone, so on a closed one it is 2-2g and states the genus;
+    boundary_edges_per_face divides the island's own rim length by its own
+    size, separating a lace-like shell from a merely large one."""
     bm = bmesh.new()
     bm.from_mesh(me)
     bm.verts.ensure_lookup_table()
-    bm.edges.ensure_lookup_table()
-
-    boundary_edge_count = sum(1 for e in bm.edges if len(e.link_faces) == 1)
-    euler_number = len(bm.verts) - len(bm.edges) + len(bm.faces)
 
     islands = _components(bm)
     main = {v.index for v in islands[0]}
     main_faces = sum(1 for f in bm.faces if f.verts[0].index in main)
+    main_edges = sum(1 for e in bm.edges if e.verts[0].index in main)
+
+    boundary = [e for e in bm.edges if len(e.link_faces) == 1]
+    main_boundary = sum(1 for e in boundary if e.verts[0].index in main)
+    total_faces = len(bm.faces)
 
     bm.free()
     return {
-        "is_watertight": boundary_edge_count == 0,
-        "boundary_edge_count": boundary_edge_count,
-        "euler_number": euler_number,
+        "boundary_edge_count": len(boundary),
         "component_count": len(islands),
-        "boundary_edges_per_face": round(boundary_edge_count / main_faces, 4),
+        "main_face_fraction": round(main_faces / total_faces, 4),
+        "main_boundary_edge_count": main_boundary,
+        "main_euler_number": len(islands[0]) - main_edges + main_faces,
+        "boundary_edges_per_face": round(main_boundary / main_faces, 4),
     }
 
 
@@ -426,9 +397,11 @@ def main():
 
     me = obj.data
 
-    # ---- weld first: edge sharing, and every island count built on it,
-    # is vertex bookkeeping rather than shape until this runs ----
-    welded_verts_removed, welded_tris_removed = weld_vertices(me)
+    # Extraction health has to be read here. The strip below deliberately cuts
+    # a face subset out of what arrives as an all-but-closed surface, so every
+    # hole, island and non-manifold edge downstream is ours; only the mesh as
+    # imported still carries a signal about what the network produced.
+    raw_health = {f"raw_{k}": v for k, v in geometry_health(me).items()}
 
     areas = np.empty(len(me.polygons))
     me.polygons.foreach_get("area", areas)
@@ -500,8 +473,6 @@ def main():
     co = vert_coords(me)
     stats = {
         "raw_tris": raw_tris,
-        "welded_verts_removed": welded_verts_removed,
-        "welded_tris_removed": welded_tris_removed,
         "interior_tris_removed": interior_tris_removed,
         "fragments_removed": fragments_removed,
         "fragment_tris_removed": fragment_tris,
@@ -515,6 +486,7 @@ def main():
         "hires_glb": str(hires),
         "clean_glb": str(clean),
     }
+    stats.update(raw_health)
     stats.update(geometry_health(me))
     if symmetrize_stats is not None:
         stats["symmetrize"] = symmetrize_stats
