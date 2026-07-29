@@ -502,6 +502,10 @@ def main():
             "elapsed_s": {
                 **shared_elapsed_s,
                 "geometry": t_geometry - t_cand,
+                # A sub-interval of "geometry" above, not a sibling of it:
+                # both samplers run before extraction starts, so these two
+                # must never be summed.
+                "extraction": extractor.last_extract_s,
                 "export": t_cand_end - t_geometry,
                 "candidate": t_cand_end - t_cand,
             },
