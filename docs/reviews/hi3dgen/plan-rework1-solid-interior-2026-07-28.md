@@ -201,8 +201,8 @@ regression instrument, then the geometry-health stats flip to fail-loud gates.
 - **Path:** Land the change on `vordar-fixes` as one commit. Test: run
   `C:\tools\Hi3DGen\venv\Scripts\python.exe tests/test_interior_fill.py` from
   the fork root — all four step-1 cases must pass, and the specific
-  assertions that flip are sphere volume ratio (≈0.14 red → within
-  `[0.95, 1.10]` green) and sphere inward-facing fraction (≈0.55 red →
+  assertions that flip are sphere volume ratio (`0.1712` un-filled red → within
+  `[0.95, 1.10]` green) and sphere inward-facing fraction (`0.4970` red →
   `< 0.01` green), while vessel stays `< 1.30` (mouth not sealed) and plate
   stacks stay `torch.equal`. Then `git branch -D fix-hollow-shell-extraction
   solidify-shell-interior` after confirming
