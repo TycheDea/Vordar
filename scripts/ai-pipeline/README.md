@@ -830,8 +830,10 @@ stick figure) is not kept in the tree; only its frozen output ships.
 `prop_hi3dgen.py` and `prop_cleanup.py` (above) run unchanged on
 characters; the concept stage substitutes `char_concept.json`
 (openpose-conditioned) for `prop_concept.json`. Cleanup targets `--height
-1.744 --tri-budget 30000` (double the prop budget; no VQ triangle clause
-exists, chosen under the 16 MB / 64-joint caps).
+1.744 --tri-budget 30000` (no VQ triangle clause exists, chosen under the
+16 MB / 64-joint caps). Characters carry no registry `tri_budget` — the
+per-asset budgets props get are measured per prop, and no character has
+been measured.
 
 `prop_texture.py`'s per-view MaterialAnything decomposition (above)
 estimates only the delit albedo per texel from the generated views — the
