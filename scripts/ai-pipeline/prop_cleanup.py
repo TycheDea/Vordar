@@ -80,9 +80,6 @@ CONTACT_BAND_FRACTION = 0.025
 # under the normal bake's margin=8 dilation.
 UV_ATLAS_RESOLUTION = 1024
 UV_ATLAS_PADDING_PX = 4
-# Rays cast through the bbox to measure two_crossing_ray_fraction: enough
-# samples to average out the sampling noise a single ray direction carries.
-RAY_SAMPLE_COUNT = 200
 # Ray origin offset along the face normal, as a fraction of the mesh's
 # bbox diagonal -- clears the originating face without biasing the test
 # toward nearby parallel geometry.
@@ -187,10 +184,7 @@ def geometry_health(me):
     non-manifold or open topology; component_count is the number of
     vertex-connectivity islands; boundary_edges_per_face normalizes the
     hole count by the size of the main island, so a lace-like shell
-    separates from a merely large one; two_crossing_ray_fraction is the
-    share of random rays through the bbox whose face-crossing count is 2,
-    the signature a closed surface gives any ray that enters and exits
-    once."""
+    separates from a merely large one."""
     bm = bmesh.new()
     bm.from_mesh(me)
     bm.verts.ensure_lookup_table()
@@ -203,31 +197,6 @@ def geometry_health(me):
     main = {v.index for v in islands[0]}
     main_faces = sum(1 for f in bm.faces if f.verts[0].index in main)
 
-    bvh = BVHTree.FromBMesh(bm)
-    co = np.array([v.co for v in bm.verts])
-    bbox_min, bbox_max = co.min(axis=0), co.max(axis=0)
-    diag = float(np.linalg.norm(bbox_max - bbox_min))
-    margin = 0.25 * diag
-    rng = np.random.default_rng(0)
-    two_crossings = 0
-    for _ in range(RAY_SAMPLE_COUNT):
-        origin = Vector(rng.uniform(bbox_min - margin, bbox_max + margin))
-        target = Vector(rng.uniform(bbox_min, bbox_max))
-        direction = (target - origin).normalized()
-        crossings = 0
-        o, remaining = origin, diag + 2 * margin
-        for _ in range(64):
-            hit, _n, _i, dist = bvh.ray_cast(o, direction, remaining)
-            if hit is None:
-                break
-            crossings += 1
-            remaining -= dist + 1e-6
-            o = hit + direction * 1e-6
-            if remaining <= 0:
-                break
-        if crossings == 2:
-            two_crossings += 1
-
     bm.free()
     return {
         "is_watertight": boundary_edge_count == 0,
@@ -235,7 +204,6 @@ def geometry_health(me):
         "euler_number": euler_number,
         "component_count": len(islands),
         "boundary_edges_per_face": round(boundary_edge_count / main_faces, 4),
-        "two_crossing_ray_fraction": round(two_crossings / RAY_SAMPLE_COUNT, 4),
     }
 
 
