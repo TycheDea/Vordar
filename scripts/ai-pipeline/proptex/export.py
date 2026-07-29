@@ -31,13 +31,14 @@ BAKE_NORMAL_SPACE = "TANGENT"
 BAKE_CAGE_EXTRUSION_M = 0.01
 # How far past the cage a bake ray may travel to find the hires surface,
 # as a fraction of the prop's own bbox diagonal. It has to be relative:
-# every prop is decimated to the same triangle budget, so clean-to-hires
-# deviation scales with the prop, and p99.9 measures 0.00057 of the
-# diagonal on the candelabra against 0.00359 on the 12 m cypress -- a
-# span no single metre bound covers. 0.006 clears the worst of those by
-# 1.6x. Overshoot cannot corrupt a texel: Cycles takes the first hit, so
-# extra length only ever turns a miss into a hit.
-BAKE_RAY_DIAG_FRACTION = 0.006
+# each prop's per-asset triangle budget holds its clean-to-hires deviation
+# to a fixed fraction of its own diagonal, so the bound that covers that
+# deviation is a fraction too, never a metre count. p99.9 of it measures
+# 0.00161 of the diagonal on the candelabra against 0.00250 on the 12 m
+# cypress; 0.004 clears the worst by 1.6x. Overshoot cannot corrupt a
+# texel: Cycles takes the first hit, so extra length only ever turns a
+# miss into a hit.
+BAKE_RAY_DIAG_FRACTION = 0.004
 BAKE_MARGIN_PX = 8
 
 

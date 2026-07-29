@@ -19,7 +19,7 @@ _ASSETS_PATH = _REPO_ROOT / "content" / "models" / "assets.json"
 _DEFAULT_AZIMUTHS = [0, 90, 180, 270]
 _ASSET_FIELDS = ("kind", "surface_class")
 _CLASS_FIELDS = ("metallic", "roughness", "albedo_source", "detail")
-_GENERATED_FIELDS = ("subject", "texture_size", "view_res", "height_m")
+_GENERATED_FIELDS = ("subject", "texture_size", "view_res", "height_m", "tri_budget")
 
 
 class RegistryError(Exception):
@@ -59,6 +59,7 @@ class GeneratedContract(Contract):
     texture_size: int
     view_res: int
     height_m: float
+    tri_budget: int
     azimuths: List[int]
 
 
@@ -93,5 +94,6 @@ def resolve(name: str) -> Union[Contract, GeneratedContract]:
         texture_size=asset["texture_size"],
         view_res=asset["view_res"],
         height_m=asset["height_m"],
+        tri_budget=asset["tri_budget"],
         azimuths=list(asset.get("azimuths", _DEFAULT_AZIMUTHS)),
     )

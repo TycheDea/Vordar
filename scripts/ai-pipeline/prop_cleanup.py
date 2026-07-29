@@ -34,7 +34,7 @@
 # decision-gate data, never silently patched.
 #
 # Usage: blender --background --python prop_cleanup.py -- \
-#            <raw.glb> <clean.glb> --height M --asset NAME [--tri-budget N]
+#            <raw.glb> <clean.glb> --height M --asset NAME --tri-budget N
 
 import argparse
 import json
@@ -353,7 +353,12 @@ def main():
                         help="Registered asset name (content/models/assets.json); "
                              "resolves the azimuths the interior-face strip's "
                              "candidate view set is built from")
-    parser.add_argument("--tri-budget", type=int, default=15000)
+    parser.add_argument("--tri-budget", type=int, required=True,
+                        help="Triangles the decimation targets. No default: the "
+                             "count needed to hold a given clean-to-hires deviation "
+                             "tracks geometric complexity, which neither the prop's "
+                             "size nor its surface area predicts, so it is a "
+                             "per-asset measurement (content/models/assets.json)")
     parser.add_argument("--symmetrize", action="store_true")
     parser.add_argument("--symmetrize-keep", choices=["+x", "-x"], default="+x",
                         help="Half to mirror, in the plane-aligned frame "
