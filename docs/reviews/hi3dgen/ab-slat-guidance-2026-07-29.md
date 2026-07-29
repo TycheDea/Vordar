@@ -134,3 +134,26 @@ touched, per the finding's gate.
 - Deltas reported against the pre-registered floor table; sub-floor moves
   (`body_count`, `boundary_edge_count`, and `main_euler_number` where under
   20) are labelled unresolved, not adjudicated as trend.
+
+## Adopted values
+
+Rework 4 closed with all five knobs confirmed kept at their current defaults.
+All four sweeps (extraction-level, occupancy, ss-guidance, slat-guidance)
+recommended no changes; no confirmation runs were spent because no default moved.
+
+| knob | value | reason |
+| --- | --- | --- |
+| `iso_level` | 0.0 | ab-extraction-level: ±0.03 range yields no improvement to any topology metric; `strip_interior_faces` closes holes one stage later, so open manifolds are accepted. |
+| `sdf_bias` | -1/256 | ab-extraction-level: only arm closing all three subjects (`sdf_bias = 0.0`) was declined for the same reason (watertight output not needed downstream). |
+| `occupancy_threshold` | 0.0 | ab-occupancy: live knob (±60 facets clears floor by 5×) but no arm dominates; both directions trade off topology vs surface thickness. |
+| `ss_cfg_interval` | [0.5, 1.0] | ab-ss-guidance: live knob but every arm crossing a signal threshold is a regression; incumbent value kept. |
+| `ss_rescale_t` | 3.0 | ab-ss-guidance: live knob but every arm crossing a signal threshold is a regression; incumbent value kept. |
+| `slat_cfg_interval` | [0.5, 1.0] | ab-slat-guidance (this report): live knob measured to redraw fine surface detail; production value is a visual quality call, not a correctness one. Incumbent kept pending render-sheet review. |
+| `slat_rescale_t` | 3.0 | ab-slat-guidance (this report): live knob measured to redraw fine surface detail; production value is a visual quality call, not a correctness one. Incumbent kept pending render-sheet review. |
+
+One decision remains open: occupancy and SLAT guidance are measurably live
+knobs, and which arm looks best on each is a human judgment against the render
+sheets under `target/knob-sweep/occupancy/<subject>/` and
+`target/knob-sweep/slat-guidance/<subject>/`. Adopting a new arm later requires
+only changing the default and running its confirmation set — a mechanical
+defaults-only change that does not revisit rework 4's sweep results.

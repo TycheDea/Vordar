@@ -22,7 +22,7 @@ Queue (single cross-file sequence, mirrored from the fixes file):
 > ~~finding 17~~ → ~~finding 15~~ → ~~finding 16~~ → ~~rework 1~~ →
 > ~~finding 18~~ → ~~finding 19~~ → ~~finding 20~~ → ~~finding 21~~ →
 > ~~finding 22~~ → ~~finding 23~~ → ~~finding 24~~ →
-> rework 2 → ~~rework 3~~ → rework 4 → ~~rework 18~~.**
+> rework 2 → ~~rework 3~~ → ~~rework 4~~ → ~~rework 18~~.**
 
 The findings numbered in *this* file (10–17, 19) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here. Where the
