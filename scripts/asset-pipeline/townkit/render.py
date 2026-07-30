@@ -21,7 +21,12 @@ def _scene_bbox():
     return mn, mx
 
 
-def render_preview(out_path, resolution=(640, 480), samples=24):
+def render_preview(out_path, resolution=(640, 480), samples=24, az_deg=35.0, el_deg=28.0, dist_scale=2.4):
+    """Render one angle. Defaults are the original three-quarter view;
+    pass a low `el_deg` (and a tighter `dist_scale`) for a street-level shot
+    that looks INTO gable ends and along wall tops rather than down onto
+    roofs, so open gables and thin exposed rims can't hide behind the
+    three-quarter view's favourable angle."""
     mn, mx = _scene_bbox()
     center = (mn + mx) / 2.0
     radius = max((mx - mn).length / 2.0, 0.5)
@@ -34,8 +39,8 @@ def render_preview(out_path, resolution=(640, 480), samples=24):
     cam_data.lens = 35
     cam_obj = bpy.data.objects.new("preview_cam", cam_data)
     bpy.context.collection.objects.link(cam_obj)
-    dist = radius * 2.4
-    az, el = math.radians(35.0), math.radians(28.0)
+    dist = radius * dist_scale
+    az, el = math.radians(az_deg), math.radians(el_deg)
     cam_obj.location = center + Vector((
         dist * math.cos(el) * math.cos(az),
         dist * math.cos(el) * math.sin(az),
@@ -74,4 +79,9 @@ def render_preview(out_path, resolution=(640, 480), samples=24):
     pixels = list(img.pixels)
     mean = sum(pixels) / len(pixels) if pixels else 0.0
     bpy.data.images.remove(img)
+
+    # Cleanup so a second render_preview call on the same scene (the
+    # street-level angle) doesn't accumulate a second sun/camera.
+    for o in (cam_obj, sun_obj, empty):
+        bpy.data.objects.remove(o, do_unlink=True)
     return mean

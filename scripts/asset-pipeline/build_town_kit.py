@@ -112,6 +112,12 @@ def main():
         vreport = verifylib.verify_glb(glb_path)
         preview_path = preview_dir / f"{t}.png"
         mean_px = renderlib.render_preview(preview_path)
+        # Street-level angle: lower and closer, so it looks into gable ends
+        # and along wall tops rather than down onto roofs -- open gables and
+        # thin exposed rims can't hide behind the three-quarter view alone.
+        preview_path_street = preview_dir / f"{t}_street.png"
+        mean_px_street = renderlib.render_preview(preview_path_street, az_deg=110.0, el_deg=8.0,
+                                                   dist_scale=2.0)
 
         chapel_checks = assert_chapel_dims(dims) if t == "chapel" else None
 
@@ -123,6 +129,8 @@ def main():
             "verify": vreport,
             "preview_mean": mean_px,
             "preview_path": str(preview_path),
+            "preview_mean_street": mean_px_street,
+            "preview_path_street": str(preview_path_street),
             "dims": dims,
             "chapel_checks": chapel_checks,
         }
@@ -131,7 +139,9 @@ def main():
               f"materials_ok={not vreport['bad_material_names']} "
               f"uv_ok={not vreport['missing_uv']} loose_v={vreport['loose_verts']} "
               f"loose_e={vreport['loose_edges']} boundary_e={vreport['boundary_edges']} "
-              f"preview_mean={mean_px:.4f}")
+              f"normals_faults={len(vreport['normals_faults'])} "
+              f"joint_gaps_bad={sum(1 for g in vreport['joint_gaps'] if not g['ok'])} "
+              f"preview_mean={mean_px:.4f} preview_mean_street={mean_px_street:.4f}")
 
     summary_path = out_dir / "build_report.json"
     with open(summary_path, "w") as f:

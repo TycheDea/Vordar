@@ -13,6 +13,7 @@ import math
 import random
 
 import bpy
+from mathutils import Matrix
 
 from . import geo
 
@@ -132,10 +133,12 @@ def build_casa_shell(name, mats, width, depth, wall_height, pitch_deg,
     objs.extend(deck)
     objs.extend(tiles)
 
-    # gable-end infill above the eave line on the two facades running along X
-    # is already covered by the front/back walls reaching wall_height; the
-    # triangular gap under the sloped deck is small at this pitch/width and
-    # is left open (unseen from the street-facing camera this kit targets).
+    # gable-end infill: the left/right walls (perpendicular to the ridge)
+    # only reach the eave line, so close the triangular attic void above
+    # them up to the ridge on both ends.
+    for gx in (-width / 2.0, width / 2.0):
+        objs.append(geo.gable_infill(f"{name}_gable_{'left' if gx < 0 else 'right'}",
+                                      gx, wall_thickness, depth, wall_height, ridge_z, enc))
 
     return objs, {"width": width, "depth": depth, "wall_height": wall_height, "ridge_height": ridge_z}
 
@@ -211,14 +214,26 @@ def build_casa_two_story(mats):
                                           pitch, mats["terracotta_tile"], mats["terracotta_tile"])
     objs.extend(deck)
     objs.extend(tiles)
+    for gx in (-width / 2.0, width / 2.0):
+        objs.append(geo.gable_infill(f"{name}_gable_{'left' if gx < 0 else 'right'}",
+                                      gx, WALL_THICKNESS, depth, h1 + h2, ridge_z, enc))
     return objs, {"width": width, "depth": depth, "wall_height": h1 + h2, "ridge_height": ridge_z}
 
 
+def _is_shell_name(name):
+    """Structural shell pieces (walls, opening reveals, roof deck, gable
+    ends) vs. decorative detail (tiles, quoins, door/window fills) -- only
+    the shell participates in casa_corner's footprint/roof boolean union."""
+    return any(tag in name for tag in ("_wall", "_sill", "_head", "_roof_deck_", "_gable_"))
+
+
 def build_casa_corner(mats):
-    """L-footprint corner casa: a main block plus a perpendicular wing,
-    footprints overlapping by one wall thickness at the inner corner so the
-    exterior silhouette reads sealed (interior of the L-joint is unmodelled,
-    matching the exterior-shell-only scope for casas)."""
+    """L-footprint corner casa: a main block plus a wing rotated 90 degrees
+    about its own centre so its ridge runs perpendicular to the main
+    block's, then positioned to share a full wall-thickness seam along one
+    side. The two shells are joined and boolean-unioned into a single
+    continuous mesh so the roofs meet in a real valley intersection and the
+    walls read as one sealed footprint, not two boxes touching at a corner."""
     name = "casa_corner"
     main_objs, main_dims = build_casa_shell(
         f"{name}_main", mats, width=6.0, depth=6.0, wall_height=4.0, pitch_deg=28.0,
@@ -228,12 +243,49 @@ def build_casa_corner(mats):
         f"{name}_wing", mats, width=4.0, depth=4.5, wall_height=3.8, pitch_deg=28.0,
         front_openings=[{"kind": "window", "offset": 0.0, "width": 0.9, "height": 1.1, "sill": 1.2}],
     )
-    dx = 6.0 / 2.0 + 4.0 / 2.0 - WALL_THICKNESS
-    dy = 6.0 / 2.0 + 4.5 / 2.0 - WALL_THICKNESS
+    # Rotating -90 deg about Z (about the wing's own origin, before
+    # translating) swaps its footprint to 4.5 x 4.0 and turns its ridge to
+    # run along world Y -- perpendicular to main's, the precondition for a
+    # real valley. The offset then shares a full wall thickness with main's
+    # right side, over a 4 m band, rather than a diagonal corner touch.
+    dx, dy = 4.8, 1.0
     for o in wing_objs:
-        o.location.x += dx
-        o.location.y += dy
-    objs = main_objs + wing_objs
+        o.rotation_euler.z = -math.pi / 2.0
+        o.location.x = dx
+        o.location.y = dy
+
+    main_shell = [o for o in main_objs if _is_shell_name(o.name)]
+    main_detail = [o for o in main_objs if not _is_shell_name(o.name)]
+    wing_shell = [o for o in wing_objs if _is_shell_name(o.name)]
+    wing_detail = [o for o in wing_objs if not _is_shell_name(o.name)]
+
+    view_layer = bpy.context.view_layer
+
+    def join(objs, joined_name):
+        for o in bpy.context.selected_objects:
+            o.select_set(False)
+        for o in objs:
+            o.select_set(True)
+        view_layer.objects.active = objs[0]
+        bpy.ops.object.join()
+        merged = view_layer.objects.active
+        merged.name = joined_name
+        merged.data.name = joined_name
+        merged.select_set(False)
+        return merged
+
+    main_merged = join(main_shell, f"{name}_main_shell")
+    wing_merged = join(wing_shell, f"{name}_wing_shell")
+
+    mod = main_merged.modifiers.new("valley_union", type="BOOLEAN")
+    mod.operation = "UNION"
+    mod.solver = "EXACT"
+    mod.object = wing_merged
+    view_layer.objects.active = main_merged
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(wing_merged, do_unlink=True)
+
+    objs = [main_merged] + main_detail + wing_detail
     return objs, {"main": main_dims, "wing": wing_dims, "offset": (dx, dy)}
 
 
@@ -275,8 +327,24 @@ def build_gate_arch(mats):
     objs.extend(wedges)
     peak_z = center_z + r
     wall_top = peak_z + 0.4
-    objs.append(geo.make_box(f"{name}_spandrel", (0.0, 0.0, (peak_z + wall_top) / 2.0),
-                              (wall_length, thickness, wall_top - peak_z), lime, bevel=0.02))
+
+    # The wall above the springing spans the full face; the arch's own void
+    # is then carved out of it with a true cylinder so it wraps flush around
+    # the voussoir ring instead of floating above it as a disconnected flat
+    # slab, with the coping bearing on a continuous surface.
+    head = geo.make_box(f"{name}_head", (0.0, 0.0, (springline + wall_top) / 2.0),
+                         (wall_length, thickness, wall_top - springline), lime)
+    bore = geo.make_cylinder(f"{name}_bore_tmp", (0.0, 0.0, center_z), r - 0.02, thickness * 2.0,
+                              None, segments=24, rotation=Matrix.Rotation(math.pi / 2.0, 3, "X"))
+    mod = head.modifiers.new("arch_bore", type="BOOLEAN")
+    mod.operation = "DIFFERENCE"
+    mod.solver = "EXACT"
+    mod.object = bore
+    bpy.context.view_layer.objects.active = head
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(bore, do_unlink=True)
+    objs.append(head)
+
     objs.append(geo.make_box(f"{name}_coping", (0.0, 0.0, wall_top + 0.075),
                               (wall_length + 0.1, thickness + 0.2, 0.15), lime, bevel=0.02))
     return objs, {"wall_length": wall_length, "opening_width": opening_width,
@@ -287,18 +355,23 @@ def build_well_basin(mats):
     name = "well_basin"
     radius = 1.25
     basin_h = 0.9
+    shaft_radius = radius * 0.55
+    shaft_depth = 2.0
     lime = mats["limestone_dressed"]
     oak = mats["oak_dark"]
-    objs = [geo.make_octagon_prism(f"{name}_basin", (0.0, 0.0, 0.0), radius, basin_h, lime, bevel=0.03)]
+    objs = [geo.make_well_shaft(f"{name}_basin", (0.0, 0.0, 0.0), radius, basin_h,
+                                 shaft_radius, shaft_depth, lime)]
     post_h = 1.8
     post_positions = [(radius * 0.75, 0.0), (-radius * 0.75, 0.0)]
     for i, (px, py) in enumerate(post_positions):
         objs.append(geo.make_box(f"{name}_post{i}", (px, py, basin_h + post_h / 2.0),
                                   (0.16, 0.16, post_h), oak, bevel=0.01))
+    # centered over the shaft (x=0), matching the beam's own midpoint
     beam_len = 2.0 * post_positions[0][0]
     objs.append(geo.make_box(f"{name}_beam", (0.0, 0.0, basin_h + post_h + 0.08),
                               (beam_len + 0.2, 0.16, 0.16), oak, bevel=0.01))
-    return objs, {"radius": radius, "basin_height": basin_h, "post_height": post_h}
+    return objs, {"radius": radius, "basin_height": basin_h, "post_height": post_h,
+                  "shaft_radius": shaft_radius, "shaft_depth": shaft_depth}
 
 
 def build_reja_set(mats):
@@ -320,6 +393,10 @@ CHAPEL_WALL_THICKNESS = 0.6
 CHAPEL_SPRINGLINE = 7.5
 CHAPEL_VAULT_RISE = 3.0
 CHAPEL_DOOR = {"width": 2.4, "height": 3.2}
+# masonry left exposed (unlined) at every wall top, so the collapsed vault's
+# rim always shows the wall's real ~0.6 m thickness rather than the thin
+# (0.06 m) interior plaster liner
+CHAPEL_RIM_EXPOSED = 0.3
 
 
 def build_chapel(mats):
@@ -338,10 +415,27 @@ def build_chapel(mats):
         cy = sign * (half_w + t / 2.0)
         objs.extend(geo.wall_with_openings(f"{name}_side_{sign}", (0.0, cy), side_wall_len, t,
                                             springline, "x", lime, openings=[]))
+    # Polygonal apse closing the west end (under the intact half of the
+    # vault): a fan of flat wall segments swept through half_w around the
+    # nave's own west corners, so it attaches with no gap, capped by a
+    # shallow conical roof.
+    apse_center = (-half_l, 0.0)
+    n_apse_sides = 5
+    apse_thetas = [math.pi / 2.0 + i * (math.pi / n_apse_sides) for i in range(n_apse_sides + 1)]
+    apse_pts = [(apse_center[0] + half_w * math.cos(th), apse_center[1] + half_w * math.sin(th))
+                for th in apse_thetas]
+    for i in range(n_apse_sides):
+        p0, p1 = apse_pts[i], apse_pts[i + 1]
+        seg_len = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+        ang = math.atan2(p1[1] - p0[1], p1[0] - p0[0])
+        mid = ((p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0, springline / 2.0)
+        objs.append(geo.make_box(f"{name}_apse_wall{i}", mid, (seg_len, t, springline), lime,
+                                  rotation=Matrix.Rotation(ang, 3, "Z")))
+    objs.append(geo.cone_cap(f"{name}_apse_cap", apse_center, half_w + t / 2.0, springline,
+                              springline + 1.0, lime, apse_thetas[0], apse_thetas[-1],
+                              n_sides=n_apse_sides))
+
     apse_len = CHAPEL_NAVE_WIDTH + t
-    objs.extend(geo.wall_with_openings(f"{name}_apse", (-half_l - t / 2.0, 0.0), apse_len, t,
-                                        springline, "y", lime,
-                                        openings=[]))
     east_cx = half_l + t / 2.0
     east_objs = geo.wall_with_openings(f"{name}_east", (east_cx, 0.0), apse_len, t, springline,
                                         "y", lime, openings=[
@@ -358,14 +452,16 @@ def build_chapel(mats):
         objs.extend(geo.wall_with_openings(f"{name}_liner_lo_{sign}", (0.0, y_liner),
                                             CHAPEL_NAVE_LENGTH, liner_t, 2.0, "x", lime, openings=[]))
         objs.extend(geo.wall_with_openings(f"{name}_liner_hi_{sign}", (0.0, y_liner),
-                                            CHAPEL_NAVE_LENGTH, liner_t, springline - 2.0, "x",
+                                            CHAPEL_NAVE_LENGTH, liner_t,
+                                            springline - 2.0 - CHAPEL_RIM_EXPOSED, "x",
                                             plaster, openings=[], z0=2.0))
     apse_inner_x = -half_l
     x_liner = apse_inner_x + liner_t / 2.0
     objs.extend(geo.wall_with_openings(f"{name}_liner_lo_apse", (x_liner, 0.0), CHAPEL_NAVE_WIDTH,
                                         liner_t, 2.0, "y", lime, openings=[]))
     objs.extend(geo.wall_with_openings(f"{name}_liner_hi_apse", (x_liner, 0.0), CHAPEL_NAVE_WIDTH,
-                                        liner_t, springline - 2.0, "y", plaster, openings=[], z0=2.0))
+                                        liner_t, springline - 2.0 - CHAPEL_RIM_EXPOSED, "y", plaster,
+                                        openings=[], z0=2.0))
 
     wedges, r, center_z, theta0 = geo.barrel_shell(f"{name}_vault", 0.0, (-half_l, 0.0), springline,
                                                     half_w, CHAPEL_VAULT_RISE, 0.4, lime,
@@ -373,7 +469,10 @@ def build_chapel(mats):
     objs.extend(wedges)
     peak_z = center_z + r
 
-    lip_wedges, _, _, _ = geo.barrel_shell(f"{name}_lip", 0.0, (-0.25, 0.25), springline, half_w,
+    # Flush against the vault's own cut end (x=0) and extending only into the
+    # collapsed half, so the ragged rim doesn't interpenetrate the intact
+    # vault's own solid wedges.
+    lip_wedges, _, _, _ = geo.barrel_shell(f"{name}_lip", 0.0, (0.0, 0.5), springline, half_w,
                                             CHAPEL_VAULT_RISE, 0.4, lime, n_wedges=14,
                                             sweep_axis="y", radial_jitter=0.05, seed=3)
     objs.extend(lip_wedges)
