@@ -16,7 +16,17 @@ use wgpu::{BindGroupLayout, Device, TextureFormat};
 /// `ssao_darkens_box_ground_contact_crease` offscreen test) — 3.0 keeps that
 /// near-field band several AO-texels wide.
 pub(crate) const SSAO_RADIUS: f32 = 3.0;
-const SSAO_BIAS: f32 = 0.02;
+/// Depth-comparison slack (world-space metres) `ssao_frag` allows before
+/// counting a kernel sample as occluded. A flat surface's own tangent-plane
+/// kernel samples should compare as unoccluded, but `ssao.wgsl`'s
+/// screen-space-derivative normal and depth-reconstructed sample position
+/// both carry enough numerical noise, at a radius this wide (see
+/// `SSAO_RADIUS`), that a bias much below 0.2 lets that noise register as
+/// real occlusion — self-shadowing "acne" that reads as a fine dirt-like
+/// speckle across large, close, flat surfaces (a building wall) once the AO
+/// darkens IBL ambient, while staying invisible on small props whose faces
+/// cover too few AO texels to show the pattern.
+const SSAO_BIAS: f32 = 0.2;
 
 /// Depth-only pipeline variants of the three geometry pipelines, rendering
 /// into `SsaoTargets`' full-res depth from the main camera (group 0 is the
