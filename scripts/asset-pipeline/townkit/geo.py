@@ -67,6 +67,12 @@ def make_halfcyl(name, center, radius, length, material, rotation=None, segments
         a0, a1 = ring[i]
         b0, b1 = ring[i + 1]
         bm.faces.new((a0, a1, b1, b0))
+    # Cap both open ends of the flute: the curved surface alone leaves the
+    # tube open there, and at the eave -- where the end faces outward into
+    # open sky rather than into the neighbouring roof -- the unlit inside
+    # face of that open end reads as a dark sawtooth tooth (G2 D3).
+    bm.faces.new([pair[0] for pair in reversed(ring)])
+    bm.faces.new([pair[1] for pair in ring])
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
     verts = bm.verts[:]
     rot = rotation.to_4x4() if rotation is not None else Matrix.Identity(4)
@@ -217,6 +223,39 @@ def wall_with_openings(name, center_xy, length, thickness, height, axis,
     return objs
 
 
+def _roof_deck_panel(name, panel_center, length, run, thickness, rot, material):
+    """A flat roof-slope deck panel with an explicit per-plane UV baked in
+    directly, instead of the generic box projection every other object gets
+    (materials.project_uv's cube_project, which picks one of 6 world-axis
+    directions per face -- fine for axis-aligned walls, but it can't know a
+    sloped face's own eave-to-ridge direction, so it maps different slopes
+    at different scales/orientations and leaves a scale+orientation break
+    at the valley where two slopes meet, per G2 D1/D2/D5). U (still local X
+    before `rot` is applied) is the ridge-line course axis; V (local Y) is
+    the eave-to-ridge slope axis -- exactly the panel's own two in-plane
+    directions, since the deck is flat and `rot` is a rigid rotation that
+    doesn't distort them. One absolute world scale (materials.TEXEL_SCALE_M)
+    everywhere makes every roof plane -- and both sides of the valley --
+    match the kit's canonical 6.4 mm/texel density."""
+    bm = bmesh.new()
+    ret = bmesh.ops.create_cube(bm, size=1.0)
+    verts = ret["verts"]
+    scale = Matrix.Diagonal((length, run, thickness, 1.0))
+    bmesh.ops.transform(bm, matrix=scale, verts=verts)
+    uv_layer = bm.loops.layers.uv.new("UVMap")
+    for f in bm.faces:
+        for loop in f.loops:
+            co = loop.vert.co
+            loop[uv_layer].uv = (co.x / matlib.TEXEL_SCALE_M, co.y / matlib.TEXEL_SCALE_M)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    rot4 = rot.to_4x4() if rot is not None else Matrix.Identity(4)
+    xform = Matrix.Translation(Vector(panel_center)) @ rot4
+    bmesh.ops.transform(bm, matrix=xform, verts=bm.verts[:])
+    obj = _finalize(bm, name, material)
+    obj["vordar_uv_final"] = True
+    return obj
+
+
 def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
                deck_material, tile_material, tile_radius=0.15,
                deck_thickness=0.06, tile_overlap=1.18, gable_axis="x",
@@ -246,8 +285,8 @@ def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
         panel_center = (cx, (outer_y + cy) / 2.0, (ridge_z + outer_z) / 2.0)
         theta = math.atan2(ext_rise, -sign * ext_half_depth)
         rot = Matrix.Rotation(theta, 3, "X")
-        deck = make_box(f"{name}_deck_{'a' if sign > 0 else 'b'}", panel_center,
-                         (length, run, deck_thickness), deck_material, rotation=rot)
+        deck = _roof_deck_panel(f"{name}_deck_{'a' if sign > 0 else 'b'}", panel_center,
+                                 length, run, deck_thickness, rot, deck_material)
         deck_objs.append(deck)
 
         tile_pitch = tile_radius * 2.0 / tile_overlap

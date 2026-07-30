@@ -103,7 +103,13 @@ def main():
         mats, sources = matlib.build_materials(args.materials_dir)
         objs, dims = buildings.BUILDERS[t](mats)
         for o in objs:
-            matlib.project_uv(o)
+            # Roof deck panels (geo._roof_deck_panel) and any shell already
+            # finalized pre-union (buildings.build_casa_shell / _casa_corner)
+            # carry their own correct UV -- a blanket re-project here would
+            # blow away the deck's per-slope planar mapping with the generic
+            # box projection it was built specifically to avoid (G2 D1/D2/D5).
+            if not o.get("vordar_uv_final"):
+                matlib.project_uv(o)
 
         glb_path = out_dir / f"{t}.glb"
         export_selected(objs, glb_path)

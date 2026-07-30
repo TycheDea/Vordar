@@ -16,6 +16,7 @@ import bpy
 from mathutils import Matrix
 
 from . import geo
+from . import materials as matlib
 
 
 WALL_THICKNESS = 0.45
@@ -27,15 +28,29 @@ assert WALL_THICKNESS >= REVEAL_MIN
 
 
 def _quoins(name, corner_xy, height, material, z0=0.0, block=0.55, gap=0.03):
+    """Corner quoins as an ashlar alternating-course stack: real dressed
+    quoins alternate long/short face length course to course and never
+    repeat an identical block height -- a uniform block size read as an
+    excluded, machine-repeated brick (G2 D7/D8). Each block also gets its
+    own UV offset into the tile (materials.project_uv) so adjacent blocks
+    don't sample the same spot in the texture (same defect: one-block
+    texture repeat)."""
+    rng = random.Random(name)
     objs = []
     z = z0
     i = 0
     while z < z0 + height - 1e-6:
-        h = min(block, z0 + height - z) - gap
+        pitch = block * rng.uniform(0.75, 1.35)
+        h = min(pitch, z0 + height - z) - gap
         if h > 0.05:
-            objs.append(geo.make_box(f"{name}_q{i}", (corner_xy[0], corner_xy[1], z + h / 2.0),
-                                      (block, block, h), material, bevel=0.015))
-        z += block
+            long_x = i % 2 == 0
+            bx = block * (rng.uniform(1.15, 1.35) if long_x else rng.uniform(0.75, 0.9))
+            by = block * (rng.uniform(0.75, 0.9) if long_x else rng.uniform(1.15, 1.35))
+            obj = geo.make_box(f"{name}_q{i}", (corner_xy[0], corner_xy[1], z + h / 2.0),
+                                (bx, by, h), material, bevel=0.015)
+            obj["vordar_uv_offset"] = (rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0))
+            objs.append(obj)
+        z += pitch
         i += 1
     return objs
 
@@ -139,6 +154,20 @@ def build_casa_shell(name, mats, width, depth, wall_height, pitch_deg,
     for gx in (-width / 2.0, width / 2.0):
         objs.append(geo.gable_infill(f"{name}_gable_{'left' if gx < 0 else 'right'}",
                                       gx, wall_thickness, depth, wall_height, ridge_z, enc))
+
+    # Finalize UV now, before any caller joins/booleans these shell pieces
+    # together (casa_corner's valley union): the deck panels already carry
+    # their own explicit per-slope UV (geo._roof_deck_panel) and must not be
+    # re-projected, and giving every other shell piece its box-projected UV
+    # now means a later boolean only ever has to interpolate UV across a
+    # cut, never re-derive it. vordar_uv_final tells build_town_kit.py's
+    # own project_uv pass to leave these alone.
+    deck_ids = {id(o) for o in deck}
+    for o in objs:
+        if _is_shell_name(o.name):
+            if id(o) not in deck_ids:
+                matlib.project_uv(o)
+            o["vordar_uv_final"] = True
 
     return objs, {"width": width, "depth": depth, "wall_height": wall_height, "ridge_height": ridge_z}
 
@@ -262,17 +291,30 @@ def build_casa_corner(mats):
     view_layer = bpy.context.view_layer
 
     def join(objs, joined_name):
-        for o in bpy.context.selected_objects:
-            o.select_set(False)
-        for o in objs:
-            o.select_set(True)
-        view_layer.objects.active = objs[0]
-        bpy.ops.object.join()
-        merged = view_layer.objects.active
-        merged.name = joined_name
-        merged.data.name = joined_name
-        merged.select_set(False)
-        return merged
+        """Weld the shell's own touching pieces (walls, deck, gable infill)
+        into one real watertight solid via chained boolean UNIONs, not
+        bpy.ops.object.join(): a plain join only concatenates mesh data, so
+        pieces that merely touch along a shared face (e.g. a wall segment
+        flush against its neighbour) stay as two coincident faces still
+        present in the result rather than a welded single surface. That
+        leftover internal coincident geometry is exactly the degenerate
+        input that made the later main/wing valley union silently drop a
+        whole wall face at the corner (G2 D6) -- solidifying each shell
+        first means the valley union only ever sees two genuinely
+        watertight solids, which it merges cleanly."""
+        base = objs[0]
+        for other in objs[1:]:
+            mod = base.modifiers.new("shell_union", type="BOOLEAN")
+            mod.operation = "UNION"
+            mod.solver = "EXACT"
+            mod.object = other
+            view_layer.objects.active = base
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            bpy.data.objects.remove(other, do_unlink=True)
+        base.name = joined_name
+        base.data.name = joined_name
+        base.select_set(False)
+        return base
 
     main_merged = join(main_shell, f"{name}_main_shell")
     wing_merged = join(wing_shell, f"{name}_wing_shell")
@@ -284,6 +326,7 @@ def build_casa_corner(mats):
     view_layer.objects.active = main_merged
     bpy.ops.object.modifier_apply(modifier=mod.name)
     bpy.data.objects.remove(wing_merged, do_unlink=True)
+    main_merged["vordar_uv_final"] = True
 
     objs = [main_merged] + main_detail + wing_detail
     return objs, {"main": main_dims, "wing": wing_dims, "offset": (dx, dy)}

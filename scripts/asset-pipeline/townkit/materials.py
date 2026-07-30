@@ -151,7 +151,11 @@ def apply_material(obj, mat):
 
 def project_uv(obj, cube_size=TEXEL_SCALE_M):
     """Box-project the object's single UV layer at the derived physical
-    texel scale (see module docstring)."""
+    texel scale (see module docstring). If the object carries a
+    `vordar_uv_offset` extra (buildings._quoins: a distinct (du, dv) per
+    quoin block so adjacent blocks don't sample the same spot in the tile,
+    G2 D7/D8), it's added after the projection -- the texture wraps
+    (REPEAT), so this just shifts which part of the tile each block shows."""
     mesh = obj.data
     if not mesh.uv_layers:
         mesh.uv_layers.new(name="UVMap")
@@ -167,6 +171,14 @@ def project_uv(obj, cube_size=TEXEL_SCALE_M):
     bpy.ops.uv.cube_project(cube_size=cube_size, correct_aspect=True,
                              clip_to_bounds=False, scale_to_bounds=False)
     bpy.ops.object.mode_set(mode="OBJECT")
+
+    offset = obj.get("vordar_uv_offset")
+    if offset is not None:
+        du, dv = offset
+        for loop_uv in mesh.uv_layers.active.data:
+            loop_uv.uv.x += du
+            loop_uv.uv.y += dv
+
     obj.select_set(False)
     for o in prev_selected:
         o.select_set(True)
