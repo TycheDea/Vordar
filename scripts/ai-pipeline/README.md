@@ -220,14 +220,18 @@ its recorded sha256 matches each source file's current hash, and every
 listed `.dds` sidecar exists on disk.
 
 ```
-cargo run -p vordar-client --release --features offscreen --bin render_material -- <texture-dir> --out <dir> [--angles N] [--size WxH]
+cargo run -p vordar-client --release --features offscreen --bin render_material -- <texture-dir> --out <dir> [--angles N] [--size WxH] [--distance METERS]
 ```
 
 `--angles` default 4, `--size` default `512x512`. Requires `--features
 offscreen` (`vordar-client`'s own feature, forwarding to
 `engine-renderer/offscreen`; a plain `cargo build -p vordar-client` skips
 the bin entirely). Writes `frame_NN.png` per angle plus a stitched
-`contact_sheet.png` for vision review.
+`contact_sheet.png` for vision review. Lighting (sun/ambient/exposure/fog)
+is always the `start` zone's authored look (`content/zones/zones.ron`).
+`--distance` renders one frame at that exact metric distance from the
+surface instead of spinning the camera through `--angles` yaw steps — for
+comparing tiling readability at a fixed viewing distance.
 
 `content/textures/ground/cracked_earth/` is the committed A1 fixture built
 with this pipeline; its provenance row lives in
