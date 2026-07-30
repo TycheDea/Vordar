@@ -26,13 +26,33 @@ pub struct ZoneDef {
     pub visuals: ZoneVisuals,
 }
 
-/// Per-zone presentation: environment HDRI (IBL + sky), distance fog, ground
-/// material, scattered props. All optional with dusk defaults.
+/// Per-zone presentation: environment HDRI (IBL + sky), sun/ambient/exposure,
+/// distance fog, ground material, scattered props. All optional with dusk
+/// defaults.
 #[derive(Clone, serde::Deserialize)]
 pub struct ZoneVisuals {
     /// Radiance .hdr path; None = the shared dusk default.
     #[serde(default)]
     pub env: Option<String>,
+    /// Sun azimuth in degrees (`Camera::recompute_eye`'s XZ convention: 0 =
+    /// +X, increasing toward +Z). Only takes effect paired with
+    /// `sun_elevation_deg` — either alone falls back to the dusk default
+    /// direction matched to the shared HDRI's sun disc.
+    #[serde(default)]
+    pub sun_azimuth_deg: Option<f32>,
+    #[serde(default)]
+    pub sun_elevation_deg: Option<f32>,
+    /// Sun tint; multiplied by `sun_intensity` for the final light color.
+    #[serde(default = "default_sun_color")]
+    pub sun_color: Vec3,
+    #[serde(default = "default_sun_intensity")]
+    pub sun_intensity: f32,
+    /// IBL ambient scale (1.0 = the environment as authored).
+    #[serde(default = "default_ambient")]
+    pub ambient: f32,
+    /// Tonemap exposure (1.0 = neutral).
+    #[serde(default = "default_exposure")]
+    pub exposure: f32,
     #[serde(default = "default_fog_color")]
     pub fog_color: Vec3,
     #[serde(default = "default_fog_density")]
@@ -54,6 +74,12 @@ impl Default for ZoneVisuals {
     fn default() -> Self {
         Self {
             env:                None,
+            sun_azimuth_deg:    None,
+            sun_elevation_deg:  None,
+            sun_color:          default_sun_color(),
+            sun_intensity:      default_sun_intensity(),
+            ambient:            default_ambient(),
+            exposure:           default_exposure(),
             fog_color:          default_fog_color(),
             fog_density:        default_fog_density(),
             fog_height:         0.0,
@@ -102,6 +128,45 @@ fn default_ground_size() -> f32 {
 }
 fn default_prop_scale() -> f32 {
     1.0
+}
+
+/// Sun direction (points TOWARD the light), matched to the baked default
+/// HDRI's sun disc — the fallback whenever a zone authors no
+/// azimuth/elevation override.
+const DEFAULT_SUN_DIR: Vec3 = Vec3::new(0.11897, 0.13917, 0.98309);
+
+fn default_sun_color() -> Vec3 {
+    Vec3::new(1.5, 1.38, 1.2) // castilian_plateau_dusk_2k tint x the dusk key's intensity
+}
+fn default_sun_intensity() -> f32 {
+    1.0
+}
+fn default_ambient() -> f32 {
+    1.0
+}
+fn default_exposure() -> f32 {
+    1.0
+}
+
+/// Direction pointing toward a light source at `azimuth_deg`/`elevation_deg`
+/// — `Camera::recompute_eye`'s XZ convention (0° = +X, increasing toward +Z).
+fn sun_dir_from_angles(azimuth_deg: f32, elevation_deg: f32) -> Vec3 {
+    let (az, el) = (azimuth_deg.to_radians(), elevation_deg.to_radians());
+    Vec3::new(az.cos() * el.cos(), el.sin(), az.sin() * el.cos())
+}
+
+/// This zone's sun direction: the authored azimuth/elevation pair if both are
+/// set, else the dusk default matched to the shared HDRI.
+pub fn resolve_sun_dir(visuals: &ZoneVisuals) -> Vec3 {
+    match (visuals.sun_azimuth_deg, visuals.sun_elevation_deg) {
+        (Some(az), Some(el)) => sun_dir_from_angles(az, el),
+        _ => DEFAULT_SUN_DIR,
+    }
+}
+
+/// This zone's sun color: authored tint × intensity.
+pub fn resolve_sun_color(visuals: &ZoneVisuals) -> Vec3 {
+    visuals.sun_color * visuals.sun_intensity
 }
 
 #[derive(Clone, serde::Deserialize)]

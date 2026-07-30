@@ -68,6 +68,7 @@ winit           = { workspace = true }
 log             = { workspace = true }
 egui            = { workspace = true }
 ron             = { workspace = true }
+serde           = { workspace = true }
 getrandom       = { workspace = true }
 # Direct deps (not dev-only): the render_material bin needs wgpu::Color and
 # PNG encoding, and a [[bin]] target can't see dev-dependencies.

@@ -8,7 +8,7 @@
 // those are the evidence — plus one small index sheet; the sheet alone is
 // never sufficient to judge an asset. Mirrors turntable.rs/zone_review.rs's
 // offscreen-harness shape one crate over; lives in the client (not the
-// engine) because `dusk` needs presentation::{SUN_DIR, SUN_COLOR} and
+// engine) because `dusk` needs vordar_game::zones' sun resolver and
 // content/zones/zones.ron.
 
 use engine_renderer::anim::LocalTransform;
@@ -20,8 +20,8 @@ use image::RgbaImage;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use vordar_client::ground::load_ground_material;
-use vordar_client::presentation::{DETAIL_TEXTURE_DIR, SUN_COLOR, SUN_DIR};
-use vordar_game::zones::load_zones;
+use vordar_client::presentation::DETAIL_TEXTURE_DIR;
+use vordar_game::zones::{load_zones, resolve_sun_color, resolve_sun_dir, ZoneVisuals};
 
 const ZONES_PATH: &str = "content/zones/zones.ron";
 const HDRI_DUSK: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
@@ -266,7 +266,7 @@ fn clay_override(prims: &mut [PrimitiveData]) {
 /// Direction pointing toward a light source at `azimuth` (radians, matching
 /// `Camera::recompute_eye`'s XZ convention: 0 = +X, increasing toward +Z)
 /// and `elevation` above horizontal — the same "points toward the source"
-/// convention as `SUN_DIR`/`TestLight::direction`.
+/// convention as `TestLight::direction`.
 fn light_dir(azimuth: f32, elevation: f32) -> Vec3 {
     Vec3::new(azimuth.cos() * elevation.cos(), elevation.sin(), azimuth.sin() * elevation.cos())
 }
@@ -294,7 +294,10 @@ fn set_light_for(r: &mut OffscreenRenderer, lighting: Lighting, camera_yaw: f32)
             color:     Vec3::splat(2.0),
             ambient:   1.0,
         }),
-        Lighting::Dusk => r.set_light(TestLight { direction: SUN_DIR, color: SUN_COLOR, ambient: 1.0 }),
+        Lighting::Dusk => {
+            let visuals = ZoneVisuals::default();
+            r.set_light(TestLight { direction: resolve_sun_dir(&visuals), color: resolve_sun_color(&visuals), ambient: visuals.ambient });
+        }
     }
 }
 

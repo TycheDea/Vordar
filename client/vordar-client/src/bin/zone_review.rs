@@ -1,12 +1,18 @@
 // zone_review: headless offscreen ship-gate render for one zone's live prop
 // dressing (content/zones/zones.ron) — a wide establishing shot, mid shots
-// per proximity cluster, and one close-up per distinct prop model (with the
-// player model for scale), all under the zone's real HDRI/fog/sun. Built
-// because turntable-style renders (fixed full-prop framing, no player, no
+// per proximity cluster, one close-up per distinct prop model (with the
+// player model for scale), and an interior shot inside chapter03's chapel
+// graybox, all under the zone's real HDRI/fog/sun. Built because
+// turntable-style renders (fixed full-prop framing, no player, no
 // destination lighting) cleared five props that then failed the in-game
 // feel-check on exactly the axes this tool now captures — see
 // tasks/lessons/2026-07-23-review-in-engine-at-gameplay-framing.md. Mirrors
 // gear_render.rs/turntable.rs's offscreen-harness pattern one crate over.
+//
+// `--visuals-override <path.ron>` replaces the zone's authored lighting with
+// a hand-written RON file so candidate looks can be rendered without editing
+// zones.ron — see `LightingOverride` for the accepted shape (every field
+// optional; ground/fog/props/env stay as the zone authored them).
 
 use engine_renderer::anim::LocalTransform;
 use engine_renderer::mesh::{load_gltf_data, MeshData, PrimitiveData};
@@ -19,8 +25,8 @@ use std::path::Path;
 use std::process::exit;
 use vordar_client::chapter_geometry::load_chapter_prims;
 use vordar_client::ground::{generate_ground, height as ground_height, load_ground_material, GROUND_TOP_Y};
-use vordar_client::presentation::{DETAIL_TEXTURE_DIR, SUN_COLOR, SUN_DIR};
-use vordar_game::zones::{load_zones, ZoneVisuals};
+use vordar_client::presentation::DETAIL_TEXTURE_DIR;
+use vordar_game::zones::{load_zones, resolve_sun_color, resolve_sun_dir, ZoneVisuals};
 
 const ZONES_PATH:  &str = "content/zones/zones.ron";
 const PLAYER_GLB:  &str = "content/models/human.glb";
@@ -35,27 +41,28 @@ const THREE_QUARTER_YAW: f32 = std::f32::consts::TAU / 8.0;
 const WIDE_RADIUS: f32 = 80.0;
 /// XZ proximity threshold for grouping placements into one mid-shot cluster.
 const CLUSTER_RADIUS: f32 = 20.0;
-/// Matches `Camera::new`'s own default 3rd-person orbit distance/pitch — the
-/// live game's actual follow-camera framing. Wide/mid shots aim at a
-/// cluster's centroid from this fixed distance (via `set_camera_lookat`)
-/// rather than sphere-fitting the cluster's AABB (`set_camera_turntable`):
-/// zones span tens of metres, and a fill-ratio sphere-fit over an area that
-/// size pulls the camera back (and up) far enough to blow out into a fogged,
-/// birds-eye haze — not what "gameplay-ish ... wide framing" asks for.
-const GAMEPLAY_RADIUS: f32 = 34.0;
-const GAMEPLAY_PITCH:  f32 = 0.8;
-/// Tighter than the wide shot's follow distance, looser than a close-up.
+/// Matches `Camera::new`'s own default 3rd-person pitch — the live game's
+/// actual follow-camera framing. The mid shot aims at a cluster's centroid
+/// from a fixed distance (via `set_camera_lookat`); the wide shot instead
+/// sphere-fits the full scene bounds (`set_camera_turntable`) so it scales
+/// from a handful of small props up to tens-of-metres chapter buildings
+/// without cropping either.
+const GAMEPLAY_PITCH: f32 = 0.8;
+/// Tighter than a close-up, wide enough to hold one prop cluster.
 const MID_RADIUS: f32 = 14.0;
 
-/// `Camera::recompute_eye`'s orbit formula at a fixed radius/pitch — see
-/// GAMEPLAY_RADIUS's comment for why wide/mid shots use this instead of an
-/// AABB fit. Floored at ground level like the real camera (`MIN_EYE_Y`).
-fn gameplay_eye(target: Vec3, radius: f32) -> Vec3 {
+/// `Camera::recompute_eye`'s orbit formula: eye at `radius`/`pitch`/`azimuth`
+/// from `target`, floored at ground level like the real camera (`MIN_EYE_Y`).
+fn orbit_eye(target: Vec3, radius: f32, azimuth: f32, pitch: f32) -> Vec3 {
     Vec3::new(
-        target.x + radius * THREE_QUARTER_YAW.cos() * GAMEPLAY_PITCH.cos(),
-        (target.y + radius * GAMEPLAY_PITCH.sin()).max(0.0),
-        target.z + radius * THREE_QUARTER_YAW.sin() * GAMEPLAY_PITCH.cos(),
+        target.x + radius * azimuth.cos() * pitch.cos(),
+        (target.y + radius * pitch.sin()).max(0.0),
+        target.z + radius * azimuth.sin() * pitch.cos(),
     )
+}
+/// `orbit_eye` at the wide/mid shots' fixed three-quarter azimuth/pitch.
+fn gameplay_eye(target: Vec3, radius: f32) -> Vec3 {
+    orbit_eye(target, radius, THREE_QUARTER_YAW, GAMEPLAY_PITCH)
 }
 /// Average human eye height above the ground — the close-up camera's height.
 const EYE_HEIGHT: f32 = 1.6;
@@ -73,15 +80,31 @@ const PLAYER_OFFSET_MAX: f32 = 1.3;
 /// sheet too large to eyeball or view.
 const THUMB: (u32, u32) = (480, 270);
 
+/// chapter03's chapel nave anchor (graybox interior: x∈[-30,-14],
+/// z∈[-16.5,-9.5]) — see chapel_probe.rs's containment sweep for the
+/// derivation. Chapter03-specific, not zone-agnostic, so the interior shot
+/// only runs when the reviewed zone actually runs chapter03.
+const NAVE_TARGET: Vec3 = Vec3::new(-22.0, EYE_HEIGHT, -13.0);
+/// chapel_probe's verified contained-interior distance at this anchor.
+const NAVE_RADIUS: f32 = 5.0;
+const NAVE_PITCH: f32 = 0.3;
+/// Looking down the nave toward the apse (chapter03's west end).
+const NAVE_YAW_APSE: f32 = std::f32::consts::PI;
+/// Looking back down the nave toward the east-face door.
+const NAVE_YAW_DOOR: f32 = 0.0;
+
 struct Args {
     zone: String,
     out:  String,
     size: (u32, u32),
+    visuals_override: Option<String>,
 }
 
 fn usage(msg: &str) -> ! {
     eprintln!("zone_review: {msg}");
-    eprintln!("usage: zone_review <zone> [--out <dir>] [--size WxH]");
+    eprintln!(
+        "usage: zone_review <zone> [--out <dir>] [--size WxH] [--visuals-override <path.ron>]"
+    );
     exit(2);
 }
 
@@ -96,19 +119,55 @@ fn parse_size(s: &str) -> Option<(u32, u32)> {
 }
 
 fn parse_args() -> Args {
-    let (mut zone, mut out, mut size) = (None, None, (1600u32, 900u32));
+    let (mut zone, mut out, mut size, mut visuals_override) = (None, None, (1600u32, 900u32), None);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--out"  => out = it.next(),
             "--size" => size = it.next().as_deref().and_then(parse_size).unwrap_or_else(|| usage("--size needs WxH")),
+            "--visuals-override" => visuals_override = Some(it.next().unwrap_or_else(|| usage("--visuals-override needs a path"))),
             _ if a.starts_with("--") => usage(&format!("unknown flag {a}")),
             _ => zone = Some(a),
         }
     }
     let zone = zone.unwrap_or_else(|| usage("required: <zone> (see content/zones/zones.ron)"));
     let out = out.unwrap_or_else(|| format!("target/zone-review/{zone}"));
-    Args { zone, out, size }
+    Args { zone, out, size, visuals_override }
+}
+
+/// `--visuals-override`'s RON shape: the six lighting fields from
+/// `ZoneVisuals`, every one optional — unset fields keep the zone's authored
+/// value (ground/fog/props/env are never touched by an override).
+#[derive(serde::Deserialize)]
+struct LightingOverride {
+    #[serde(default)]
+    sun_azimuth_deg: Option<f32>,
+    #[serde(default)]
+    sun_elevation_deg: Option<f32>,
+    #[serde(default)]
+    sun_color: Option<Vec3>,
+    #[serde(default)]
+    sun_intensity: Option<f32>,
+    #[serde(default)]
+    ambient: Option<f32>,
+    #[serde(default)]
+    exposure: Option<f32>,
+}
+
+/// Layers a `LightingOverride` file's fields onto `visuals`, leaving every
+/// unset field (and every non-lighting field) as the zone authored it.
+fn apply_visuals_override(mut visuals: ZoneVisuals, path: &str) -> ZoneVisuals {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| die(format!("visuals override {path}: {e}")));
+    let ov: LightingOverride = ron::from_str(&text)
+        .unwrap_or_else(|e| die(format!("visuals override {path}: parse error: {e}")));
+    if let Some(v) = ov.sun_azimuth_deg { visuals.sun_azimuth_deg = Some(v); }
+    if let Some(v) = ov.sun_elevation_deg { visuals.sun_elevation_deg = Some(v); }
+    if let Some(v) = ov.sun_color { visuals.sun_color = v; }
+    if let Some(v) = ov.sun_intensity { visuals.sun_intensity = v; }
+    if let Some(v) = ov.ambient { visuals.ambient = v; }
+    if let Some(v) = ov.exposure { visuals.exposure = v; }
+    visuals
 }
 
 // ── Prop placements ──────────────────────────────────────────────────────
@@ -242,12 +301,13 @@ fn render(r: &mut OffscreenRenderer, data: MeshData, w: u32, h: u32) -> RgbaImag
     RgbaImage::from_raw(w, h, pixels).expect("readback size matches WxH")
 }
 
-/// Establishing shot over the dressed area: every prop drawn, camera aimed
-/// (from `GAMEPLAY_RADIUS`) at the centroid of placements within
-/// `WIDE_RADIUS` so distant horizon landmarks don't pull the shot off-centre.
-/// `chapter_prims` (the zone's chapter buildings, if any — see
-/// `chapter_geometry::load_chapter_prims`) always count toward that centroid:
-/// they're the zone's built-up cluster, not horizon dressing.
+/// Establishing shot over the dressed area: every prop drawn, camera fit
+/// (`set_camera_turntable`'s bounding-sphere fit, three-quarter yaw) to the
+/// placements within `WIDE_RADIUS` so distant horizon landmarks don't pull
+/// the shot off-centre or force too wide a fit. `chapter_prims` (the zone's
+/// chapter buildings, if any — see `chapter_geometry::load_chapter_prims`)
+/// always count toward those bounds: they're the zone's built-up cluster,
+/// not horizon dressing, and a fixed prop-scale framing crops them.
 fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], chapter_prims: Vec<PrimitiveData>, w: u32, h: u32) -> RgbaImage {
     let mut prims = Vec::new();
     let mut near_min = Vec3::splat(f32::INFINITY);
@@ -272,10 +332,19 @@ fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropIn
         near_min = a;
         near_max = b;
     }
-    let cx = (near_min.x + near_max.x) * 0.5;
-    let cz = (near_min.z + near_max.z) * 0.5;
-    let target = Vec3::new(cx, ground_height(cx, cz), cz);
-    r.set_camera_lookat(gameplay_eye(target, GAMEPLAY_RADIUS), target);
+    r.set_camera_turntable(near_min, near_max, THREE_QUARTER_YAW);
+    prims.extend(build_ground(visuals));
+    render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)
+}
+
+/// Inside chapter03's chapel nave, looking down its length toward the apse
+/// (west) or back toward the door (east) — `NAVE_RADIUS` keeps the camera
+/// inside the walls per chapel_probe's containment sweep. Only the chapter
+/// geometry is drawn (interior framing, not the exterior dressing).
+fn render_interior(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, chapter_prims: Vec<PrimitiveData>, yaw: f32, w: u32, h: u32) -> RgbaImage {
+    let eye = orbit_eye(NAVE_TARGET, NAVE_RADIUS, yaw, NAVE_PITCH);
+    r.set_camera_lookat(eye, NAVE_TARGET);
+    let mut prims = chapter_prims;
     prims.extend(build_ground(visuals));
     render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)
 }
@@ -367,7 +436,11 @@ fn main() {
         let have: Vec<&str> = def.zones.iter().map(|z| z.name.as_str()).collect();
         die(format!("no zone {:?} (zones.ron has: [{}])", args.zone, have.join(", ")))
     });
-    let visuals = &zone.visuals;
+    let visuals = match &args.visuals_override {
+        Some(path) => apply_visuals_override(zone.visuals.clone(), path),
+        None => zone.visuals.clone(),
+    };
+    let visuals = &visuals;
 
     let Some(mut r) = OffscreenRenderer::new(w as f32 / h as f32) else {
         eprintln!("zone_review: no GPU adapter available");
@@ -387,7 +460,8 @@ fn main() {
     r.draw_sky = true;
     r.set_fog(visuals.fog_color, visuals.fog_density);
     r.set_fog_height(visuals.fog_height, visuals.fog_height_falloff);
-    r.set_light(TestLight { direction: SUN_DIR, color: SUN_COLOR, ambient: 1.0 });
+    r.set_light(TestLight { direction: resolve_sun_dir(visuals), color: resolve_sun_color(visuals), ambient: visuals.ambient });
+    r.set_exposure(visuals.exposure);
 
     let out = Path::new(&args.out);
     if let Err(e) = std::fs::create_dir_all(out) {
@@ -402,6 +476,17 @@ fn main() {
     let wide = render_wide(&mut r, visuals, &props, chapter_prims, w, h);
     save(&wide, &out.join("wide.png"));
     sheet_frames.push(wide);
+
+    // chapter03's chapel nave anchor is hardcoded (NAVE_TARGET) — only run
+    // this shot against the chapter it was measured against.
+    if zone.chapter.as_deref() == Some("chapter03") {
+        let apse = render_interior(&mut r, visuals, load_chapter_prims("chapter03"), NAVE_YAW_APSE, w, h);
+        save(&apse, &out.join("interior_apse.png"));
+        sheet_frames.push(apse);
+        let door = render_interior(&mut r, visuals, load_chapter_prims("chapter03"), NAVE_YAW_DOOR, w, h);
+        save(&door, &out.join("interior_door.png"));
+        sheet_frames.push(door);
+    }
 
     let clusters = cluster_props(&props);
     for (i, cluster) in clusters.iter().enumerate() {
@@ -424,8 +509,9 @@ fn main() {
     let sheet = review::contact_sheet(&sheet_frames, THUMB);
     save(&sheet, &out.join("contact_sheet.png"));
 
+    let interior_count = if zone.chapter.as_deref() == Some("chapter03") { 2 } else { 0 };
     println!(
-        "zone_review: wrote wide + {} mid + {close_count} close + contact sheet to {}",
+        "zone_review: wrote wide + {} mid + {close_count} close + {interior_count} interior + contact sheet to {}",
         clusters.len(), args.out
     );
 }

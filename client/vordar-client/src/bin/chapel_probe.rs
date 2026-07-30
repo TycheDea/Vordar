@@ -13,7 +13,7 @@ use glam::Vec3;
 use image::RgbaImage;
 use vordar_client::chapter_geometry::load_chapter_prims;
 use vordar_client::ground::{generate_ground, load_ground_material};
-use vordar_client::presentation::{SUN_COLOR, SUN_DIR};
+use vordar_game::zones::{resolve_sun_color, resolve_sun_dir, ZoneVisuals};
 
 const OUT: &str = "target/town-probe";
 const HDRI: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
@@ -174,7 +174,8 @@ fn setup(r: &mut OffscreenRenderer) {
     r.load_environment_hdr(HDRI).unwrap_or_else(|e| panic!("HDRI: {e}"));
     r.draw_sky = true;
     r.set_fog(FOG_COLOR, FOG_DENSITY);
-    r.set_light(TestLight { direction: SUN_DIR, color: SUN_COLOR, ambient: 1.0 });
+    let visuals = ZoneVisuals::default();
+    r.set_light(TestLight { direction: resolve_sun_dir(&visuals), color: resolve_sun_color(&visuals), ambient: visuals.ambient });
     // RendererState defaults SSAO on (state.rs) — match it so the IBL/shadow
     // reads reflect live gameplay, not just this harness's own default-off.
     r.set_ssao(true);
