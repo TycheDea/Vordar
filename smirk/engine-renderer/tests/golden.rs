@@ -142,7 +142,7 @@ fn golden_sdf_composite() {
 #[test]
 fn golden_helmet_ibl() {
     let helmet = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/source/test/DamagedHelmet.glb");
-    let hdri   = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/textures/env/castilian_plateau_dusk_2k.hdr");
+    let hdri   = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/textures/env/castilian_plateau_overcast_2k.hdr");
     if !Path::new(helmet).exists() || !Path::new(hdri).exists() {
         eprintln!("SKIP: DamagedHelmet/HDRI fixtures missing");
         return;

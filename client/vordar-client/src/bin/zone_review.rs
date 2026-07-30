@@ -32,7 +32,7 @@ const ZONES_PATH:  &str = "content/zones/zones.ron";
 const PLAYER_GLB:  &str = "content/models/human.glb";
 // Matches ZoneDressingSystem's fallback (presentation.rs) when a zone
 // authors no `env`.
-const DEFAULT_HDRI: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
+const DEFAULT_HDRI: &str = "content/textures/env/castilian_plateau_overcast_2k.hdr";
 const THREE_QUARTER_YAW: f32 = std::f32::consts::TAU / 8.0;
 
 /// Props farther than this from the origin still draw (horizon landmarks)

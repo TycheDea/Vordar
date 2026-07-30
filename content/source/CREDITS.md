@@ -26,7 +26,7 @@ side — which models are allowed to generate anything that ships).
 | "Human - Male_" VRoid character — `content/models/statue_vroid.glb`, origin of the `human.glb` player body | Project owner (VRoid Studio) | Authored in VRoid Studio (output belongs to its creator, commercial use allowed) | Owner's asset | With the project only |
 | Cracked earth ground PBR set, 2k — `content/textures/ground/cracked_earth/` | Project-generated | StableMaterials (`gvecchio/StableMaterials`) + SDXL img2img upscale; full provenance in `content/textures/ground/cracked_earth/generation_manifest.json` | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL) — `Cleared` rows in the model ledger | With the project only |
 | Worn cobble ground PBR set, 2k — `content/textures/ground/worn_cobble/` | Project-generated | StableMaterials (`gvecchio/StableMaterials`), prompt "worn cobblestone pavement of large rounded cobbles, fist-sized weathered stones, sun-bleached tops, soot-darkened deep joints, a few cracked flagstones", seed 1, + SDXL img2img upscale; full provenance in `content/textures/ground/worn_cobble/generation_manifest.json` | openrail (StableMaterials) / CreativeML Open RAIL++-M (SDXL) — `Cleared` rows in the model ledger | With the project only |
-| Castilian Plateau Dusk HDRI, 2k — `content/textures/env/castilian_plateau_dusk_2k.hdr` | Project-generated | SDXL circular-x pano (`gen_pano_sdxl.py`) + `hdr_post.py` sun injection; full provenance in `castilian_plateau_dusk_2k.manifest.json` | CreativeML Open RAIL++-M (SDXL) — `Cleared` row in the model ledger | With the project only |
+| Castilian Plateau Overcast HDRI, 2k — `content/textures/env/castilian_plateau_overcast_2k.hdr` | Project-generated | SDXL circular-x pano (`gen_pano_sdxl.py`) + `hdr_post.py`, no sun disc (overcast); full provenance in `castilian_plateau_overcast_2k.manifest.json` | CreativeML Open RAIL++-M (SDXL) — `Cleared` row in the model ledger | With the project only |
 | Iron candelabra shrine prop — `content/models/props/candelabra_shrine/` | Project-generated | SDXL concept + Hi3DGen geometry + Blender bake texturing via `gen_prop.py`; full provenance in `content/models/props/candelabra_shrine/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) — `Cleared` rows in the model ledger | With the project only |
 | Chapel arch prop — `content/models/props/chapel_arch/` | Project-generated | SDXL concept (prompt "ruined stone chapel arch, freestanding gothic archway fragment, sun-bleached limestone, soot-darkened carvings, broken masonry", seed 0) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/chapel_arch/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
 | Broken column prop — `content/models/props/broken_column/` | Project-generated | SDXL concept (prompt "broken stone column, toppled cathedral pillar stump, weathered fluted limestone, cracked drum sections", seed 0) + Hi3DGen geometry + multiview ControlNet-depth SDXL retexture + MaterialAnything PBR decomposition via `gen_prop.py`; full provenance in `content/models/props/broken_column/generation_manifest.json` | CreativeML Open RAIL++-M (SDXL) / MIT + Apache-2.0 (Hi3DGen stack) / MIT + Apache-2.0 (MaterialAnything) — `Cleared` rows in the model ledger | With the project only |
@@ -45,9 +45,12 @@ Notes:
   if regeneration is ever needed.
 - **DamagedHelmet**: renderer test fixture only (PBR/IBL verification), never shipped
   in game content.
-- **Castilian Plateau Dusk**: shippable now — the bake-off winner (Path 3,
-  `gen_pano_sdxl.py`) carries no license condition, unlike the sdxl_360
-  runner-up-path candidate.
+- **Castilian Plateau Overcast**: shippable now — same Path 3 `gen_pano_sdxl.py`
+  bake-off method as the retired dusk HDRI, carries no license condition.
+  Adopted at the G1 lighting gate (2026-07-30,
+  `docs/reviews/town/g1-lighting-2026-07-30.md`) over runner-up L2 and the
+  original dusk look; the dusk HDRI is removed (recover from git history if
+  ever needed).
 - **Worn cobble ground PBR set**: B2 product; east-zone ground, placed B3.
   Shippable now — same StableMaterials + SDXL path as cracked_earth, no NC
   tool anywhere in the chain.

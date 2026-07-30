@@ -41,9 +41,14 @@ explicitly out of scope.
   ≥ 10° above the threat band and never telegraphs danger.
   *Check:* eyeball; VFX RON defs cite the role they use. The numeric ranges are a
   proposal — the user tunes them at the B1 phase-gate text review.
-- **VQ-A5** — Lighting sells the theme: low amber dusk over a dry plateau, depth
-  fog, votive-candle/shrine emissive accents (portals, altars, magic). Bright
-  noon-neutral scenes are off-theme.
+- **VQ-A5** — Lighting sells the theme: a neutral grey overcast key (sun
+  intensity 0.25, elevation 60°, no warm tint), cool grey-blue fog sampled
+  from the sky's upper-elevation mean (0.327, 0.352, 0.409), exposure 0.576
+  (G1 gate, `docs/reviews/town/g1-lighting-2026-07-30.md`). Materials must
+  read their true PBR color under this near-zero-chroma field — no hue cast
+  from the key or the fog. Votive-candle/shrine emissive accents (portals,
+  altars, magic) are the zone's one deliberate warm chroma, standing out
+  precisely because the field around them carries none.
   *Check:* eyeball per zone.
 
 ## B. Characters (machine-checked; enemy clauses deferred)
@@ -151,8 +156,8 @@ intersecting transparents and particle-vs-glass ordering remain approximate).
 Run at phase boundaries; the user eyeballs, never automated:
 
 1. **Theme read** (VQ-A1/A5): does the start zone read religious dark fantasy at
-   a glance — low amber dusk, sun-bleached/soot-darkened stone, candle-gold
-   accents?
+   a glance — neutral grey overcast, sun-bleached/soot-darkened stone,
+   candle-gold accents?
 2. **Material read** (VQ-A2): walk close to ground/props — surfaces show normal
    detail and roughness variation, no flat plastic.
 3. **Cohesion** (VQ-A3): no asset looks like it came from a different game.

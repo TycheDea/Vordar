@@ -16,7 +16,7 @@ use vordar_client::ground::{generate_ground, load_ground_material};
 use vordar_game::zones::{resolve_sun_color, resolve_sun_dir, ZoneVisuals};
 
 const OUT: &str = "target/town-probe";
-const HDRI: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
+const HDRI: &str = "content/textures/env/castilian_plateau_overcast_2k.hdr";
 const GROUND_DIR: &str = "content/textures/ground/cracked_earth";
 const FOG_COLOR: Vec3 = Vec3::new(2.0, 0.64, 0.25);
 const FOG_DENSITY: f32 = 0.0055;

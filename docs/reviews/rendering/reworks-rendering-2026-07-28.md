@@ -38,6 +38,16 @@ Cross-type queue (mirrored verbatim from `audit-rendering-2026-07-28.md`):
   registered only on the networked path and waits for sync), so offline
   review always looks on-theme while networked play always drifts — the
   worst shape for catching it by eye.
+- **Update (2026-07-30):** `5933c31` landed per-zone `ZoneVisuals` lighting
+  fields (`sun_azimuth_deg`/`sun_elevation_deg`/`sun_color`/`sun_intensity`/
+  `ambient`/`exposure`, `game/vordar-game/src/world/zones.rs`) — the
+  hardcoded `SUN_DIR`/`SUN_COLOR` constants this evidence cites no longer
+  exist in `presentation.rs`; zones now author their own key
+  (`content/zones/zones.ron`, G1 gate:
+  `docs/reviews/town/g1-lighting-2026-07-30.md`). This is plumbing only, not
+  a fix: `DayNightSystem` still overwrites the authored key every frame once
+  world time syncs. The per-zone fields are the re-entry point option (b)
+  below needs; the core VQ-A5-vs-VQ-D5 fight is unchanged.
 - **Ideal:** the zone's authored key is the envelope for *mood*; day/night
   keeps flowing through the `DayNightSystem` seam (VQ-D5 requires the cycle)
   but its output is remapped into the zone envelope — exposure/ambient

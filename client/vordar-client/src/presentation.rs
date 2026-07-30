@@ -92,7 +92,7 @@ impl System for ZoneDressingSystem {
             visuals
                 .env
                 .as_deref()
-                .unwrap_or("content/textures/env/castilian_plateau_dusk_2k.hdr"),
+                .unwrap_or("content/textures/env/castilian_plateau_overcast_2k.hdr"),
             resources,
         );
         engine_renderer::set_fog(visuals.fog_color, visuals.fog_density, resources);

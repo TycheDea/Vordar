@@ -377,16 +377,18 @@ cargo run -p engine-renderer --release --features offscreen --bin turntable -- c
 ```
 
 `--hdri` is optional; omitting it renders under the hardcoded default
-(`castilian_plateau_dusk_2k.hdr`). This is the engine-side gate for any
+(`castilian_plateau_overcast_2k.hdr`). This is the engine-side gate for any
 generated HDRI — the full `load_environment_hdr` → `decode_hdr` → f16
 upload → IBL bake → sky + lit render path, exercised end to end.
 
 ### Fixture
 
-`content/textures/env/castilian_plateau_dusk_2k.hdr` (+ its
-`.manifest.json`) is the Phase A2 fixture: Path 3, seed 7, sun az
-263.1°/el 8°. Provenance and shippability note: `content/source/CREDITS.md`
-→ "Castilian Plateau Dusk HDRI, 2k" row.
+`content/textures/env/castilian_plateau_overcast_2k.hdr` (+ its
+`.manifest.json`) is the Phase A2 fixture, currently the G1 lighting-gate
+winner: Path 3, seed 7, no explicit sun disc (overcast). Provenance and
+shippability note: `content/source/CREDITS.md` → "Castilian Plateau Overcast
+HDRI, 2k" row. Superseded a dusk look (Path 3, seed 7, sun az 263.1°/el 8°),
+retired at the G1 gate (`docs/reviews/town/g1-lighting-2026-07-30.md`).
 
 ## Prop generation (Phase A3)
 

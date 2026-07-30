@@ -8,7 +8,7 @@
 // those are the evidence — plus one small index sheet; the sheet alone is
 // never sufficient to judge an asset. Mirrors turntable.rs/zone_review.rs's
 // offscreen-harness shape one crate over; lives in the client (not the
-// engine) because `dusk` needs vordar_game::zones' sun resolver and
+// engine) because `ship` needs vordar_game::zones' sun resolver and
 // content/zones/zones.ron.
 
 use engine_renderer::anim::LocalTransform;
@@ -24,7 +24,9 @@ use vordar_client::presentation::DETAIL_TEXTURE_DIR;
 use vordar_game::zones::{load_zones, resolve_sun_color, resolve_sun_dir, ZoneVisuals};
 
 const ZONES_PATH: &str = "content/zones/zones.ron";
-const HDRI_DUSK: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
+// Matches ZoneDressingSystem's fallback (presentation.rs) when the "start"
+// zone authors no `env`.
+const DEFAULT_HDRI: &str = "content/textures/env/castilian_plateau_overcast_2k.hdr";
 
 /// Single-prop framing extent — matches turntable.rs/gear_render.rs
 /// (zone_review.rs's wider whole-zone fallback doesn't apply here).
@@ -61,7 +63,7 @@ const MAX_SHEET_EDGE: u32 = 1536;
 const DEFAULT_BLOOM: f32 = 0.12;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Lighting { Studio, Furnace, Raking, Dusk }
+enum Lighting { Studio, Furnace, Raking, Ship }
 
 impl Lighting {
     fn name(self) -> &'static str {
@@ -69,14 +71,14 @@ impl Lighting {
             Lighting::Studio  => "studio",
             Lighting::Furnace => "furnace",
             Lighting::Raking  => "raking",
-            Lighting::Dusk    => "dusk",
+            Lighting::Ship    => "ship",
         }
     }
 
     /// Whether this preset's `beauty`/`clay` render shows the sky as
     /// background. Every other channel forces it off regardless (see main).
     fn draw_sky(self) -> bool {
-        matches!(self, Lighting::Furnace | Lighting::Dusk)
+        matches!(self, Lighting::Furnace | Lighting::Ship)
     }
 
     fn clear_color(self) -> wgpu::Color {
@@ -146,7 +148,7 @@ fn usage(msg: &str) -> ! {
     eprintln!("asset_inspect: {msg}");
     eprintln!(
         "usage: asset_inspect <glb|gltf> [--out DIR] [--size WxH] [--scale S] \
-         [--lighting studio,furnace,raking,dusk] \
+         [--lighting studio,furnace,raking,ship] \
          [--channel beauty,albedo,rough,metal,normal,ao,clay] \
          [--angles N] [--distance full,gameplay,macro] [--reference]"
     );
@@ -173,7 +175,7 @@ fn parse_lighting(s: &str) -> Option<Lighting> {
         "studio"  => Lighting::Studio,
         "furnace" => Lighting::Furnace,
         "raking"  => Lighting::Raking,
-        "dusk"    => Lighting::Dusk,
+        "ship"    => Lighting::Ship,
         _ => return None,
     })
 }
@@ -216,7 +218,7 @@ fn parse_args() -> Args {
             "--out"       => out = it.next(),
             "--size"      => size = it.next().as_deref().and_then(parse_size).unwrap_or_else(|| usage("--size needs WxH")),
             "--scale"     => scale = it.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| usage("--scale needs a float")),
-            "--lighting"  => lighting = it.next().as_deref().and_then(|s| parse_list(s, parse_lighting)).unwrap_or_else(|| usage("--lighting needs studio,furnace,raking,dusk")),
+            "--lighting"  => lighting = it.next().as_deref().and_then(|s| parse_list(s, parse_lighting)).unwrap_or_else(|| usage("--lighting needs studio,furnace,raking,ship")),
             "--channel"   => channel = it.next().as_deref().and_then(|s| parse_list(s, parse_channel)).unwrap_or_else(|| usage("--channel needs beauty,albedo,rough,metal,normal,ao,clay")),
             "--angles"    => angles = it.next().and_then(|s| s.parse().ok()).filter(|&n| n > 0).unwrap_or_else(|| usage("--angles needs a positive integer")),
             "--distance"  => distance = it.next().as_deref().and_then(|s| parse_list(s, parse_distance)).unwrap_or_else(|| usage("--distance needs full,gameplay,macro")),
@@ -276,7 +278,7 @@ fn light_dir(azimuth: f32, elevation: f32) -> Vec3 {
 /// constant so a sweep's frames only vary by camera yaw.
 const KEY_AZIMUTH: f32 = std::f32::consts::FRAC_PI_4;
 
-fn set_light_for(r: &mut OffscreenRenderer, lighting: Lighting, camera_yaw: f32) {
+fn set_light_for(r: &mut OffscreenRenderer, lighting: Lighting, camera_yaw: f32, start: &ZoneVisuals) {
     match lighting {
         Lighting::Studio => r.set_light(TestLight {
             direction: light_dir(KEY_AZIMUTH, 60.0_f32.to_radians()),
@@ -294,33 +296,33 @@ fn set_light_for(r: &mut OffscreenRenderer, lighting: Lighting, camera_yaw: f32)
             color:     Vec3::splat(2.0),
             ambient:   1.0,
         }),
-        Lighting::Dusk => {
-            let visuals = ZoneVisuals::default();
-            r.set_light(TestLight { direction: resolve_sun_dir(&visuals), color: resolve_sun_color(&visuals), ambient: visuals.ambient });
+        Lighting::Ship => {
+            r.set_light(TestLight { direction: resolve_sun_dir(start), color: resolve_sun_color(start), ambient: start.ambient });
         }
     }
 }
 
-/// One-time-per-lighting-group setup: environment, bloom, fog. `start_fog`
-/// is the "start" zone's authored fog (`dusk` is the ship gate — it wants
-/// the real destination atmosphere); every other preset renders fog-free so
-/// material/debug reads aren't hazed.
-fn setup_environment(r: &mut OffscreenRenderer, lighting: Lighting, start_fog: (Vec3, f32, f32, f32)) {
+/// One-time-per-lighting-group setup: environment, bloom, fog. `start` is
+/// the "start" zone's authored visuals (`ship` renders the real destination
+/// atmosphere, whatever it's currently authored to); every other preset
+/// renders fog-free so material/debug reads aren't hazed.
+fn setup_environment(r: &mut OffscreenRenderer, lighting: Lighting, start: &ZoneVisuals) {
     match lighting {
         Lighting::Studio  => r.set_uniform_environment([0.6; 3]),
         Lighting::Furnace => r.set_uniform_environment([1.0; 3]),
         Lighting::Raking  => r.set_uniform_environment([0.05; 3]),
-        Lighting::Dusk => {
-            if let Err(e) = r.load_environment_hdr(HDRI_DUSK) {
-                die(format!("HDRI {HDRI_DUSK}: {e}"));
+        Lighting::Ship => {
+            let hdri = start.env.as_deref().unwrap_or(DEFAULT_HDRI);
+            if let Err(e) = r.load_environment_hdr(hdri) {
+                die(format!("HDRI {hdri}: {e}"));
             }
         }
     }
     // The 1.0 uniform-radiance background would otherwise bloom over the
     // silhouette and defeat furnace's energy check.
     r.set_bloom_intensity(if lighting == Lighting::Furnace { 0.0 } else { DEFAULT_BLOOM });
-    let (color, density, height, falloff) = if lighting == Lighting::Dusk {
-        start_fog
+    let (color, density, height, falloff) = if lighting == Lighting::Ship {
+        (start.fog_color, start.fog_density, start.fog_height, start.fog_height_falloff)
     } else {
         (Vec3::ZERO, 0.0, 0.0, 0.0)
     };
@@ -428,16 +430,13 @@ fn main() {
     let def = load_zones(ZONES_PATH);
     let start = def.zones.iter().find(|z| z.name == "start")
         .unwrap_or_else(|| die("zones.ron has no \"start\" zone".to_string()));
-    let start_fog = (
-        start.visuals.fog_color, start.visuals.fog_density,
-        start.visuals.fog_height, start.visuals.fog_height_falloff,
-    );
+    let start = &start.visuals;
 
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut total_frames = 0usize;
 
     for &lighting in &args.lighting {
-        setup_environment(&mut r, lighting, start_fog);
+        setup_environment(&mut r, lighting, start);
         for &channel in &args.channel {
             let dir = out.join(format!("{}_{}", lighting.name(), channel.name()));
             if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -455,7 +454,7 @@ fn main() {
             for &distance in &args.distance {
                 for angle in 0..args.angles {
                     let yaw = std::f32::consts::TAU * angle as f32 / args.angles as f32;
-                    set_light_for(&mut r, lighting, yaw);
+                    set_light_for(&mut r, lighting, yaw, start);
 
                     let img = shoot(&mut r, &args.model, args.scale, min, max, channel, distance, yaw, w, h, clear);
                     save(&img, &dir.join(format!("{}_{angle:02}.png", distance.name())));

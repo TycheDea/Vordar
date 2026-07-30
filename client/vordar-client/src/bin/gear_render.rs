@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::exit;
 use vordar_client::weapons::{shield_grip_local, shield_mesh, sword_grip_local, sword_mesh};
 
-const HDRI: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
+const HDRI: &str = "content/textures/env/castilian_plateau_overcast_2k.hdr";
 const GROUND_EXTENT: f32 = 40.0;
 const THREE_QUARTER_YAW: f32 = std::f32::consts::TAU / 8.0;
 

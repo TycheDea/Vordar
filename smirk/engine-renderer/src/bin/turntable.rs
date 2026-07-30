@@ -15,7 +15,7 @@ use image::RgbaImage;
 use std::path::Path;
 use std::process::exit;
 
-const HDRI: &str = "content/textures/env/castilian_plateau_dusk_2k.hdr";
+const HDRI: &str = "content/textures/env/castilian_plateau_overcast_2k.hdr";
 const GROUND_EXTENT: f32 = 40.0;
 /// Fixed camera yaw for `--clip` frames: the classic 3/4 view.
 const THREE_QUARTER_YAW: f32 = std::f32::consts::TAU / 8.0;

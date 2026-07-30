@@ -1,0 +1,87 @@
+{
+  "source": "target\\lighting-looks\\L3_overcast\\pano_2048x1024.png",
+  "source_sha256": "ee585f66200767eeb7a379eee4580edb2a74acacad9f8876ac9d8bfcbb506e44",
+  "source_size": [
+    2048,
+    1024
+  ],
+  "generation_manifest": {
+    "model": "stabilityai/stable-diffusion-xl-base-1.0",
+    "checkpoint": "C:\\tools\\ComfyUI\\ComfyUI\\models\\checkpoints\\sd_xl_base_1.0.safetensors",
+    "mechanism": "x-only circular Conv2d padding (roll/pad/crop), active in txt2img, img2img, and their VAE passes",
+    "circular_pad_px": 4,
+    "prompt": "fully overcast grey sky over an empty dry Castilian plateau, wide open horizon, no trees, flat soft diffuse light, uniform pale grey cloud cover, no visible sun, distant low mountains muted by haze, semi-realistic dark fantasy, dread stillness",
+    "full_prompt": "equirectangular 360 panorama, fully overcast grey sky over an empty dry Castilian plateau, wide open horizon, no trees, flat soft diffuse light, uniform pale grey cloud cover, no visible sun, distant low mountains muted by haze, semi-realistic dark fantasy, dread stillness",
+    "negative_prompt": "blurry, low quality, jpeg artifacts, watermark, text, seams, stretched, warped, duplicated horizon, oversaturated",
+    "seed": 7,
+    "native": {
+      "width": 1536,
+      "height": 768,
+      "num_inference_steps": 40,
+      "guidance_scale": 7.0
+    },
+    "hop": {
+      "width": 2048,
+      "height": 1024,
+      "strength": 0.35,
+      "num_inference_steps": 40,
+      "guidance_scale": 7.0,
+      "init_resize": "Lanczos"
+    },
+    "seam_check": {
+      "strip_px": 8,
+      "threshold": 20.0,
+      "left_right_mad": 3.2561848958333335
+    },
+    "output_size": [
+      2048,
+      1024
+    ],
+    "elapsed_seconds": 61.4529999999977,
+    "peak_vram_allocated_gb": 10.576625152,
+    "peak_vram_reserved_gb": 19.15748352,
+    "versions": {
+      "torch": "2.11.0+cu128",
+      "diffusers": "0.39.0"
+    }
+  },
+  "linearize": "exact sRGB EOTF (IEC 61966-2-1)",
+  "expansion_curve": {
+    "formula": "gain*L + (peak_white-gain)*L**power",
+    "gain": 1.4,
+    "power": 6,
+    "peak_white": 20.0
+  },
+  "seam_blend": {
+    "type": "mirror-pair cosine cross-blend",
+    "columns": 32
+  },
+  "sun": {
+    "mode": "none",
+    "azimuth_deg": null,
+    "elevation_deg": null,
+    "intensity": null,
+    "core_radius_deg": 0.5,
+    "limb_outer_deg": 0.75,
+    "glow_sigma_deg": 2.0,
+    "glow_fraction": 0.015,
+    "tint_rgb": [
+      1.0,
+      0.92,
+      0.8
+    ],
+    "clamp": 30000.0,
+    "mapping": "azimuth 0..360 -> x 0..W left-to-right, elevation +90 -> y=0 (zenith)"
+  },
+  "stats": {
+    "peak": 20.0,
+    "p99_9": 9.909428596496582,
+    "median": 0.25805234909057617,
+    "mean": 0.37783282995224,
+    "seam_mad": 0.014416567981243134
+  },
+  "versions": {
+    "opencv": "5.0.0",
+    "numpy": "2.4.6"
+  }
+}

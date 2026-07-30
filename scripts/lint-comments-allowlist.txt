@@ -10,3 +10,7 @@ client/vordar-client/src/vfx.rs:/// The impact beat for projectiles (VQ-E1/E2): 
 client/vordar-client/tests/ground_render.rs:"textured ground must vary (VQ-A2): stddev {:.2}, mean {mean:.2}",
 smirk/engine-renderer/src/mesh/store.rs:/// feeds the dev overlay's "tex mem (assets)" line (VQ-C5's budget).
 smirk/engine-renderer/tests/offscreen.rs:/// VQ-C3's "HDR emissive > 1.0 blooms" must hold in display-referred space:
+client/vordar-client/tests/lighting_look.rs:// VQ-A5: the shipped "start" zone key must read near-neutral grey overcast
+client/vordar-client/tests/lighting_look.rs:/// VQ-A5: the shipped overcast look reads near-neutral (R/B close to 1, R
+client/vordar-client/tests/lighting_look.rs:"R/B {ratio:.4} (R={rm:.4} B={bm:.4}) drifted off VQ-A5's near-neutral overcast band"
+client/vordar-client/tests/lighting_look.rs:assert!(rm - bm < 0.05, "R-B {:.4} too warm for VQ-A5's overcast look", rm - bm);

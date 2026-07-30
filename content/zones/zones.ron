@@ -12,17 +12,28 @@
             portals: [
                 (pos: (22.0, 0.0, 0.0), radius: 2.0, target_zone: "east", target_pos: (-16.0, 0.0, 0.0)),
             ],
-            // Theme pass (VQ-A5): dusk HDRI (the default env), depth fog,
+            // Theme pass (VQ-A5): G1 overcast HDRI (the shipped look, see
+            // docs/reviews/town/g1-lighting-2026-07-30.md), depth fog,
             // cracked-earth PBR ground, ruined chapel stonework and cypress
             // silhouettes among the rocks. Props sit on the ground plane
             // (y = -0.5), clear of spawn and portals.
             visuals: (
+                env: Some("content/textures/env/castilian_plateau_overcast_2k.hdr"),
+                // Soft, near-shadowless overcast key — the HDRI has no real
+                // sun disc, so az/el are a synthetic direction, not a
+                // measured one (see g1-lighting-2026-07-30.md).
+                sun_azimuth_deg: Some(83.1),
+                sun_elevation_deg: Some(60.0),
+                sun_color: (1.0, 1.0, 1.0),
+                sun_intensity: 0.25,
+                ambient: 1.0,
+                exposure: 0.5763153092807317,
                 // Fog is the visible horizon (sky.wgsl blends to it at 0°
-                // elevation), so it must hold the HDRI's horizon register:
-                // measured band mean (3.40, 1.09, 0.42) linear — same amber
-                // ratio here, at median-horizon magnitude so the anti-sun
-                // side doesn't glow.
-                fog_color: (2.0, 0.64, 0.25),
+                // elevation); sampled from the HDRI's upper-sky mean
+                // (elevation > 30°) rather than the horizon band, which
+                // carries an amber cast the upper sky doesn't (see
+                // g1-lighting-2026-07-30.md).
+                fog_color: (0.32728323340415955, 0.3519519865512848, 0.4090961813926697),
                 fog_density: 0.0055,
                 // Height fog (VQ-A1): full density at ground level (y = -0.5),
                 // thinning above so prop tops read clearer than the ground haze.
@@ -48,7 +59,7 @@
                     (model: "content/models/props/cypress/cypress.glb",               pos: (-34.0, -0.5, -40.0), scale: 0.95, yaw: 300.0),
                     // Toppled column past the play-radius edge.
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-58.0, -0.5, 14.0),  scale: 1.0,  yaw: 305.0),
-                    // Cypress pairs — dusk silhouettes at the field edges.
+                    // Cypress pairs — silhouettes at the field edges.
                     (model: "content/models/props/cypress/cypress.glb",               pos: (-48.0, -0.5, 42.0),  scale: 1.0,  yaw: 20.0),
                     (model: "content/models/props/cypress/cypress.glb",               pos: (-42.0, -0.5, 48.0),  scale: 0.85, yaw: 140.0),
                     (model: "content/models/props/cypress/cypress.glb",               pos: (30.0, -0.5, -52.0),  scale: 1.1,  yaw: 75.0),
@@ -72,15 +83,21 @@
                 (pos: (-22.0, 0.0, 0.0), radius: 2.0, target_zone: "start", target_pos: (16.0, 0.0, 0.0)),
             ],
             // Emberwood Rest: a worn-cobble settlement square under the same
-            // dusk sky — drier, warmer haze, sparser dressing than start.
-            // Props sit on the ground plane (y = -0.5), clear of the portal
+            // G1 overcast sky as start (D6 ruling: relight only — same
+            // lighting constants, sparser dressing kept as authored). Props
+            // sit on the ground plane (y = -0.5), clear of the portal
             // corridor on the west side.
             visuals: (
-                // Fog is the visible horizon here too: same measured HDRI
-                // band anchor as start ((3.40, 1.09, 0.42) linear), the amber
-                // ratio warmed by the parked zone pair's channel tilt at
-                // near-start magnitude so the seam still reads as one sky.
-                fog_color: (2.3, 0.69, 0.22),
+                env: Some("content/textures/env/castilian_plateau_overcast_2k.hdr"),
+                sun_azimuth_deg: Some(83.1),
+                sun_elevation_deg: Some(60.0),
+                sun_color: (1.0, 1.0, 1.0),
+                sun_intensity: 0.25,
+                ambient: 1.0,
+                exposure: 0.5763153092807317,
+                // Fog matches start exactly (D6: same lighting constants,
+                // not a re-measured per-zone tilt).
+                fog_color: (0.32728323340415955, 0.3519519865512848, 0.4090961813926697),
                 fog_density: 0.004,
                 fog_height: 0.0,
                 fog_height_falloff: 0.12,
