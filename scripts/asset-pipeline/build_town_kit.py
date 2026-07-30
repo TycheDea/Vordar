@@ -1,0 +1,143 @@
+# Blender-headless: generate the Rocalba town-kit buildings procedurally.
+#
+# One glb per building type (campaign decision D7), cites docs/town-premise.md
+# S3 (six-material closed vocabulary) and S5/S6 (building register, chapel
+# spec). Geometry lives in townkit/{geo,buildings}.py; townkit/materials.py
+# derives the tiling UV scale from VQ-A3's texel-density figure and loads
+# baked materials from --materials-dir when present, else flat placeholder
+# colors from the premise palette. townkit/verify.py re-imports each export
+# into a fresh scene to check material names, the vordar_detail extra, UVs
+# and loose/boundary geometry; townkit/render.py renders one silhouette
+# preview PNG per type.
+#
+# Usage: blender --background --python build_town_kit.py -- \
+#            --types all --materials-dir <dir> --out <dir>
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+import bpy  # noqa: E402
+
+from townkit import buildings  # noqa: E402
+from townkit import materials as matlib  # noqa: E402
+from townkit import render as renderlib  # noqa: E402
+from townkit import verify as verifylib  # noqa: E402
+
+ALL_TYPES = list(buildings.BUILDERS.keys())
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--types", default="all")
+    parser.add_argument("--materials-dir", default=None)
+    parser.add_argument("--out", required=True)
+    return parser.parse_args(argv)
+
+
+def clear_scene():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+
+
+def export_selected(objs, path):
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    result = bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB",
+                                        export_yup=True, export_image_format="AUTO",
+                                        export_extras=True, use_selection=True)
+    if result != {"FINISHED"}:
+        raise RuntimeError(f"export_scene.gltf({path}) returned {result}")
+
+
+def assert_chapel_dims(dims):
+    checks = []
+
+    def check(label, val, lo, hi):
+        ok = lo <= val <= hi
+        checks.append({"label": label, "value": val, "lo": lo, "hi": hi, "ok": ok})
+        if not ok:
+            raise AssertionError(f"chapel {label}={val} outside [{lo}, {hi}]")
+
+    check("nave_width", dims["nave_width"], 7.0 - 0.2, 7.0 + 0.2)
+    check("nave_length", dims["nave_length"], 16.0 - 0.2, 16.0 + 0.2)
+    check("vault_peak", dims["vault_peak"], 10.0, 12.0)
+    check("door_width", dims["door_width"], 2.4 - 0.1, 2.4 + 0.1)
+    check("door_height", dims["door_height"], 3.2 - 0.1, 3.2 + 0.1)
+    return checks
+
+
+def _json_default(o):
+    if isinstance(o, set):
+        return sorted(o)
+    return str(o)
+
+
+def main():
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    args = parse_args(argv)
+    # Resolved once: after a scene reset (read_factory_settings), Blender's
+    # own relative-path base drifts from the process cwd, so every path
+    # handed to a bpy.ops.* call downstream must already be absolute.
+    out_dir = Path(args.out).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if args.materials_dir is not None:
+        args.materials_dir = str(Path(args.materials_dir).resolve())
+    preview_dir = out_dir / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    types = ALL_TYPES if args.types == "all" else args.types.split(",")
+    unknown = [t for t in types if t not in buildings.BUILDERS]
+    if unknown:
+        print(f"build_town_kit: unknown types {unknown}, choices are {ALL_TYPES}", file=sys.stderr)
+        sys.exit(1)
+
+    results = []
+    for t in types:
+        clear_scene()
+        mats, sources = matlib.build_materials(args.materials_dir)
+        objs, dims = buildings.BUILDERS[t](mats)
+        for o in objs:
+            matlib.project_uv(o)
+
+        glb_path = out_dir / f"{t}.glb"
+        export_selected(objs, glb_path)
+        size_bytes = glb_path.stat().st_size
+
+        vreport = verifylib.verify_glb(glb_path)
+        preview_path = preview_dir / f"{t}.png"
+        mean_px = renderlib.render_preview(preview_path)
+
+        chapel_checks = assert_chapel_dims(dims) if t == "chapel" else None
+
+        entry = {
+            "type": t,
+            "tris": vreport["total_tris"],
+            "size_bytes": size_bytes,
+            "material_sources": sources,
+            "verify": vreport,
+            "preview_mean": mean_px,
+            "preview_path": str(preview_path),
+            "dims": dims,
+            "chapel_checks": chapel_checks,
+        }
+        results.append(entry)
+        print(f"[{t}] tris={vreport['total_tris']} size={size_bytes}B "
+              f"materials_ok={not vreport['bad_material_names']} "
+              f"uv_ok={not vreport['missing_uv']} loose_v={vreport['loose_verts']} "
+              f"loose_e={vreport['loose_edges']} boundary_e={vreport['boundary_edges']} "
+              f"preview_mean={mean_px:.4f}")
+
+    summary_path = out_dir / "build_report.json"
+    with open(summary_path, "w") as f:
+        json.dump(results, f, indent=2, default=_json_default)
+    print(json.dumps({"summary": str(summary_path), "texel_scale_m": matlib.TEXEL_SCALE_M}))
+
+
+if __name__ == "__main__":
+    main()
