@@ -115,7 +115,7 @@ pub struct PropDef {
 }
 
 fn default_fog_color() -> Vec3 {
-    Vec3::new(0.30, 0.26, 0.28) // dusk haze
+    Vec3::new(0.32728323340415955, 0.3519519865512848, 0.4090961813926697) // overcast key
 }
 fn default_fog_density() -> f32 {
     0.0
@@ -130,22 +130,24 @@ fn default_prop_scale() -> f32 {
     1.0
 }
 
-/// Sun direction (points TOWARD the light), matched to the baked default
-/// HDRI's sun disc — the fallback whenever a zone authors no
-/// azimuth/elevation override.
-const DEFAULT_SUN_DIR: Vec3 = Vec3::new(0.11897, 0.13917, 0.98309);
+/// Default sun azimuth/elevation for a zone that authors no override —
+/// matches the overcast key every zone authors explicitly today; the sole
+/// source of truth `resolve_sun_dir`'s fallback shares with its authored-pair
+/// branch via `sun_dir_from_angles`.
+const DEFAULT_SUN_AZIMUTH_DEG: f32 = 83.1;
+const DEFAULT_SUN_ELEVATION_DEG: f32 = 60.0;
 
 fn default_sun_color() -> Vec3 {
-    Vec3::new(1.5, 1.38, 1.2) // castilian_plateau_dusk_2k tint x the dusk key's intensity
+    Vec3::new(1.0, 1.0, 1.0)
 }
 fn default_sun_intensity() -> f32 {
-    1.0
+    0.25
 }
 fn default_ambient() -> f32 {
     1.0
 }
 fn default_exposure() -> f32 {
-    1.0
+    0.5763153092807317
 }
 
 /// Direction pointing toward a light source at `azimuth_deg`/`elevation_deg`
@@ -156,11 +158,11 @@ fn sun_dir_from_angles(azimuth_deg: f32, elevation_deg: f32) -> Vec3 {
 }
 
 /// This zone's sun direction: the authored azimuth/elevation pair if both are
-/// set, else the dusk default matched to the shared HDRI.
+/// set, else the default matched to the shared overcast key.
 pub fn resolve_sun_dir(visuals: &ZoneVisuals) -> Vec3 {
     match (visuals.sun_azimuth_deg, visuals.sun_elevation_deg) {
         (Some(az), Some(el)) => sun_dir_from_angles(az, el),
-        _ => DEFAULT_SUN_DIR,
+        _ => sun_dir_from_angles(DEFAULT_SUN_AZIMUTH_DEG, DEFAULT_SUN_ELEVATION_DEG),
     }
 }
 
