@@ -1,0 +1,18 @@
+[package]
+name    = "chapter-03"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "chapter_03"
+# No unit tests or doctests ship here; skip building the empty test binaries.
+test    = false
+doctest = false
+
+[dependencies]
+engine-app  = { path = "../../smirk/engine-app", default-features = false }
+vordar-game = { path = "../vordar-game" }

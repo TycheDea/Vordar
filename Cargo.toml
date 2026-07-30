@@ -10,6 +10,7 @@ members = [
     "game/vordar-game",
     "game/chapter-01",
     "game/chapter-02",
+    "game/chapter-03",
     "client/vordar-client",
     "server/vordar-server",
     "benchmarks",

@@ -5,6 +5,7 @@
 
 pub mod body;
 pub mod cast;
+pub mod chapter_geometry;
 pub mod credentials;
 pub mod ground;
 pub mod hit_react;

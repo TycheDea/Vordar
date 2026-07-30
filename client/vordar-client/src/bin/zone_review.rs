@@ -17,6 +17,7 @@ use image::RgbaImage;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::process::exit;
+use vordar_client::chapter_geometry::load_chapter_prims;
 use vordar_client::ground::{generate_ground, height as ground_height, load_ground_material, GROUND_TOP_Y};
 use vordar_client::presentation::{DETAIL_TEXTURE_DIR, SUN_COLOR, SUN_DIR};
 use vordar_game::zones::{load_zones, ZoneVisuals};
@@ -244,7 +245,10 @@ fn render(r: &mut OffscreenRenderer, data: MeshData, w: u32, h: u32) -> RgbaImag
 /// Establishing shot over the dressed area: every prop drawn, camera aimed
 /// (from `GAMEPLAY_RADIUS`) at the centroid of placements within
 /// `WIDE_RADIUS` so distant horizon landmarks don't pull the shot off-centre.
-fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], w: u32, h: u32) -> RgbaImage {
+/// `chapter_prims` (the zone's chapter buildings, if any — see
+/// `chapter_geometry::load_chapter_prims`) always count toward that centroid:
+/// they're the zone's built-up cluster, not horizon dressing.
+fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], chapter_prims: Vec<PrimitiveData>, w: u32, h: u32) -> RgbaImage {
     let mut prims = Vec::new();
     let mut near_min = Vec3::splat(f32::INFINITY);
     let mut near_max = Vec3::splat(f32::NEG_INFINITY);
@@ -257,6 +261,12 @@ fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropIn
         }
         prims.extend(placed);
     }
+    if !chapter_prims.is_empty() {
+        let (cmin, cmax) = review::aabb(&chapter_prims);
+        near_min = near_min.min(cmin);
+        near_max = near_max.max(cmax);
+    }
+    prims.extend(chapter_prims);
     if !near_min.x.is_finite() {
         let (a, b) = review::aabb(&prims); // no prop within WIDE_RADIUS: fall back to everything
         near_min = a;
@@ -388,7 +398,8 @@ fn main() {
     let props = load_props(visuals);
     let mut sheet_frames: Vec<RgbaImage> = Vec::new();
 
-    let wide = render_wide(&mut r, visuals, &props, w, h);
+    let chapter_prims = zone.chapter.as_deref().map(load_chapter_prims).unwrap_or_default();
+    let wide = render_wide(&mut r, visuals, &props, chapter_prims, w, h);
     save(&wide, &out.join("wide.png"));
     sheet_frames.push(wide);
 

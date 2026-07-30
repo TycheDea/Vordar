@@ -436,6 +436,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "chapter-03"
+version = "0.1.0"
+dependencies = [
+ "engine-app",
+ "vordar-game",
+]
+
+[[package]]
 name = "ciborium"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3930,6 +3938,7 @@ version = "0.1.0"
 dependencies = [
  "chapter-01",
  "chapter-02",
+ "chapter-03",
  "egui",
  "egui_kittest",
  "engine-app",
@@ -3984,6 +3993,7 @@ version = "0.1.0"
 dependencies = [
  "chapter-01",
  "chapter-02",
+ "chapter-03",
  "ctrlc",
  "engine-app",
  "engine-core",

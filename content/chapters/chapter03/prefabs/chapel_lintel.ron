@@ -1,0 +1,13 @@
+// Wall above the chapel door opening. Spawned aloft (y = 7.1) so its
+// spawn-centred hitbox spans y 3.2..11 — the door passage below stays open.
+(
+    components: {
+        "Transform":  (),
+        "ShapeGroup": (shapes: [
+            (shape: Cube, offset: (0.0, 0.0, 0.0), scale: (0.8, 7.8, 2.4), color: (0.60, 0.58, 0.54)),
+        ]),
+        "Hitbox":     (shape: Aabb(half_extents: (0.4, 3.9, 1.2))),
+        "Solid":      (),
+        "Anchored":   (),
+    },
+)

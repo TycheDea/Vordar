@@ -126,26 +126,27 @@ fn login_routes_to_saved_zone() {
     );
 }
 
-// Chapter 2's town (shipped zones.ron: east = chapter02): buildings and
-// villagers replicate as ordinary prefab entities, a villager can't be hit
-// by an AOE centered on it (no Health = immune by construction, the pin for
-// that design), and the monster camps prowl outside town.
+// The town chapters (shipped zones.ron: start = chapter03, east = chapter02):
+// buildings and villagers replicate as ordinary prefab entities, a villager
+// can't be hit by an AOE centered on it (no Health = immune by construction,
+// the pin for that design), and the monster camps prowl outside town.
 #[test]
 fn town_zone_replicates_and_villagers_are_unhittable() {
     workspace_root();
     let start_addr: SocketAddr = "127.0.0.1:25177".parse().unwrap();
     let east_addr: SocketAddr = "127.0.0.1:25178".parse().unwrap();
 
-    // Like spawn_zone_server, but east runs the town chapter — installed the
-    // same way main.rs installs zone chapters.
+    // Like spawn_zone_server, but both zones run their town chapters —
+    // installed the same way main.rs installs zone chapters.
     let mut zones = test_zones();
+    zones[0].chapter = Some("chapter03".into());
     zones[1].chapter = Some("chapter02".into());
     let (_, worker) = spawn_zones(zones, start_addr, east_addr, ":memory:", |addr, handle, zone, directory, world_origin| {
         std::thread::spawn(move || {
             let chapter = zone.chapter.clone();
             let mut app = build_zone_app(addr, handle, zone, directory, world_origin);
             if let Some(name) = chapter.as_deref() {
-                vordar_game::chapter::ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module()])
+                vordar_game::chapter::ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module(), chapter_03::module()])
                     .install(name, &mut app)
                     .unwrap();
             }
@@ -157,6 +158,17 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
     let mut bot = Bot::connect_as(start_addr, "traveler");
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
     bot.wait_for("first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+    bot.wait_for("the graybox town replicates", Duration::from_secs(10), |b| {
+        let has = |p: &str| b.prefabs.values().any(|v| v == p);
+        has("chapel_wall_side") && has("chapel_wall_apse") && has("chapel_door_jamb")
+            && has("chapel_lintel") && has("chapel_roof") && has("casa_long") && has("casa_block")
+    });
+    let shells = bot
+        .prefabs
+        .values()
+        .filter(|p| p.starts_with("chapel_") || p.starts_with("casa_"))
+        .count();
+    assert_eq!(shells, 12, "every chapter03 collision shell replicates");
     walk_into_portal(&mut bot, Vec3::new(10.0, 0.0, 0.0), Duration::from_secs(10));
     bot.follow_redirect();
     bot.wait_for("welcome in east", Duration::from_secs(5), |b| b.player_id.is_some());

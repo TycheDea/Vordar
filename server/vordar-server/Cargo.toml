@@ -28,6 +28,7 @@ vordar-game     = { path = "../../game/vordar-game" }
 vordar-protocol = { path = "../../game/vordar-protocol" }
 chapter-01      = { path = "../../game/chapter-01" }
 chapter-02      = { path = "../../game/chapter-02" }
+chapter-03      = { path = "../../game/chapter-03" }
 glam            = { workspace = true }
 hecs            = { workspace = true }
 log             = { workspace = true }

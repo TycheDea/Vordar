@@ -1,0 +1,13 @@
+// Chapel west end wall (apse end), spanning between the side walls.
+// Anchored: players collide with it, it never budges.
+(
+    components: {
+        "Transform":  (),
+        "ShapeGroup": (shapes: [
+            (shape: Cube, offset: (0.0, 5.25, 0.0), scale: (0.8, 11.5, 7.0), color: (0.60, 0.58, 0.54)),
+        ]),
+        "Hitbox":     (shape: Aabb(half_extents: (0.4, 5.5, 3.5))),
+        "Solid":      (),
+        "Anchored":   (),
+    },
+)

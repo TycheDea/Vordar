@@ -51,7 +51,7 @@ fn main() {
     // Replicated NPCs spawn from chapter prefabs — content registrations of
     // EVERY linked chapter (a Redirect can land us in any zone), no chapter
     // systems (the server is authoritative).
-    ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module()]).install_all_content(&mut app);
+    ChapterRegistry::new(vec![chapter_01::module(), chapter_02::module(), chapter_03::module()]).install_all_content(&mut app);
     app.add_plugin(NetClientPlugin { server_addr, predict, simulated_rtt, user, token })
         .run()
 }

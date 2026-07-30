@@ -8,9 +8,7 @@
     zones: [
         (
             name: "start",
-            // No chapter (zero NPC spawns): chapter content is the placeholder
-            // town/camp prefab set the pre-content foundation stage defers.
-            chapter: None,
+            chapter: Some("chapter03"),
             portals: [
                 (pos: (22.0, 0.0, 0.0), radius: 2.0, target_zone: "east", target_pos: (-16.0, 0.0, 0.0)),
             ],

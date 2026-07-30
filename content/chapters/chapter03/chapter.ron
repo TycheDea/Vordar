@@ -1,0 +1,25 @@
+// Chapter 3 — Rocalba: the start town, graybox shells only. Everything is an
+// initial_spawn of an anchored solid box (players collide, nothing here can
+// die); no NPCs, no camps.
+//
+// Layout (spawn ring r=3 at the origin; the east portal corridor along +X —
+// portal (22,0,0), arrival (16,0,0) — stays clear; everything inside r≈55,
+// the play radius clamps at 65):
+//   - the plaza sits at the origin, walled by casa blocks;
+//   - the chapel anchors SW. Its shell is assembled from axis-aligned wall
+//     prefabs (a Hitbox is one Aabb centred on the spawn point, so the door
+//     opening comes from placement, not shape): interior 16×7 m, vault 11 m,
+//     entered through a 2.4 m gap centred at z=-13 in the east face x=-13.2;
+//     the roof covers only the west half — the east vault is open to sky.
+(
+    name: "Chapter 3 — Rocalba",
+    initial_spawns: [
+        (prefab: "chapel_wall_side", positions: [(-22.0, 0.0, -9.1), (-22.0, 0.0, -16.9)]),
+        (prefab: "chapel_wall_apse", positions: [(-30.4, 0.0, -13.0)]),
+        (prefab: "chapel_door_jamb", positions: [(-13.6, 0.0, -15.35), (-13.6, 0.0, -10.65)]),
+        (prefab: "chapel_lintel",    positions: [(-13.6, 7.1, -13.0)]),
+        (prefab: "chapel_roof",      positions: [(-26.4, 11.3, -13.0)]),
+        (prefab: "casa_long",        positions: [(-3.0, 0.0, 12.0), (3.0, 0.0, -12.0)]),
+        (prefab: "casa_block",       positions: [(12.0, 0.0, 10.0), (12.0, 0.0, -10.0), (-12.0, 0.0, 8.0)]),
+    ],
+)

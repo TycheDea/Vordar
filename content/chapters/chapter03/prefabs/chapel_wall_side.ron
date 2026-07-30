@@ -1,0 +1,15 @@
+// Chapel nave side wall, full exterior length. Anchored: players collide
+// with it, it never budges. No Health — indestructible by construction.
+// The visual reaches down to the ground plane (y = -0.5) so the shell seals
+// light at the base; the hitbox keeps the spawn-centred convention.
+(
+    components: {
+        "Transform":  (),
+        "ShapeGroup": (shapes: [
+            (shape: Cube, offset: (0.0, 5.25, 0.0), scale: (17.6, 11.5, 0.8), color: (0.60, 0.58, 0.54)),
+        ]),
+        "Hitbox":     (shape: Aabb(half_extents: (8.8, 5.5, 0.4))),
+        "Solid":      (),
+        "Anchored":   (),
+    },
+)
