@@ -53,6 +53,13 @@ Multi-view conditioning is not adopted; `--view`/`--mv-mode` stay plumbed,
 opt-in, and dormant, not wired into `gen_prop.py`/`gen_character.py`
 defaults.
 
+The reworks file's findings 24 and 25 (orientation-robust fidelity metric;
+same-subject back/side noise floor) are **parked 2026-07-30, user ruling**:
+no pending A/B consumes them since multi-view was rejected, so they wait for
+the next orientation-sensitive experiment rather than entering this queue.
+Campaign closed 2026-07-30 — aggregate regenerated at `1532b9d`, lesson-mining
+pass done (2 lessons accepted: `tasks/lessons/2026-07-30-*`).
+
 Done 2026-07-28 (findings 15, 19–23, commits `23c7063`..`f2015e7`; findings 19–23
 run out of queue order, pulled forward as file-disjoint parallel work while the
 GPU-bound items serialized). Finding 15 raised `blend_coverage` 0.7303→0.9759 on

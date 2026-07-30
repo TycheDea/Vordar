@@ -30,6 +30,13 @@ Multi-view conditioning is not adopted; `--view`/`--mv-mode` stay plumbed,
 opt-in, and dormant, not wired into `gen_prop.py`/`gen_character.py`
 defaults.
 
+This file's findings 24 and 25 (orientation-robust fidelity metric;
+same-subject back/side noise floor) are **parked 2026-07-30, user ruling**:
+no pending A/B consumes them since multi-view was rejected, so they wait for
+the next orientation-sensitive experiment rather than entering this queue.
+Campaign closed 2026-07-30 — aggregate regenerated at `1532b9d`, lesson-mining
+pass done (2 lessons accepted: `tasks/lessons/2026-07-30-*`).
+
 The findings numbered in *this* file (10–17, 19) are discoveries from rework
 execution and sit outside that mirrored queue; they are struck here. Where the
 two numberings collide, this file's own are written "this file's finding N".
