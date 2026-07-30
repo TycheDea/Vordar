@@ -135,9 +135,13 @@ fn parse_args() -> Args {
     Args { zone, out, size, visuals_override }
 }
 
-/// `--visuals-override`'s RON shape: the six lighting fields from
-/// `ZoneVisuals`, every one optional — unset fields keep the zone's authored
-/// value (ground/fog/props/env are never touched by an override).
+/// `--visuals-override`'s RON shape: the six `ZoneVisuals` lighting fields
+/// plus the two other dominant look contributors (fog tint, environment
+/// HDRI), every one optional — unset fields keep the zone's authored value
+/// (ground/props are never touched by an override). `env_hdr` takes any
+/// filesystem path, not just one under `content/` (`load_environment_hdr`
+/// opens it directly, no prefix assumed) — the candidate looks live under
+/// `target/lighting-looks/`.
 #[derive(serde::Deserialize)]
 struct LightingOverride {
     #[serde(default)]
@@ -152,6 +156,10 @@ struct LightingOverride {
     ambient: Option<f32>,
     #[serde(default)]
     exposure: Option<f32>,
+    #[serde(default)]
+    fog_color: Option<Vec3>,
+    #[serde(default)]
+    env_hdr: Option<String>,
 }
 
 /// Layers a `LightingOverride` file's fields onto `visuals`, leaving every
@@ -167,6 +175,8 @@ fn apply_visuals_override(mut visuals: ZoneVisuals, path: &str) -> ZoneVisuals {
     if let Some(v) = ov.sun_intensity { visuals.sun_intensity = v; }
     if let Some(v) = ov.ambient { visuals.ambient = v; }
     if let Some(v) = ov.exposure { visuals.exposure = v; }
+    if let Some(v) = ov.fog_color { visuals.fog_color = v; }
+    if let Some(v) = ov.env_hdr { visuals.env = Some(v); }
     visuals
 }
 

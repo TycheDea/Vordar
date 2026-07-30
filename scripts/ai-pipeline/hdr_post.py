@@ -93,7 +93,7 @@ def detect_sun(img: np.ndarray) -> tuple:
     return az_c, el_c
 
 
-def inject_sun(img: np.ndarray, az_s: float, el_s: float, intensity: float) -> np.ndarray:
+def inject_sun(img: np.ndarray, az_s: float, el_s: float, intensity: float, tint_rgb=SUN_TINT) -> np.ndarray:
     h, w = img.shape[:2]
     az, el = pixel_angles(w, h)
     # Angular distance on the sphere, not pixel distance: equirect pixels
@@ -107,7 +107,7 @@ def inject_sun(img: np.ndarray, az_s: float, el_s: float, intensity: float) -> n
     core = t * t * (3.0 - 2.0 * t)
     glow = SUN_GLOW_FRACTION * np.exp(-((theta / SUN_GLOW_SIGMA_DEG) ** 2))
     shape = (intensity * (core + glow)).astype(np.float32)
-    tint = np.array(SUN_TINT, dtype=np.float32)
+    tint = np.array(tint_rgb, dtype=np.float32)
     return img + shape[:, :, None] * tint[None, None, :]
 
 
@@ -127,9 +127,11 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--sun", default="auto")
     parser.add_argument("--sun-intensity", type=float, default=2000.0)
+    parser.add_argument("--sun-tint", default=None, help="R,G,B floats overriding the default sun/moon tint")
     parser.add_argument("--seed-manifest", type=Path, default=None)
     args = parser.parse_args()
     sun_mode, sun_pos = parse_sun(args.sun)
+    sun_tint = tuple(float(c) for c in args.sun_tint.split(",")) if args.sun_tint else SUN_TINT
 
     src_bytes = args.input.read_bytes()
     src_sha256 = hashlib.sha256(src_bytes).hexdigest()
@@ -153,7 +155,7 @@ def main():
     sun_az = sun_el = None
     if sun_mode != "none":
         sun_az, sun_el = sun_pos if sun_mode == "explicit" else detect_sun(hdr)
-        hdr = inject_sun(hdr, sun_az, sun_el, args.sun_intensity)
+        hdr = inject_sun(hdr, sun_az, sun_el, args.sun_intensity, sun_tint)
     hdr = np.minimum(hdr, INTENSITY_CLAMP)
 
     lum = hdr @ LUMA
@@ -205,7 +207,7 @@ def main():
             "limb_outer_deg": SUN_LIMB_OUTER_DEG,
             "glow_sigma_deg": SUN_GLOW_SIGMA_DEG,
             "glow_fraction": SUN_GLOW_FRACTION,
-            "tint_rgb": list(SUN_TINT),
+            "tint_rgb": list(sun_tint),
             "clamp": INTENSITY_CLAMP,
             "mapping": "azimuth 0..360 -> x 0..W left-to-right, elevation +90 -> y=0 (zenith)",
         },
