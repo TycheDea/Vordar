@@ -17,6 +17,7 @@ repeat that insert.
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -25,7 +26,12 @@ import cv2
 
 import comfy_run
 
-MV_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "prop_multiview.json"
+# RUN-P2 (D4 probe): PROPTEX_MV_WORKFLOW swaps the conditioning graph without
+# touching the tracked default, so an A/B against a different backend (e.g.
+# Qwen-Image) needs no code edit -- only an env var for that invocation.
+MV_WORKFLOW = Path(os.environ.get(
+    "PROPTEX_MV_WORKFLOW",
+    str(Path(__file__).resolve().parents[1] / "workflows" / "prop_multiview.json")))
 
 
 class GenerateError(Exception):
@@ -100,7 +106,11 @@ def render_canvas(views, pair, depth_pngs, canvas_seed, view_res, subject, out_d
             elif key == "seed":
                 inputs[key] = canvas_seed
     try:
-        manifest = comfy_run.run_workflow(template, out_dir, wait_timeout=300)
+        # 300s default is sized for the tracked Z-Image-Turbo graph (8 steps);
+        # a non-turbo conditioning graph (PROPTEX_MV_WORKFLOW override, e.g.
+        # RUN-P2's Qwen-Image A/B) needs more wall-clock per canvas.
+        wait_timeout = float(os.environ.get("PROPTEX_MV_WAIT_TIMEOUT", "300"))
+        manifest = comfy_run.run_workflow(template, out_dir, wait_timeout=wait_timeout)
     finally:
         (comfy_run.COMFY_INPUT_DIR / input_name).unlink()
 
