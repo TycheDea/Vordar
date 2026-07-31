@@ -815,3 +815,341 @@ fn prop_models_within_byte_budget() {
         );
     }
 }
+
+// ── D5: town layout <-> collision cross-check (P2.5, tasks/town/p24-layout.md §5) ──
+
+#[derive(serde::Deserialize)]
+struct FootprintManifest {
+    types: std::collections::HashMap<String, FootprintType>,
+}
+
+#[derive(serde::Deserialize)]
+struct FootprintType {
+    size: (f32, f32),
+    tolerance: f32,
+    #[serde(default)]
+    members: Vec<FootprintMember>,
+}
+
+/// One collision piece of a kit type: `prefab` is its chapter03 prefab id,
+/// `offsets` its position(s) in the type's local frame (model frame at yaw
+/// 0) relative to the zone prop. A type with no members in `footprints.ron`
+/// is a single piece under its own name, at offset (0,0). A member carries no
+/// size of its own — the chapel and gate ship as one mesh each, so there is
+/// no independent per-piece measurement to check a member's collision box
+/// against (a size copied from the very prefab it would be checked against
+/// is circular, not a check). Check (b) instead unions the placed members'
+/// actual hitboxes and compares THAT to the type's own measured `size`.
+#[derive(Clone, serde::Deserialize)]
+struct FootprintMember {
+    prefab: String,
+    offsets: Vec<(f32, f32)>,
+}
+
+fn load_footprints(root: &Path) -> FootprintManifest {
+    let path = root.join("content/chapters/chapter03/footprints.ron");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+    ron::from_str(&text).unwrap_or_else(|e| panic!("{path:?}: {e}"))
+}
+
+/// Every chapter03 prefab's Hitbox half-extents, keyed by prefab id (file
+/// stem). Wall/gate prefabs are authored directly in their placed
+/// orientation (no in-game rotation applies to a Hitbox — it's always
+/// axis-aligned), so these are already world-space.
+fn chapter03_hitboxes(root: &Path) -> std::collections::HashMap<String, glam::Vec3> {
+    use engine_core::components::{CollisionShape, Hitbox};
+    use engine_core::prefab::{register_core_components, spawn_prefab, ComponentRegistry, PrefabLibrary};
+    use engine_core::traits::{Resources, SpawnContext};
+
+    let mut registry = ComponentRegistry::new();
+    register_core_components(&mut registry);
+    let mut library = PrefabLibrary::new();
+    library.load_dir(root.join("content/chapters/chapter03/prefabs").to_str().unwrap());
+    let names = library.names();
+
+    let mut world = hecs::World::new();
+    let mut resources = Resources::new();
+    resources.insert(registry);
+    resources.insert(library);
+    let mut ctx = SpawnContext { world: &mut world, resources: &mut resources };
+
+    let mut out = std::collections::HashMap::new();
+    for name in names {
+        let entity = spawn_prefab(&name, glam::Vec3::ZERO, &mut ctx)
+            .unwrap_or_else(|e| panic!("chapter03 prefab '{name}': {e}"));
+        let hitbox = ctx.world.get::<&Hitbox>(entity)
+            .unwrap_or_else(|_| panic!("chapter03 prefab '{name}' has no Hitbox"));
+        let CollisionShape::Aabb { half_extents } = &hitbox.shape else {
+            panic!("chapter03 prefab '{name}' Hitbox is not an Aabb");
+        };
+        out.insert(name, *half_extents);
+    }
+    out
+}
+
+/// Rotates a local-frame XZ vector (a member offset or size) into world XZ by
+/// the same `Quat::from_rotation_y` the renderer applies to placed kit models
+/// (`presentation.rs`) — reusing the engine's own rotation instead of
+/// re-deriving its sign convention.
+fn rotate_xz(v: (f32, f32), yaw_deg: f32) -> (f32, f32) {
+    let r = glam::Quat::from_rotation_y(yaw_deg.to_radians()) * glam::Vec3::new(v.0, 0.0, v.1);
+    (r.x, r.z)
+}
+
+/// D5 (a)+(b): every kit-type start-zone prop in `zones.ron` has an exact-XZ
+/// (±0.01) match among chapter03's collision spawns, and every chapter03
+/// spawn maps back to exactly one prop — bijection, no orphans either side.
+/// A prop's `footprints.ron` entry lists one member per distinct collision
+/// piece, each with its own local-frame offset(s) rotated by the prop's
+/// placement yaw (casa_corner's wing, chapel's 7 pieces, gate_arch's jambs +
+/// head); a type with no members list is a single piece.
+///
+/// Check (b) unions the matched pieces' actual (already-authored) Hitboxes in
+/// world space and compares that union to the type's own measured `size`
+/// (rotated the same way), within the entry's tolerance — independent
+/// ground truth on one side, real placed geometry on the other. A simple
+/// (single-piece) type's "union" is just its own box, so this subsumes the
+/// plain per-spawn check those types had before composites existed.
+///
+/// Dressing props (crucero, cypress, gravestones, ...) carry no collision and
+/// are skipped via `assets.json`'s `kind` field — the same "kit" flag
+/// `prop_material_matches_surface_class` already keys off, not a name list.
+#[test]
+fn town_prop_collision_matches_footprints() {
+    let root = repo_root();
+    let assets: std::collections::HashMap<String, AssetEntry> =
+        load_registry(&root.join("content/models/assets.json"));
+    let footprints = load_footprints(&root);
+    let hitboxes = chapter03_hitboxes(&root);
+    let chapter = vordar_game::chapter::load_chapter(
+        root.join("content/chapters/chapter03/chapter.ron").to_str().unwrap(),
+    );
+
+    struct Spawn {
+        prefab: String,
+        xz: (f32, f32),
+        claimed: bool,
+    }
+    let mut spawns: Vec<Spawn> = chapter
+        .initial_spawns
+        .iter()
+        .flat_map(|s| {
+            s.positions.iter().map(move |p| Spawn { prefab: s.prefab.clone(), xz: (p.x, p.z), claimed: false })
+        })
+        .collect();
+
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+    let start = def.zones.iter().find(|z| z.name == "start").expect("zones.ron has a 'start' zone");
+
+    let mut missing = Vec::new();
+    let mut size_mismatches = Vec::new();
+    for prop in &start.visuals.props {
+        let type_name = prop_dir_name(&prop.model);
+        if assets.get(type_name).map(|a| a.kind.as_str()) != Some("kit") {
+            continue; // dressing prop — no collision expected
+        }
+        let footprint = footprints.types.get(type_name).unwrap_or_else(|| {
+            panic!("D5: kit prop '{type_name}' has no content/chapters/chapter03/footprints.ron entry")
+        });
+        let members: Vec<FootprintMember> = if footprint.members.is_empty() {
+            vec![FootprintMember { prefab: type_name.to_string(), offsets: vec![(0.0, 0.0)] }]
+        } else {
+            footprint.members.clone()
+        };
+
+        // World-space (x_min, x_max, z_min, z_max) of every piece this prop
+        // claims, folded into a union below — the real, placed geometry half
+        // of check (b).
+        let mut piece_bounds: Vec<(f32, f32, f32, f32)> = Vec::new();
+
+        for member in &members {
+            for &local_offset in &member.offsets {
+                let (dx, dz) = rotate_xz(local_offset, prop.yaw);
+                let expect = (prop.pos.x + dx, prop.pos.z + dz);
+                let found = spawns.iter_mut().find(|s| {
+                    !s.claimed
+                        && s.prefab == member.prefab
+                        && (s.xz.0 - expect.0).abs() <= 0.01
+                        && (s.xz.1 - expect.1).abs() <= 0.01
+                });
+                match found {
+                    Some(s) => {
+                        s.claimed = true;
+                        let half = hitboxes
+                            .get(&member.prefab)
+                            .unwrap_or_else(|| panic!("D5: chapter03 has no prefab '{}'", member.prefab));
+                        piece_bounds.push((s.xz.0 - half.x, s.xz.0 + half.x, s.xz.1 - half.z, s.xz.1 + half.z));
+                    }
+                    None => missing.push(format!(
+                        "{type_name} @ ({:.1},{:.1}) yaw {}: no '{}' spawn at ({:.2},{:.2})",
+                        prop.pos.x, prop.pos.z, prop.yaw, member.prefab, expect.0, expect.1
+                    )),
+                }
+            }
+        }
+
+        if piece_bounds.is_empty() {
+            continue; // every member already reported missing above
+        }
+        let x_min = piece_bounds.iter().map(|b| b.0).fold(f32::INFINITY, f32::min);
+        let x_max = piece_bounds.iter().map(|b| b.1).fold(f32::NEG_INFINITY, f32::max);
+        let z_min = piece_bounds.iter().map(|b| b.2).fold(f32::INFINITY, f32::min);
+        let z_max = piece_bounds.iter().map(|b| b.3).fold(f32::NEG_INFINITY, f32::max);
+        let (union_x, union_z) = (x_max - x_min, z_max - z_min);
+        let (expect_x, expect_z) = {
+            let (ex, ez) = rotate_xz(footprint.size, prop.yaw);
+            (ex.abs(), ez.abs())
+        };
+        if (union_x - expect_x).abs() > footprint.tolerance || (union_z - expect_z).abs() > footprint.tolerance {
+            size_mismatches.push(format!(
+                "{type_name} @ ({:.1},{:.1}): collision coverage {union_x:.2}x{union_z:.2} vs measured footprint {expect_x:.2}x{expect_z:.2} (tol {})",
+                prop.pos.x, prop.pos.z, footprint.tolerance
+            ));
+        }
+    }
+
+    let orphans: Vec<String> = spawns
+        .iter()
+        .filter(|s| !s.claimed)
+        .map(|s| format!("{} @ ({:.2},{:.2})", s.prefab, s.xz.0, s.xz.1))
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "D5: zone prop has no matching chapter03 collision spawn:\n  {}",
+        missing.join("\n  ")
+    );
+    assert!(
+        orphans.is_empty(),
+        "D5: chapter03 collision spawn has no matching zone prop:\n  {}",
+        orphans.join("\n  ")
+    );
+    assert!(
+        size_mismatches.is_empty(),
+        "D5: collision coverage diverges from footprints.ron's measured size:\n  {}",
+        size_mismatches.join("\n  ")
+    );
+}
+
+/// D5 (c): every kit-type start-zone prop's yaw is one of the four facings a
+/// Hitbox Aabb (never rotated) can actually match.
+#[test]
+fn town_prop_yaw_is_axis_aligned() {
+    let root = repo_root();
+    let assets: std::collections::HashMap<String, AssetEntry> =
+        load_registry(&root.join("content/models/assets.json"));
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+    let start = def.zones.iter().find(|z| z.name == "start").expect("zones.ron has a 'start' zone");
+
+    for prop in &start.visuals.props {
+        let type_name = prop_dir_name(&prop.model);
+        if assets.get(type_name).map(|a| a.kind.as_str()) != Some("kit") {
+            continue;
+        }
+        let yaw = prop.yaw.rem_euclid(360.0);
+        let axis_aligned = [0.0, 90.0, 180.0, 270.0].iter().any(|v: &f32| (yaw - v).abs() < 1e-3);
+        assert!(
+            axis_aligned,
+            "D5: kit prop '{type_name}' at ({},{}) has non-axis-aligned yaw {}",
+            prop.pos.x, prop.pos.z, prop.yaw
+        );
+    }
+}
+
+/// D5 (d): the spawn ring (r=3 at the origin) and the east portal corridor
+/// (x in [0,22], the road to the gate) stay clear of every chapter03 solid a
+/// player can actually walk into. The corridor's half-width (1.5) sits just
+/// under the gate's own 3.2 m opening (jamb inner faces at |z| = 1.6) — the
+/// jambs bound the passage by design and must not themselves read as
+/// blocking it. Solids spawned aloft over a passage (gate_head at y=4.6,
+/// chapel_lintel/roof) are excluded the same way: their own prefab comments
+/// say the passage below stays open, so a check against ground-level
+/// clearance must look at height too, not XZ alone.
+#[test]
+fn town_layout_clearances() {
+    const RING_RADIUS: f32 = 3.0;
+    const CORRIDOR_X: (f32, f32) = (0.0, 22.0);
+    const CORRIDOR_HALF_Z: f32 = 1.5;
+    // A player's vertical extent above the ground plane (zone_review's
+    // EYE_HEIGHT is 1.6; this leaves headroom without reaching the 3.6 m
+    // gate/lintel springline any collision piece is spawned aloft above).
+    const PLAYER_HEIGHT: f32 = 2.0;
+
+    let root = repo_root();
+    let chapter = vordar_game::chapter::load_chapter(
+        root.join("content/chapters/chapter03/chapter.ron").to_str().unwrap(),
+    );
+    let hitboxes = chapter03_hitboxes(&root);
+
+    let mut ring_hits = Vec::new();
+    let mut corridor_hits = Vec::new();
+    for spawn in &chapter.initial_spawns {
+        let half = hitboxes
+            .get(&spawn.prefab)
+            .unwrap_or_else(|| panic!("D5: chapter03 has no prefab '{}'", spawn.prefab));
+        for pos in &spawn.positions {
+            if pos.y - half.y >= PLAYER_HEIGHT || pos.y + half.y <= 0.0 {
+                continue; // spawned aloft — doesn't block ground-level movement
+            }
+            let closest_x = 0.0_f32.clamp(pos.x - half.x, pos.x + half.x);
+            let closest_z = 0.0_f32.clamp(pos.z - half.z, pos.z + half.z);
+            let ring_dist = (closest_x * closest_x + closest_z * closest_z).sqrt();
+            if ring_dist < RING_RADIUS {
+                ring_hits.push(format!(
+                    "{} @ ({:.2},{:.2}): {:.2} m from spawn (ring r={RING_RADIUS})",
+                    spawn.prefab, pos.x, pos.z, ring_dist
+                ));
+            }
+
+            let overlaps_x = (pos.x - half.x) < CORRIDOR_X.1 && (pos.x + half.x) > CORRIDOR_X.0;
+            let overlaps_z = (pos.z - half.z) < CORRIDOR_HALF_Z && (pos.z + half.z) > -CORRIDOR_HALF_Z;
+            if overlaps_x && overlaps_z {
+                corridor_hits.push(format!("{} @ ({:.2},{:.2})", spawn.prefab, pos.x, pos.z));
+            }
+        }
+    }
+
+    assert!(
+        ring_hits.is_empty(),
+        "D5: spawn-ring r={RING_RADIUS} intrusion:\n  {}",
+        ring_hits.join("\n  ")
+    );
+    assert!(
+        corridor_hits.is_empty(),
+        "D5: portal-corridor intrusion (x in {CORRIDOR_X:?}, |z| < {CORRIDOR_HALF_Z}):\n  {}",
+        corridor_hits.join("\n  ")
+    );
+}
+
+/// D5 (e): every town solid lies within r=55 of the origin (the play-radius
+/// clamp is 65, `game/vordar-game/src/motion/movement.rs`).
+#[test]
+fn town_solids_within_play_radius() {
+    const MAX_RADIUS: f32 = 55.0;
+
+    let root = repo_root();
+    let chapter = vordar_game::chapter::load_chapter(
+        root.join("content/chapters/chapter03/chapter.ron").to_str().unwrap(),
+    );
+    let hitboxes = chapter03_hitboxes(&root);
+
+    let mut worst: Option<(String, f32)> = None;
+    for spawn in &chapter.initial_spawns {
+        let half = hitboxes
+            .get(&spawn.prefab)
+            .unwrap_or_else(|| panic!("D5: chapter03 has no prefab '{}'", spawn.prefab));
+        for pos in &spawn.positions {
+            let r = ((pos.x.abs() + half.x).powi(2) + (pos.z.abs() + half.z).powi(2)).sqrt();
+            if worst.as_ref().is_none_or(|(_, w)| r > *w) {
+                worst = Some((spawn.prefab.clone(), r));
+            }
+            assert!(
+                r <= MAX_RADIUS,
+                "D5: '{}' solid at ({:.1},{:.1}) reaches r={:.2}, beyond the {MAX_RADIUS} play radius",
+                spawn.prefab, pos.x, pos.z, r
+            );
+        }
+    }
+    let (name, r) = worst.expect("chapter03 has no solids");
+    println!("D5: farthest town solid corner is '{name}' at r={r:.2} (cap {MAX_RADIUS})");
+}

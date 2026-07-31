@@ -70,6 +70,30 @@ impl SimDeadline {
     }
 }
 
+/// Steers straight toward `target`'s XZ (recomputed every tick) until within
+/// `arrive_radius`, or panics after the sim/wall budget. A straight line is
+/// not always a walkable line — the server's `SeparationSystem` collides a
+/// Solid player against every Solid + Anchored static (chapter03's buildings
+/// included), so a target on the far side of a building row needs a caller
+/// that chains waypoints around it, same as any other walk.
+pub fn walk_to(bot: &mut Bot, target: Vec3, arrive_radius: f32, timeout: Duration) {
+    let mut deadline = SimDeadline::new(timeout);
+    loop {
+        bot.pump();
+        if let Some(pos) = bot.own_pos() {
+            let d = target - pos;
+            let dir = Vec2::new(d.x, d.z);
+            if dir.length() <= arrive_radius {
+                bot.send_move(Vec2::ZERO);
+                return;
+            }
+            bot.send_move(dir.normalize());
+        }
+        deadline.check(bot, "a waypoint");
+        std::thread::sleep(Duration::from_millis(16));
+    }
+}
+
 /// Steer toward `portal` (spawn points sit on a ring, so a straight east
 /// walk can miss the 2-unit radius) until the server redirects us.
 pub fn walk_into_portal(bot: &mut Bot, portal: Vec3, timeout: Duration) {

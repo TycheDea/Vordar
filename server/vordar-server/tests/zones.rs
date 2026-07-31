@@ -1,7 +1,7 @@
 // Multi-zone server: portal transfer handoff, login routing, shared world
 // clock, and snapshot throttling under crowd load.
 
-use test_support::{spawn_zones, temp_db, test_zones, walk_into_portal, workspace_root, Bot, PopulateSystem};
+use test_support::{spawn_zones, temp_db, test_zones, walk_into_portal, walk_to, workspace_root, Bot, PopulateSystem};
 use engine_app::scheduler::{Phase, SystemOrder};
 use glam::Vec3;
 use std::collections::HashSet;
@@ -183,7 +183,44 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
     ] {
         assert_eq!(count(prefab), in_aoi, "AOI subset at spawn: {prefab}");
     }
-    walk_into_portal(&mut bot, Vec3::new(10.0, 0.0, 0.0), Duration::from_secs(10));
+
+    // P2.5: walk to the chapel door (chapter.ron's jambs sit at x=-21.7,
+    // z=+-26.5/-31.5 — center z=-29) and confirm the AOI grows to cover the
+    // rest of the chapel: both side walls, the apse, and the south jamb are
+    // all beyond AOI_RADIUS 40 from spawn, so they replicate only once the
+    // bot is close enough. Every leg below stays inside the corridor at
+    // x=-20 — east of the chapel's own wall/jamb line (x<=-21.4) and west of
+    // the south row's westmost wing (x>=-19.35, and that wing's z reach ends
+    // at -13.8 regardless) — clear the whole way down, then a final dead-west
+    // approach along z=-29, inside the 2.4 m door gap between the jambs
+    // (z=-26.5/-31.5) for its entire length. Also stays clear of
+    // `test_zones()`'s portal trigger (x=10, r=2) this test topology uses
+    // instead of the shipped zones.ron's.
+    walk_to(&mut bot, Vec3::new(-20.0, 0.0, 0.0), 2.0, Duration::from_secs(20));
+    walk_to(&mut bot, Vec3::new(-20.0, 0.0, -29.0), 2.0, Duration::from_secs(20));
+    walk_to(&mut bot, Vec3::new(-21.7, 0.0, -29.0), 1.0, Duration::from_secs(30));
+    bot.wait_for("all 7 chapel pieces replicate", Duration::from_secs(10), |b| {
+        let chapel_count = |p: &str| b.prefabs.values().filter(|v| v.as_str() == p).count();
+        chapel_count("chapel_wall_side") == 2
+            && chapel_count("chapel_wall_apse") == 1
+            && chapel_count("chapel_door_jamb") == 2
+            && chapel_count("chapel_lintel") == 1
+            && chapel_count("chapel_roof") == 1
+    });
+    let count_at_door = |p: &str| bot.prefabs.values().filter(|v| v.as_str() == p).count();
+    for (prefab, at_door) in [
+        ("chapel_wall_side", 2), ("chapel_wall_apse", 1), ("chapel_door_jamb", 2),
+        ("chapel_lintel", 1), ("chapel_roof", 1),
+    ] {
+        assert_eq!(count_at_door(prefab), at_door, "AOI subset at chapel door: {prefab}");
+    }
+
+    // Back out the same corridor before making for the portal — a direct
+    // line from the chapel door crosses the south row exactly like the walk
+    // in did.
+    walk_to(&mut bot, Vec3::new(-20.0, 0.0, -29.0), 2.0, Duration::from_secs(20));
+    walk_to(&mut bot, Vec3::new(-20.0, 0.0, 0.0), 2.0, Duration::from_secs(20));
+    walk_into_portal(&mut bot, Vec3::new(10.0, 0.0, 0.0), Duration::from_secs(15));
     bot.follow_redirect();
     bot.wait_for("welcome in east", Duration::from_secs(5), |b| b.player_id.is_some());
     bot.wait_for("clock sync in east", Duration::from_secs(5), |b| {
