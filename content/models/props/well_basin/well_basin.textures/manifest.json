@@ -1,0 +1,36 @@
+{
+  "source": "well_basin.gltf",
+  "sha256": "481e71004e6ac5d03e5a63eefc7ec1ebf4daff28980dc24cd03521690447290d",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    },
+    {
+      "index": 3,
+      "slot": "normal",
+      "file": "img3.dds"
+    },
+    {
+      "index": 4,
+      "slot": "base",
+      "file": "img4.dds"
+    },
+    {
+      "index": 5,
+      "slot": "mr",
+      "file": "img5.dds"
+    }
+  ]
+}

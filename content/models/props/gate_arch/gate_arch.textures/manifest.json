@@ -1,0 +1,21 @@
+{
+  "source": "gate_arch.gltf",
+  "sha256": "0ad5e882e6b4ebf62989ff5221c23cbb3689b1da71ba936c3e5713d621bde112",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    }
+  ]
+}

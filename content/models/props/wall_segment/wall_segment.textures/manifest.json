@@ -1,0 +1,21 @@
+{
+  "source": "wall_segment.gltf",
+  "sha256": "849dcffcbf5d6990f98720cc72e286f6131bc1db4a4a87852f569a32cbf348b8",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    }
+  ]
+}

@@ -10,6 +10,10 @@ MODELS_DIR = REPO_ROOT / "content" / "models"
 PROPS_DIR = MODELS_DIR / "props"
 
 EXPECTED_CLASSES = {"limestone", "wood", "foliage", "painted_metal", "character_skin"}
+# Kit material families (scripts/asset-pipeline/townkit/materials.py): one
+# class per glTF material name; iron_wrought is the one metal in the set.
+KIT_CLASSES = {"encalado", "limestone_dressed", "terracotta_tile", "oak_dark",
+               "plaster_smoked", "iron_wrought"}
 CLASS_FIELDS = {"metallic", "roughness", "albedo_source", "detail"}
 GENERATED_FIELDS = {"subject", "texture_size", "view_res"}
 
@@ -22,10 +26,10 @@ def main() -> int:
 
     # 1. Exact class set.
     class_names = set(surface_classes.keys())
-    if class_names != EXPECTED_CLASSES:
+    if class_names != EXPECTED_CLASSES | KIT_CLASSES:
         errors.append(
             f"surface_classes.json class set mismatch: got {sorted(class_names)}, "
-            f"expected {sorted(EXPECTED_CLASSES)}"
+            f"expected {sorted(EXPECTED_CLASSES | KIT_CLASSES)}"
         )
 
     # 2. Each class has exactly the four fields, with correct types/values.
@@ -33,8 +37,12 @@ def main() -> int:
         keys = set(fields.keys())
         if keys != CLASS_FIELDS:
             errors.append(f"surface_classes.json[{name!r}] has keys {sorted(keys)}, expected {sorted(CLASS_FIELDS)}")
-        if fields.get("metallic") != 0.0:
-            errors.append(f"surface_classes.json[{name!r}].metallic = {fields.get('metallic')!r}, expected 0.0")
+        expected_metallic = 1.0 if name == "iron_wrought" else 0.0
+        if fields.get("metallic") != expected_metallic:
+            errors.append(
+                f"surface_classes.json[{name!r}].metallic = {fields.get('metallic')!r}, "
+                f"expected {expected_metallic}"
+            )
         if fields.get("albedo_source") not in ("direct", "delit"):
             errors.append(
                 f"surface_classes.json[{name!r}].albedo_source = {fields.get('albedo_source')!r}, "
@@ -44,7 +52,11 @@ def main() -> int:
             errors.append(f"surface_classes.json[{name!r}].detail = {fields.get('detail')!r}, expected a bool")
 
     # 3. Every assets.json surface_class resolves into surface_classes.json.
+    # Kit entries carry none: their models are multi-material, classed per
+    # glTF material name instead (content_lint.rs prop_material_matches_surface_class).
     for asset_name, entry in assets.items():
+        if entry.get("kind") == "kit":
+            continue
         sc = entry.get("surface_class")
         if sc not in surface_classes:
             errors.append(f"assets.json[{asset_name!r}].surface_class = {sc!r} not found in surface_classes.json")
@@ -59,7 +71,8 @@ def main() -> int:
     if missing_dirs:
         errors.append(f"assets.json entries with no directory under content/models/props/: {sorted(missing_dirs)}")
 
-    # 5. generated entries carry subject/texture_size/view_res; downloaded entries carry none of them.
+    # 5. generated entries carry subject/texture_size/view_res; downloaded and
+    # kit entries carry none of them; kit entries carry no surface_class either.
     for asset_name, entry in assets.items():
         kind = entry.get("kind")
         present = GENERATED_FIELDS & entry.keys()
@@ -70,8 +83,12 @@ def main() -> int:
         elif kind == "downloaded":
             if present:
                 errors.append(f"assets.json[{asset_name!r}] (downloaded) must not carry {sorted(present)}")
+        elif kind == "kit":
+            extra = sorted(present | ({"surface_class"} & entry.keys()))
+            if extra:
+                errors.append(f"assets.json[{asset_name!r}] (kit) must not carry {extra}")
         else:
-            errors.append(f"assets.json[{asset_name!r}].kind = {kind!r}, expected 'generated' or 'downloaded'")
+            errors.append(f"assets.json[{asset_name!r}].kind = {kind!r}, expected 'generated', 'downloaded', or 'kit'")
 
     if errors:
         print(f"FAIL: {len(errors)} error(s)")

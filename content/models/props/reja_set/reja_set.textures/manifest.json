@@ -1,0 +1,21 @@
+{
+  "source": "reja_set.gltf",
+  "sha256": "777791b48d4833fe2b9edd714b00d8174914ac57b547401e1f74c0c7ae71b3cd",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    }
+  ]
+}

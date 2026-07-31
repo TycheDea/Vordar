@@ -591,7 +591,9 @@ struct SurfaceClass {
 #[derive(serde::Deserialize)]
 struct AssetEntry {
     kind: String,
-    surface_class: String,
+    /// None for `kind: "kit"` — kit models are multi-material, classed per
+    /// glTF material name instead of per asset.
+    surface_class: Option<String>,
 }
 
 fn load_registry<T: serde::de::DeserializeOwned>(path: &Path) -> std::collections::HashMap<String, T> {
@@ -631,9 +633,59 @@ fn prop_placements_are_registered() {
     }
 }
 
+/// A `kind: "kit"` model's per-material contract: every glTF material's
+/// name keys a family entry in surface_classes.json, which authors its
+/// metallic/roughness factors and detail flag; each family ships
+/// base-color + normal + metallic-roughness maps (roughness lives in the
+/// map, so the factor must stay 1.0 or it silently rescales it). Read from
+/// the .gltf JSON directly — `MaterialData` carries no material names.
+fn check_kit_materials(path: &Path, classes: &std::collections::HashMap<String, SurfaceClass>, clauses: &mut Vec<String>) {
+    const TOLERANCE: f32 = 1e-6;
+
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+    let json: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+    let materials = json["materials"].as_array().unwrap_or_else(|| panic!("{path:?}: no materials array"));
+
+    for mat in materials {
+        let Some(mat_name) = mat["name"].as_str() else {
+            clauses.push("unnamed material".to_string());
+            continue;
+        };
+        let Some(class) = classes.get(mat_name) else {
+            clauses.push(format!("material '{mat_name}' not in surface_classes.json"));
+            continue;
+        };
+
+        let pbr = &mat["pbrMetallicRoughness"];
+        let metallic = pbr["metallicFactor"].as_f64().unwrap_or(1.0) as f32;
+        if (metallic - class.metallic).abs() > TOLERANCE {
+            clauses.push(format!("{mat_name}: metallic_factor {metallic} != {}", class.metallic));
+        }
+        let roughness = pbr["roughnessFactor"].as_f64().unwrap_or(1.0) as f32;
+        if (roughness - class.roughness).abs() > TOLERANCE {
+            clauses.push(format!("{mat_name}: roughness_factor {roughness} != {}", class.roughness));
+        }
+        let detail = mat["extras"]["vordar_detail"].as_bool().unwrap_or(false);
+        if detail != class.detail {
+            clauses.push(format!("{mat_name}: detail {detail} != {}", class.detail));
+        }
+        for (slot, value) in [
+            ("baseColorTexture", &pbr["baseColorTexture"]),
+            ("metallicRoughnessTexture", &pbr["metallicRoughnessTexture"]),
+            ("normalTexture", &mat["normalTexture"]),
+        ] {
+            if value.is_null() {
+                clauses.push(format!("{mat_name}: {slot} missing"));
+            }
+        }
+    }
+}
+
 /// Every shipped prop material matches its assets.json surface_class
 /// contract: metallic/roughness/detail as the class authors them, and the
 /// map slots the pipeline is expected to have baked for that `kind`.
+/// Kit models are checked per material name instead (`check_kit_materials`).
 #[test]
 fn prop_material_matches_surface_class() {
     const TOLERANCE: f32 = 1e-6;
@@ -657,8 +709,21 @@ fn prop_material_matches_surface_class() {
             let asset = assets
                 .get(name)
                 .unwrap_or_else(|| panic!("prop '{name}' has no assets.json entry"));
-            let class = classes.get(&asset.surface_class).unwrap_or_else(|| {
-                panic!("prop '{name}': surface_class '{}' not in surface_classes.json", asset.surface_class)
+
+            if asset.kind == "kit" {
+                let mut clauses = Vec::new();
+                check_kit_materials(&root.join(&prop.model), &classes, &mut clauses);
+                if !clauses.is_empty() {
+                    violations.insert(name.to_string(), clauses);
+                }
+                continue;
+            }
+
+            let surface_class = asset.surface_class.as_deref().unwrap_or_else(|| {
+                panic!("prop '{name}' (kind '{}') has no surface_class", asset.kind)
+            });
+            let class = classes.get(surface_class).unwrap_or_else(|| {
+                panic!("prop '{name}': surface_class '{surface_class}' not in surface_classes.json")
             });
             let downloaded = asset.kind == "downloaded";
 

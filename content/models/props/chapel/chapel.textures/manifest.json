@@ -1,0 +1,51 @@
+{
+  "source": "chapel.gltf",
+  "sha256": "955be00181676b3b574953f063be37fa1b3b36a8826323d5613d797791f60858",
+  "images": [
+    {
+      "index": 0,
+      "slot": "normal",
+      "file": "img0.dds"
+    },
+    {
+      "index": 1,
+      "slot": "base",
+      "file": "img1.dds"
+    },
+    {
+      "index": 2,
+      "slot": "mr",
+      "file": "img2.dds"
+    },
+    {
+      "index": 3,
+      "slot": "normal",
+      "file": "img3.dds"
+    },
+    {
+      "index": 4,
+      "slot": "base",
+      "file": "img4.dds"
+    },
+    {
+      "index": 5,
+      "slot": "mr",
+      "file": "img5.dds"
+    },
+    {
+      "index": 6,
+      "slot": "normal",
+      "file": "img6.dds"
+    },
+    {
+      "index": 7,
+      "slot": "base",
+      "file": "img7.dds"
+    },
+    {
+      "index": 8,
+      "slot": "mr",
+      "file": "img8.dds"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+// Kit-type XZ footprints, measured from the installed glTFs
+// (content/models/props/<type>/). Frame: model frame = world frame at
+// yaw 0 — x is width, z is depth; casa door facades face -Z, the chapel
+// door end faces +X (nave runs along X). P2.5's layout lint asserts the
+// chapter03 collision spawns against this data (tasks/town/p24-layout.md §5).
+//
+// size: full outer wall/body XZ extent at ground level — what a collision
+//   Aabb mirrors. NOTE: the plan §1 table lists wall-centerline footprints;
+//   walls extend a further 0.6 m (one wall thickness) in each axis, so e.g.
+//   casa_small_a is 6.6 x 8.6 outer, not 6.0 x 8.0.
+// tolerance: how far the visual solid may exceed the collision box per axis
+//   (decorative or approximated volume: quoins/eaves on casas, wall coping,
+//   gate imposts, the round well basin vs its square box, the chapel apse
+//   fan which the flat apse wall leaves uncollided).
+// members: composite types spawn one collision piece per member, offset in
+//   this frame from the prop position.
+(
+    types: {
+        "casa_small_a": ( size: (6.6, 8.6), tolerance: 0.1 ),
+        "casa_small_b": ( size: (6.2, 8.0), tolerance: 0.1 ),
+        "casa_two_story": ( size: (7.6, 10.6), tolerance: 0.1 ),
+        // Composite AABB spans x in [-3.3, 7.35] — centered on the main
+        // block, wing to +X. Wing is rotated 90°: ridge along Z.
+        "casa_corner": (
+            size: (10.65, 6.6),
+            tolerance: 0.1,
+            members: [
+                ( prefab: "casa_corner_main", offset: (0.0, 0.0), size: (6.6, 6.6) ),
+                ( prefab: "casa_corner_wing", offset: (4.8, -1.0), size: (5.1, 4.6) ),
+            ],
+        ),
+        // Body 4.0 x 0.6; the coping course overhangs to 4.1 x 0.8.
+        "wall_segment": ( size: (4.0, 0.6), tolerance: 0.2 ),
+        // Jamb faces 6.4 x 0.9; imposts/voussoirs overhang to 6.5 x 1.1.
+        "gate_arch": ( size: (6.4, 0.9), tolerance: 0.1 ),
+        // Asymmetric about the origin: door end at x = +8.6, apse fan out to
+        // x = -11.63 (3.03 m beyond the 17.2 m nave rectangle; plan §1 said
+        // ~2.5). The flat apse collision wall leaves the fan uncollided —
+        // hence the tolerance.
+        "chapel": ( size: (20.23, 8.2), tolerance: 3.05 ),
+        // Round basin r = 1.25; square collision box faces sit 0.10 in,
+        // corners 0.31 out (plan §5 accepted approximation).
+        "well_basin": ( size: (2.5, 2.5), tolerance: 0.31 ),
+        // reja_set is deliberately absent: not placed in v1 (plan §7.3),
+        // three loose grilles with no footprint contract.
+    },
+)

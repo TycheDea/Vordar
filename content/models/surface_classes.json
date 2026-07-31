@@ -5,11 +5,23 @@
     "metallic": 0.0,
     "roughness": 0.8
   },
+  "encalado": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 1.0
+  },
   "foliage": {
     "albedo_source": "direct",
     "detail": false,
     "metallic": 0.0,
     "roughness": 0.7
+  },
+  "iron_wrought": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 1.0,
+    "roughness": 1.0
   },
   "limestone": {
     "albedo_source": "direct",
@@ -17,11 +29,35 @@
     "metallic": 0.0,
     "roughness": 0.85
   },
+  "limestone_dressed": {
+    "albedo_source": "direct",
+    "detail": true,
+    "metallic": 0.0,
+    "roughness": 1.0
+  },
+  "oak_dark": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 1.0
+  },
   "painted_metal": {
     "albedo_source": "direct",
     "detail": false,
     "metallic": 0.0,
     "roughness": 0.75
+  },
+  "plaster_smoked": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 1.0
+  },
+  "terracotta_tile": {
+    "albedo_source": "direct",
+    "detail": false,
+    "metallic": 0.0,
+    "roughness": 1.0
   },
   "wood": {
     "albedo_source": "direct",
