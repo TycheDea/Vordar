@@ -1,4 +1,4 @@
-"""Re-import a just-exported glb into a fresh scene and check it: material
+"""Re-import a just-exported glTF into a fresh scene and check it: material
 slot names against the six-material vocabulary, the vordar_detail extra on
 limestone materials, UV layers, loose geometry, boundary-edge counts, and
 that no curved-ring assembly (arch voussoirs, vault, rubble lip) has a
@@ -321,7 +321,7 @@ def _roof_slope_faults(mesh_objs, min_cluster_area=2.0, nz_lo=0.3, nz_hi=0.985,
     return slopes, faults
 
 
-def verify_glb(path):
+def verify_export(path):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=str(path))
 

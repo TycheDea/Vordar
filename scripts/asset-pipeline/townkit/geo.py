@@ -259,15 +259,19 @@ def _roof_deck_panel(name, panel_center, length, run, thickness, rot, material):
 def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
                deck_material, tile_material, tile_radius=0.15,
                deck_thickness=0.06, tile_overlap=1.18, gable_axis="x",
-               eave_overhang=0.35):
+               eave_overhang=0.35, verge_overhang=0.3):
     """A symmetric two-pitch tiled roof: ridge runs along `gable_axis`
     (the building's long facade), sloping down to eaves that overhang
-    `eave_overhang` past the wall face at +/- depth/2. Tiles are arrayed
-    half-cylinders sitting flush on the deck and running the whole slope on
-    both sides -- the barrel-tile silhouette stays legible at mid distance
-    rather than reading as a flat plane. Returns (deck_objs, tile_objs,
-    ridge_height); `ridge_height` is the structural ridge (the overhang
-    extends the eave only, it never raises the ridge)."""
+    `eave_overhang` past the wall face at +/- depth/2, and past the gable
+    faces at +/- length/2 by `verge_overhang`. The verge must clear the
+    gable wall's full half-thickness: a deck stopping at the wall span
+    leaves the gable infill's sloped top half-exposed as a plaster plane
+    parallel to the roof pitch (verify._roof_slope_faults). Tiles are
+    arrayed half-cylinders sitting flush on the deck and running the whole
+    slope on both sides -- the barrel-tile silhouette stays legible at mid
+    distance rather than reading as a flat plane. Returns (deck_objs,
+    tile_objs, ridge_height); `ridge_height` is the structural ridge (the
+    overhangs extend the eave and verge only, they never raise the ridge)."""
     cx, cy = center_xy
     pitch = math.radians(pitch_deg)
     half_depth = depth / 2.0
@@ -276,6 +280,7 @@ def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
     ext_half_depth = half_depth + eave_overhang
     ext_rise = ext_half_depth * math.tan(pitch)
     run = math.hypot(ext_half_depth, ext_rise)
+    ext_length = length + 2.0 * verge_overhang
 
     deck_objs = []
     tile_objs = []
@@ -295,14 +300,14 @@ def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
         else:
             rot = Matrix.Rotation(pitch_ext, 3, "X")
         deck = _roof_deck_panel(f"{name}_deck_{'a' if sign > 0 else 'b'}", panel_center,
-                                 length, run, deck_thickness, rot, deck_material)
+                                 ext_length, run, deck_thickness, rot, deck_material)
         deck_objs.append(deck)
 
         tile_pitch = tile_radius * 2.0 / tile_overlap
-        n_tiles = max(1, int(length / tile_pitch))
+        n_tiles = max(1, int(ext_length / tile_pitch))
         outward = deck_thickness / 2.0
         for i in range(n_tiles):
-            tx = -length / 2.0 + (i + 0.5) * (length / n_tiles)
+            tx = -ext_length / 2.0 + (i + 0.5) * (ext_length / n_tiles)
             local = Vector((tx, 0.0, outward))
             world = Vector(panel_center) + rot @ local
             # make_halfcyl's local X is its length axis and local Z is its

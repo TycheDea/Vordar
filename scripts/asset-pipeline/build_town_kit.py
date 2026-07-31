@@ -1,6 +1,9 @@
 # Blender-headless: generate the Rocalba town-kit buildings procedurally.
 #
-# One glb per building type (campaign decision D7), cites docs/town-premise.md
+# One glTF-separate export (.gltf + .bin) per building type (campaign
+# decision D7), all types referencing one shared <out>/textures/ set -- the
+# repo carries a single copy of each material family's maps instead of nine
+# embedded ones (VQ-B5). Cites docs/town-premise.md
 # S3 (six-material closed vocabulary) and S5/S6 (building register, chapel
 # spec). Geometry lives in townkit/{geo,buildings}.py; townkit/materials.py
 # derives the tiling UV scale from VQ-A3's texel-density figure and loads
@@ -14,8 +17,10 @@
 #            --types all --materials-dir <dir> --out <dir>
 
 import argparse
+import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -48,11 +53,27 @@ def export_selected(objs, path):
     for o in objs:
         o.select_set(True)
     bpy.context.view_layer.objects.active = objs[0]
-    result = bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB",
+    result = bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLTF_SEPARATE",
+                                        export_texture_dir="textures",
                                         export_yup=True, export_image_format="AUTO",
                                         export_extras=True, use_selection=True)
     if result != {"FINISHED"}:
         raise RuntimeError(f"export_scene.gltf({path}) returned {result}")
+
+
+def check_texture_uris(gltf_path):
+    """Every image must be an external file under the shared textures/ dir --
+    an embedded (data:) or stray-path image would silently defeat the
+    one-copy-on-disk layout."""
+    doc = json.loads(gltf_path.read_text())
+    uris = [img.get("uri", "") for img in doc.get("images", [])]
+    bad = [u for u in uris if not u.startswith("textures/")]
+    if bad:
+        raise RuntimeError(f"{gltf_path.name}: non-shared image URIs {bad}")
+    missing = [u for u in uris if not (gltf_path.parent / u).is_file()]
+    if missing:
+        raise RuntimeError(f"{gltf_path.name}: dangling image URIs {missing}")
+    return sorted(uris)
 
 
 def assert_chapel_dims(dims):
@@ -98,9 +119,15 @@ def main():
         sys.exit(1)
 
     results = []
+    tex_dir = out_dir / "textures"
+    shared_hashes = {}
+    # Staged canonical texture copies must outlive every export in the run
+    # (the exporter reads source bytes at export time), then vanish -- the
+    # shared set the repo keeps is only what the exporter writes to tex_dir.
+    staging = tempfile.TemporaryDirectory(prefix="townkit-texsrc-")
     for t in types:
         clear_scene()
-        mats, sources = matlib.build_materials(args.materials_dir)
+        mats, sources = matlib.build_materials(args.materials_dir, staging.name)
         objs, dims = buildings.BUILDERS[t](mats)
         for o in objs:
             # Roof deck panels (geo._roof_deck_panel) and any shell already
@@ -111,11 +138,19 @@ def main():
             if not o.get("vordar_uv_final"):
                 matlib.project_uv(o)
 
-        glb_path = out_dir / f"{t}.glb"
-        export_selected(objs, glb_path)
-        size_bytes = glb_path.stat().st_size
+        gltf_path = out_dir / f"{t}.gltf"
+        export_selected(objs, gltf_path)
+        size_bytes = gltf_path.stat().st_size + (out_dir / f"{t}.bin").stat().st_size
+        texture_uris = check_texture_uris(gltf_path)
+        # Exports overwrite into the shared textures/ dir; a rewrite with
+        # different bytes would silently corrupt what earlier .gltf files
+        # reference, so any already-seen URI must hash identically.
+        for uri in texture_uris:
+            digest = hashlib.sha256((out_dir / uri).read_bytes()).hexdigest()
+            if shared_hashes.setdefault(uri, digest) != digest:
+                raise RuntimeError(f"[{t}] rewrote shared texture {uri} with different bytes")
 
-        vreport = verifylib.verify_glb(glb_path)
+        vreport = verifylib.verify_export(gltf_path)
         preview_path = preview_dir / f"{t}.png"
         mean_px = renderlib.render_preview(preview_path)
         # Street-level angle: lower and closer, so it looks into gable ends
@@ -131,6 +166,7 @@ def main():
             "type": t,
             "tris": vreport["total_tris"],
             "size_bytes": size_bytes,
+            "texture_uris": texture_uris,
             "material_sources": sources,
             "verify": vreport,
             "preview_mean": mean_px,
@@ -149,10 +185,21 @@ def main():
               f"joint_gaps_bad={sum(1 for g in vreport['joint_gaps'] if not g['ok'])} "
               f"preview_mean={mean_px:.4f} preview_mean_street={mean_px_street:.4f}")
 
+    staging.cleanup()
+    if types == ALL_TYPES and tex_dir.is_dir():
+        # A full rebuild owns the shared dir: an unreferenced file is a
+        # stale leftover whose bytes would ride into installs as duplicates.
+        referenced = {Path(u).name for u in shared_hashes}
+        for p in tex_dir.iterdir():
+            if p.is_file() and p.name not in referenced:
+                p.unlink()
     summary_path = out_dir / "build_report.json"
     with open(summary_path, "w") as f:
         json.dump(results, f, indent=2, default=_json_default)
-    print(json.dumps({"summary": str(summary_path), "texel_scale_m": matlib.TEXEL_SCALE_M}))
+    shared_bytes = sum((out_dir / u).stat().st_size for u in shared_hashes)
+    print(json.dumps({"summary": str(summary_path), "texel_scale_m": matlib.TEXEL_SCALE_M,
+                      "shared_texture_files": len(shared_hashes),
+                      "shared_texture_bytes": shared_bytes}))
 
 
 if __name__ == "__main__":

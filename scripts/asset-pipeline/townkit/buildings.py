@@ -109,9 +109,78 @@ def _window_fill(name, center_xy, width, height, sill, iron_mat, oak_mat, wall_t
     return [reja, shutter]
 
 
+def _shell_union(objs, joined_name):
+    """Weld every shell piece (walls, decks, gable infill, all blocks)
+    into one solid via a SINGLE multi-operand boolean UNION, not
+    bpy.ops.object.join() and not chained pairwise unions: a plain join
+    only concatenates mesh data, leaving touching pieces as coincident
+    faces (the degenerate input that silently dropped a whole wall face
+    at the corner, G2 D6), while chained pairwise unions re-tessellate
+    the accumulating mesh at every step and pile up doubled faces and
+    sliver seams wherever operands share exactly coplanar faces (flush
+    facade bands, the common ground plane). One EXACT arrangement over
+    all pieces at once resolves those coincidences once, coherently."""
+    view_layer = bpy.context.view_layer
+    base = objs[0]
+    for other in objs[1:]:
+        # The boolean keeps an operand face's material only when the
+        # base already carries that material as a slot; otherwise the
+        # face silently falls back to slot 0 (probed on Blender 5.2) --
+        # which turned the terracotta roof decks into encalado.
+        for mat in other.data.materials:
+            if mat.name not in base.data.materials:
+                base.data.materials.append(mat)
+    operands = bpy.data.collections.new(f"{joined_name}_operands")
+    bpy.context.scene.collection.children.link(operands)
+    for other in objs[1:]:
+        operands.objects.link(other)
+    mod = base.modifiers.new("shell_union", type="BOOLEAN")
+    mod.operation = "UNION"
+    mod.solver = "EXACT"
+    mod.operand_type = "COLLECTION"
+    mod.collection = operands
+    view_layer.objects.active = base
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    for other in objs[1:]:
+        bpy.data.objects.remove(other, do_unlink=True)
+    bpy.data.collections.remove(operands)
+    base.name = joined_name
+    base.data.name = joined_name
+    base.select_set(False)
+    return base
+
+
+def _finalize_shell(objs, deck, name, union=True):
+    """Finalize shell UVs, then (unless the caller unions the shell itself,
+    casa_corner) weld the shell pieces into one sealed solid. The UV pass
+    runs before any join/boolean: the deck panels already carry their own
+    explicit per-slope UV (geo._roof_deck_panel) and must not be
+    re-projected, and giving every other shell piece its box-projected UV
+    now means the boolean only ever has to interpolate UV across a cut,
+    never re-derive it. The union is what keeps the casa roof invariant
+    (verify._roof_slope_faults) true by construction: loose gable-infill
+    top faces lie embedded inside the deck slab as large encalado planes
+    parallel to the slope, and only the boolean dissolves them.
+    vordar_uv_final tells build_town_kit.py's own project_uv pass to leave
+    these alone."""
+    deck_ids = {id(o) for o in deck}
+    for o in objs:
+        if _is_shell_name(o.name):
+            if id(o) not in deck_ids:
+                matlib.project_uv(o)
+            o["vordar_uv_final"] = True
+    if not union:
+        return objs
+    shell = [o for o in objs if _is_shell_name(o.name)]
+    detail = [o for o in objs if not _is_shell_name(o.name)]
+    merged = _shell_union(shell, f"{name}_shell")
+    merged["vordar_uv_final"] = True
+    return [merged] + detail
+
+
 def build_casa_shell(name, mats, width, depth, wall_height, pitch_deg,
                       front_openings, side_openings_left=None, side_openings_right=None,
-                      wall_thickness=WALL_THICKNESS):
+                      wall_thickness=WALL_THICKNESS, union=True):
     objs = []
     enc = mats["encalado"]
     lime = mats["limestone_dressed"]
@@ -155,20 +224,7 @@ def build_casa_shell(name, mats, width, depth, wall_height, pitch_deg,
         objs.append(geo.gable_infill(f"{name}_gable_{'left' if gx < 0 else 'right'}",
                                       gx, wall_thickness, depth, wall_height, ridge_z, enc))
 
-    # Finalize UV now, before any caller joins/booleans these shell pieces
-    # together (casa_corner's valley union): the deck panels already carry
-    # their own explicit per-slope UV (geo._roof_deck_panel) and must not be
-    # re-projected, and giving every other shell piece its box-projected UV
-    # now means a later boolean only ever has to interpolate UV across a
-    # cut, never re-derive it. vordar_uv_final tells build_town_kit.py's
-    # own project_uv pass to leave these alone.
-    deck_ids = {id(o) for o in deck}
-    for o in objs:
-        if _is_shell_name(o.name):
-            if id(o) not in deck_ids:
-                matlib.project_uv(o)
-            o["vordar_uv_final"] = True
-
+    objs = _finalize_shell(objs, deck, name, union=union)
     return objs, {"width": width, "depth": depth, "wall_height": wall_height, "ridge_height": ridge_z}
 
 
@@ -246,13 +302,14 @@ def build_casa_two_story(mats):
     for gx in (-width / 2.0, width / 2.0):
         objs.append(geo.gable_infill(f"{name}_gable_{'left' if gx < 0 else 'right'}",
                                       gx, WALL_THICKNESS, depth, h1 + h2, ridge_z, enc))
+    objs = _finalize_shell(objs, deck, name)
     return objs, {"width": width, "depth": depth, "wall_height": h1 + h2, "ridge_height": ridge_z}
 
 
 def _is_shell_name(name):
     """Structural shell pieces (walls, opening reveals, roof deck, gable
     ends) vs. decorative detail (tiles, quoins, door/window fills) -- only
-    the shell participates in casa_corner's footprint/roof boolean union."""
+    the shell participates in a casa's footprint/roof boolean union."""
     return any(tag in name for tag in ("_wall", "_sill", "_head", "_roof_deck_", "_gable_"))
 
 
@@ -267,10 +324,12 @@ def build_casa_corner(mats):
     main_objs, main_dims = build_casa_shell(
         f"{name}_main", mats, width=6.0, depth=6.0, wall_height=4.0, pitch_deg=28.0,
         front_openings=[{"kind": "door", "offset": 0.0, "width": 1.1, "height": 2.2, "sill": 0.0}],
+        union=False,
     )
     wing_objs, wing_dims = build_casa_shell(
         f"{name}_wing", mats, width=4.0, depth=4.5, wall_height=3.8, pitch_deg=28.0,
         front_openings=[{"kind": "window", "offset": 0.0, "width": 0.9, "height": 1.1, "sill": 1.2}],
+        union=False,
     )
     # Rotating -90 deg about Z (about the wing's own origin, before
     # translating) swaps its footprint to 4.5 x 4.0 and turns its ridge to
@@ -291,48 +350,7 @@ def build_casa_corner(mats):
     wing_shell = [o for o in wing_objs if _is_shell_name(o.name)]
     wing_detail = [o for o in wing_objs if not _is_shell_name(o.name)]
 
-    view_layer = bpy.context.view_layer
-
-    def join(objs, joined_name):
-        """Weld every shell piece (walls, decks, gable infill, both blocks)
-        into one solid via a SINGLE multi-operand boolean UNION, not
-        bpy.ops.object.join() and not chained pairwise unions: a plain join
-        only concatenates mesh data, leaving touching pieces as coincident
-        faces (the degenerate input that silently dropped a whole wall face
-        at the corner, G2 D6), while chained pairwise unions re-tessellate
-        the accumulating mesh at every step and pile up doubled faces and
-        sliver seams wherever operands share exactly coplanar faces (flush
-        facade bands, the common ground plane). One EXACT arrangement over
-        all pieces at once resolves those coincidences once, coherently."""
-        base = objs[0]
-        for other in objs[1:]:
-            # The boolean keeps an operand face's material only when the
-            # base already carries that material as a slot; otherwise the
-            # face silently falls back to slot 0 (probed on Blender 5.2) --
-            # which turned the terracotta roof decks into encalado.
-            for mat in other.data.materials:
-                if mat.name not in base.data.materials:
-                    base.data.materials.append(mat)
-        operands = bpy.data.collections.new(f"{joined_name}_operands")
-        bpy.context.scene.collection.children.link(operands)
-        for other in objs[1:]:
-            operands.objects.link(other)
-        mod = base.modifiers.new("shell_union", type="BOOLEAN")
-        mod.operation = "UNION"
-        mod.solver = "EXACT"
-        mod.operand_type = "COLLECTION"
-        mod.collection = operands
-        view_layer.objects.active = base
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-        for other in objs[1:]:
-            bpy.data.objects.remove(other, do_unlink=True)
-        bpy.data.collections.remove(operands)
-        base.name = joined_name
-        base.data.name = joined_name
-        base.select_set(False)
-        return base
-
-    main_merged = join(main_shell + wing_shell, f"{name}_main_shell")
+    main_merged = _shell_union(main_shell + wing_shell, f"{name}_main_shell")
     main_merged["vordar_uv_final"] = True
 
     objs = [main_merged] + main_detail + wing_detail

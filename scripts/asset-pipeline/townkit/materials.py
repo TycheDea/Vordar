@@ -13,6 +13,7 @@ and a long wall segment carry the same texel density.
 
 import glob as _glob
 import os
+import shutil
 
 import bpy
 
@@ -86,6 +87,20 @@ def _resolve_family_dir(materials_dir, family):
     return None
 
 
+def _stage(path, staging_dir, name):
+    # The glTF exporter names an exported texture file after its SOURCE
+    # file's basename (io_scene_gltf2 __gather_name), never the image
+    # datablock -- and every family's bake uses the same generic basenames
+    # (diff_2048.png, ...), which would collide into per-export "-1"
+    # suffixes whose family mapping shifts with each type's material
+    # subset. Loading from a per-family canonical copy is the one lever
+    # that controls the exported filename.
+    staged = os.path.join(staging_dir, name + os.path.splitext(path)[1])
+    if not os.path.exists(staged):
+        shutil.copyfile(path, staged)
+    return staged
+
+
 def _load_image(path, non_color):
     img = bpy.data.images.load(path, check_existing=True)
     if non_color:
@@ -93,7 +108,7 @@ def _load_image(path, non_color):
     return img
 
 
-def _wire_baked_textures(mat, family_dir):
+def _wire_baked_textures(mat, family_dir, staging_dir):
     tree = mat.node_tree
     bsdf = tree.nodes["Principled BSDF"]
     base_path = _find_first(family_dir, _BASECOLOR_GLOBS)
@@ -101,17 +116,20 @@ def _wire_baked_textures(mat, family_dir):
     rough_path = _find_first(family_dir, _ROUGHNESS_GLOBS)
     if base_path:
         node = tree.nodes.new("ShaderNodeTexImage")
-        node.image = _load_image(base_path, non_color=False)
+        node.image = _load_image(_stage(base_path, staging_dir, f"{mat.name}_diff"),
+                                 non_color=False)
         node.location = (-600, 300)
         tree.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
     if rough_path:
         node = tree.nodes.new("ShaderNodeTexImage")
-        node.image = _load_image(rough_path, non_color=True)
+        node.image = _load_image(_stage(rough_path, staging_dir, f"{mat.name}_rough"),
+                                 non_color=True)
         node.location = (-600, 0)
         tree.links.new(node.outputs["Color"], bsdf.inputs["Roughness"])
     if normal_path:
         tex = tree.nodes.new("ShaderNodeTexImage")
-        tex.image = _load_image(normal_path, non_color=True)
+        tex.image = _load_image(_stage(normal_path, staging_dir, f"{mat.name}_nor_gl"),
+                                non_color=True)
         tex.location = (-600, -300)
         nmap = tree.nodes.new("ShaderNodeNormalMap")
         nmap.location = (-300, -300)
@@ -120,11 +138,12 @@ def _wire_baked_textures(mat, family_dir):
     return base_path is not None
 
 
-def build_materials(materials_dir):
-    """Create the six premise materials once per run. Returns
-    (materials: dict[name, bpy.types.Material], sources: dict[name, str])
-    where sources records "baked:<dir>" or "placeholder" per family, for the
-    caller's report."""
+def build_materials(materials_dir, staging_dir):
+    """Create the six premise materials once per run, loading baked maps
+    through canonically-named copies under `staging_dir` (see _stage).
+    Returns (materials: dict[name, bpy.types.Material],
+    sources: dict[name, str]) where sources records "baked:<dir>" or
+    "placeholder" per family, for the caller's report."""
     materials = {}
     sources = {}
     for family in PLACEHOLDER_COLOR:
@@ -136,7 +155,7 @@ def build_materials(materials_dir):
         bsdf.inputs["Metallic"].default_value = 1.0 if family == "iron_wrought" else 0.0
 
         family_dir = _resolve_family_dir(materials_dir, family)
-        used_baked = _wire_baked_textures(mat, family_dir) if family_dir else False
+        used_baked = _wire_baked_textures(mat, family_dir, staging_dir) if family_dir else False
         sources[family] = f"baked:{family_dir}" if used_baked else "placeholder"
 
         mat["vordar_detail"] = family == DETAIL_FAMILY
