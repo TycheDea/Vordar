@@ -1,3 +1,7 @@
 /gradlew text eol=lf
 *.bat text eol=crlf
 *.jar binary
+# glTF JSON bytes are hashed into texture-sidecar manifests
+# (material_textures_have_fresh_sidecars); an autocrlf rewrite on checkout
+# would stale every sidecar. Keep them byte-exact.
+*.gltf -text
