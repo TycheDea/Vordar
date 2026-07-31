@@ -1,13 +1,11 @@
-// Chapel east-face wall piece flanking the door opening; two placements
-// leave the 2.4 m gap between them. Anchored: players collide with it.
+// Invisible collision shell for one chapel east-wall piece flanking the
+// door; two placements leave the 2.4 m opening between them (a Hitbox is one
+// Aabb centred on the spawn point, so the opening comes from placement).
 (
     components: {
-        "Transform":  (),
-        "ShapeGroup": (shapes: [
-            (shape: Cube, offset: (0.0, 5.25, 0.0), scale: (0.8, 11.5, 2.3), color: (0.60, 0.58, 0.54)),
-        ]),
-        "Hitbox":     (shape: Aabb(half_extents: (0.4, 5.5, 1.15))),
-        "Solid":      (),
-        "Anchored":   (),
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (0.3, 3.75, 1.3))),
+        "Solid":     (),
+        "Anchored":  (),
     },
 )

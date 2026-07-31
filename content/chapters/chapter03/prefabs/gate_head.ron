@@ -1,0 +1,12 @@
+// Invisible collision shell for the gate_arch head over the opening.
+// Spawned aloft (y = 4.6) so the spawn-centred hitbox spans y 3.6..5.6 —
+// springline to wall top; the road passage below stays open. Covers only
+// the 3.2 m opening span (the head over the jambs is unreachable).
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (0.45, 1.0, 1.6))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

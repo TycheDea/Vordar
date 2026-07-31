@@ -1,0 +1,12 @@
+// Invisible collision shell for the casa_corner zone prop's wing member.
+// Spawned at the prop position plus the yaw-rotated member offset from
+// ../footprints.ron; half-extents are the wing's measured footprint in the
+// model frame (the 90-degree wing rotation is already baked into the model).
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (2.55, 2.57, 2.3))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

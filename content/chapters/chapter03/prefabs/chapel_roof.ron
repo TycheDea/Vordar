@@ -1,14 +1,11 @@
-// Chapel roof slab over the west half of the nave only — the east vault is
-// deliberately open to sky. Spawned aloft (y = 11.3), resting on the wall
-// tops; far above the movement plane, so its solidity is inert.
+// Invisible collision slab for the chapel's intact west-half barrel vault —
+// the east half is collapsed, open to sky. Spawned aloft (y = 10.2) at the
+// vault crown, far above the movement plane, so its solidity is inert.
 (
     components: {
-        "Transform":  (),
-        "ShapeGroup": (shapes: [
-            (shape: Cube, offset: (0.0, 0.0, 0.0), scale: (8.8, 0.6, 8.6), color: (0.35, 0.32, 0.30)),
-        ]),
-        "Hitbox":     (shape: Aabb(half_extents: (4.4, 0.3, 4.3))),
-        "Solid":      (),
-        "Anchored":   (),
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (4.0, 0.3, 3.5))),
+        "Solid":     (),
+        "Anchored":  (),
     },
 )

@@ -1,0 +1,12 @@
+// Invisible collision shell for a ruined wall_segment zone prop. A Hitbox
+// Aabb cannot rotate, so this is authored in the placed orientation: every
+// town wall fragment runs along Z on the east wall line (model-local width
+// 4.0 becomes the z extent). Height covers coping plus rubble crest.
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (0.3, 1.54, 2.0))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

@@ -1,25 +1,42 @@
-// Chapter 3 — Rocalba: the start town, graybox shells only. Everything is an
-// initial_spawn of an anchored solid box (players collide, nothing here can
-// die); no NPCs, no camps.
+// Chapter 3 — Rocalba: the start town's collision layer. Every spawn is an
+// invisible anchored solid box mirroring a town-kit prop placed in
+// content/zones/zones.ron (visuals are always-rendered client dressing;
+// collision rides replication, so prefabs stay collision-only — anything
+// visible here would pop at the AOI edge). footprints.ron records the
+// measured per-type extents the boxes mirror; no NPCs, no camps.
 //
 // Layout (spawn ring r=3 at the origin; the east portal corridor along +X —
-// portal (22,0,0), arrival (16,0,0) — stays clear; everything inside r≈55,
+// portal (22,0,0), arrival (16,0,0) — stays clear; every solid inside r≈51,
 // the play radius clamps at 65):
-//   - the plaza sits at the origin, walled by casa blocks;
-//   - the chapel anchors SW. Its shell is assembled from axis-aligned wall
-//     prefabs (a Hitbox is one Aabb centred on the spawn point, so the door
-//     opening comes from placement, not shape): interior 16×7 m, vault 11 m,
-//     entered through a 2.4 m gap centred at z=-13 in the east face x=-13.2;
-//     the roof covers only the west half — the east vault is open to sky.
+//   - the plaza sits at the origin: casa rows north (fronts on z=+9.5,
+//     doors facing south) and south (fronts on z=-9.5, doors facing north);
+//     the well at (0,-5.5); each casa_corner adds a wing spawn at the prop
+//     position plus the yaw-rotated member offset from footprints.ron;
+//   - the east gate stands astride the road at x=15 (jambs at z=+-2.4
+//     flanking the 3.2 m opening, head aloft over it), with ruined wall
+//     fragments along the x=15 line — the gap z 3.2..7.0 is the unfinished
+//     breach where the crucero shrine stands;
+//   - the chapel anchors SW: nave along X centred at (-30,-29), door east
+//     at x=-21.7 (2.4 m opening from jamb placement, lintel aloft above
+//     it); the collision roof covers only the intact west-half vault — the
+//     east half is collapsed, open to sky; the apse fan west of x=-38.6 is
+//     uncollided (footprints.ron chapel tolerance).
 (
     name: "Chapter 3 — Rocalba",
     initial_spawns: [
-        (prefab: "chapel_wall_side", positions: [(-22.0, 0.0, -9.1), (-22.0, 0.0, -16.9)]),
-        (prefab: "chapel_wall_apse", positions: [(-30.4, 0.0, -13.0)]),
-        (prefab: "chapel_door_jamb", positions: [(-13.6, 0.0, -15.35), (-13.6, 0.0, -10.65)]),
-        (prefab: "chapel_lintel",    positions: [(-13.6, 7.1, -13.0)]),
-        (prefab: "chapel_roof",      positions: [(-26.4, 11.3, -13.0)]),
-        (prefab: "casa_long",        positions: [(-3.0, 0.0, 12.0), (3.0, 0.0, -12.0)]),
-        (prefab: "casa_block",       positions: [(12.0, 0.0, 10.0), (12.0, 0.0, -10.0), (-12.0, 0.0, 8.0)]),
+        (prefab: "casa_small_b",     positions: [(-12.2, 0.0, 13.2), (6.8, 0.0, -13.2)]),
+        (prefab: "casa_small_a",     positions: [(-6.4, 0.0, 13.5), (-12.0, 0.0, -13.5)]),
+        (prefab: "casa_two_story",   positions: [(0.1, 0.0, 14.5), (0.5, 0.0, -14.5)]),
+        (prefab: "casa_corner_main", positions: [(6.6, 0.0, 12.5), (-6.0, 0.0, -12.5)]),
+        (prefab: "casa_corner_wing", positions: [(11.4, 0.0, 11.5), (-10.8, 0.0, -11.5)]),
+        (prefab: "chapel_wall_side", positions: [(-30.0, 0.0, -25.2), (-30.0, 0.0, -32.8)]),
+        (prefab: "chapel_wall_apse", positions: [(-38.3, 0.0, -29.0)]),
+        (prefab: "chapel_door_jamb", positions: [(-21.7, 0.0, -26.5), (-21.7, 0.0, -31.5)]),
+        (prefab: "chapel_lintel",    positions: [(-21.7, 5.35, -29.0)]),
+        (prefab: "chapel_roof",      positions: [(-34.0, 10.2, -29.0)]),
+        (prefab: "gate_jamb",        positions: [(15.0, 0.0, -2.4), (15.0, 0.0, 2.4)]),
+        (prefab: "gate_head",        positions: [(15.0, 4.6, 0.0)]),
+        (prefab: "well_basin",       positions: [(0.0, 0.0, -5.5)]),
+        (prefab: "wall_segment",     positions: [(15.0, 0.0, 9.0), (15.0, 0.0, 13.5), (15.0, 0.0, -5.5), (15.0, 0.0, -10.0)]),
     ],
 )

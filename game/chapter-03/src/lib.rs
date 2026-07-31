@@ -1,4 +1,4 @@
-// Chapter 3 — Rocalba: the start town, graybox shells only. Buildings are
+// Chapter 3 — Rocalba: the start town, collision shells only. Buildings are
 // initial_spawns of anchored solid boxes (spawn once, nothing here can die);
 // no NPCs, no camps, no systems beyond the shared chapter setup spawn.
 

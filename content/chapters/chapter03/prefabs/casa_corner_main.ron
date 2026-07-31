@@ -1,0 +1,11 @@
+// Invisible collision shell for the casa_corner zone prop's main block; the
+// wing is a separate spawn (casa_corner_wing) at the member offset recorded
+// in ../footprints.ron.
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (3.3, 2.87, 3.3))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

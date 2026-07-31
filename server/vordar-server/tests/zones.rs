@@ -158,17 +158,31 @@ fn town_zone_replicates_and_villagers_are_unhittable() {
     let mut bot = Bot::connect_as(start_addr, "traveler");
     bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
     bot.wait_for("first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
-    bot.wait_for("the graybox town replicates", Duration::from_secs(10), |b| {
-        let has = |p: &str| b.prefabs.values().any(|v| v == p);
-        has("chapel_wall_side") && has("chapel_wall_apse") && has("chapel_door_jamb")
-            && has("chapel_lintel") && has("chapel_roof") && has("casa_long") && has("casa_block")
+    // AOI subset of the chapter03 town: the bot is this server's first
+    // connection (ConnId 1), so it spawns at (2.12, 0, 2.12) on the r=3
+    // spawn ring, and must see exactly the chapter.ron spawns within
+    // AOI_RADIUS 40 of that point. The chapel sits far SW: only its door-end
+    // pieces (north jamb at 37.2, lintel at 39.6) are in range — both side
+    // walls, the apse and the roof (42.2..51.0) are not. Walking to the
+    // chapel door and seeing the rest replicate is P2.5's extension.
+    const TOWN_PREFABS: [&str; 14] = [
+        "casa_small_a", "casa_small_b", "casa_two_story", "casa_corner_main",
+        "casa_corner_wing", "chapel_wall_side", "chapel_wall_apse", "chapel_door_jamb",
+        "chapel_lintel", "chapel_roof", "gate_jamb", "gate_head", "well_basin", "wall_segment",
+    ];
+    bot.wait_for("the town collision shells replicate", Duration::from_secs(10), |b| {
+        b.prefabs.values().filter(|p| TOWN_PREFABS.contains(&p.as_str())).count() >= 20
     });
-    let shells = bot
-        .prefabs
-        .values()
-        .filter(|p| p.starts_with("chapel_") || p.starts_with("casa_"))
-        .count();
-    assert_eq!(shells, 12, "every chapter03 collision shell replicates");
+    let count = |p: &str| bot.prefabs.values().filter(|v| v.as_str() == p).count();
+    for (prefab, in_aoi) in [
+        ("casa_small_a", 2), ("casa_small_b", 2), ("casa_two_story", 2),
+        ("casa_corner_main", 2), ("casa_corner_wing", 2),
+        ("gate_jamb", 2), ("gate_head", 1), ("well_basin", 1), ("wall_segment", 4),
+        ("chapel_door_jamb", 1), ("chapel_lintel", 1),
+        ("chapel_wall_side", 0), ("chapel_wall_apse", 0), ("chapel_roof", 0),
+    ] {
+        assert_eq!(count(prefab), in_aoi, "AOI subset at spawn: {prefab}");
+    }
     walk_into_portal(&mut bot, Vec3::new(10.0, 0.0, 0.0), Duration::from_secs(10));
     bot.follow_redirect();
     bot.wait_for("welcome in east", Duration::from_secs(5), |b| b.player_id.is_some());

@@ -1,0 +1,12 @@
+// Invisible collision shell for the casa_small_a zone prop — the visual is
+// the always-rendered kit model, so this entity carries no ShapeGroup and
+// only its Aabb replicates. Half-extents mirror the measured outer footprint
+// in ../footprints.ron; y is height/2 (hitbox is centred on the spawn point).
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (3.3, 3.13, 4.3))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

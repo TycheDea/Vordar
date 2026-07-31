@@ -1,0 +1,11 @@
+// Invisible collision shell for the well_basin zone prop. Square box for the
+// round basin: faces flush with the r=1.25 rim, corners overshoot by the
+// tolerance recorded in ../footprints.ron. Height covers the rope posts.
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (1.25, 1.43, 1.25))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

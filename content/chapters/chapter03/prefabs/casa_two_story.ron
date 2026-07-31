@@ -1,0 +1,10 @@
+// Invisible collision shell for the casa_two_story zone prop; half-extents
+// mirror the measured outer footprint in ../footprints.ron.
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (3.8, 4.49, 5.3))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)

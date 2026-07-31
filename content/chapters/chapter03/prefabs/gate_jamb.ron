@@ -1,0 +1,12 @@
+// Invisible collision shell for one gate_arch jamb (two placements flank the
+// 3.2 m opening). Authored in the placed orientation — the gate spans Z
+// astride the east road, so the jamb's 1.6 m face runs along Z; the jamb
+// rises to the 3.6 m springline, the arch above belongs to gate_head.
+(
+    components: {
+        "Transform": (),
+        "Hitbox":    (shape: Aabb(half_extents: (0.45, 1.8, 0.8))),
+        "Solid":     (),
+        "Anchored":  (),
+    },
+)
