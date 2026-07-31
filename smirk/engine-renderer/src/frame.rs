@@ -537,11 +537,10 @@ fn record_depth_prepass(
         }
 }
 
-/// Hemisphere-kernel occlusion (half-res) from the depth prepass, then a box
-/// blur — both into `state.ssao_targets`.
+/// GTAO from the depth prepass — prefilter, main, and denoise compute passes
+/// into `state.ssao_targets`.
 fn record_ssao(state: &RendererState, encoder: &mut wgpu::CommandEncoder) {
-    state.ssao_pass.encode(encoder, &state.camera_bind_group, &state.ssao_targets.raw_ao_view);
-    state.blur_pass.encode(encoder, &state.ssao_targets.blurred_ao_view);
+    state.gtao.encode(encoder, &state.camera_bind_group);
 }
 
 /// Main 3D pass — MSAA HDR opaque + sky. Color/depth stay live for the

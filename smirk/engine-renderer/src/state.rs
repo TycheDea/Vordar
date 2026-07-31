@@ -18,7 +18,7 @@ use crate::post;
 use crate::sdf_pipeline;
 use crate::shadow;
 use crate::skinned_pipeline;
-use crate::ssao::{self, BlurPass, DepthPrepassPipelines, SsaoPass, SsaoTargets};
+use crate::ssao::{self, DepthPrepassPipelines, GtaoPasses, SsaoTargets};
 use crate::sky;
 use crate::texture::{self, ColorTexture};
 use crate::ParticleDrawList;
@@ -76,11 +76,10 @@ pub(crate) struct RendererState {
     pub(crate) light_dir:            GlamVec3,
     _shadow_texture:    wgpu::Texture,
     _shadow_array_view: wgpu::TextureView,
-    // ── depth prepass + SSAO ──
+    // ── depth prepass + SSAO (GTAO) ──
     pub(crate) depth_prepass_pipelines: DepthPrepassPipelines,
     pub(crate) ssao_targets:            SsaoTargets,
-    pub(crate) ssao_pass:               SsaoPass,
-    pub(crate) blur_pass:               BlurPass,
+    pub(crate) gtao:                    GtaoPasses,
     pub(crate) ssao_enabled:            bool,
     // CPU copy of the full light uniform so set_light / set_fog can update
     // their halves independently.
@@ -156,17 +155,17 @@ impl RendererState {
             create_instance_buffers(&device, &joint_bgl);
 
         // Depth prepass + SSAO: full-res single-sample depth from the main
-        // camera, then half-res hemisphere-kernel occlusion + blur.
-        let (depth_prepass_pipelines, ssao_targets, ssao_pass, blur_pass) =
+        // camera, then the three GTAO compute passes.
+        let (depth_prepass_pipelines, ssao_targets, gtao) =
             create_ssao_resources(&device, &queue, &camera_bgl, &joint_bgl, size);
 
         // The scene bind group binds SSAO's AO view, so it can only be built
         // once the target above exists — production always binds the real
-        // (blurred) view.
+        // (denoised) view.
         let ao_sampler = ssao::create_ao_sampler(&device);
         let camera_bind_group = camera::create_scene_bind_group(
             &device, &camera_bgl, &camera_buffer, &light_buffer, &light_vp_buffer,
-            &shadow_array_view, &ssao_targets.blurred_ao_view, &ao_sampler,
+            &shadow_array_view, &ssao_targets.ao_view, &ao_sampler,
         );
 
         // ── egui ──────────────────────────────────────────────────────────────
@@ -205,7 +204,7 @@ impl RendererState {
                 light_dir: GlamVec3::new(-1.0, 2.0, -1.0).normalize(),
                 _shadow_texture: shadow_texture,
                 _shadow_array_view: shadow_array_view,
-                depth_prepass_pipelines, ssao_targets, ssao_pass, blur_pass,
+                depth_prepass_pipelines, ssao_targets, gtao,
                 ssao_enabled: true,
                 light_state: LightUniform::default_sun(),
                 env_bgl, sky_bgl, sky_pipeline, baker, environment, brdf_view,
@@ -251,13 +250,12 @@ impl RendererState {
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
         self.ssao_targets = SsaoTargets::new(&self.device, w, h);
-        self.ssao_pass.set_target(&self.device, &self.queue, &self.ssao_targets);
-        self.blur_pass.set_target(&self.device, &self.ssao_targets.raw_ao_view, self.ssao_pass.params_buffer());
+        self.gtao.set_target(&self.device, &self.ssao_targets);
         // The AO view above is a freshly created texture — rebind so the
         // scene bind group doesn't keep the old (now stale-sized) one alive.
         self.camera_bind_group = camera::create_scene_bind_group(
             &self.device, &self.camera_bgl, &self.camera_buffer, &self.light_buffer, &self.light_vp_buffer,
-            &self._shadow_array_view, &self.ssao_targets.blurred_ao_view, &self.ao_sampler,
+            &self._shadow_array_view, &self.ssao_targets.ao_view, &self.ao_sampler,
         );
     }
 
@@ -307,6 +305,12 @@ fn create_surface_and_device(
             // Timestamps are optional (dev-overlay GPU timing).
             required_features: wgpu::Features::TEXTURE_COMPRESSION_BC
                 | (adapter.features() & wgpu::Features::TIMESTAMP_QUERY),
+            // The GTAO prefilter writes all 5 depth mips in one dispatch;
+            // the WebGPU default limit is 4.
+            required_limits: wgpu::Limits {
+                max_storage_textures_per_shader_stage: 5,
+                ..Default::default()
+            },
             ..Default::default()
         })
     ).expect("failed to acquire device (TEXTURE_COMPRESSION_BC required — desktop GPU needed)");
@@ -486,15 +490,12 @@ fn create_ssao_resources(
     camera_bgl: &wgpu::BindGroupLayout,
     joint_bgl:  &wgpu::BindGroupLayout,
     size:       winit::dpi::PhysicalSize<u32>,
-) -> (DepthPrepassPipelines, SsaoTargets, SsaoPass, BlurPass) {
+) -> (DepthPrepassPipelines, SsaoTargets, GtaoPasses) {
     let depth_prepass_pipelines = DepthPrepassPipelines::new(device, camera_bgl, joint_bgl);
     let ssao_targets = SsaoTargets::new(device, size.width, size.height);
-    let shader = ssao::create_shader(device);
-    let mut ssao_pass = SsaoPass::new(device, camera_bgl, &shader);
-    ssao_pass.set_target(device, queue, &ssao_targets);
-    let mut blur_pass = BlurPass::new(device, &shader);
-    blur_pass.set_target(device, &ssao_targets.raw_ao_view, ssao_pass.params_buffer());
-    (depth_prepass_pipelines, ssao_targets, ssao_pass, blur_pass)
+    let mut gtao = GtaoPasses::new(device, queue, camera_bgl);
+    gtao.set_target(device, &ssao_targets);
+    (depth_prepass_pipelines, ssao_targets, gtao)
 }
 
 fn create_instance_buffers(

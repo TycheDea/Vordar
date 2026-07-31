@@ -88,7 +88,7 @@ mod generated_shader_tests {
             include_str!(concat!(env!("OUT_DIR"), "/mesh_shader.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/skinned_mesh_shader.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/depth_prepass.wgsl")),
-            include_str!(concat!(env!("OUT_DIR"), "/ssao.wgsl")),
+            include_str!(concat!(env!("OUT_DIR"), "/gtao.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/sky.wgsl")),
             include_str!(concat!(env!("OUT_DIR"), "/tonemap.wgsl")),
         ];

@@ -22,7 +22,7 @@ use crate::sdf_pipeline::{self, INDICES};
 use crate::shadow::{self, ShadowPipelines};
 use crate::skinned_pipeline;
 use crate::sky;
-use crate::ssao::{self, BlurPass, DepthPrepassPipelines, SsaoPass, SsaoTargets};
+use crate::ssao::{self, DepthPrepassPipelines, GtaoPasses, SsaoTargets};
 use crate::texture;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -47,6 +47,12 @@ impl HeadlessGpu {
         let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor {
                 required_features: adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC,
+                // The GTAO prefilter writes all 5 depth mips in one dispatch;
+                // the WebGPU default limit is 4.
+                required_limits: wgpu::Limits {
+                    max_storage_textures_per_shader_stage: 5,
+                    ..Default::default()
+                },
                 ..Default::default()
             })
         ).ok()?;
@@ -208,12 +214,11 @@ pub struct OffscreenRenderer {
     /// GPU readback.
     camera_eye:     Vec3,
     depth_prepass_pipelines: DepthPrepassPipelines,
-    ssao_pass:               SsaoPass,
-    blur_pass:               BlurPass,
+    gtao:                    GtaoPasses,
     /// Built lazily against the first `SceneTarget` size `compose` sees;
     /// rebuilt if a later target's size differs.
     ssao_targets:            Option<SsaoTargets>,
-    /// Depth prepass + SSAO + blur on/off — off (the default) keeps every
+    /// Depth prepass + GTAO passes on/off — off (the default) keeps every
     /// pre-existing offscreen test's pass count unchanged.
     ssao_enabled:   bool,
     /// Set whenever `camera_bind_group`'s bound AO view might no longer
@@ -286,9 +291,7 @@ impl OffscreenRenderer {
         let index_buffer  = sdf_pipeline::create_index_buffer(device);
 
         let depth_prepass_pipelines = DepthPrepassPipelines::new(device, &camera_bgl, &joint_bgl);
-        let ssao_shader = ssao::create_shader(device);
-        let ssao_pass = SsaoPass::new(device, &camera_bgl, &ssao_shader);
-        let blur_pass = BlurPass::new(device, &ssao_shader);
+        let gtao = GtaoPasses::new(device, &gpu.queue, &camera_bgl);
 
         // SSAO starts disabled, so the initial bind group points at the
         // white fallback — every pre-existing (non-SSAO) test's shading
@@ -339,8 +342,7 @@ impl OffscreenRenderer {
             draw_sky: false,
             camera_eye: camera.eye(),
             depth_prepass_pipelines,
-            ssao_pass,
-            blur_pass,
+            gtao,
             ssao_targets: None,
             ssao_enabled: false,
             scene_bind_group_stale: false,
@@ -362,14 +364,13 @@ impl OffscreenRenderer {
             return;
         }
         let targets = SsaoTargets::new(&self.gpu.device, width, height);
-        self.ssao_pass.set_target(&self.gpu.device, &self.gpu.queue, &targets);
-        self.blur_pass.set_target(&self.gpu.device, &targets.raw_ao_view, self.ssao_pass.params_buffer());
+        self.gtao.set_target(&self.gpu.device, &targets);
         self.ssao_targets = Some(targets);
         self.scene_bind_group_stale = true;
     }
 
-    /// Turns the depth prepass + SSAO + blur passes on/off and, in lockstep,
-    /// which AO view the scene bind group points at: the real blurred target
+    /// Turns the depth prepass + GTAO passes on/off and, in lockstep, which
+    /// AO view the scene bind group points at: the real denoised target
     /// when on, the white fallback when off — `compose` applies the change
     /// (rebuilding the target first if this is the first enabled render).
     pub fn set_ssao(&mut self, enabled: bool) {
@@ -380,13 +381,13 @@ impl OffscreenRenderer {
         self.scene_bind_group_stale = true;
     }
 
-    /// (Re)points the scene bind group's AO binding at the real blurred
+    /// (Re)points the scene bind group's AO binding at the real denoised
     /// target when SSAO is enabled, the white fallback otherwise.
     fn rebuild_scene_bind_group(&mut self) {
         let ao_view = if self.ssao_enabled {
             &self.ssao_targets.as_ref()
                 .expect("ensure_ssao_targets runs before this in compose")
-                .blurred_ao_view
+                .ao_view
         } else {
             &self.white_ao.view
         };
@@ -396,16 +397,18 @@ impl OffscreenRenderer {
         );
     }
 
-    /// Read the blurred half-res AO target back to CPU memory: one byte per
-    /// texel (R8Unorm), width×height = the target's dimensions halved. `None`
-    /// until a `set_ssao(true)` render has run.
-    pub fn ao_readback(&self, target: &SceneTarget) -> Option<Vec<u8>> {
+    /// Read the denoised full-res AO target back to CPU memory: one f32
+    /// visibility per texel (R32Float, 0 = fully occluded, 1 = open),
+    /// width×height = the target's dimensions. `None` until a
+    /// `set_ssao(true)` render has run.
+    pub fn ao_readback(&self, target: &SceneTarget) -> Option<Vec<f32>> {
         let targets = self.ssao_targets.as_ref()?;
         debug_assert_eq!(
             (targets.width, targets.height), (target.width, target.height),
             "ao_readback called against a different-sized target than the last SSAO-enabled render"
         );
-        Some(read_r8(&self.gpu, &targets.blurred_ao))
+        let bytes = read_texture_mip(&self.gpu, &targets.ao, 0);
+        Some(bytemuck::cast_slice(&bytes).to_vec())
     }
 
     pub fn target(&self, width: u32, height: u32) -> SceneTarget {
@@ -790,8 +793,7 @@ impl OffscreenRenderer {
                 });
                 depth_draw(&mut pass, self);
             }
-            self.ssao_pass.encode(&mut encoder, &self.camera_bind_group, &targets.raw_ao_view);
-            self.blur_pass.encode(&mut encoder, &targets.blurred_ao_view);
+            self.gtao.encode(&mut encoder, &self.camera_bind_group);
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -909,57 +911,3 @@ pub fn read_texture_mip(gpu: &HeadlessGpu, texture: &wgpu::Texture, mip: u32) ->
     pixels
 }
 
-/// Read a mip-0, single-channel (R8) texture back to CPU memory, rows
-/// unpadded (row-major) — `read_texture_mip` assumes 4 bytes/pixel, which an
-/// R8Unorm target (the SSAO textures) doesn't have.
-fn read_r8(gpu: &HeadlessGpu, texture: &wgpu::Texture) -> Vec<u8> {
-    const ROW_ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let width  = texture.width();
-    let height = texture.height();
-    let padded = width.div_ceil(ROW_ALIGN) * ROW_ALIGN;
-
-    let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label:              Some("R8 Readback Buffer"),
-        size:               (padded * height) as u64,
-        usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
-    let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("R8 Readback Encoder"),
-    });
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin:    wgpu::Origin3d::ZERO,
-            aspect:    wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset:         0,
-                bytes_per_row:  Some(padded),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-    );
-    gpu.queue.submit(std::iter::once(encoder.finish()));
-
-    let slice = readback.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |r| r.expect("readback map failed"));
-    gpu.device
-        .poll(wgpu::PollType::Wait { submission_index: None, timeout: None })
-        .expect("device poll failed");
-
-    let mapped = slice.get_mapped_range();
-    let mut pixels = Vec::with_capacity((width * height) as usize);
-    for row in 0..height {
-        let start = (row * padded) as usize;
-        pixels.extend_from_slice(&mapped[start..start + width as usize]);
-    }
-    drop(mapped);
-    readback.unmap();
-    pixels
-}

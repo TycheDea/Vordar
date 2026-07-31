@@ -35,7 +35,7 @@ struct LightUniform {
 @group(0) @binding(1)
 var<uniform> light: LightUniform;
 
-// SSAO: real blurred target when enabled, a white 1×1 fallback otherwise
+// SSAO: the denoised GTAO target when enabled, a white 1×1 fallback otherwise
 // (see engine_renderer::ssao::WhiteAo) — shade_pbr multiplies ambient by it.
 @group(0) @binding(5) var t_ssao: texture_2d<f32>;
 @group(0) @binding(6) var s_ssao: sampler;

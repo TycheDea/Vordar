@@ -1,6 +1,6 @@
 // Preprocesses the three geometry shaders (shader.wgsl, mesh_shader.wgsl,
 // skinned_mesh_shader.wgsl), the sky shader (sky.wgsl), the depth
-// prepass/SSAO shaders (depth_prepass.wgsl, ssao.wgsl), and the tonemap
+// prepass/GTAO shaders (depth_prepass.wgsl, gtao.wgsl), and the tonemap
 // shader (tonemap.wgsl):
 // `//#include "snippets/x.wgsl"` lines splice in the shared PBR/shadow/uniform
 // snippets, `//#const NAME` markers become `const NAME: f32 = ...;`
@@ -16,7 +16,7 @@ use std::path::Path;
 
 const PREPROCESSED_SHADERS: [&str; 7] = [
     "shader.wgsl", "mesh_shader.wgsl", "skinned_mesh_shader.wgsl", "sky.wgsl",
-    "depth_prepass.wgsl", "ssao.wgsl", "tonemap.wgsl",
+    "depth_prepass.wgsl", "gtao.wgsl", "tonemap.wgsl",
 ];
 const SNIPPETS: [&str; 7] = ["scene_uniforms.wgsl", "shadow_sample.wgsl", "pbr_common.wgsl", "fog.wgsl", "debug_channel.wgsl", "srgb_oetf.wgsl", "detail_triplanar.wgsl"];
 

@@ -1197,42 +1197,30 @@ fn point_light_brightens_falls_off_and_carries_color() {
 
 // ── SSAO ─────────────────────────────────────────────────────────────────────
 
-/// Mean AO byte (0..255, R8Unorm) over a pixel-space rectangle of the
-/// half-res AO readback (`ao` is `ao_w`-wide, row-major, one byte/texel).
-fn ao_tile_mean(ao: &[u8], ao_w: u32, x: Range<u32>, y: Range<u32>) -> f64 {
-    let mut sum = 0u64;
+/// Mean AO visibility (0..1, R32Float) over a pixel-space rectangle of the
+/// full-res AO readback (`ao` is `ao_w`-wide, row-major, one f32/texel).
+fn ao_tile_mean(ao: &[f32], ao_w: u32, x: Range<u32>, y: Range<u32>) -> f64 {
+    let mut sum = 0.0f64;
     let mut count = 0u64;
     for row in y {
         for col in x.clone() {
-            sum += ao[(row * ao_w + col) as usize] as u64;
+            sum += ao[(row * ao_w + col) as usize] as f64;
             count += 1;
         }
     }
     assert!(count > 0, "empty tile");
-    sum as f64 / count as f64
+    sum / count as f64
 }
 
-/// A box (SDF cube) sitting on a large ground quad, viewed straight down
-/// (TopDown: world x/z maps linearly to screen, no perspective math needed
-/// to place tiles) with the sun off and uniform env ambient: the AO texture
-/// must read clearly darker right where the box's wall meets the ground
-/// than on open ground far from the box — the depth prepass + SSAO + blur
-/// pipeline producing a real, direction-correct occlusion signal end to end.
-#[test]
-fn ssao_darkens_box_ground_contact_crease() {
-    let Some(mut r) = renderer_or_skip() else { return };
-    const SIZE: u32 = 512;
-    r.set_ssao(true);
-    r.set_camera_top_down();
-    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
-
-    // Ground: a 60×60 slab, top surface at y=0. Box: 6×1×6, resting on the
-    // ground (base at y=0), footprint x/z in [-3,3]. Kept short (comparable
-    // to SSAO_RADIUS): in this top-down view the box's own height is a
-    // camera-space depth gap, and a box much taller than the radius pushes
-    // the occluded-sample range check toward zero (`ssao.wgsl`'s
-    // `range_check`) — a real limitation of range-checked SSAO, not
-    // something to route around by disabling the check.
+/// The shared scene both SSAO tests frame: a 60×60 ground slab (top surface
+/// at y=0) and a 6×1×6 box resting on it (footprint x/z in [-3,3]), with
+/// the camera aimed obliquely at the box's +X wall base so the wall face and
+/// the ground in front of it fill the frame — the crease line runs through
+/// the frame center, so tiles need no world→pixel math. An angled view is
+/// essential: GTAO integrates horizons from visible surfaces only, and its
+/// effect radius (XeGTAO default ≈ 0.73 m) is shorter than the wall, so a
+/// straight-down framing that hides the wall face shows no crease.
+fn ssao_crease_scene() -> (SdfInstance, SdfInstance) {
     let ground = SdfInstance {
         model: Mat4::from_scale_rotation_translation(
             Vec3::new(60.0, 1.0, 60.0), glam::Quat::IDENTITY, Vec3::new(0.0, -0.5, 0.0),
@@ -1245,29 +1233,51 @@ fn ssao_darkens_box_ground_contact_crease() {
         ).to_cols_array_2d(),
         color: [1.0, 1.0, 1.0], shape_type: 0, shape_params: [0.0; 4],
     };
+    (ground, box_on_ground)
+}
+
+const SSAO_CREASE_EYE: Vec3 = Vec3::new(6.0, 2.0, 0.0);
+const SSAO_CREASE_TARGET: Vec3 = Vec3::new(3.0, 0.0, 0.0);
+
+/// The box-and-ground scene of `ssao_crease_scene`, with the sun off and
+/// uniform env ambient: the AO texture over the ground just in front of the
+/// wall must read clearly darker with the box present than the same pixels
+/// over bare ground, while ground metres away (outside the effect radius)
+/// stays untouched — the depth prepass + GTAO + denoise pipeline producing a
+/// real, geometry-driven occlusion signal end to end.
+#[test]
+fn ssao_darkens_box_ground_contact_crease() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    const SIZE: u32 = 512;
+    r.set_ssao(true);
+    r.set_camera_lookat(SSAO_CREASE_EYE, SSAO_CREASE_TARGET);
+    r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
+    let (ground, box_on_ground) = ssao_crease_scene();
 
     let target = r.target(SIZE, SIZE);
     r.render_sdf(&target, &[ground, box_on_ground], wgpu::Color::BLACK);
-    let ao = r.ao_readback(&target).expect("set_ssao(true) must produce an AO readback");
+    let ao_with = r.ao_readback(&target).expect("set_ssao(true) must produce an AO readback");
 
-    // TopDown is orthographic with ortho_half_height=20 and aspect=1, so
-    // world x/z map linearly: half-res px = ao_w/2 + world*(ao_w/40).
-    let ao_w = SIZE / 2;
-    let scale = ao_w as f64 / 40.0;
-    let center = ao_w as f64 / 2.0;
-    let px = |world: f64| (center + world * scale).round() as u32;
+    let target = r.target(SIZE, SIZE);
+    r.render_sdf(&target, &[ground], wgpu::Color::BLACK);
+    let ao_without = r.ao_readback(&target).expect("set_ssao(true) must produce an AO readback");
 
-    // Crease: hugging the box's +X wall (world x in [3.05,3.55], just past
-    // the footprint edge at x=3) — occlusion falls off with distance from
-    // the wall, so the tile stays within the near-field band the kernel
-    // radius actually reaches strongly.
-    let crease = ao_tile_mean(&ao, ao_w, px(3.05)..px(3.55), px(-2.0)..px(2.0));
-    // Open ground: far along -X, well outside any occluder's reach.
-    let open = ao_tile_mean(&ao, ao_w, px(-19.0)..px(-15.0), px(-2.0)..px(2.0));
-
+    // Rows just below the frame center: ground within ~25 cm of the wall
+    // base (the boresight hits the crease), inside the effect radius.
+    let crease_with    = ao_tile_mean(&ao_with,    SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE / 2 + 4..SIZE / 2 + 24);
+    let crease_without = ao_tile_mean(&ao_without, SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE / 2 + 4..SIZE / 2 + 24);
     assert!(
-        crease < open * 0.9,
-        "crease must read clearly darker than open ground: crease={crease:.1} open={open:.1}"
+        crease_with < crease_without * 0.9,
+        "the wall must darken the ground at its base: with={crease_with:.3} without={crease_without:.3}"
+    );
+
+    // Rows near the bottom edge: ground ~1.5 m from the wall, outside the
+    // effect radius — the box must not reach it.
+    let open_with    = ao_tile_mean(&ao_with,    SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE - 60..SIZE - 20);
+    let open_without = ao_tile_mean(&ao_without, SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE - 60..SIZE - 20);
+    assert!(
+        (open_with - open_without).abs() < 0.05 * open_without,
+        "open ground outside the effect radius must stay within noise: with={open_with:.3} without={open_without:.3}"
     );
 }
 
@@ -1287,37 +1297,20 @@ fn luminance_tile_mean(pixels: &[u8], width: u32, x: Range<u32>, y: Range<u32>) 
     sum / count as f64
 }
 
-/// Same box-on-ground/top-down scene as `ssao_darkens_box_ground_contact_crease`,
+/// Same scene and framing as `ssao_darkens_box_ground_contact_crease`,
 /// through the real tonemapped output rather than the raw AO readback: proves
 /// `shade_pbr` actually consumes the AO texture to darken ambient (not just
-/// that the AO pass produces one). SSAO on must read clearly darker at the
-/// contact crease than SSAO off, while open ground far from the box — where
-/// SSAO ≈ 1 either way — stays within noise.
+/// that the AO pass produces one), and that the `set_ssao` toggle governs it.
+/// SSAO on must read clearly darker at the contact crease than SSAO off,
+/// while open ground outside the effect radius — where AO ≈ 1 either way —
+/// stays within noise.
 #[test]
 fn ssao_darkens_final_image_crease_vs_open_ground() {
     let Some(mut r) = renderer_or_skip() else { return };
     const SIZE: u32 = 512;
-    r.set_camera_top_down();
+    r.set_camera_lookat(SSAO_CREASE_EYE, SSAO_CREASE_TARGET);
     r.set_light(TestLight { direction: Vec3::Y, color: Vec3::ZERO, ambient: 1.0 });
-
-    let ground = SdfInstance {
-        model: Mat4::from_scale_rotation_translation(
-            Vec3::new(60.0, 1.0, 60.0), glam::Quat::IDENTITY, Vec3::new(0.0, -0.5, 0.0),
-        ).to_cols_array_2d(),
-        color: [1.0, 1.0, 1.0], shape_type: 0, shape_params: [0.0; 4],
-    };
-    let box_on_ground = SdfInstance {
-        model: Mat4::from_scale_rotation_translation(
-            Vec3::new(6.0, 1.0, 6.0), glam::Quat::IDENTITY, Vec3::new(0.0, 0.5, 0.0),
-        ).to_cols_array_2d(),
-        color: [1.0, 1.0, 1.0], shape_type: 0, shape_params: [0.0; 4],
-    };
-
-    // Same TopDown linear world->screen mapping as
-    // ssao_darkens_box_ground_contact_crease, at full (not half-res) scale.
-    let scale = SIZE as f64 / 40.0;
-    let center = SIZE as f64 / 2.0;
-    let px = |world: f64| (center + world * scale).round() as u32;
+    let (ground, box_on_ground) = ssao_crease_scene();
 
     r.set_ssao(false);
     let target = r.target(SIZE, SIZE);
@@ -1329,10 +1322,12 @@ fn ssao_darkens_final_image_crease_vs_open_ground() {
     r.render_sdf(&target, &[ground, box_on_ground], wgpu::Color::BLACK);
     let on = r.read(&target);
 
-    let crease_off = luminance_tile_mean(&off, SIZE, px(3.05)..px(3.55), px(-2.0)..px(2.0));
-    let crease_on  = luminance_tile_mean(&on,  SIZE, px(3.05)..px(3.55), px(-2.0)..px(2.0));
-    let open_off = luminance_tile_mean(&off, SIZE, px(-19.0)..px(-15.0), px(-2.0)..px(2.0));
-    let open_on  = luminance_tile_mean(&on,  SIZE, px(-19.0)..px(-15.0), px(-2.0)..px(2.0));
+    // The same tiles as the AO-buffer test: crease rows just below the frame
+    // center, open ground near the bottom edge.
+    let crease_off = luminance_tile_mean(&off, SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE / 2 + 4..SIZE / 2 + 24);
+    let crease_on  = luminance_tile_mean(&on,  SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE / 2 + 4..SIZE / 2 + 24);
+    let open_off = luminance_tile_mean(&off, SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE - 60..SIZE - 20);
+    let open_on  = luminance_tile_mean(&on,  SIZE, SIZE / 2 - 40..SIZE / 2 + 40, SIZE - 60..SIZE - 20);
 
     assert!(
         crease_on < crease_off * 0.95,
@@ -1340,7 +1335,7 @@ fn ssao_darkens_final_image_crease_vs_open_ground() {
     );
     assert!(
         (open_on - open_off).abs() < 0.05 * open_off,
-        "open ground far from any occluder must stay within noise: off={open_off:.1} on={open_on:.1}"
+        "open ground outside the effect radius must stay within noise: off={open_off:.1} on={open_on:.1}"
     );
 }
 

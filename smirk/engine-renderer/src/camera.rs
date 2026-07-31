@@ -310,8 +310,10 @@ pub(crate) fn create_scene_buffers_and_layout(
     let layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: Some("Scene Bind Group Layout"),
         entries: &[
-            // Fragment too: the PBR shaders read camera.eye for the view vector.
-            uniform_entry(0, ShaderStages::VERTEX.union(ShaderStages::FRAGMENT)),
+            // Fragment: the PBR shaders read camera.eye for the view vector.
+            // Compute: the GTAO passes reconstruct positions from view_proj/
+            // inv_view_proj.
+            uniform_entry(0, ShaderStages::VERTEX.union(ShaderStages::FRAGMENT).union(ShaderStages::COMPUTE)),
             uniform_entry(1, ShaderStages::FRAGMENT),
             // Shadow receiving: sun view-proj + depth map + comparison sampler.
             uniform_entry(2, ShaderStages::FRAGMENT),
@@ -331,22 +333,23 @@ pub(crate) fn create_scene_buffers_and_layout(
                 ty:         BindingType::Sampler(SamplerBindingType::Comparison),
                 count:      None,
             },
-            // SSAO: real blurred target when enabled, a white 1×1 fallback
-            // otherwise (see ssao::WhiteAo).
+            // SSAO: the denoised GTAO target when enabled (R32Float —
+            // non-filterable), a white 1×1 fallback otherwise (see
+            // ssao::WhiteAo).
             BindGroupLayoutEntry {
                 binding:    5,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
                     multisampled:   false,
                     view_dimension: TextureViewDimension::D2,
-                    sample_type:    wgpu::TextureSampleType::Float { filterable: true },
+                    sample_type:    wgpu::TextureSampleType::Float { filterable: false },
                 },
                 count: None,
             },
             BindGroupLayoutEntry {
                 binding:    6,
                 visibility: ShaderStages::FRAGMENT,
-                ty:         BindingType::Sampler(SamplerBindingType::Filtering),
+                ty:         BindingType::Sampler(SamplerBindingType::NonFiltering),
                 count:      None,
             },
         ],

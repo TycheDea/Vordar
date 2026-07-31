@@ -1,32 +1,11 @@
-// Depth prepass + SSAO: a full-res single-sample depth-only pass renders
-// opaque geometry from the main camera, then a half-res pass reconstructs
-// position/normal from that depth and darkens creases where nearby geometry
-// blocks the hemisphere above a surface. shade_pbr (pbr_common.wgsl) samples
-// the blurred result to scale IBL ambient only; `WhiteAo` is the neutral
-// stand-in bound whenever SSAO is disabled.
+// Depth prepass + GTAO: a full-res single-sample depth-only pass renders
+// opaque geometry from the main camera, then three compute passes (gtao.wgsl:
+// depth prefilter → horizon-slice GTAO → edge-aware spatial denoise) produce
+// a full-res AO texture. shade_pbr (pbr_common.wgsl) samples the denoised
+// result to scale IBL ambient only; `WhiteAo` is the neutral stand-in bound
+// whenever SSAO is disabled.
 
 use wgpu::{BindGroupLayout, Device, TextureFormat};
-
-/// Sample radius (world-space metres) the hemisphere kernel reaches. Wider
-/// than a textbook 0.5m default: occlusion strength falls off with distance
-/// from the occluder much faster than the radius itself (few kernel
-/// directions reach a far corner of the hemisphere), so a small radius
-/// collapses the crease's strongly-occluded band to a sub-pixel strip with
-/// nothing to average over at these render sizes (see the
-/// `ssao_darkens_box_ground_contact_crease` offscreen test) — 3.0 keeps that
-/// near-field band several AO-texels wide.
-pub(crate) const SSAO_RADIUS: f32 = 3.0;
-/// Depth-comparison slack (world-space metres) `ssao_frag` allows before
-/// counting a kernel sample as occluded. A flat surface's own tangent-plane
-/// kernel samples should compare as unoccluded, but `ssao.wgsl`'s
-/// screen-space-derivative normal and depth-reconstructed sample position
-/// both carry enough numerical noise, at a radius this wide (see
-/// `SSAO_RADIUS`), that a bias much below 0.2 lets that noise register as
-/// real occlusion — self-shadowing "acne" that reads as a fine dirt-like
-/// speckle across large, close, flat surfaces (a building wall) once the AO
-/// darkens IBL ambient, while staying invisible on small props whose faces
-/// cover too few AO texels to show the pattern.
-const SSAO_BIAS: f32 = 0.2;
 
 /// Depth-only pipeline variants of the three geometry pipelines, rendering
 /// into `SsaoTargets`' full-res depth from the main camera (group 0 is the
@@ -180,30 +159,36 @@ impl DepthPrepassPipelines {
     }
 }
 
-/// The full-res prepass depth plus the half-res raw/blurred AO targets. AO
-/// renders at half the prepass resolution; the blur denoises the raw pass's
-/// per-pixel hash-rotated kernel noise.
+/// Depth mip levels in the prefiltered chain (XeGTAO's XE_GTAO_DEPTH_MIP_LEVELS).
+const DEPTH_MIP_COUNT: u32 = 5;
+
+/// The full-res prepass depth plus the GTAO intermediates: the linearized
+/// depth mip chain, packed depth-difference edges, the noisy AO the main pass
+/// writes, and the denoised AO the scene bind group samples.
 pub(crate) struct SsaoTargets {
-    pub(crate) width:      u32,
-    pub(crate) height:     u32,
-    pub(crate) ao_width:   u32,
-    pub(crate) ao_height:  u32,
+    pub(crate) width:  u32,
+    pub(crate) height: u32,
     pub(crate) prepass_depth_view: wgpu::TextureView,
-    pub(crate) raw_ao_view:        wgpu::TextureView,
-    pub(crate) blurred_ao_view:    wgpu::TextureView,
+    /// Per-mip storage views the prefilter pass writes.
+    pub(crate) depth_mip_views: Vec<wgpu::TextureView>,
+    /// All-mips sampled view the GTAO main pass reads.
+    pub(crate) depth_mips_view: wgpu::TextureView,
+    pub(crate) edges_view:    wgpu::TextureView,
+    pub(crate) noisy_ao_view: wgpu::TextureView,
+    pub(crate) ao_view:       wgpu::TextureView,
     /// Exposed for CPU readback (offscreen tests only — production frames
     /// never read this back).
-    pub(crate) blurred_ao: wgpu::Texture,
+    pub(crate) ao: wgpu::Texture,
     _prepass_depth: wgpu::Texture,
-    _raw_ao:        wgpu::Texture,
+    _depth_mips:    wgpu::Texture,
+    _edges:         wgpu::Texture,
+    _noisy_ao:      wgpu::Texture,
 }
 
 impl SsaoTargets {
     pub(crate) fn new(device: &Device, width: u32, height: u32) -> Self {
         let width  = width.max(1);
         let height = height.max(1);
-        let ao_width  = (width / 2).max(1);
-        let ao_height = (height / 2).max(1);
 
         let prepass_depth = device.create_texture(&wgpu::TextureDescriptor {
             label:           Some("SSAO Prepass Depth"),
@@ -216,33 +201,50 @@ impl SsaoTargets {
             view_formats:    &[],
         });
 
-        let ao_tex = |label: &str| {
+        let storage_tex = |label: &str, format: TextureFormat, mips: u32, extra: wgpu::TextureUsages| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label:           Some(label),
-                size:            wgpu::Extent3d { width: ao_width, height: ao_height, depth_or_array_layers: 1 },
-                mip_level_count: 1,
+                size:            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: mips,
                 sample_count:    1,
                 dimension:       wgpu::TextureDimension::D2,
-                format:          TextureFormat::R8Unorm,
-                // COPY_SRC: the offscreen test harness reads the blurred
-                // target back; harmless for the production frame path.
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                format,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
                     | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
+                    | extra,
                 view_formats: &[],
             })
         };
-        let raw_ao     = ao_tex("SSAO Raw");
-        let blurred_ao = ao_tex("SSAO Blurred");
+        let depth_mips = storage_tex("GTAO Depth Mips", TextureFormat::R32Float, DEPTH_MIP_COUNT, wgpu::TextureUsages::empty());
+        let edges      = storage_tex("GTAO Edges", TextureFormat::R32Uint, 1, wgpu::TextureUsages::empty());
+        let noisy_ao   = storage_tex("GTAO Noisy AO", TextureFormat::R32Float, 1, wgpu::TextureUsages::empty());
+        // COPY_SRC: the offscreen test harness reads the denoised target
+        // back; harmless for the production frame path.
+        let ao = storage_tex("GTAO AO", TextureFormat::R32Float, 1, wgpu::TextureUsages::COPY_SRC);
+
+        let depth_mip_views = (0..DEPTH_MIP_COUNT)
+            .map(|mip| {
+                depth_mips.create_view(&wgpu::TextureViewDescriptor {
+                    base_mip_level:  mip,
+                    mip_level_count: Some(1),
+                    ..Default::default()
+                })
+            })
+            .collect();
 
         Self {
-            width, height, ao_width, ao_height,
+            width, height,
             prepass_depth_view: prepass_depth.create_view(&Default::default()),
-            raw_ao_view:        raw_ao.create_view(&Default::default()),
-            blurred_ao_view:    blurred_ao.create_view(&Default::default()),
-            blurred_ao,
+            depth_mip_views,
+            depth_mips_view: depth_mips.create_view(&Default::default()),
+            edges_view:      edges.create_view(&Default::default()),
+            noisy_ao_view:   noisy_ao.create_view(&Default::default()),
+            ao_view:         ao.create_view(&Default::default()),
+            ao,
             _prepass_depth: prepass_depth,
-            _raw_ao:        raw_ao,
+            _depth_mips:    depth_mips,
+            _edges:         edges,
+            _noisy_ao:      noisy_ao,
         }
     }
 }
@@ -283,261 +285,286 @@ impl WhiteAo {
     }
 }
 
-/// Linear-filtering sampler for the AO texture (real or white-fallback),
-/// clamped so a screen UV rounding slightly past [0,1] at the frame edge
-/// samples the edge texel rather than wrapping.
+/// Nearest sampler for the AO texture (real or white-fallback) — the AO
+/// target is R32Float (non-filterable without an extra feature) and full-res,
+/// so shading reads texels 1:1 anyway. Clamped so a screen UV rounding
+/// slightly past [0,1] at the frame edge samples the edge texel rather than
+/// wrapping.
 pub(crate) fn create_ao_sampler(device: &Device) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
         label:          Some("SSAO Sampler"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
-        mag_filter:     wgpu::FilterMode::Linear,
-        min_filter:     wgpu::FilterMode::Linear,
+        mag_filter:     wgpu::FilterMode::Nearest,
+        min_filter:     wgpu::FilterMode::Nearest,
         ..Default::default()
     })
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct SsaoParamsUniform {
-    screen_size: [f32; 2],
-    radius:      f32,
-    bias:        f32,
+/// The three GTAO compute pipelines (gtao.wgsl) and their per-target bind
+/// groups: depth prefilter → GTAO main → spatial denoise.
+pub(crate) struct GtaoPasses {
+    prefilter: wgpu::ComputePipeline,
+    main:      wgpu::ComputePipeline,
+    denoise:   wgpu::ComputePipeline,
+    prefilter_bgl: wgpu::BindGroupLayout,
+    gtao_bgl:      wgpu::BindGroupLayout,
+    denoise_bgl:   wgpu::BindGroupLayout,
+    sampler:       wgpu::Sampler,
+    hilbert_view:  wgpu::TextureView,
+    _hilbert:      wgpu::Texture,
+    bind_groups:   Option<GtaoBindGroups>,
 }
 
-/// Fullscreen hemisphere-kernel occlusion pass: samples the depth prepass,
-/// writes raw (unblurred) AO.
-pub(crate) struct SsaoPass {
-    pipeline:      wgpu::RenderPipeline,
-    bgl:           wgpu::BindGroupLayout,
-    params_buffer: wgpu::Buffer,
-    bind_group:    Option<wgpu::BindGroup>,
+struct GtaoBindGroups {
+    prefilter: wgpu::BindGroup,
+    main:      wgpu::BindGroup,
+    denoise:   wgpu::BindGroup,
+    width:     u32,
+    height:    u32,
 }
 
-impl SsaoPass {
-    pub(crate) fn new(device: &Device, camera_bgl: &BindGroupLayout, shader: &wgpu::ShaderModule) -> Self {
-        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label:   Some("SSAO BGL"),
+impl GtaoPasses {
+    pub(crate) fn new(device: &Device, queue: &wgpu::Queue, camera_bgl: &BindGroupLayout) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:  Some("GTAO Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/gtao.wgsl")).into()),
+        });
+
+        let storage_entry = |binding: u32, format: TextureFormat| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::StorageTexture {
+                access:         wgpu::StorageTextureAccess::WriteOnly,
+                format,
+                view_dimension: wgpu::TextureViewDimension::D2,
+            },
+            count: None,
+        };
+        let texture_entry = |binding: u32, sample_type: wgpu::TextureSampleType| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+                multisampled:   false,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                sample_type,
+            },
+            count: None,
+        };
+
+        let prefilter_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label:   Some("GTAO Prefilter BGL"),
             entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding:    0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled:   false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type:    wgpu::TextureSampleType::Depth,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding:    1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty:                 wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size:   None,
-                    },
-                    count: None,
-                },
+                texture_entry(0, wgpu::TextureSampleType::Depth),
+                storage_entry(1, TextureFormat::R32Float),
+                storage_entry(2, TextureFormat::R32Float),
+                storage_entry(3, TextureFormat::R32Float),
+                storage_entry(4, TextureFormat::R32Float),
+                storage_entry(5, TextureFormat::R32Float),
             ],
         });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label:              Some("SSAO Pipeline Layout"),
-            bind_group_layouts: &[Some(camera_bgl), Some(&bgl)],
-            immediate_size:     0,
+        let gtao_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label:   Some("GTAO Main BGL"),
+            entries: &[
+                texture_entry(0, wgpu::TextureSampleType::Float { filterable: false }),
+                texture_entry(1, wgpu::TextureSampleType::Uint),
+                wgpu::BindGroupLayoutEntry {
+                    binding:    2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty:         wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count:      None,
+                },
+                storage_entry(3, TextureFormat::R32Float),
+                storage_entry(4, TextureFormat::R32Uint),
+            ],
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label:  Some("SSAO Pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module:      shader,
-                entry_point: Some("vtx_main"),
-                buffers:     &[],
+        let denoise_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label:   Some("GTAO Denoise BGL"),
+            entries: &[
+                texture_entry(0, wgpu::TextureSampleType::Float { filterable: false }),
+                texture_entry(1, wgpu::TextureSampleType::Uint),
+                storage_entry(2, TextureFormat::R32Float),
+            ],
+        });
+
+        let compute = |label: &str, entry: &str, layouts: &[Option<&wgpu::BindGroupLayout>]| {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label:              Some(label),
+                bind_group_layouts: layouts,
+                immediate_size:     0,
+            });
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label:       Some(label),
+                layout:      Some(&layout),
+                module:      &shader,
+                entry_point: Some(entry),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive:     Default::default(),
-            depth_stencil: None,
-            multisample:   Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module:      shader,
-                entry_point: Some("ssao_frag"),
-                targets:     &[Some(wgpu::ColorTargetState {
-                    format:     TextureFormat::R8Unorm,
-                    blend:      None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache:          None,
+                cache:       None,
+            })
+        };
+        let prefilter = compute("GTAO Prefilter Pipeline", "prefilter_depth", &[Some(camera_bgl), Some(&prefilter_bgl)]);
+        let main      = compute("GTAO Main Pipeline", "gtao", &[Some(camera_bgl), None, Some(&gtao_bgl)]);
+        let denoise   = compute("GTAO Denoise Pipeline", "denoise", &[None, None, None, Some(&denoise_bgl)]);
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label:          Some("GTAO Point Clamp Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
         });
-        let params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label:              Some("SSAO Params"),
-            size:               std::mem::size_of::<SsaoParamsUniform>() as u64,
-            usage:              wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        Self { pipeline, bgl, params_buffer, bind_group: None }
+        let (hilbert, hilbert_view) = create_hilbert_lut(device, queue);
+
+        Self {
+            prefilter, main, denoise,
+            prefilter_bgl, gtao_bgl, denoise_bgl,
+            sampler,
+            hilbert_view,
+            _hilbert:    hilbert,
+            bind_groups: None,
+        }
     }
 
-    /// (Re)point the pass at the current `SsaoTargets` — call at init and on
-    /// every resize, since the depth view it binds is rebuilt there too.
-    pub(crate) fn set_target(&mut self, device: &Device, queue: &wgpu::Queue, targets: &SsaoTargets) {
-        queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[SsaoParamsUniform {
-            screen_size: [targets.ao_width as f32, targets.ao_height as f32],
-            radius:      SSAO_RADIUS,
-            bias:        SSAO_BIAS,
-        }]));
-        self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label:   Some("SSAO Bind Group"),
-            layout:  &self.bgl,
+    /// (Re)point the passes at the current `SsaoTargets` — call at init and
+    /// on every resize, since every view they bind is rebuilt there too.
+    pub(crate) fn set_target(&mut self, device: &Device, targets: &SsaoTargets) {
+        let prefilter = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("GTAO Prefilter Bind Group"),
+            layout:  &self.prefilter_bgl,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&targets.prepass_depth_view) },
-                wgpu::BindGroupEntry { binding: 1, resource: self.params_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&targets.depth_mip_views[0]) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&targets.depth_mip_views[1]) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&targets.depth_mip_views[2]) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&targets.depth_mip_views[3]) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&targets.depth_mip_views[4]) },
             ],
-        }));
+        });
+        let main = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("GTAO Main Bind Group"),
+            layout:  &self.gtao_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&targets.depth_mips_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.hilbert_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&targets.noisy_ao_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&targets.edges_view) },
+            ],
+        });
+        let denoise = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:   Some("GTAO Denoise Bind Group"),
+            layout:  &self.denoise_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&targets.noisy_ao_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&targets.edges_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&targets.ao_view) },
+            ],
+        });
+        self.bind_groups = Some(GtaoBindGroups {
+            prefilter, main, denoise,
+            width:  targets.width,
+            height: targets.height,
+        });
     }
 
-    /// The params buffer — `BlurPass` shares it (both passes want the same
-    /// screen-size/radius/bias uniform, per `ssao.wgsl`).
-    pub(crate) fn params_buffer(&self) -> &wgpu::Buffer {
-        &self.params_buffer
-    }
-
-    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, camera_bind_group: &wgpu::BindGroup, dst: &wgpu::TextureView) {
-        let Some(bind_group) = self.bind_group.as_ref() else {
-            log::error!("SsaoPass::encode before set_target — frame dropped");
+    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, camera_bind_group: &wgpu::BindGroup) {
+        let Some(groups) = self.bind_groups.as_ref() else {
+            log::error!("GtaoPasses::encode before set_target — frame dropped");
             return;
         };
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("SSAO Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view:           dst,
-                resolve_target: None,
-                depth_slice:    None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Store },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            ..Default::default()
-        });
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, camera_bind_group, &[]);
-        pass.set_bind_group(1, bind_group, &[]);
-        pass.draw(0..3, 0..1);
+        // The prefilter handles 2×2 source texels per invocation at
+        // workgroup 8×8 (16×16 texels per group); the other two are 1:1.
+        let (w, h) = (groups.width, groups.height);
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("GTAO Prefilter Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.prefilter);
+            pass.set_bind_group(0, camera_bind_group, &[]);
+            pass.set_bind_group(1, &groups.prefilter, &[]);
+            pass.dispatch_workgroups(w.div_ceil(16), h.div_ceil(16), 1);
+        }
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("GTAO Main Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.main);
+            pass.set_bind_group(0, camera_bind_group, &[]);
+            pass.set_bind_group(2, &groups.main, &[]);
+            pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
+        }
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("GTAO Denoise Pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.denoise);
+            pass.set_bind_group(3, &groups.denoise, &[]);
+            pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
+        }
     }
 }
 
-/// Fullscreen 3×3 box blur denoising `SsaoPass`'s raw output.
-pub(crate) struct BlurPass {
-    pipeline:   wgpu::RenderPipeline,
-    bgl:        wgpu::BindGroupLayout,
-    bind_group: Option<wgpu::BindGroup>,
+const HILBERT_WIDTH: u16 = 64;
+
+/// The 64×64 Hilbert-curve index LUT the GTAO pass turns into a low-bias
+/// per-pixel noise pair via the R2 sequence (XeGTAO's spatial noise).
+fn create_hilbert_lut(device: &Device, queue: &wgpu::Queue) -> (wgpu::Texture, wgpu::TextureView) {
+    let mut data = [0u16; (HILBERT_WIDTH as usize) * (HILBERT_WIDTH as usize)];
+    for y in 0..HILBERT_WIDTH {
+        for x in 0..HILBERT_WIDTH {
+            data[y as usize * HILBERT_WIDTH as usize + x as usize] = hilbert_index(x, y);
+        }
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label:           Some("GTAO Hilbert LUT"),
+        size:            wgpu::Extent3d { width: HILBERT_WIDTH as u32, height: HILBERT_WIDTH as u32, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count:    1,
+        dimension:       wgpu::TextureDimension::D2,
+        format:          TextureFormat::R16Uint,
+        usage:           wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats:    &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture:   &texture,
+            mip_level: 0,
+            origin:    wgpu::Origin3d::ZERO,
+            aspect:    wgpu::TextureAspect::All,
+        },
+        bytemuck::cast_slice(&data),
+        wgpu::TexelCopyBufferLayout {
+            offset:         0,
+            bytes_per_row:  Some(HILBERT_WIDTH as u32 * 2),
+            rows_per_image: Some(HILBERT_WIDTH as u32),
+        },
+        wgpu::Extent3d { width: HILBERT_WIDTH as u32, height: HILBERT_WIDTH as u32, depth_or_array_layers: 1 },
+    );
+    let view = texture.create_view(&Default::default());
+    (texture, view)
 }
 
-impl BlurPass {
-    pub(crate) fn new(device: &Device, shader: &wgpu::ShaderModule) -> Self {
-        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label:   Some("SSAO Blur BGL"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding:    0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled:   false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type:    wgpu::TextureSampleType::Float { filterable: false },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding:    1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty:                 wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size:   None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-        // Group 0 is left unused: blur_frag never reaches `camera`/`light`.
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label:              Some("SSAO Blur Pipeline Layout"),
-            bind_group_layouts: &[None, Some(&bgl)],
-            immediate_size:     0,
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label:  Some("SSAO Blur Pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module:      shader,
-                entry_point: Some("vtx_main"),
-                buffers:     &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive:     Default::default(),
-            depth_stencil: None,
-            multisample:   Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module:      shader,
-                entry_point: Some("blur_frag"),
-                targets:     &[Some(wgpu::ColorTargetState {
-                    format:     TextureFormat::R8Unorm,
-                    blend:      None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache:          None,
-        });
-        Self { pipeline, bgl, bind_group: None }
-    }
+// https://www.shadertoy.com/view/3tB3z3
+fn hilbert_index(mut x: u16, mut y: u16) -> u16 {
+    let mut index = 0;
+    let mut level: u16 = HILBERT_WIDTH / 2;
+    while level > 0 {
+        let region_x = (x & level > 0) as u16;
+        let region_y = (y & level > 0) as u16;
+        index += level * level * ((3 * region_x) ^ region_y);
 
-    /// (Re)point the pass at the current raw AO view — call at init and on
-    /// every resize. `params_buffer` is `SsaoPass::params_buffer()`, shared
-    /// so both passes read the same screen size.
-    pub(crate) fn set_target(&mut self, device: &Device, raw_ao_view: &wgpu::TextureView, params_buffer: &wgpu::Buffer) {
-        self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label:   Some("SSAO Blur Bind Group"),
-            layout:  &self.bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(raw_ao_view) },
-                wgpu::BindGroupEntry { binding: 1, resource: params_buffer.as_entire_binding() },
-            ],
-        }));
-    }
+        if region_y == 0 {
+            if region_x == 1 {
+                x = HILBERT_WIDTH - 1 - x;
+                y = HILBERT_WIDTH - 1 - y;
+            }
+            std::mem::swap(&mut x, &mut y);
+        }
 
-    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, dst: &wgpu::TextureView) {
-        let Some(bind_group) = self.bind_group.as_ref() else {
-            log::error!("BlurPass::encode before set_target — frame dropped");
-            return;
-        };
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("SSAO Blur Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view:           dst,
-                resolve_target: None,
-                depth_slice:    None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Store },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            ..Default::default()
-        });
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(1, bind_group, &[]);
-        pass.draw(0..3, 0..1);
+        level /= 2;
     }
-}
-
-/// Compiles `ssao.wgsl` once — `SsaoPass` and `BlurPass` share the module
-/// (its two fragment entries), matching `ssao.wgsl`'s own doc comment.
-pub(crate) fn create_shader(device: &Device) -> wgpu::ShaderModule {
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label:  Some("SSAO Shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!(concat!(env!("OUT_DIR"), "/ssao.wgsl")).into()),
-    })
+    index
 }
