@@ -283,8 +283,17 @@ def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
         outer_y = cy + sign * ext_half_depth
         outer_z = ridge_z - ext_rise
         panel_center = (cx, (outer_y + cy) / 2.0, (ridge_z + outer_z) / 2.0)
-        theta = math.atan2(ext_rise, -sign * ext_half_depth)
-        rot = Matrix.Rotation(theta, 3, "X")
+        # Local +Z must be the OUTWARD slope normal on both sides: the tiles
+        # sit at local +Z and bulge along it. A pure X-rotation can point
+        # local +Y eave-to-ridge on the +sign slope only by turning +Z into
+        # the attic, which buries that slope's tiles under the deck -- so
+        # that slope first spins 180 deg about its own Z, keeping +Y
+        # eave-to-ridge and +Z outward on both.
+        pitch_ext = math.atan2(ext_rise, ext_half_depth)
+        if sign > 0:
+            rot = Matrix.Rotation(-pitch_ext, 3, "X") @ Matrix.Rotation(math.pi, 3, "Z")
+        else:
+            rot = Matrix.Rotation(pitch_ext, 3, "X")
         deck = _roof_deck_panel(f"{name}_deck_{'a' if sign > 0 else 'b'}", panel_center,
                                  length, run, deck_thickness, rot, deck_material)
         deck_objs.append(deck)

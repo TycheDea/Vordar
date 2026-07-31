@@ -6,6 +6,7 @@ significant inward-pointing face or an unmitered joint gap between its
 wedges -- the two ways a barrel_shell ring renders as a dark, jagged band."""
 
 import re
+from pathlib import Path
 
 import bmesh
 import bpy
@@ -163,7 +164,14 @@ def _open_wall_faces(mesh_objs, min_perimeter=1.0):
     shared vertex identity, same reason _wedge_joint_gaps is position- not
     vertex-based) and any loop whose perimeter clears `min_perimeter` is
     flagged -- scoped to wall-shell objects only, since roof-tile geometry
-    has its own legitimate open (unglazed) rim by design."""
+    has its own legitimate open (unglazed) rim by design.
+
+    Exact endpoint pairing alone is not enough: the EXACT boolean solver
+    tessellates each of an edge's two adjacent faces independently, so one
+    side may carry the edge as a single span and the other as several
+    sub-segments (a T-junction seam). Those copies never share a rounded
+    key, yet the surface is closed there -- so a candidate only stays open
+    if no other collinear edge of the same object covers its midpoint."""
     edge_counts = _global_edge_face_counts(mesh_objs)
     reports = []
     for obj in mesh_objs:
@@ -172,8 +180,31 @@ def _open_wall_faces(mesh_objs, min_perimeter=1.0):
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         bm.edges.ensure_lookup_table()
-        boundary = [e for e in bm.edges
-                    if len(e.link_faces) == 1 and edge_counts.get(_edge_key(e, obj), 0) <= 1]
+        candidates = [e for e in bm.edges
+                      if len(e.link_faces) == 1 and edge_counts.get(_edge_key(e, obj), 0) <= 1]
+        segments = None
+        if candidates:
+            segments = [(obj.matrix_world @ e.verts[0].co, obj.matrix_world @ e.verts[1].co,
+                          _edge_key(e, obj)) for e in bm.edges]
+
+        def covered(e, tol=1e-3):
+            a = obj.matrix_world @ e.verts[0].co
+            b = obj.matrix_world @ e.verts[1].co
+            mid = (a + b) / 2.0
+            own = _edge_key(e, obj)
+            for p, q, key in segments:
+                if key == own:
+                    continue
+                pq = q - p
+                ll = pq.length_squared
+                if ll < 1e-12:
+                    continue
+                t = (mid - p).dot(pq) / ll
+                if -1e-6 <= t <= 1.0 + 1e-6 and ((p + t * pq) - mid).length < tol:
+                    return True
+            return False
+
+        boundary = [e for e in candidates if not covered(e)]
         if not boundary:
             bm.free()
             continue
@@ -211,6 +242,85 @@ def _open_wall_faces(mesh_objs, min_perimeter=1.0):
     return reports
 
 
+def _roof_slope_faults(mesh_objs, min_cluster_area=2.0, nz_lo=0.3, nz_hi=0.985,
+                        relief_lo=0.02, relief_hi=0.5, relief_min_area=1.0):
+    """Casa gable-roof invariant: every large up-sloped plane on a casa is a
+    roof deck, so (1) its faces must all carry terracotta_tile -- a
+    material-dropping merge leaves the slope reading as wall plaster -- and
+    (2) each slope must carry tile relief: terracotta faces parallel to the
+    deck at offsets above it (the barrel tiles' crests). A slope whose tiles
+    ended up under the deck has nothing above it and fails (2) even when its
+    deck material is right. Returns (slopes, faults)."""
+    faces = []  # (normal, offset, area, material_name)
+    for obj in mesh_objs:
+        mw = obj.matrix_world
+        nmat = mw.to_3x3()
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        for f in bm.faces:
+            n = nmat @ f.normal
+            if n.length < 1e-9:
+                continue
+            n = n.normalized()
+            if not (nz_lo < n.z < nz_hi):
+                continue
+            area = f.calc_area()
+            if area < 1e-4:
+                continue
+            center = mw @ f.calc_center_median()
+            mat = None
+            if obj.data.materials and f.material_index < len(obj.data.materials):
+                slot = obj.data.materials[f.material_index]
+                mat = slot.name if slot else None
+            faces.append((n, n.dot(center), area, mat))
+        bm.free()
+
+    clusters = {}
+    for n, off, area, mat in faces:
+        key = (round(n.x, 2), round(n.y, 2), round(n.z, 2), round(off, 2))
+        c = clusters.setdefault(key, {"normal": Vector((0, 0, 0)), "offset": off,
+                                       "area": 0.0, "materials": set()})
+        c["normal"] += n * area
+        c["area"] += area
+        c["materials"].add(mat)
+    large = [c for c in clusters.values() if c["area"] >= min_cluster_area]
+    for c in large:
+        c["normal"].normalize()
+
+    families = []  # each: list of clusters with dot-similar normals
+    for c in large:
+        for fam in families:
+            if fam[0]["normal"].dot(c["normal"]) > 0.95:
+                fam.append(c)
+                break
+        else:
+            families.append([c])
+
+    slopes = []
+    faults = []
+    for fam in families:
+        deck = max(fam, key=lambda c: c["area"])
+        for c in fam:
+            if c["materials"] != {"terracotta_tile"}:
+                faults.append({"kind": "slope_material",
+                                "normal": [round(v, 3) for v in c["normal"]],
+                                "offset": round(c["offset"], 3),
+                                "area": round(c["area"], 2),
+                                "materials": sorted(str(m) for m in c["materials"])})
+        relief_area = sum(
+            area for n, off, area, mat in faces
+            if mat == "terracotta_tile" and n.dot(deck["normal"]) > 0.95
+            and relief_lo < off - deck["offset"] < relief_hi)
+        slope = {"normal": [round(v, 3) for v in deck["normal"]],
+                 "offset": round(deck["offset"], 3),
+                 "deck_area": round(deck["area"], 2),
+                 "relief_area": round(relief_area, 2)}
+        slopes.append(slope)
+        if relief_area < relief_min_area:
+            faults.append({"kind": "slope_flat", **slope})
+    return slopes, faults
+
+
 def verify_glb(path):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=str(path))
@@ -230,6 +340,8 @@ def verify_glb(path):
         "normals_faults": [],
         "joint_gaps": [],
         "open_wall_faces": [],
+        "roof_slopes": [],
+        "roof_faults": [],
     }
 
     for mat in bpy.data.materials:
@@ -265,9 +377,11 @@ def verify_glb(path):
     report["joint_gaps"] = _wedge_joint_gaps(mesh_objs)
     bad_gaps = [g for g in report["joint_gaps"] if not g["ok"]]
     report["open_wall_faces"] = _open_wall_faces(mesh_objs)
+    if Path(str(path)).stem.startswith("casa"):
+        report["roof_slopes"], report["roof_faults"] = _roof_slope_faults(mesh_objs)
 
     report["ok"] = (not report["bad_material_names"] and not report["missing_uv"]
                      and report["loose_verts"] == 0 and report["loose_edges"] == 0
                      and not report["normals_faults"] and not bad_gaps
-                     and not report["open_wall_faces"])
+                     and not report["open_wall_faces"] and not report["roof_faults"])
     return report

@@ -277,11 +277,14 @@ def build_casa_corner(mats):
     # run along world Y -- perpendicular to main's, the precondition for a
     # real valley. The offset then shares a full wall thickness with main's
     # right side, over a 4 m band, rather than a diagonal corner touch.
+    # Baked into the mesh data, not set as an object transform: the detail
+    # objects' UV projection (build_town_kit's project_uv pass) works in
+    # mesh-local space, so an object-level rotation would leave the wing
+    # tiles' texture courses turned 90 deg in world (the louvre-slat read).
     dx, dy = 4.8, 1.0
+    wing_xform = Matrix.Translation((dx, dy, 0.0)) @ Matrix.Rotation(-math.pi / 2.0, 4, "Z")
     for o in wing_objs:
-        o.rotation_euler.z = -math.pi / 2.0
-        o.location.x = dx
-        o.location.y = dy
+        o.data.transform(wing_xform)
 
     main_shell = [o for o in main_objs if _is_shell_name(o.name)]
     main_detail = [o for o in main_objs if not _is_shell_name(o.name)]
@@ -291,41 +294,45 @@ def build_casa_corner(mats):
     view_layer = bpy.context.view_layer
 
     def join(objs, joined_name):
-        """Weld the shell's own touching pieces (walls, deck, gable infill)
-        into one real watertight solid via chained boolean UNIONs, not
-        bpy.ops.object.join(): a plain join only concatenates mesh data, so
-        pieces that merely touch along a shared face (e.g. a wall segment
-        flush against its neighbour) stay as two coincident faces still
-        present in the result rather than a welded single surface. That
-        leftover internal coincident geometry is exactly the degenerate
-        input that made the later main/wing valley union silently drop a
-        whole wall face at the corner (G2 D6) -- solidifying each shell
-        first means the valley union only ever sees two genuinely
-        watertight solids, which it merges cleanly."""
+        """Weld every shell piece (walls, decks, gable infill, both blocks)
+        into one solid via a SINGLE multi-operand boolean UNION, not
+        bpy.ops.object.join() and not chained pairwise unions: a plain join
+        only concatenates mesh data, leaving touching pieces as coincident
+        faces (the degenerate input that silently dropped a whole wall face
+        at the corner, G2 D6), while chained pairwise unions re-tessellate
+        the accumulating mesh at every step and pile up doubled faces and
+        sliver seams wherever operands share exactly coplanar faces (flush
+        facade bands, the common ground plane). One EXACT arrangement over
+        all pieces at once resolves those coincidences once, coherently."""
         base = objs[0]
         for other in objs[1:]:
-            mod = base.modifiers.new("shell_union", type="BOOLEAN")
-            mod.operation = "UNION"
-            mod.solver = "EXACT"
-            mod.object = other
-            view_layer.objects.active = base
-            bpy.ops.object.modifier_apply(modifier=mod.name)
+            # The boolean keeps an operand face's material only when the
+            # base already carries that material as a slot; otherwise the
+            # face silently falls back to slot 0 (probed on Blender 5.2) --
+            # which turned the terracotta roof decks into encalado.
+            for mat in other.data.materials:
+                if mat.name not in base.data.materials:
+                    base.data.materials.append(mat)
+        operands = bpy.data.collections.new(f"{joined_name}_operands")
+        bpy.context.scene.collection.children.link(operands)
+        for other in objs[1:]:
+            operands.objects.link(other)
+        mod = base.modifiers.new("shell_union", type="BOOLEAN")
+        mod.operation = "UNION"
+        mod.solver = "EXACT"
+        mod.operand_type = "COLLECTION"
+        mod.collection = operands
+        view_layer.objects.active = base
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+        for other in objs[1:]:
             bpy.data.objects.remove(other, do_unlink=True)
+        bpy.data.collections.remove(operands)
         base.name = joined_name
         base.data.name = joined_name
         base.select_set(False)
         return base
 
-    main_merged = join(main_shell, f"{name}_main_shell")
-    wing_merged = join(wing_shell, f"{name}_wing_shell")
-
-    mod = main_merged.modifiers.new("valley_union", type="BOOLEAN")
-    mod.operation = "UNION"
-    mod.solver = "EXACT"
-    mod.object = wing_merged
-    view_layer.objects.active = main_merged
-    bpy.ops.object.modifier_apply(modifier=mod.name)
-    bpy.data.objects.remove(wing_merged, do_unlink=True)
+    main_merged = join(main_shell + wing_shell, f"{name}_main_shell")
     main_merged["vordar_uv_final"] = True
 
     objs = [main_merged] + main_detail + wing_detail
