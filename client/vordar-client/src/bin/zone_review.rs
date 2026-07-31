@@ -456,6 +456,7 @@ fn main() {
         eprintln!("zone_review: no GPU adapter available");
         exit(1);
     };
+    r.set_ssao(true);
     // Without this, the review harness would render stone props with the
     // detail layer absent — blind to the feature it exists to check.
     match load_ground_material(DETAIL_TEXTURE_DIR) {

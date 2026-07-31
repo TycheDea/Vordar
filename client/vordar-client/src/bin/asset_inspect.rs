@@ -410,6 +410,7 @@ fn main() {
         eprintln!("asset_inspect: no GPU adapter available");
         exit(1);
     };
+    r.set_ssao(true);
     // Without this, the debug channels this tool exists to inspect would be
     // blind to the detail layer on any opted-in prop.
     match load_ground_material(DETAIL_TEXTURE_DIR) {
