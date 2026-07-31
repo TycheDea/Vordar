@@ -67,7 +67,7 @@
                     // East gate astride the road: face runs along Z (yaw 90),
                     // 3.2 m opening on the portal corridor.
                     (model: "content/models/props/gate_arch/gate_arch.gltf",           pos: (15.0, -0.5, 0.0),    scale: 1.0, yaw: 90.0),
-                    (model: "content/models/props/well_basin/well_basin.gltf",         pos: (0.0, -0.5, -5.5),    scale: 1.0, yaw: 0.0),
+                    (model: "content/models/props/well_basin/well_basin.gltf",         pos: (0.0, -0.5, -4.6),    scale: 1.0, yaw: 0.0),
                     // Ruined town-wall fragments along x=15; the gap
                     // z in [3.2, 7.0] is the unfinished breach where the
                     // crucero shrine stands.
@@ -75,34 +75,43 @@
                     (model: "content/models/props/wall_segment/wall_segment.gltf",     pos: (15.0, -0.5, 13.5),   scale: 1.0, yaw: 90.0),
                     (model: "content/models/props/wall_segment/wall_segment.gltf",     pos: (15.0, -0.5, -5.5),   scale: 1.0, yaw: 90.0),
                     (model: "content/models/props/wall_segment/wall_segment.gltf",     pos: (15.0, -0.5, -10.0),  scale: 1.0, yaw: 90.0),
-                    // First Z-Image prop, near spawn for the feel-check.
-                    (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (-4.0, -0.5, -5.0), scale: 1.0, yaw: 25.0),
-                    (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (14.0, -0.5, -19.0), scale: 3.0, yaw: 40.0),
-                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-24.0, -0.5, 13.0), scale: 2.2, yaw: 205.0),
-                    (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (-11.0, -0.5, 27.0), scale: 1.6, yaw: 118.0),
-                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (31.0, -0.5, 22.0),  scale: 1.8, yaw: 320.0),
+                    // Votive stands flanking the apse, inside the chapel nave.
+                    // Held clear of the apse end wall (x=-38.00): stand
+                    // half-depth is 0.59 m, so x=-37.0 leaves 0.41 m of air.
+                    (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (-37.0, -0.5, -27.6), scale: 1.0, yaw: 0.0),
+                    (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (-37.0, -0.5, -30.4), scale: 1.0, yaw: 180.0),
+                    (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (14.0, -0.5, -19.0), scale: 24.3, yaw: 40.0),
+                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-24.0, -0.5, 13.0), scale: 5.9, yaw: 205.0),
+                    (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (-11.0, -0.5, 27.0), scale: 19.8, yaw: 118.0),
+                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (31.0, -0.5, 22.0),  scale: 4.9, yaw: 320.0),
                     // Gate shrine: crucero standing in the town wall's
-                    // unfinished breach north of the gate.
-                    (model: "content/models/props/crucero/crucero.glb",               pos: (15.0, -0.5, 6.0), scale: 1.0, yaw: 200.0),
+                    // unfinished breach north of the gate. Scaled up so its
+                    // silhouette reads as a monument, not a grave marker.
+                    (model: "content/models/props/crucero/crucero.glb",               pos: (15.0, -0.5, 6.0), scale: 1.5, yaw: 200.0),
                     // Ruin fragments around the chapel precinct: the arch
-                    // clears the chapel south wall by 0.9 m; the column sits
+                    // clears the chapel south wall by 1.1 m; the column sits
                     // clear of the east door approach.
-                    (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (-26.0, -0.5, -34.0), scale: 1.0,  yaw: 40.0),
+                    (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (-26.0, -0.5, -36.5), scale: 1.0,  yaw: 40.0),
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-19.5, -0.5, -34.0), scale: 0.9,  yaw: 190.0),
+                    // Collapse rubble outside the chapel's east (roofless)
+                    // half, clear of the walls, the arch, the jamb and the
+                    // door approach.
+                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-25.5, -0.5, -24.1), scale: 5.9, yaw: 90.0),
+                    (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-21.6, -0.5, -34.3), scale: 5.0, yaw: 0.0),
                     // Graveyard patch north of the chapel.
-                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-31.0, -0.5, -22.5), scale: 0.72, yaw: 210.0),
-                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-27.5, -0.5, -22.0), scale: 0.70, yaw: 45.0),
-                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-35.0, -0.5, -22.5), scale: 0.75, yaw: 320.0),
-                    (model: "content/models/props/cypress/cypress.glb",               pos: (-34.0, -0.5, -40.0), scale: 0.95, yaw: 300.0),
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-31.0, -0.5, -21.2), scale: 0.72, yaw: 210.0),
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-27.5, -0.5, -23.4), scale: 0.70, yaw: 45.0),
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-35.0, -0.5, -22.6), scale: 0.75, yaw: 320.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (-34.0, -0.5, -40.0), scale: 4.75, yaw: 300.0),
                     // Toppled column past the play-radius edge.
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-58.0, -0.5, 14.0),  scale: 1.0,  yaw: 305.0),
                     // Cypress pairs — silhouettes at the field edges.
-                    (model: "content/models/props/cypress/cypress.glb",               pos: (-48.0, -0.5, 42.0),  scale: 1.0,  yaw: 20.0),
-                    (model: "content/models/props/cypress/cypress.glb",               pos: (-42.0, -0.5, 48.0),  scale: 0.85, yaw: 140.0),
-                    (model: "content/models/props/cypress/cypress.glb",               pos: (30.0, -0.5, -52.0),  scale: 1.1,  yaw: 75.0),
-                    (model: "content/models/props/cypress/cypress.glb",               pos: (36.0, -0.5, -46.0),  scale: 0.9,  yaw: 230.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (-48.0, -0.5, 42.0),  scale: 5.0,  yaw: 20.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (-42.0, -0.5, 48.0),  scale: 4.25, yaw: 140.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (30.0, -0.5, -52.0),  scale: 5.5,  yaw: 75.0),
+                    (model: "content/models/props/cypress/cypress.glb",               pos: (36.0, -0.5, -46.0),  scale: 4.5,  yaw: 230.0),
                     // Dead olive stumps in the mid field.
-                    (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (-16.0, -0.5, 18.0),  scale: 1.2,  yaw: 85.0),
+                    (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (-17.0, -0.5, 19.0),  scale: 1.2,  yaw: 85.0),
                     (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (24.0, -0.5, -24.0),  scale: 1.0,  yaw: 300.0),
                     (model: "content/models/props/olive_stump/olive_stump.glb",       pos: (-8.0, -0.5, -30.0),  scale: 0.9,  yaw: 160.0),
                     // Horizon landmarks out in the hills.

@@ -10,7 +10,7 @@
 // the play radius clamps at 65):
 //   - the plaza sits at the origin: casa rows north (fronts on z=+9.5,
 //     doors facing south) and south (fronts on z=-9.5, doors facing north);
-//     the well at (0,-5.5); each casa_corner adds a wing spawn at the prop
+//     the well at (0,-4.6); each casa_corner adds a wing spawn at the prop
 //     position plus the yaw-rotated member offset from footprints.ron;
 //   - the east gate stands astride the road at x=15 (jambs at z=+-2.4
 //     flanking the 3.2 m opening, head aloft over it), with ruined wall
@@ -36,7 +36,7 @@
         (prefab: "chapel_roof",      positions: [(-34.0, 10.2, -29.0)]),
         (prefab: "gate_jamb",        positions: [(15.0, 0.0, -2.4), (15.0, 0.0, 2.4)]),
         (prefab: "gate_head",        positions: [(15.0, 4.6, 0.0)]),
-        (prefab: "well_basin",       positions: [(0.0, 0.0, -5.5)]),
+        (prefab: "well_basin",       positions: [(0.0, 0.0, -4.6)]),
         (prefab: "wall_segment",     positions: [(15.0, 0.0, 9.0), (15.0, 0.0, 13.5), (15.0, 0.0, -5.5), (15.0, 0.0, -10.0)]),
     ],
 )

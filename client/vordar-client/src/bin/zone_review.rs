@@ -353,6 +353,59 @@ fn render_interior(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[Pr
     render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)
 }
 
+/// One hand-placed gameplay-framing shot for the Rocalba town (chapter03).
+/// `cluster_props`'s single-linkage clustering at `CLUSTER_RADIUS` merges
+/// all 30 town props into one group in a town this size, so every mid shot
+/// but one goes to waste on pairs of outlying cypresses and premise beats
+/// like the gate, the chapel exterior, the graveyard and the north row never
+/// get a gameplay-framed shot — see fix F7,
+/// docs/reviews/town/p24-layout-review-2026-07-31.md §3. Props within
+/// `select_radius` of `target` are drawn, isolated like a cluster mid shot;
+/// `azimuth_deg` stands in for `THREE_QUARTER_YAW` so each shot can be
+/// approached from the side its premise beat is meant to be read from.
+struct NamedShot {
+    name: &'static str,
+    target: (f32, f32),
+    select_radius: f32,
+    camera_radius: f32,
+    azimuth_deg: f32,
+}
+
+const ROCALBA_SHOTS: &[NamedShot] = &[
+    // East gate astride the road (x=15, z=0), with the unfinished breach
+    // (z∈[3.2,7.0]) and its crucero north of it.
+    NamedShot { name: "gate", target: (15.0, 2.0), select_radius: 9.0, camera_radius: 16.0, azimuth_deg: 200.0 },
+    // Chapel exterior from the plaza side (east/NE), pulled back far enough
+    // to hold the whole 18 m nave and the collapsed roofline.
+    NamedShot { name: "chapel", target: (-30.0, -29.0), select_radius: 5.5, camera_radius: 38.0, azimuth_deg: 45.0 },
+    // Chapel precinct viewed down the nave's long axis from the east so the
+    // graveyard (north side) and the graveyard cypress + ruin quarter (south
+    // side) both clear the chapel's flank instead of one hiding behind it.
+    NamedShot { name: "graveyard", target: (-30.0, -29.0), select_radius: 14.0, camera_radius: 30.0, azimuth_deg: 20.0 },
+    // North terrace's plaza-facing facade, doors turned toward the camera.
+    NamedShot { name: "north_row", target: (-3.0, 11.0), select_radius: 12.0, camera_radius: 28.0, azimuth_deg: 270.0 },
+];
+
+/// One `NamedShot`'s render: the same isolated-group style as `render_mid`,
+/// but the group is every prop within `select_radius` of a hand-placed
+/// target instead of a mutual-proximity cluster, and the camera azimuth is
+/// per-shot instead of the fixed `THREE_QUARTER_YAW`.
+fn render_named(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], shot: &NamedShot, w: u32, h: u32) -> RgbaImage {
+    let (tx, tz) = shot.target;
+    let target = Vec3::new(tx, ground_height(tx, tz), tz);
+    let mut prims = Vec::new();
+    for p in props {
+        let dist = ((p.pos.x - tx).powi(2) + (p.pos.z - tz).powi(2)).sqrt();
+        if dist <= shot.select_radius {
+            prims.extend(place(load_prop_mesh(&p.model), transform_for(p)));
+        }
+    }
+    let eye = orbit_eye(target, shot.camera_radius, shot.azimuth_deg.to_radians(), GAMEPLAY_PITCH);
+    r.set_camera_lookat(eye, target);
+    prims.extend(build_ground(visuals));
+    render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)
+}
+
 /// Mid shot of one proximity cluster, isolated from the rest of the zone's
 /// dressing so the group reads clearly.
 fn render_mid(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, cluster: &[&PropInstance], w: u32, h: u32) -> RgbaImage {
@@ -492,12 +545,26 @@ fn main() {
         sheet_frames.push(door);
     }
 
-    let clusters = cluster_props(&props);
-    for (i, cluster) in clusters.iter().enumerate() {
-        let img = render_mid(&mut r, visuals, cluster, w, h);
-        save(&img, &out.join(format!("mid_{i:02}.png")));
-        sheet_frames.push(img);
-    }
+    // Rocalba (chapter03) is too big for cluster_props to cover with
+    // proximity groups alone (see ROCALBA_SHOTS' doc comment) — it gets
+    // hand-placed shot targets instead; every other zone keeps the generic
+    // clustering.
+    let mid_count = if zone.chapter.as_deref() == Some("chapter03") {
+        for shot in ROCALBA_SHOTS {
+            let img = render_named(&mut r, visuals, &props, shot, w, h);
+            save(&img, &out.join(format!("mid_{}.png", shot.name)));
+            sheet_frames.push(img);
+        }
+        ROCALBA_SHOTS.len()
+    } else {
+        let clusters = cluster_props(&props);
+        for (i, cluster) in clusters.iter().enumerate() {
+            let img = render_mid(&mut r, visuals, cluster, w, h);
+            save(&img, &out.join(format!("mid_{i:02}.png")));
+            sheet_frames.push(img);
+        }
+        clusters.len()
+    };
 
     let mut seen = HashSet::new();
     let mut close_count = 0;
@@ -515,7 +582,7 @@ fn main() {
 
     let interior_count = if zone.chapter.as_deref() == Some("chapter03") { 2 } else { 0 };
     println!(
-        "zone_review: wrote wide + {} mid + {close_count} close + {interior_count} interior + contact sheet to {}",
-        clusters.len(), args.out
+        "zone_review: wrote wide + {mid_count} mid + {close_count} close + {interior_count} interior + contact sheet to {}",
+        args.out
     );
 }
