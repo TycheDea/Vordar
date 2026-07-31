@@ -6,7 +6,7 @@
 // Frames go through the real chain: MSAA HDR → resolve → ACES tonemap.
 
 use engine_renderer::instance::SdfInstance;
-use engine_renderer::mesh::{load_gltf_data, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData, TextureSource};
+use engine_renderer::mesh::{load_gltf_data, AlphaMode, ImageData, MaterialData, MeshData, PrimitiveData, SharedImage, TextureSource};
 use engine_renderer::offscreen::{
     create_mipped_rgba8, read_texture_mip, DebugChannel, HeadlessGpu, OffscreenRenderer, TestLight, TestPointLight,
 };
@@ -299,7 +299,7 @@ fn tilted_normal_map_changes_luminance_vs_flat() {
         base_color_factor: [0.5, 0.5, 0.5, 1.0],
         roughness_factor:  0.6,
         metallic_factor:   0.0,
-        normal_image:      Some(TextureSource::Rgba8(solid_normal_texture(normal_rgb))),
+        normal_image:      Some(SharedImage::new(TextureSource::Rgba8(solid_normal_texture(normal_rgb)))),
         ..Default::default()
     };
 
@@ -376,7 +376,7 @@ fn denser_normal_tiling_softens_specular_peak() {
         base_color_factor: [0.5, 0.5, 0.5, 1.0],
         roughness_factor:  0.2,
         metallic_factor:   0.0,
-        normal_image:      Some(TextureSource::Rgba8(checker_normal_texture())),
+        normal_image:      Some(SharedImage::new(TextureSource::Rgba8(checker_normal_texture()))),
         ..Default::default()
     };
 
@@ -458,7 +458,7 @@ fn compressed_bc7_texture_renders_through_real_pipeline() {
 
     let img = parse_dds(include_bytes!("data/red8x8_bc7_srgb.dds")).expect("fixture parses");
     let material = MaterialData {
-        base_color_image: Some(TextureSource::Compressed(img)),
+        base_color_image: Some(SharedImage::new(TextureSource::Compressed(img))),
         roughness_factor: 1.0,
         metallic_factor:  0.0,
         ..Default::default()
@@ -580,7 +580,7 @@ fn masked_billboard() -> MeshData {
         alpha_mode:        AlphaMode::Mask(0.5),
         metallic_factor:   0.0,
         roughness_factor:  1.0,
-        base_color_image:  Some(TextureSource::Rgba8(diagonal_alpha_texture(64))),
+        base_color_image:  Some(SharedImage::new(TextureSource::Rgba8(diagonal_alpha_texture(64)))),
         ..Default::default()
     })
 }
@@ -1395,8 +1395,8 @@ fn detail_albedo_tile() -> ImageData {
 /// synthetic non-flat tile standing in for the real CC0 photoscan (T1).
 fn detail_tile_material() -> MaterialData {
     MaterialData {
-        base_color_image: Some(TextureSource::Rgba8(detail_albedo_tile())),
-        normal_image:     Some(TextureSource::Rgba8(detail_normal_tile())),
+        base_color_image: Some(SharedImage::new(TextureSource::Rgba8(detail_albedo_tile()))),
+        normal_image:     Some(SharedImage::new(TextureSource::Rgba8(detail_normal_tile()))),
         ..Default::default()
     }
 }
@@ -1512,11 +1512,11 @@ fn detail_normal_fades_out_with_distance() {
 /// tests above, this is flat so it isolates the overlay's identity point.
 fn detail_dc_neutral_tile() -> MaterialData {
     MaterialData {
-        base_color_image: Some(TextureSource::Rgba8(ImageData {
+        base_color_image: Some(SharedImage::new(TextureSource::Rgba8(ImageData {
             width:  1,
             height: 1,
             pixels: vec![128, 128, 128, 255],
-        })),
+        }))),
         ..Default::default()
     }
 }

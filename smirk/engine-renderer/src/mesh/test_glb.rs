@@ -151,10 +151,11 @@ pub(crate) fn write_skinned_glb(path: &std::path::Path) {
     std::fs::write(path, glb).unwrap();
 }
 
-/// Build a minimal single-triangle GLB whose material carries an embedded
-/// PNG base-color texture (a solid-red 2×2 image) — the seam for testing the
+/// Build a minimal GLB whose material carries an embedded PNG base-color
+/// texture (a solid-red 2×2 image) — the seam for testing the
 /// sidecar-DDS-preference path, which needs a real base-color image slot to
-/// prefer over.
+/// prefer over. Two triangle primitives share the one material/image, the
+/// seam for testing per-image sharing across primitives.
 pub(crate) fn write_textured_glb(path: &std::path::Path) {
     fn push(bin: &mut Vec<u8>, data: &[u8]) -> (usize, usize) {
         while !bin.len().is_multiple_of(4) { bin.push(0); }
@@ -184,6 +185,9 @@ pub(crate) fn write_textured_glb(path: &std::path::Path) {
         "scenes": [{{"nodes": [0]}}],
         "nodes": [{{"mesh": 0}}],
         "meshes": [{{"primitives": [{{
+            "attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}},
+            "indices": 3, "material": 0
+        }}, {{
             "attributes": {{"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}},
             "indices": 3, "material": 0
         }}]}}],

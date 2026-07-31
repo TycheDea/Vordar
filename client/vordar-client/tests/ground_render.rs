@@ -18,9 +18,12 @@ fn zone_ground_renders_with_texture_variation() {
     // cracked_earth ships a .dds sidecar for every map slot: the finder must
     // prefer it over the PNG source. Needs no GPU, so it's checked whether
     // or not the render below runs.
-    let base_color_compressed = matches!(material.base_color_image, Some(TextureSource::Compressed(_)));
-    let normal_compressed = matches!(material.normal_image, Some(TextureSource::Compressed(_)));
-    let mr_compressed = matches!(material.metallic_roughness_image, Some(TextureSource::Compressed(_)));
+    let compressed = |image: &Option<std::sync::Arc<engine_renderer::mesh::SharedImage>>| {
+        image.as_deref().is_some_and(|i| matches!(i.source, TextureSource::Compressed(_)))
+    };
+    let base_color_compressed = compressed(&material.base_color_image);
+    let normal_compressed = compressed(&material.normal_image);
+    let mr_compressed = compressed(&material.metallic_roughness_image);
 
     let Some(mut r) = OffscreenRenderer::new(1.0) else {
         eprintln!("SKIP: no GPU adapter");

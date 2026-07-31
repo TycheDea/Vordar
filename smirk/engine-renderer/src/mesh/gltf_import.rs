@@ -2,6 +2,9 @@ use crate::anim::{AnimationClip, Skeleton};
 use crate::mesh_pipeline::MeshVertex;
 use crate::tangent::generate_tangents;
 use glam::{Mat3, Mat4};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use super::anim_import::{extract_skeleton, extract_clips};
 
@@ -35,6 +38,33 @@ pub enum TextureSource {
     Compressed(crate::texture::CompressedImage),
 }
 
+/// One source image shared by every material slot that references it — a
+/// glTF file's primitives alias the same `Arc` per image index, so decode
+/// happens once per image, not once per primitive. `key` is a content hash
+/// of the stored data; the GPU texture cache keys on it, so identical images
+/// dedup to one resident texture even across separately loaded models.
+pub struct SharedImage {
+    pub key:    u64,
+    pub source: TextureSource,
+}
+
+impl SharedImage {
+    pub fn new(source: TextureSource) -> Arc<Self> {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        match &source {
+            TextureSource::Rgba8(img) => {
+                (img.width, img.height).hash(&mut h);
+                img.pixels.hash(&mut h);
+            }
+            TextureSource::Compressed(img) => {
+                (img.width, img.height, img.mip_count, img.format).hash(&mut h);
+                img.data.hash(&mut h);
+            }
+        }
+        Arc::new(Self { key: h.finish(), source })
+    }
+}
+
 /// Per-vertex skin binding, parallel to `PrimitiveData::vertices`. Kept
 /// separate from `Vertex` so static meshes carry no skinning overhead and the
 /// static GPU path is untouched.
@@ -57,11 +87,11 @@ pub struct MaterialData {
     /// KHR_materials_emissive_strength (1.0 when absent) — HDR emissive for
     /// bloom.
     pub emissive_strength: f32,
-    pub base_color_image:         Option<TextureSource>, // sRGB
-    pub normal_image:             Option<TextureSource>, // linear
-    pub metallic_roughness_image: Option<TextureSource>, // linear (g=rough, b=metal)
-    pub emissive_image:           Option<TextureSource>, // sRGB
-    pub occlusion_image:          Option<TextureSource>, // linear (r)
+    pub base_color_image:         Option<Arc<SharedImage>>, // sRGB
+    pub normal_image:             Option<Arc<SharedImage>>, // linear
+    pub metallic_roughness_image: Option<Arc<SharedImage>>, // linear (g=rough, b=metal)
+    pub emissive_image:           Option<Arc<SharedImage>>, // sRGB
+    pub occlusion_image:          Option<Arc<SharedImage>>, // linear (r)
     /// glTF material extras `{"vordar_detail": true}` — opts this material
     /// into the world-space triplanar detail overlay (mesh_shader.wgsl).
     /// False for every material that doesn't carry the marker.
@@ -121,8 +151,9 @@ pub fn load_gltf_data(path: &str) -> Result<MeshData, String> {
         .ok_or_else(|| format!("{path}: no scene"))?;
 
     let mut primitives = Vec::new();
+    let mut images: ImageCache = HashMap::new();
     for node in scene.nodes() {
-        visit_node(&node, Mat4::IDENTITY, &buffers, doc, path, &mut primitives);
+        visit_node(&node, Mat4::IDENTITY, &buffers, doc, path, &mut images, &mut primitives);
     }
     if primitives.is_empty() {
         return Err(format!("{path}: no triangle primitives in scene"));
@@ -142,12 +173,17 @@ pub fn load_gltf_data(path: &str) -> Result<MeshData, String> {
 
 
 
+/// Per-load memo of decoded images by glTF image index — `None` entries cache
+/// failed slots so a bad image logs and decodes once, not once per primitive.
+type ImageCache = HashMap<usize, Option<Arc<SharedImage>>>;
+
 fn visit_node(
     node:       &gltf::Node,
     parent:     Mat4,
     buffers:    &[gltf::buffer::Data],
     doc:        &gltf::Document,
     path:       &str,
+    images:     &mut ImageCache,
     out:        &mut Vec<PrimitiveData>,
 ) {
     let global = parent * Mat4::from_cols_array_2d(&node.transform().matrix());
@@ -232,14 +268,14 @@ fn visit_node(
                 None
             };
 
-            let material = read_material(&prim.material(), doc, buffers, path);
+            let material = read_material(&prim.material(), doc, buffers, path, images);
 
             out.push(PrimitiveData { vertices, indices, material, skin });
         }
     }
 
     for child in node.children() {
-        visit_node(&child, global, buffers, doc, path, out);
+        visit_node(&child, global, buffers, doc, path, images, out);
     }
 }
 
@@ -250,6 +286,7 @@ fn read_material(
     doc:     &gltf::Document,
     buffers: &[gltf::buffer::Data],
     path:    &str,
+    images:  &mut ImageCache,
 ) -> MaterialData {
     // Preprocessed DDS sidecars live in `<asset stem>.textures/img<N>.dds`,
     // one per glTF image index (see scripts/asset-pipeline).
@@ -257,7 +294,7 @@ fn read_material(
     let asset_dir = std::path::Path::new(path)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
-    let fetch = |index: usize, slot: &str| -> Option<TextureSource> {
+    let fetch_source = |index: usize, slot: &str| -> Option<TextureSource> {
         let sidecar = sidecar_dir.join(format!("img{index}.dds"));
         if sidecar.exists() {
             match std::fs::read(&sidecar)
@@ -305,6 +342,14 @@ fn read_material(
                 None
             }
         }
+    };
+    let mut fetch = |index: usize, slot: &str| -> Option<Arc<SharedImage>> {
+        if let Some(cached) = images.get(&index) {
+            return cached.clone();
+        }
+        let shared = fetch_source(index, slot).map(SharedImage::new);
+        images.insert(index, shared.clone());
+        shared
     };
 
     // glTF material extras `{"vordar_detail": true}` — a per-material fact,
@@ -406,7 +451,7 @@ mod tests {
             .base_color_image
             .as_ref()
             .expect("textured glb has a base-color texture");
-        let TextureSource::Compressed(c) = source else {
+        let TextureSource::Compressed(c) = &source.source else {
             panic!("sidecar DDS must win the slot over the embedded PNG")
         };
         assert_eq!(c.format, wgpu::TextureFormat::Bc7RgbaUnormSrgb);
@@ -432,7 +477,7 @@ mod tests {
             .base_color_image
             .as_ref()
             .expect("textured glb has a base-color texture");
-        assert!(matches!(source, TextureSource::Compressed(_)));
+        assert!(matches!(source.source, TextureSource::Compressed(_)));
 
         // Without the sidecar, the corrupt embedded image is a per-slot None,
         // not a whole-asset Err (matches fetch's unsupported-format contract).
@@ -513,7 +558,7 @@ mod tests {
         let p = &data.primitives[0];
         assert!(p.vertices.len() > 100, "real mesh, not a placeholder");
         let source = p.material.base_color_image.as_ref().expect("avocado has a base-color texture");
-        let TextureSource::Rgba8(img) = source else { panic!("avocado's base-color must decode as RGBA8") };
+        let TextureSource::Rgba8(img) = &source.source else { panic!("avocado's base-color must decode as RGBA8") };
         assert_eq!(img.pixels.len() as u32, img.width * img.height * 4, "tightly packed RGBA8");
     }
 
@@ -567,7 +612,7 @@ mod tests {
             for p in &data.primitives {
                 let source = p.material.base_color_image.as_ref().expect("human primitive has a base-color texture");
                 assert!(
-                    matches!(source, TextureSource::Compressed(_)),
+                    matches!(source.source, TextureSource::Compressed(_)),
                     "base-color slot must prefer the sidecar DDS over the embedded image"
                 );
             }

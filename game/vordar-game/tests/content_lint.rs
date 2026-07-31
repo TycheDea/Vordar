@@ -323,7 +323,7 @@ fn character_maps_within_dimension_cap() {
             ];
 
             for (slot_name, image) in &slots {
-                if let Some(TextureSource::Rgba8(img)) = image {
+                if let Some(TextureSource::Rgba8(img)) = image.as_deref().map(|i| &i.source) {
                     assert!(
                         img.width <= MAX_DIM && img.height <= MAX_DIM,
                         "VQ-C5: race '{}' primitive {} slot '{}' exceeds 2048² ({}×{})",
@@ -370,46 +370,57 @@ fn ground_sets_within_dimension_cap() {
 }
 
 /// VQ-C5: total texture memory budget ≤ 1 GB — matching what the runtime
-/// actually residents: a bound DDS sidecar's own byte size, or the RGBA8 +
-/// mip-chain estimate when no sidecar wins the slot.
+/// actually residents: one GPU texture per unique image (content key +
+/// color space, mirroring the MeshStore texture cache), each model loaded
+/// once however many placements reference it, and per image a bound DDS
+/// sidecar's own byte size or the RGBA8 + mip-chain estimate.
 #[test]
 fn total_texture_memory_within_budget() {
-    use engine_renderer::mesh::load_image_rgba;
+    use engine_renderer::mesh::{load_image_rgba, SharedImage};
     use engine_renderer::texture::load_dds_image;
 
     const BUDGET_BYTES: u64 = 1_073_741_824; // 1 GB
 
-    fn slot_bytes(image: &Option<TextureSource>) -> u64 {
-        match image {
-            Some(TextureSource::Compressed(c)) => c.data.len() as u64,
+    fn image_bytes(image: &SharedImage) -> u64 {
+        match &image.source {
+            TextureSource::Compressed(c) => c.data.len() as u64,
             // Estimate: RGBA8 + mip chain: w × h × 4 × 4/3
-            Some(TextureSource::Rgba8(img)) => (img.width as u64) * (img.height as u64) * 4 * 4 / 3,
-            None => 0,
+            TextureSource::Rgba8(img) => (img.width as u64) * (img.height as u64) * 4 * 4 / 3,
         }
     }
 
     let root = repo_root();
     let mut total_bytes: u64 = 0;
+    let mut counted = std::collections::HashSet::new();
+    let mut add_model = |total_bytes: &mut u64, data: &MeshData| {
+        for prim in &data.primitives {
+            let mat = &prim.material;
+            // srgb rides the slot, as in `upload_mesh` — the same image in a
+            // color slot and a data slot residents two GPU textures.
+            for (image, srgb) in [
+                (&mat.base_color_image, true),
+                (&mat.normal_image, false),
+                (&mat.metallic_roughness_image, false),
+                (&mat.emissive_image, true),
+                (&mat.occlusion_image, false),
+            ] {
+                if let Some(img) = image
+                    && counted.insert((img.key, srgb)) {
+                        *total_bytes += image_bytes(img);
+                    }
+            }
+        }
+    };
 
     // (a) Race model image slots
     for (_id, _model, data) in race_models() {
-        for prim in &data.primitives {
-            let mat = &prim.material;
-            for image in [
-                &mat.base_color_image,
-                &mat.normal_image,
-                &mat.metallic_roughness_image,
-                &mat.emissive_image,
-                &mat.occlusion_image,
-            ] {
-                total_bytes += slot_bytes(image);
-            }
-        }
+        add_model(&mut total_bytes, &data);
     }
 
     // (b) Zone prop image slots and (c) zone ground sets
     let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
 
+    let mut loaded_models = std::collections::HashSet::new();
     for zone in &def.zones {
         // (c) Ground sets: diff/nor_gl/mr maps — same sidecar-then-source
         // preference as `client::ground::load_ground_material`.
@@ -435,22 +446,14 @@ fn total_texture_memory_within_budget() {
             }
         }
 
-        // (b) Prop image slots
+        // (b) Prop image slots, each unique model once (MeshStore path dedup)
         for prop in &zone.visuals.props {
+            if !loaded_models.insert(prop.model.clone()) {
+                continue;
+            }
             let path = root.join(&prop.model);
             if let Ok(data) = load_gltf_data(path.to_str().unwrap()) {
-                for prim in &data.primitives {
-                    let mat = &prim.material;
-                    for image in [
-                        &mat.base_color_image,
-                        &mat.normal_image,
-                        &mat.metallic_roughness_image,
-                        &mat.emissive_image,
-                        &mat.occlusion_image,
-                    ] {
-                        total_bytes += slot_bytes(image);
-                    }
-                }
+                add_model(&mut total_bytes, &data);
             }
         }
     }

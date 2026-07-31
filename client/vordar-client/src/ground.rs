@@ -5,7 +5,7 @@
 //
 // Pure mesh math — unit-tested without a GPU.
 
-use engine_renderer::mesh::{load_image_rgba, ImageData, MaterialData, MeshData, PrimitiveData, TextureSource};
+use engine_renderer::mesh::{load_image_rgba, ImageData, MaterialData, MeshData, PrimitiveData, SharedImage, TextureSource};
 use engine_renderer::tangent::generate_tangents;
 use engine_renderer::texture::load_dds_image;
 use engine_renderer::MeshVertex;
@@ -162,9 +162,9 @@ pub fn load_ground_material(dir: &str) -> Result<MaterialData, String> {
     };
 
     Ok(MaterialData {
-        base_color_image:         Some(base_color_image),
-        normal_image:             Some(normal_image),
-        metallic_roughness_image: Some(metallic_roughness_image),
+        base_color_image:         Some(SharedImage::new(base_color_image)),
+        normal_image:             Some(SharedImage::new(normal_image)),
+        metallic_roughness_image: Some(SharedImage::new(metallic_roughness_image)),
         // Ground sets are dielectric by declaration: the baked MR sidecar
         // replicates roughness into every colour channel (texconv only
         // parses uniform swizzle masks reliably), so its B channel is NOT

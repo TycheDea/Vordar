@@ -1,4 +1,4 @@
-use super::gltf_import::{MeshData, TextureSource, VertexSkin};
+use super::gltf_import::{MeshData, SharedImage, TextureSource, VertexSkin};
 use crate::anim::{AnimationClip, Skeleton};
 use crate::culling::Aabb;
 use crate::mesh_pipeline::MaterialUniform;
@@ -6,16 +6,23 @@ use crate::mipgen::MipGenerator;
 use crate::skinned_pipeline::SkinnedVertex;
 use crate::texture::{self, ColorTexture};
 use std::collections::HashMap;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Weak};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{BindGroup, BindGroupLayout, Buffer, BufferUsages, Device, Queue};
+
+/// GPU textures shared across primitives and meshes, keyed by
+/// (`SharedImage::key`, srgb) — srgb belongs to the key because the same
+/// image bound in a color slot and a data slot needs two GPU formats. Weak
+/// entries so a texture's lifetime stays owned by the primitives binding it;
+/// a dead entry is recreated on the next upload that needs it.
+pub(crate) type TextureCache = HashMap<(u64, bool), Weak<ColorTexture>>;
 
 pub(crate) struct GpuPrimitive {
     pub(crate) vertex_buffer: Buffer,
     pub(crate) index_buffer:  Buffer,
     pub(crate) index_count:   u32,
     // Textures + factor uniform kept alive alongside their bind group.
-    pub(crate) _textures:          Vec<ColorTexture>,
+    pub(crate) _textures:          Vec<Arc<ColorTexture>>,
     pub(crate) _material_buffer:   Buffer,
     pub(crate) material_bind_group: BindGroup,
     pub(crate) blend:   bool,
@@ -60,11 +67,11 @@ pub(crate) fn slot_texture(
     device:  &Device,
     queue:   &Queue,
     mipgen:  &MipGenerator,
-    image:   &Option<TextureSource>,
+    image:   &Option<Arc<SharedImage>>,
     srgb:    bool,
     neutral: [u8; 4],
 ) -> ColorTexture {
-    match image {
+    match image.as_deref().map(|i| &i.source) {
         Some(TextureSource::Rgba8(img)) => texture::create_rgba_texture_mipped(
             device, queue, mipgen, img.width, img.height, &img.pixels, srgb,
         ),
@@ -79,6 +86,7 @@ pub(crate) fn upload_mesh(
     layout: &BindGroupLayout,
     mipgen: &MipGenerator,
     data:   MeshData,
+    textures: &mut TextureCache,
 ) -> GpuMesh {
     let skinned = data.skeleton.is_some();
     let primitives: Vec<GpuPrimitive> = data.primitives.iter().map(|p| {
@@ -118,13 +126,26 @@ pub(crate) fn upload_mesh(
         });
 
         // The five material textures: sRGB for color-like slots, linear for
-        // data-like slots; 1×1 neutral defaults where absent.
+        // data-like slots; 1×1 neutral defaults where absent. Real images go
+        // through the shared cache; neutral defaults stay per-slot (4 B each).
+        let mut shared_slot = |image: &Option<Arc<SharedImage>>, srgb: bool, neutral: [u8; 4]| {
+            let Some(img) = image else {
+                return Arc::new(slot_texture(device, queue, mipgen, &None, srgb, neutral));
+            };
+            let key = (img.key, srgb);
+            if let Some(tex) = textures.get(&key).and_then(Weak::upgrade) {
+                return tex;
+            }
+            let tex = Arc::new(slot_texture(device, queue, mipgen, image, srgb, neutral));
+            textures.insert(key, Arc::downgrade(&tex));
+            tex
+        };
         let m = &p.material;
-        let albedo   = slot_texture(device, queue, mipgen, &m.base_color_image, true, [255; 4]);
-        let normal   = slot_texture(device, queue, mipgen, &m.normal_image, false, [128, 128, 255, 255]);
-        let mr       = slot_texture(device, queue, mipgen, &m.metallic_roughness_image, false, [255; 4]);
-        let emissive = slot_texture(device, queue, mipgen, &m.emissive_image, true, [255; 4]);
-        let ao       = slot_texture(device, queue, mipgen, &m.occlusion_image, false, [255; 4]);
+        let albedo   = shared_slot(&m.base_color_image, true, [255; 4]);
+        let normal   = shared_slot(&m.normal_image, false, [128, 128, 255, 255]);
+        let mr       = shared_slot(&m.metallic_roughness_image, false, [255; 4]);
+        let emissive = shared_slot(&m.emissive_image, true, [255; 4]);
+        let ao       = shared_slot(&m.occlusion_image, false, [255; 4]);
 
         let (cutoff, blend_w) = match m.alpha_mode {
             super::gltf_import::AlphaMode::Opaque => (0.0, 0.0),
@@ -215,6 +236,7 @@ pub(crate) enum MeshEntry {
 pub struct MeshStore {
     by_path:           HashMap<String, MeshEntry>,
     pub(crate) meshes: Vec<GpuMesh>,
+    textures:          TextureCache,
     results_tx: mpsc::Sender<(String, Result<MeshData, String>)>,
     results_rx: mpsc::Receiver<(String, Result<MeshData, String>)>,
 }
@@ -222,7 +244,13 @@ pub struct MeshStore {
 impl Default for MeshStore {
     fn default() -> Self {
         let (results_tx, results_rx) = mpsc::channel();
-        Self { by_path: HashMap::new(), meshes: Vec::new(), results_tx, results_rx }
+        Self {
+            by_path: HashMap::new(),
+            meshes: Vec::new(),
+            textures: TextureCache::new(),
+            results_tx,
+            results_rx,
+        }
     }
 }
 
@@ -241,7 +269,7 @@ impl MeshStore {
         key:    &str,
         data:   MeshData,
     ) -> usize {
-        let mesh = upload_mesh(device, queue, layout, mipgen, data);
+        let mesh = upload_mesh(device, queue, layout, mipgen, data, &mut self.textures);
         if let Some(&MeshEntry::Loaded(idx)) = self.by_path.get(key) {
             self.meshes[idx] = mesh;
             return idx;
@@ -324,7 +352,8 @@ impl MeshStore {
             match result {
                 Ok(data) => {
                     let idx = self.meshes.len();
-                    self.meshes.push(upload_mesh(device, queue, layout, mipgen, data));
+                    let mesh = upload_mesh(device, queue, layout, mipgen, data, &mut self.textures);
+                    self.meshes.push(mesh);
                     self.by_path.insert(path, MeshEntry::Loaded(idx));
                 }
                 Err(e) => {
@@ -342,13 +371,16 @@ impl MeshStore {
         self.by_path.values().filter(|e| matches!(e, MeshEntry::Pending)).count()
     }
 
-    /// Sum of every loaded mesh's material textures' resident GPU bytes —
-    /// feeds the dev overlay's "tex mem (assets)" line (VQ-C5's budget).
+    /// Sum of every loaded mesh's material textures' resident GPU bytes,
+    /// counting each shared texture once — feeds the dev overlay's
+    /// "tex mem (assets)" line, the texture-memory budget's instrument.
     pub(crate) fn texture_memory_bytes(&self) -> u64 {
+        let mut seen = std::collections::HashSet::new();
         self.meshes
             .iter()
             .flat_map(|m| &m.primitives)
             .flat_map(|p| &p._textures)
+            .filter(|t| seen.insert(Arc::as_ptr(t)))
             .map(|t| t.bytes)
             .sum()
     }
@@ -365,7 +397,7 @@ pub(crate) const MESH_UPLOADS_PER_FRAME: usize = 1;
 mod tests {
     use super::*;
     use crate::anim::{Joint, LocalTransform};
-    use crate::mesh::gltf_import::{AlphaMode, ImageData, MaterialData, PrimitiveData, TextureSource};
+    use crate::mesh::gltf_import::{AlphaMode, ImageData, MaterialData, PrimitiveData, SharedImage, TextureSource};
     use crate::mesh_pipeline::{self, MeshVertex};
     use crate::offscreen::HeadlessGpu;
 
@@ -600,7 +632,7 @@ mod tests {
             clips:    vec![],
         };
 
-        let gpu_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, data);
+        let gpu_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, data, &mut TextureCache::new());
 
         assert_eq!(gpu_mesh.primitives.len(), 2);
         assert!(!gpu_mesh.primitives[0].blend, "default material should not be blend");
@@ -624,13 +656,13 @@ mod tests {
         let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
         let mipgen = MipGenerator::new(&gpu.device);
 
-        let static_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, triangle_mesh_data());
+        let static_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, triangle_mesh_data(), &mut TextureCache::new());
         assert!(static_mesh.local_aabb.min.abs_diff_eq(glam::Vec3::new(0.0, 0.0, 0.0), 1e-5), "static min");
         assert!(static_mesh.local_aabb.max.abs_diff_eq(glam::Vec3::new(1.0, 1.0, 0.0), 1e-5), "static max");
 
         let mut skinned_data = triangle_mesh_data();
         skinned_data.skeleton = Some(stub_skeleton(1));
-        let skinned_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, skinned_data);
+        let skinned_mesh = upload_mesh(&gpu.device, &gpu.queue, &layout, &mipgen, skinned_data, &mut TextureCache::new());
         // Bind-pose box is min(0,0,0)/max(1,1,0), center (0.5,0.5,0), half-extents
         // (0.5,0.5,0) — doubled to (1.0,1.0,0.0) about the same center.
         assert!(skinned_mesh.local_aabb.min.abs_diff_eq(glam::Vec3::new(-0.5, -0.5, 0.0), 1e-5), "skinned min");
@@ -653,15 +685,58 @@ mod tests {
         let mut store = MeshStore::default();
 
         let mut data = triangle_mesh_data();
-        data.primitives[0].material.base_color_image = Some(TextureSource::Rgba8(ImageData {
+        data.primitives[0].material.base_color_image = Some(SharedImage::new(TextureSource::Rgba8(ImageData {
             width:  8,
             height: 8,
             pixels: vec![255u8; 8 * 8 * 4],
-        }));
+        })));
 
         store.register(&gpu.device, &gpu.queue, &layout, &mipgen, "tex-mem-test", data);
 
         assert_eq!(store.texture_memory_bytes(), 356);
+    }
+
+    /// Two primitives referencing the same glTF image must bind one cached
+    /// GPU texture, and a second model with an identical image (same content
+    /// key, distinct `Arc`) must share it too — `texture_memory_bytes`
+    /// counts the shared texture once. The 2×2 image residents 20 B
+    /// (4 + 1 texels × 4 B); each primitive adds 4 × 1×1 neutral defaults
+    /// (16 B).
+    #[test]
+    fn primitives_sharing_an_image_share_one_gpu_texture() {
+        let Some(gpu) = HeadlessGpu::new() else {
+            eprintln!("SKIP: no GPU adapter available — texture sharing test needs one");
+            return;
+        };
+        let layout = mesh_pipeline::create_material_bind_group_layout(&gpu.device);
+        let mipgen = MipGenerator::new(&gpu.device);
+        let mut store = MeshStore::default();
+
+        let path = std::env::temp_dir().join("vordar_store_test_shared_image.glb");
+        crate::mesh::test_glb::write_textured_glb(&path);
+        let load = || crate::mesh::gltf_import::load_gltf_data(path.to_str().unwrap()).unwrap();
+
+        let data = load();
+        assert_eq!(data.primitives.len(), 2);
+        let images: Vec<&std::sync::Arc<SharedImage>> = data
+            .primitives
+            .iter()
+            .map(|p| p.material.base_color_image.as_ref().unwrap())
+            .collect();
+        assert!(Arc::ptr_eq(images[0], images[1]), "import must decode the shared image once");
+
+        let idx = store.register(&gpu.device, &gpu.queue, &layout, &mipgen, "shared-a", data);
+        let prims = &store.meshes[idx].primitives;
+        assert!(
+            Arc::ptr_eq(&prims[0]._textures[0], &prims[1]._textures[0]),
+            "both primitives must bind the same cached GPU texture"
+        );
+        assert_eq!(store.texture_memory_bytes(), 20 + 2 * 16);
+
+        // Same content loaded again under another key: fresh Arcs, same
+        // content key — the image stays a single resident texture.
+        store.register(&gpu.device, &gpu.queue, &layout, &mipgen, "shared-b", load());
+        assert_eq!(store.texture_memory_bytes(), 20 + 4 * 16);
     }
 
     /// Content-gated: streams the real statue asset (11 MB, embedded

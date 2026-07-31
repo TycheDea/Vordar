@@ -642,6 +642,7 @@ impl OffscreenRenderer {
         assert!(data.skeleton.is_none(), "render_mesh drives the static mesh path only");
         let gpu_mesh = mesh::upload_mesh(
             &self.gpu.device, &self.gpu.queue, &self.material_bgl, &self.mipgen, data,
+            &mut Default::default(),
         );
         let instance = MeshInstance {
             model: glam::Mat4::IDENTITY.to_cols_array_2d(),
