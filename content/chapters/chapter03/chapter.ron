@@ -25,10 +25,10 @@
     name: "Chapter 3 — Rocalba",
     initial_spawns: [
         (prefab: "casa_small_b",     positions: [(-12.2, 0.0, 13.2), (6.8, 0.0, -13.2)]),
-        (prefab: "casa_small_a",     positions: [(-6.4, 0.0, 13.5), (-12.0, 0.0, -13.5)]),
+        (prefab: "casa_small_a",     positions: [(-6.4, 0.0, 13.5), (-6.0, 0.0, -13.5)]),
         (prefab: "casa_two_story",   positions: [(0.1, 0.0, 14.5), (0.5, 0.0, -14.5)]),
-        (prefab: "casa_corner_main", positions: [(6.6, 0.0, 12.5), (-6.0, 0.0, -12.5)]),
-        (prefab: "casa_corner_wing", positions: [(11.4, 0.0, 11.5), (-10.8, 0.0, -11.5)]),
+        (prefab: "casa_corner_main", positions: [(6.6, 0.0, 12.5), (-12.0, 0.0, -12.5)]),
+        (prefab: "casa_corner_wing", positions: [(11.4, 0.0, 11.5), (-16.8, 0.0, -11.5)]),
         (prefab: "chapel_wall_side", positions: [(-30.0, 0.0, -25.2), (-30.0, 0.0, -32.8)]),
         (prefab: "chapel_wall_apse", positions: [(-38.3, 0.0, -29.0)]),
         (prefab: "chapel_door_jamb", positions: [(-21.7, 0.0, -26.5), (-21.7, 0.0, -31.5)]),

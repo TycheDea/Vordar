@@ -1,8 +1,8 @@
 // zone_review: headless offscreen ship-gate render for one zone's live prop
 // dressing (content/zones/zones.ron) — a wide establishing shot, mid shots
 // per proximity cluster, one close-up per distinct prop model (with the
-// player model for scale), and an interior shot inside chapter03's chapel
-// graybox, all under the zone's real HDRI/fog/sun. Built because
+// player model for scale), and interior shots inside the start town's
+// chapel prop, all under the zone's real HDRI/fog/sun. Built because
 // turntable-style renders (fixed full-prop framing, no player, no
 // destination lighting) cleared five props that then failed the in-game
 // feel-check on exactly the axes this tool now captures — see
@@ -23,7 +23,6 @@ use image::RgbaImage;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::process::exit;
-use vordar_client::chapter_geometry::load_chapter_prims;
 use vordar_client::ground::{generate_ground, height as ground_height, load_ground_material, GROUND_TOP_Y};
 use vordar_client::presentation::DETAIL_TEXTURE_DIR;
 use vordar_game::zones::{load_zones, resolve_sun_color, resolve_sun_dir, ZoneVisuals};
@@ -80,18 +79,18 @@ const PLAYER_OFFSET_MAX: f32 = 1.3;
 /// sheet too large to eyeball or view.
 const THUMB: (u32, u32) = (480, 270);
 
-/// chapter03's chapel nave anchor (graybox interior: x∈[-30,-14],
-/// z∈[-16.5,-9.5]) — see chapel_probe.rs's containment sweep for the
-/// derivation. Chapter03-specific, not zone-agnostic, so the interior shot
-/// only runs when the reviewed zone actually runs chapter03.
-const NAVE_TARGET: Vec3 = Vec3::new(-22.0, EYE_HEIGHT, -13.0);
-/// chapel_probe's verified contained-interior distance at this anchor.
+/// The start town's chapel nave anchor: the kit chapel prop at (-30, -29),
+/// nave interior x∈[-38,-22], z∈[-32.5,-25.5]. Chapter03-specific, not
+/// zone-agnostic, so the interior shot only runs when the reviewed zone
+/// actually runs chapter03.
+const NAVE_TARGET: Vec3 = Vec3::new(-30.0, EYE_HEIGHT, -29.0);
+/// Camera-to-anchor distance that stays inside the 16 m x 7 m nave.
 const NAVE_RADIUS: f32 = 5.0;
 const NAVE_PITCH: f32 = 0.3;
-/// Looking down the nave toward the apse (chapter03's west end).
-const NAVE_YAW_APSE: f32 = std::f32::consts::PI;
-/// Looking back down the nave toward the east-face door.
-const NAVE_YAW_DOOR: f32 = 0.0;
+/// Looking down the nave toward the apse (west): eye east of the anchor.
+const NAVE_YAW_APSE: f32 = 0.0;
+/// Looking back down the nave toward the east-face door: eye west of it.
+const NAVE_YAW_DOOR: f32 = std::f32::consts::PI;
 
 struct Args {
     zone: String,
@@ -314,11 +313,8 @@ fn render(r: &mut OffscreenRenderer, data: MeshData, w: u32, h: u32) -> RgbaImag
 /// Establishing shot over the dressed area: every prop drawn, camera fit
 /// (`set_camera_turntable`'s bounding-sphere fit, three-quarter yaw) to the
 /// placements within `WIDE_RADIUS` so distant horizon landmarks don't pull
-/// the shot off-centre or force too wide a fit. `chapter_prims` (the zone's
-/// chapter buildings, if any — see `chapter_geometry::load_chapter_prims`)
-/// always count toward those bounds: they're the zone's built-up cluster,
-/// not horizon dressing, and a fixed prop-scale framing crops them.
-fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], chapter_prims: Vec<PrimitiveData>, w: u32, h: u32) -> RgbaImage {
+/// the shot off-centre or force too wide a fit.
+fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], w: u32, h: u32) -> RgbaImage {
     let mut prims = Vec::new();
     let mut near_min = Vec3::splat(f32::INFINITY);
     let mut near_max = Vec3::splat(f32::NEG_INFINITY);
@@ -331,12 +327,6 @@ fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropIn
         }
         prims.extend(placed);
     }
-    if !chapter_prims.is_empty() {
-        let (cmin, cmax) = review::aabb(&chapter_prims);
-        near_min = near_min.min(cmin);
-        near_max = near_max.max(cmax);
-    }
-    prims.extend(chapter_prims);
     if !near_min.x.is_finite() {
         let (a, b) = review::aabb(&prims); // no prop within WIDE_RADIUS: fall back to everything
         near_min = a;
@@ -347,14 +337,18 @@ fn render_wide(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropIn
     render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)
 }
 
-/// Inside chapter03's chapel nave, looking down its length toward the apse
+/// Inside the town chapel's nave, looking down its length toward the apse
 /// (west) or back toward the door (east) — `NAVE_RADIUS` keeps the camera
-/// inside the walls per chapel_probe's containment sweep. Only the chapter
-/// geometry is drawn (interior framing, not the exterior dressing).
-fn render_interior(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, chapter_prims: Vec<PrimitiveData>, yaw: f32, w: u32, h: u32) -> RgbaImage {
+/// inside the walls. Draws the full prop dressing: the chapel itself is a
+/// zones.ron prop (chapter03 is collision-only), and the street outside
+/// reads through the door opening.
+fn render_interior(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], yaw: f32, w: u32, h: u32) -> RgbaImage {
     let eye = orbit_eye(NAVE_TARGET, NAVE_RADIUS, yaw, NAVE_PITCH);
     r.set_camera_lookat(eye, NAVE_TARGET);
-    let mut prims = chapter_prims;
+    let mut prims: Vec<PrimitiveData> = props
+        .iter()
+        .flat_map(|p| place(load_prop_mesh(&p.model), transform_for(p)))
+        .collect();
     prims.extend(build_ground(visuals));
     render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)
 }
@@ -483,18 +477,17 @@ fn main() {
     let props = load_props(visuals);
     let mut sheet_frames: Vec<RgbaImage> = Vec::new();
 
-    let chapter_prims = zone.chapter.as_deref().map(load_chapter_prims).unwrap_or_default();
-    let wide = render_wide(&mut r, visuals, &props, chapter_prims, w, h);
+    let wide = render_wide(&mut r, visuals, &props, w, h);
     save(&wide, &out.join("wide.png"));
     sheet_frames.push(wide);
 
-    // chapter03's chapel nave anchor is hardcoded (NAVE_TARGET) — only run
-    // this shot against the chapter it was measured against.
+    // The chapel nave anchor is hardcoded (NAVE_TARGET) — only run this
+    // shot against the chapter03 town it was measured against.
     if zone.chapter.as_deref() == Some("chapter03") {
-        let apse = render_interior(&mut r, visuals, load_chapter_prims("chapter03"), NAVE_YAW_APSE, w, h);
+        let apse = render_interior(&mut r, visuals, &props, NAVE_YAW_APSE, w, h);
         save(&apse, &out.join("interior_apse.png"));
         sheet_frames.push(apse);
-        let door = render_interior(&mut r, visuals, load_chapter_prims("chapter03"), NAVE_YAW_DOOR, w, h);
+        let door = render_interior(&mut r, visuals, &props, NAVE_YAW_DOOR, w, h);
         save(&door, &out.join("interior_door.png"));
         sheet_frames.push(door);
     }

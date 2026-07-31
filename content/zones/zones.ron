@@ -41,21 +41,58 @@
                 fog_height_falloff: 0.12,
                 ground: Some((texture_dir: "content/textures/ground/cracked_earth", tile: 7.0)),
                 props: [
+                    // Rocalba town (tasks/town/p24-layout.md §4). Every kit
+                    // placement here has a same-XZ collision spawn in
+                    // chapter03/chapter.ron; move them together. Kit door
+                    // facades face -Z at yaw 0 (yaw 90 -> W, 180 -> N,
+                    // 270 -> E); yaws stay in {0, 90, 180, 270} because the
+                    // collision boxes are axis-aligned.
+                    // North row, fronts on the z=+9.5 facade line, doors south
+                    // toward the plaza; party walls touch (0.6 m wall overlap).
+                    (model: "content/models/props/casa_small_b/casa_small_b.gltf",     pos: (-12.2, -0.5, 13.2), scale: 1.0, yaw: 0.0),
+                    (model: "content/models/props/casa_small_a/casa_small_a.gltf",     pos: (-6.4, -0.5, 13.5),  scale: 1.0, yaw: 0.0),
+                    (model: "content/models/props/casa_two_story/casa_two_story.gltf", pos: (0.1, -0.5, 14.5),   scale: 1.0, yaw: 0.0),
+                    // Corner house at the row's east end, wing toward the road mouth.
+                    (model: "content/models/props/casa_corner/casa_corner.gltf",       pos: (6.6, -0.5, 12.5),   scale: 1.0, yaw: 0.0),
+                    // South row, fronts on z=-9.5, doors north. The corner
+                    // house holds the WEST end (wing at yaw 180 is locked to
+                    // -X, so anywhere mid-row it would run into its west
+                    // neighbor); its wing extends past the row end.
+                    (model: "content/models/props/casa_corner/casa_corner.gltf",       pos: (-12.0, -0.5, -12.5), scale: 1.0, yaw: 180.0),
+                    (model: "content/models/props/casa_small_a/casa_small_a.gltf",     pos: (-6.0, -0.5, -13.5),  scale: 1.0, yaw: 180.0),
+                    (model: "content/models/props/casa_two_story/casa_two_story.gltf", pos: (0.5, -0.5, -14.5),   scale: 1.0, yaw: 180.0),
+                    (model: "content/models/props/casa_small_b/casa_small_b.gltf",     pos: (6.8, -0.5, -13.2),   scale: 1.0, yaw: 180.0),
+                    // Chapel anchoring the SW precinct, door east toward the town.
+                    (model: "content/models/props/chapel/chapel.gltf",                 pos: (-30.0, -0.5, -29.0), scale: 1.0, yaw: 0.0),
+                    // East gate astride the road: face runs along Z (yaw 90),
+                    // 3.2 m opening on the portal corridor.
+                    (model: "content/models/props/gate_arch/gate_arch.gltf",           pos: (15.0, -0.5, 0.0),    scale: 1.0, yaw: 90.0),
+                    (model: "content/models/props/well_basin/well_basin.gltf",         pos: (0.0, -0.5, -5.5),    scale: 1.0, yaw: 0.0),
+                    // Ruined town-wall fragments along x=15; the gap
+                    // z in [3.2, 7.0] is the unfinished breach where the
+                    // crucero shrine stands.
+                    (model: "content/models/props/wall_segment/wall_segment.gltf",     pos: (15.0, -0.5, 9.0),    scale: 1.0, yaw: 90.0),
+                    (model: "content/models/props/wall_segment/wall_segment.gltf",     pos: (15.0, -0.5, 13.5),   scale: 1.0, yaw: 90.0),
+                    (model: "content/models/props/wall_segment/wall_segment.gltf",     pos: (15.0, -0.5, -5.5),   scale: 1.0, yaw: 90.0),
+                    (model: "content/models/props/wall_segment/wall_segment.gltf",     pos: (15.0, -0.5, -10.0),  scale: 1.0, yaw: 90.0),
                     // First Z-Image prop, near spawn for the feel-check.
                     (model: "content/models/props/candelabra_shrine/candelabra_shrine.glb", pos: (-4.0, -0.5, -5.0), scale: 1.0, yaw: 25.0),
                     (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (14.0, -0.5, -19.0), scale: 3.0, yaw: 40.0),
                     (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (-24.0, -0.5, 13.0), scale: 2.2, yaw: 205.0),
                     (model: "content/models/props/rock_09/rock_09_1k.gltf",           pos: (-11.0, -0.5, 27.0), scale: 1.6, yaw: 118.0),
                     (model: "content/models/props/rock_07/rock_07_1k.gltf",           pos: (31.0, -0.5, 22.0),  scale: 1.8, yaw: 320.0),
-                    // Wayside crucero flanking the eastward road to the portal.
+                    // Gate shrine: crucero standing in the town wall's
+                    // unfinished breach north of the gate.
                     (model: "content/models/props/crucero/crucero.glb",               pos: (15.0, -0.5, 6.0), scale: 1.0, yaw: 200.0),
-                    // Ruined chapel cluster — the mid-distance landmark southwest of spawn.
+                    // Ruin fragments around the chapel precinct: the arch
+                    // clears the chapel south wall by 0.9 m; the column sits
+                    // clear of the east door approach.
                     (model: "content/models/props/chapel_arch/chapel_arch.glb",       pos: (-26.0, -0.5, -34.0), scale: 1.0,  yaw: 40.0),
-                    (model: "content/models/props/broken_column/broken_column.glb",   pos: (-20.0, -0.5, -29.0), scale: 0.9,  yaw: 190.0),
-                    // Small grave-marker cluster within the chapel ruins.
-                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-31.0, -0.5, -27.0), scale: 0.72, yaw: 210.0),
-                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-28.5, -0.5, -24.5), scale: 0.70, yaw: 45.0),
-                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-33.5, -0.5, -29.5), scale: 0.75, yaw: 320.0),
+                    (model: "content/models/props/broken_column/broken_column.glb",   pos: (-19.5, -0.5, -34.0), scale: 0.9,  yaw: 190.0),
+                    // Graveyard patch north of the chapel.
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-31.0, -0.5, -22.5), scale: 0.72, yaw: 210.0),
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-27.5, -0.5, -22.0), scale: 0.70, yaw: 45.0),
+                    (model: "content/models/props/gravestone/gravestone.glb",         pos: (-35.0, -0.5, -22.5), scale: 0.75, yaw: 320.0),
                     (model: "content/models/props/cypress/cypress.glb",               pos: (-34.0, -0.5, -40.0), scale: 0.95, yaw: 300.0),
                     // Toppled column past the play-radius edge.
                     (model: "content/models/props/broken_column/broken_column.glb",   pos: (-58.0, -0.5, 14.0),  scale: 1.0,  yaw: 305.0),
