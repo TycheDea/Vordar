@@ -235,8 +235,8 @@ Every generation prompt for this campaign must:
 
 1. Be authored from this document, with `place: Rocalba (docs/town-premise.md)`
    recorded beside the prompt in the run's report or manifest — the citation is
-   traceability, and it belongs where a reader can follow it rather than inside
-   model-facing text that a 77-token conditioner will truncate.
+   traceability, and it belongs where a reader can follow it rather than in
+   model-facing text, which carries only what should reach the image.
 2. Take material color text verbatim from §3 — never paraphrase colors. Those
    quoted lines are prompt text for generated heroes and props and the
    acceptance spec for sourced photoscans, which are chosen against the words
