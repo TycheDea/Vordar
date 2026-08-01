@@ -40,14 +40,15 @@ No one lives here now. Travelers use the east road and do not stop after dark.
   candlelight, the office begun and never finished.
 - **Time has leaned on the edges.** The perimeter — wall fragments, the
   graveyard, the old ruin cluster — is weathered and broken, while the plaza
-  core is eerily kept. Decay increases with distance from the chapel.
+  core is eerily kept. Decay increases with distance from the plaza.
 
 ---
 
-## 2. Color law (binding — quotes VQ-A4)
+## 2. Color law (binding — refines VQ-A4's ambient row)
 
-All town surfaces are **ambient world**: saturation ≤ 0.35, value ≤ 0.6,
-warm stone bias 20°–50° only when chromatic. Emissives are the exceptions:
+All town surfaces are **ambient world**: desaturated, never glowing, never
+competing with an emissive — warm stone bias 20°–50° only when chromatic.
+Emissives are the exceptions:
 
 | Role | Hue | S | V |
 |---|---|---|---|
@@ -57,9 +58,18 @@ warm stone bias 20°–50° only when chromatic. Emissives are the exceptions:
 
 Consequences for asset work:
 
-- Candle-gold sits ≥ 10° above the threat band; no architectural material may
-  glow, and rust/terracotta must stay desaturated enough (S ≤ 0.35) never to
-  read as telegraph.
+- **Threat reservation — absolute.** The threat band is a conjunction: hue
+  350°–25° *and* S ≥ 0.7 *and* V ≥ 0.8. No architectural or dressing surface
+  may enter it, and none whose hue falls inside the reserved window may exceed
+  **S 0.35** — half the threat floor. Candle-gold sits ≥ 10° above the window;
+  no architectural material may glow. Terracotta lives inside the window
+  (hue 16°–18°, rendered S 0.309 at 4 m, 0.345 at 1 m) and is legal by that
+  margin, not by exemption; a rust-orange iron is not.
+- **Ambient ceiling — S ≤ 0.35, V ≤ 0.6**, read as a surface's rendered mean
+  under ship lighting, not as a per-pixel clamp. It binds chromatic surfaces.
+  Near-achromatic surfaces — whitewash, dressed limestone — are bound in
+  saturation only: whitewash is the brightest thing in Rocalba that is not on
+  fire, and a value ceiling on it would outlaw the material §3 mandates.
 - The texture stage drifts warm when colors are only implied — prompts must
   name the explicit colors given in §3, especially "pale grey", "off-white",
   and "cool grey".
@@ -77,12 +87,18 @@ written for verbatim use in generation prompts.
 > and corners exposing grey-brown rubble limestone; grey rain streaks under
 > sills; faint soot shadow above lintels"
 
+Interior plaster above the candle line is the same render carried as a second,
+uniformly soot-darkened set (§6). The soot is a tone, not a gradient: a tiling
+material cannot hold a height ramp, and the rise to the vault is a lighting
+read.
+
 **Dressed limestone** — quoins, portals, the chapel, the well, the gate:
 > "pale grey dressed limestone ashlar, cool light grey with faint sandy
 > flecks, matte; crisp chisel tool-marks softened by wear; edges rounded;
 > thin dark-grey soot settled in joints and carving recesses"
 
-**Terracotta barrel tile** — every roof (the one warm material; roofs only):
+**Terracotta barrel tile** — every casa roof, ridge included (the one warm
+material; roofs only — the chapel's vault is its own roof, §6):
 > "weathered terracotta barrel tiles, muted dusty red-brown, low saturation;
 > patchy grey-green lichen; whole courses slipped or missing near eaves"
 
@@ -94,7 +110,7 @@ written for verbatim use in generation prompts.
 > "matte black wrought iron, charcoal-grey worn highlights on edges; sparse
 > desaturated brown rust at joints and rivets, never bright orange"
 
-**Worn cobble** — plaza, streets, chapel floor:
+**Worn cobble** — plaza and streets; a ground surface, not a building material:
 > "worn grey cobblestones, mixed cool greys from pale to slate, crowns
 > polished smooth; dark earth-brown packed joints; no moss"
 
@@ -179,13 +195,24 @@ plaza-facing facades kept, perimeter pieces weathered and broken.
 ## 6. The chapel — the one enterable landmark
 
 Anchors the SW precinct. Nave **~7 × 16 m**, stone barrel vault springing to
-**~10–12 m**. Dressed pale-grey limestone throughout (§3), worn cobble floor,
-dark oak west doors standing open — the only open door in Rocalba.
+**~10–12 m**. Dressed pale-grey limestone throughout (§3), floor slabs included,
+dark oak east doors standing open onto the plaza approach — the only open door
+in Rocalba.
 
-- **Partially broken vault**: a collapse over the western nave bays leaves the
-  vault open to the sky, admitting light shafts; rubble from the fall lies
-  swept aside, not cleared. The east end and its vaulting are intact.
-- **Retablo** at the east end: dark oak frame, painted panels in ambient-world
+- **Espadaña** over the east facade: a single round-arched tronera with one
+  wrought-iron bell, a plain gable, and an iron cross at the apex — the town's
+  tallest thing at ~13 m above the plaza, and the silhouette that names
+  Rocalba from the east road. Below it a round-arched dressed portal, an oculus
+  between the two shuttered in dark oak, and one saetera per nave side wall.
+  Nothing moulded, nothing carved: Rocalba could afford a bell and a cross, and
+  stopped there.
+- **Partially broken vault**: a collapse over the eastern entry bays leaves the
+  vault open to the sky, admitting light shafts; rubble from the fall lies where
+  it came down, bedded into the paving, not cleared. The apse end and its
+  vaulting are intact — the altar survived, the door end did not. The vault is
+  the chapel's only roof, so the breach is also the orbit camera's window into
+  the nave; nothing is ever laid over it.
+- **Retablo** at the apse end: dark oak frame, painted panels in ambient-world
   values, gilt details that glint candle-gold (35°–50°) — the richest surface
   in town, and still modest.
 - **Votive stands** flanking the retablo and along the nave piers: wrought
@@ -195,7 +222,7 @@ dark oak west doors standing open — the only open door in Rocalba.
   overturned, no damage newer than the old vault fall. The dread is stillness,
   not wreckage.
 - Interior wall surfaces above the candle line carry smoke-darkened plaster:
-  encalado (§3) with a soot-grey gradient rising to the vault.
+  encalado (§3) in its uniformly soot-grey set.
 
 Lighting intent: cool sky shafts through the breach against warm candle-gold
 below — the votive/candle opposition of VQ-A4 staged in one room.
@@ -206,8 +233,14 @@ below — the votive/candle opposition of VQ-A4 staged in one room.
 
 Every generation prompt for this campaign must:
 
-1. Cite the premise: `place: Rocalba (docs/town-premise.md)`.
-2. Take material color text verbatim from §3 — never paraphrase colors.
+1. Be authored from this document, with `place: Rocalba (docs/town-premise.md)`
+   recorded beside the prompt in the run's report or manifest — the citation is
+   traceability, and it belongs where a reader can follow it rather than inside
+   model-facing text that a 77-token conditioner will truncate.
+2. Take material color text verbatim from §3 — never paraphrase colors. Those
+   quoted lines are prompt text for generated heroes and props and the
+   acceptance spec for sourced photoscans, which are chosen against the words
+   rather than generated from them.
 3. Use only §3 materials; never brick, thatch, half-timber, or marble.
 4. Keep surfaces in the ambient-world band (§2); emissives only as candle-gold.
 5. State the vespers condition where it shows: doors barred, candles lit,
