@@ -90,6 +90,14 @@ def assert_chapel_dims(dims):
     check("vault_peak", dims["vault_peak"], 10.0, 12.0)
     check("door_width", dims["door_width"], 2.4 - 0.1, 2.4 + 0.1)
     check("door_height", dims["door_height"], 3.2 - 0.1, 3.2 + 0.1)
+    # C1 — footprint guard: converts §5's invisible footprints.ron coupling
+    # into a hard build-time failure. Any future feature that projects past
+    # the east wall or the side walls trips this before it ever reaches the
+    # 0.02 m D5 margin.
+    check("footprint_x", dims["footprint_x"], 20.21, 20.25)
+    check("footprint_y", dims["footprint_y"], 8.18, 8.22)
+    check("espadana_apex", dims["espadana_apex"], 12.30, 12.50)
+    check("overall_height", dims["overall_height"], 13.05, 13.25)
     return checks
 
 

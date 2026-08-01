@@ -3,7 +3,7 @@
 (
     components: {
         "Transform": (),
-        "Hitbox":    (shape: Aabb(half_extents: (3.8, 4.49, 5.3))),
+        "Hitbox":    (shape: Aabb(half_extents: (3.8, 4.53, 5.3))),
         "Solid":     (),
         "Anchored":  (),
     },

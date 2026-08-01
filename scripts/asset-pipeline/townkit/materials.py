@@ -155,7 +155,19 @@ def build_materials(materials_dir, staging_dir):
         bsdf.inputs["Metallic"].default_value = 1.0 if family == "iron_wrought" else 0.0
 
         family_dir = _resolve_family_dir(materials_dir, family)
+        # A caller who names --materials-dir wants every family baked from
+        # it; a silent placeholder fallback here is what let a rejected
+        # material root (target/town-materials/) pass as a real build.
+        if materials_dir is not None and family_dir is None:
+            raise RuntimeError(
+                f"build_materials: family {family!r} not found under "
+                f"--materials-dir {materials_dir!r} "
+                f"(tried {_FAMILY_DIR_CANDIDATES[family]})")
         used_baked = _wire_baked_textures(mat, family_dir, staging_dir) if family_dir else False
+        if materials_dir is not None and not used_baked:
+            raise RuntimeError(
+                f"build_materials: family {family!r} resolved to "
+                f"{family_dir!r} but no basecolor image found there")
         sources[family] = f"baked:{family_dir}" if used_baked else "placeholder"
 
         mat["vordar_detail"] = family == DETAIL_FAMILY
@@ -168,37 +180,35 @@ def apply_material(obj, mat):
     obj.data.materials.append(mat)
 
 
+# Per dominant world-axis of a face normal, the two world axes that become
+# (U, V). Chosen so U advances with +X (or +Y on the X-facing walls) and V
+# with +Z on every vertical face, i.e. the texture stands upright on walls
+# and never mirrors between two faces of the same corner.
+_AXIS_UV = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
+
+
 def project_uv(obj, cube_size=TEXEL_SCALE_M):
-    """Box-project the object's single UV layer at the derived physical
-    texel scale (see module docstring). If the object carries a
-    `vordar_uv_offset` extra (buildings._quoins: a distinct (du, dv) per
-    quoin block so adjacent blocks don't sample the same spot in the tile,
-    G2 D7/D8), it's added after the projection -- the texture wraps
-    (REPEAT), so this just shifts which part of the tile each block shows."""
+    """Box-project the object's UV layer at the derived physical texel scale
+    (see module docstring), anchored at the **world origin** rather than at
+    the object's own centre.
+
+    The anchor is the whole point. bpy.ops.uv.cube_project origins each
+    projection on the selection's own median, so every congruent object
+    lands on the same UV rectangle: a slope's 25 barrel tiles, a ridge's 26
+    cover tiles and a vault's 18 voussoirs each stamped one patch N times,
+    and every dark region inside that patch recurred as a band. Dividing the
+    world coordinate itself means neighbouring pieces continue one another's
+    tiling, so a repeat can only come from the texture's own 13.1 m period."""
     mesh = obj.data
     if not mesh.uv_layers:
         mesh.uv_layers.new(name="UVMap")
-    view_layer = bpy.context.view_layer
-    prev_active = view_layer.objects.active
-    prev_selected = list(bpy.context.selected_objects)
-    for o in prev_selected:
-        o.select_set(False)
-    obj.select_set(True)
-    view_layer.objects.active = obj
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.cube_project(cube_size=cube_size, correct_aspect=True,
-                             clip_to_bounds=False, scale_to_bounds=False)
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-    offset = obj.get("vordar_uv_offset")
-    if offset is not None:
-        du, dv = offset
-        for loop_uv in mesh.uv_layers.active.data:
-            loop_uv.uv.x += du
-            loop_uv.uv.y += dv
-
-    obj.select_set(False)
-    for o in prev_selected:
-        o.select_set(True)
-    view_layer.objects.active = prev_active
+    uv_layer = mesh.uv_layers.active
+    mw = obj.matrix_world
+    nmat = mw.to_3x3()
+    for poly in mesh.polygons:
+        n = nmat @ poly.normal
+        axis = max(range(3), key=lambda i: abs(n[i]))
+        ui, vi = _AXIS_UV[axis]
+        for li in poly.loop_indices:
+            co = mw @ mesh.vertices[mesh.loops[li].vertex_index].co
+            uv_layer.data[li].uv = (co[ui] / cube_size, co[vi] / cube_size)

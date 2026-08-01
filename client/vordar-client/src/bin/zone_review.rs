@@ -369,21 +369,39 @@ struct NamedShot {
     select_radius: f32,
     camera_radius: f32,
     azimuth_deg: f32,
+    /// Orbit pitch, and the height above ground the camera aims at. The
+    /// default `GAMEPLAY_PITCH`/`EYE_HEIGHT` pair looks *down* onto a prop,
+    /// so an element whose whole job is a skyline silhouette is never seen
+    /// against sky in it: a negative pitch with the aim raised to the
+    /// element's own height puts the eye at standing height under it and
+    /// the horizon below it.
+    pitch: f32,
+    aim_y: f32,
 }
 
 const ROCALBA_SHOTS: &[NamedShot] = &[
     // East gate astride the road (x=15, z=0), with the unfinished breach
     // (z∈[3.2,7.0]) and its crucero north of it.
-    NamedShot { name: "gate", target: (15.0, 2.0), select_radius: 9.0, camera_radius: 16.0, azimuth_deg: 200.0 },
+    NamedShot { name: "gate", target: (15.0, 2.0), select_radius: 9.0, camera_radius: 16.0, azimuth_deg: 200.0, pitch: GAMEPLAY_PITCH, aim_y: EYE_HEIGHT },
     // Chapel exterior from the plaza side (east/NE), pulled back far enough
     // to hold the whole 18 m nave and the collapsed roofline.
-    NamedShot { name: "chapel", target: (-30.0, -29.0), select_radius: 5.5, camera_radius: 38.0, azimuth_deg: 45.0 },
+    NamedShot { name: "chapel", target: (-30.0, -29.0), select_radius: 5.5, camera_radius: 38.0, azimuth_deg: 45.0, pitch: GAMEPLAY_PITCH, aim_y: EYE_HEIGHT },
     // Chapel precinct viewed down the nave's long axis from the east so the
     // graveyard (north side) and the graveyard cypress + ruin quarter (south
     // side) both clear the chapel's flank instead of one hiding behind it.
-    NamedShot { name: "graveyard", target: (-30.0, -29.0), select_radius: 14.0, camera_radius: 30.0, azimuth_deg: 20.0 },
+    NamedShot { name: "graveyard", target: (-30.0, -29.0), select_radius: 14.0, camera_radius: 30.0, azimuth_deg: 20.0, pitch: GAMEPLAY_PITCH, aim_y: EYE_HEIGHT },
     // North terrace's plaza-facing facade, doors turned toward the camera.
-    NamedShot { name: "north_row", target: (-3.0, 11.0), select_radius: 12.0, camera_radius: 28.0, azimuth_deg: 270.0 },
+    NamedShot { name: "north_row", target: (-3.0, 11.0), select_radius: 12.0, camera_radius: 28.0, azimuth_deg: 270.0, pitch: GAMEPLAY_PITCH, aim_y: EYE_HEIGHT },
+    // Chapel east facade close: aimed at the door end (world x = -21.7) but
+    // selecting on the chapel's own prop position (8.3 m away, at the nave
+    // centre) since select_radius filters by placement, not facade offset;
+    // camera pulled in tight enough to hold the espadaña/bell/cross, the
+    // portal ring and the oculus in one frame (P3.0 F1-F4).
+    NamedShot { name: "chapel_facade", target: (-21.7, -29.0), select_radius: 9.0, camera_radius: 26.0, azimuth_deg: 0.0, pitch: 0.45, aim_y: 6.5 },
+    // The espadana against sky, from the east approach at standing height —
+    // the one condition the bell gable is designed for and the one no frame
+    // in the P3.0 gate set provided (watch item 1).
+    NamedShot { name: "chapel_skyline", target: (-21.7, -29.0), select_radius: 9.0, camera_radius: 30.0, azimuth_deg: 12.0, pitch: -0.30, aim_y: 11.4 },
 ];
 
 /// One `NamedShot`'s render: the same isolated-group style as `render_mid`,
@@ -392,7 +410,7 @@ const ROCALBA_SHOTS: &[NamedShot] = &[
 /// per-shot instead of the fixed `THREE_QUARTER_YAW`.
 fn render_named(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropInstance], shot: &NamedShot, w: u32, h: u32) -> RgbaImage {
     let (tx, tz) = shot.target;
-    let target = Vec3::new(tx, ground_height(tx, tz), tz);
+    let target = Vec3::new(tx, ground_height(tx, tz) + shot.aim_y, tz);
     let mut prims = Vec::new();
     for p in props {
         let dist = ((p.pos.x - tx).powi(2) + (p.pos.z - tz).powi(2)).sqrt();
@@ -400,7 +418,7 @@ fn render_named(r: &mut OffscreenRenderer, visuals: &ZoneVisuals, props: &[PropI
             prims.extend(place(load_prop_mesh(&p.model), transform_for(p)));
         }
     }
-    let eye = orbit_eye(target, shot.camera_radius, shot.azimuth_deg.to_radians(), GAMEPLAY_PITCH);
+    let eye = orbit_eye(target, shot.camera_radius, shot.azimuth_deg.to_radians(), shot.pitch);
     r.set_camera_lookat(eye, target);
     prims.extend(build_ground(visuals));
     render(r, MeshData { primitives: prims, skeleton: None, clips: Vec::new() }, w, h)

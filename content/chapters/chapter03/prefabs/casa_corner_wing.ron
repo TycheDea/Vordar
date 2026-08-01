@@ -5,7 +5,7 @@
 (
     components: {
         "Transform": (),
-        "Hitbox":    (shape: Aabb(half_extents: (2.55, 2.57, 2.3))),
+        "Hitbox":    (shape: Aabb(half_extents: (2.55, 2.609, 2.3))),
         "Solid":     (),
         "Anchored":  (),
     },

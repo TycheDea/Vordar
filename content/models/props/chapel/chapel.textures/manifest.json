@@ -1,6 +1,6 @@
 {
   "source": "chapel.gltf",
-  "sha256": "955be00181676b3b574953f063be37fa1b3b36a8826323d5613d797791f60858",
+  "sha256": "2b54c42a0402aee7bc557269ee1c6e3ad5b70a30f75d5efcfade9398b15d56b1",
   "images": [
     {
       "index": 0,
@@ -46,6 +46,21 @@
       "index": 8,
       "slot": "mr",
       "file": "img8.dds"
+    },
+    {
+      "index": 9,
+      "slot": "normal",
+      "file": "img9.dds"
+    },
+    {
+      "index": 10,
+      "slot": "base",
+      "file": "img10.dds"
+    },
+    {
+      "index": 11,
+      "slot": "mr",
+      "file": "img11.dds"
     }
   ]
 }

@@ -81,13 +81,18 @@ def make_halfcyl(name, center, radius, length, material, rotation=None, segments
     return _finalize(bm, name, material)
 
 
-def make_cylinder(name, center, radius, depth, material, segments=24, rotation=None):
+def make_cylinder(name, center, radius, depth, material, segments=24, rotation=None,
+                   radius_top=None):
     """A capped cylinder of given radius/depth along its local Z, rotated
     and placed like `make_box`. Used as a boolean-carve tool (e.g. the gate
-    arch's opening) where a smooth true circle is needed."""
+    arch's opening) where a smooth true circle is needed. `radius_top`, when
+    given, tapers the +Z end to a different radius -- a truncated cone, the
+    flare of the chapel bell."""
     bm = bmesh.new()
     bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=segments,
-                           radius1=radius, radius2=radius, depth=depth)
+                           radius1=radius,
+                           radius2=radius if radius_top is None else radius_top,
+                           depth=depth)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
     verts = bm.verts[:]
     rot = rotation.to_4x4() if rotation is not None else Matrix.Identity(4)
@@ -223,7 +228,7 @@ def wall_with_openings(name, center_xy, length, thickness, height, axis,
     return objs
 
 
-def _roof_deck_panel(name, panel_center, length, run, thickness, rot, material):
+def _roof_deck_panel(name, panel_center, length, run, thickness, rot, material, slope="a"):
     """A flat roof-slope deck panel with an explicit per-plane UV baked in
     directly, instead of the generic box projection every other object gets
     (materials.project_uv's cube_project, which picks one of 6 world-axis
@@ -236,17 +241,31 @@ def _roof_deck_panel(name, panel_center, length, run, thickness, rot, material):
     directions, since the deck is flat and `rot` is a rigid rotation that
     doesn't distort them. One absolute world scale (materials.TEXEL_SCALE_M)
     everywhere makes every roof plane -- and both sides of the valley --
-    match the kit's canonical 6.4 mm/texel density."""
+    match the kit's canonical 6.4 mm/texel density.
+
+    UV origin is shifted to the panel's own corner (not its signed centre)
+    and offset 0.02 tiles clear of the U=0/V=0 boundary, and the two slopes
+    (`slope` 'a'/'b') carry different V biases: co.x/co.y = 0 is where a
+    REPEAT-wrapped tile's own seam sits, so a centred UV put that seam at
+    the panel's exact middle -- a mirror-symmetric luminance band across the
+    fall line, worse the closer the camera (N3). The bias must stay U=0.02
+    with no per-panel scaling: a translated-only origin can't re-cross the
+    boundary regardless of `ext_length`, so long roofs (casa_two_story) stay
+    seam-free without a length-dependent tolerance."""
     bm = bmesh.new()
     ret = bmesh.ops.create_cube(bm, size=1.0)
     verts = ret["verts"]
     scale = Matrix.Diagonal((length, run, thickness, 1.0))
     bmesh.ops.transform(bm, matrix=scale, verts=verts)
     uv_layer = bm.loops.layers.uv.new("UVMap")
+    u0 = length / 2.0
+    v0 = run / 2.0
+    vbias = 0.0 if slope == "a" else 0.31
     for f in bm.faces:
         for loop in f.loops:
             co = loop.vert.co
-            loop[uv_layer].uv = (co.x / matlib.TEXEL_SCALE_M, co.y / matlib.TEXEL_SCALE_M)
+            loop[uv_layer].uv = ((co.x + u0) / matlib.TEXEL_SCALE_M + 0.02,
+                                  (co.y + v0) / matlib.TEXEL_SCALE_M + 0.02 + vbias)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
     rot4 = rot.to_4x4() if rot is not None else Matrix.Identity(4)
     xform = Matrix.Translation(Vector(panel_center)) @ rot4
@@ -300,7 +319,8 @@ def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
         else:
             rot = Matrix.Rotation(pitch_ext, 3, "X")
         deck = _roof_deck_panel(f"{name}_deck_{'a' if sign > 0 else 'b'}", panel_center,
-                                 ext_length, run, deck_thickness, rot, deck_material)
+                                 ext_length, run, deck_thickness, rot, deck_material,
+                                 slope="a" if sign > 0 else "b")
         deck_objs.append(deck)
 
         tile_pitch = tile_radius * 2.0 / tile_overlap
@@ -319,12 +339,67 @@ def gable_roof(name, center_xy, length, depth, eave_z, pitch_deg,
                                 rotation=rot @ Matrix.Rotation(math.pi / 2.0, 3, "Z"),
                                 segments=7)
             tile_objs.append(tile)
+
+    # Caballete: a half-cylinder course astride the bare ridge arris the two
+    # decks meet at -- `gable_roof` otherwise leaves it uncapped. Runs along
+    # world X (`gable_axis="x"`, the only value any kit type uses), so no
+    # rotation is needed; caps stay inside `ext_length` so no casa AABB moves.
+    cap_len = 0.42
+    n_caps = max(1, int(ext_length / cap_len))
+    for i in range(n_caps):
+        tx = -ext_length / 2.0 + (i + 0.5) * (ext_length / n_caps)
+        tile_objs.append(make_halfcyl(f"{name}_ridge_{i}",
+                                       (cx + tx, cy, ridge_z + tile_radius * 0.35),
+                                       tile_radius * 1.15, cap_len * 1.05, tile_material,
+                                       segments=7))
     return deck_objs, tile_objs, ridge_z
+
+
+def _wedge_uv(bm, sweep_center, center_z, sweep_axis, r_ref):
+    """Cylindrical UV for one barrel_shell wedge, in the ring's own frame:
+    arc length (`s`, measured on `r_ref` so neighbouring wedges continue),
+    radius (`r`) and the extrusion coordinate (`e`).
+
+    A voussoir ring box-projected like flat wall inherits the tile's own
+    horizontal courses, so a dressed arch reads as the wall it is cut into
+    and its blocks never read as radial (the P3.0 gate's portal-ring
+    finding). Mapping arc length onto one axis turns those courses across
+    the arc, which is what a voussoir joint is. Faces are classified by
+    which of the three frame directions their normal follows, since no
+    single pair of axes is non-degenerate on all six faces of a wedge."""
+    uv_layer = bm.loops.layers.uv.new("UVMap")
+    sweep_i = 0 if sweep_axis == "x" else 1
+    extrude_i = 1 - sweep_i
+
+    def frame(co):
+        du = co[sweep_i] - sweep_center
+        dz = co[2] - center_z
+        return co[extrude_i], math.hypot(du, dz), r_ref * math.atan2(du, dz)
+
+    for f in bm.faces:
+        n = f.normal
+        centre = f.calc_center_median()
+        du = centre[sweep_i] - sweep_center
+        dz = centre[2] - center_z
+        rad = math.hypot(du, dz) or 1.0
+        radial = (du / rad, dz / rad)
+        n_e = abs(n[extrude_i])
+        n_r = abs(n[sweep_i] * radial[0] + n[2] * radial[1])
+        n_t = max(0.0, 1.0 - n_e - n_r)
+        for loop in f.loops:
+            e, rr, s = frame(loop.vert.co)
+            if n_e >= n_r and n_e >= n_t:
+                uv = (s, rr)          # the annulus the camera faces
+            elif n_r >= n_t:
+                uv = (e, s)           # intrados / extrados
+            else:
+                uv = (e, rr)          # radial joint face
+            loop[uv_layer].uv = (uv[0] / matlib.TEXEL_SCALE_M, uv[1] / matlib.TEXEL_SCALE_M)
 
 
 def barrel_shell(name, sweep_center, extrude_range, springline_z, half_span,
                   rise, thickness, material, n_wedges, sweep_axis,
-                  phi_range=None, radial_jitter=0.0, seed=1):
+                  phi_range=None, radial_jitter=0.0, seed=1, extrude_ends=None):
     """A segmental/semicircular vault or arch as a swept ring of true
     trapezoidal stone-block wedges: each wedge's tangential faces are actual
     radial planes (both containing the sweep axis), so neighbours share an
@@ -338,13 +413,15 @@ def barrel_shell(name, sweep_center, extrude_range, springline_z, half_span,
     randomizes each wedge's own radius for a broken-edge look. Each wedge
     object carries its arc centre/radii as extras so a re-imported glb can
     check its own faces for inward-pointing (flipped) normals without
-    needing the build-time parameters again."""
+    needing the build-time parameters again. `extrude_ends`, if given, is a
+    per-wedge sequence overriding `extrude_range[1]` -- a ragged fracture
+    lip whose break line varies wedge to wedge rather than a uniform cut."""
     r = (half_span ** 2 + rise ** 2) / (2.0 * rise)
     center_z = springline_z + rise - r
     theta0 = math.atan2(half_span, r - rise)
     lo, hi = phi_range if phi_range is not None else (-theta0, theta0)
     rng = random.Random(seed)
-    e0, e1 = extrude_range
+    e0, e1_default = extrude_range
 
     def ring_point(phi, rad):
         return math.sin(phi) * rad, center_z + math.cos(phi) * rad
@@ -356,6 +433,7 @@ def barrel_shell(name, sweep_center, extrude_range, springline_z, half_span,
         jitter = rng.uniform(-radial_jitter, radial_jitter)
         r_out = r + jitter
         r_in = r_out - thickness
+        e1 = extrude_ends[i] if extrude_ends is not None else e1_default
 
         bm = bmesh.new()
         v = {}
@@ -372,7 +450,9 @@ def barrel_shell(name, sweep_center, extrude_range, springline_z, half_span,
         bm.faces.new((v["ilo0"], v["ilo1"], v["olo1"], v["olo0"]))
         bm.faces.new((v["ihi0"], v["ihi1"], v["ohi1"], v["ohi0"]))
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+        _wedge_uv(bm, sweep_center, center_z, sweep_axis, r)
         obj = _finalize(bm, f"{name}_wedge{i}", material)
+        obj["vordar_uv_final"] = True
         obj["vordar_arc_axis"] = sweep_axis
         obj["vordar_arc_u"] = float(sweep_center)
         obj["vordar_arc_z"] = float(center_z)
