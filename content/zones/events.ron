@@ -6,33 +6,5 @@
 // visible during play sessions; tune freely).
 (
     day_seconds: 120.0,
-    events: [
-        (
-            name: "blood_moon",
-            start_seconds_of_day: 30.0,
-            duration_seconds: 20.0,
-            ambient: (0.7, 0.08, 0.08),
-            spawns: [
-                (prefab: "grunt", positions: [
-                    (12.0, 0.0, 0.0),
-                    (-12.0, 0.0, 0.0),
-                    (0.0, 0.0, 12.0),
-                    (0.0, 0.0, -12.0),
-                    (8.5, 0.0, 8.5),
-                    (-8.5, 0.0, -8.5),
-                ]),
-            ],
-            // Sustained pressure for the whole window: grunts push in from the
-            // zone edges, outside every chapter-01 camp aggro bubble and clear
-            // of the portal corridor along +X.
-            waves: [
-                (prefab: "grunt", positions: [
-                    (16.0, 0.0, 16.0),
-                    (-16.0, 0.0, 16.0),
-                    (16.0, 0.0, -16.0),
-                    (-16.0, 0.0, -16.0),
-                ], interval_seconds: 5.0, max_alive: 8),
-            ],
-        ),
-    ],
+    events: [],
 )
