@@ -485,11 +485,14 @@ CHAPEL_DOOR = {"width": 2.4, "height": 3.2}
 # (0.06 m) interior plaster liner
 CHAPEL_RIM_EXPOSED = 0.3
 # The bay the vault tore out of. Its side walls are broken masonry down to
-# CHAPEL_CROWN_LOW at mid-span, recovering to CHAPEL_CROWN_HIGH at the two
-# ends -- which must stay under the intact crown (CHAPEL_SPRINGLINE) or the
-# contrast that reads as loss inverts.
+# CHAPEL_CROWN_LOW at mid-span, recovering toward CHAPEL_CROWN_CREST at the
+# two ends. CHAPEL_CROWN_HIGH is the ceiling no broken course may reach: it
+# must stay under the intact crown (CHAPEL_SPRINGLINE) or the contrast that
+# reads as loss inverts. The crest sits below the ceiling so the surviving
+# piers have headroom to rise into without any two of them tying.
 CHAPEL_COLLAPSE_X = (1.0, 7.6)
 CHAPEL_CROWN_LOW = 4.55
+CHAPEL_CROWN_CREST = 6.60
 CHAPEL_CROWN_HIGH = 7.30
 # The nave paving stands proud of the earth outside. Local z = 0 is the
 # prop's own placement height, which for the chapel is exactly the town's
@@ -544,17 +547,29 @@ def build_chapel(mats):
         cursor = bx0
         i = 0
         while cursor < bx1 - 1e-6:
-            step = min(rng.uniform(0.30, 0.95), bx1 - cursor)
+            step = min(rng.uniform(0.25, 1.25), bx1 - cursor)
             u = (cursor + step / 2.0 - bx0) / (bx1 - bx0)
-            funnel = CHAPEL_CROWN_LOW + (CHAPEL_CROWN_HIGH - CHAPEL_CROWN_LOW) * abs(2.0 * u - 1.0) ** 1.5
-            top = min(CHAPEL_CROWN_HIGH, max(4.2, funnel + rng.uniform(-0.5, 0.5)))
-            # Columns overlap by 1 cm: two boxes meeting on an exact shared
-            # plane leave a coincident face pair that z-fights.
+            funnel = CHAPEL_CROWN_LOW + (CHAPEL_CROWN_CREST - CHAPEL_CROWN_LOW) * abs(2.0 * u - 1.0) ** 1.5
+            top = funnel + rng.uniform(-0.45, 0.45)
+            # A pier that outlived its neighbours. Without it the funnel plus
+            # a symmetric jitter descends monotonically and reads as a regular
+            # flight of stairs. The rise is a fraction of the headroom left
+            # under CHAPEL_CROWN_HIGH, so it is largest mid-span -- where the
+            # wall is lowest and a survivor reads hardest -- and can never tie
+            # against the ceiling: tied tops would rebuild the level datum
+            # this profile exists to destroy.
+            if rng.random() < 0.28:
+                top += rng.uniform(0.35, 0.95) * (CHAPEL_CROWN_HIGH - top)
+            # Columns abut on an exact shared plane and carry no chamfer: a
+            # bevelled arris at every junction printed a hard vertical seam
+            # down the wall's full height, crossing the masonry's own courses
+            # and legible at 2 m. The world-anchored UV runs on across the
+            # shared plane, so the junction itself leaves no mark.
             objs.append(geo.make_box(f"{name}_side_{sign}_B_wall{i}",
                                      (cursor + step / 2.0, cy, top / 2.0),
-                                     (step + 0.01, t, top), lime, bevel=0.02, bevel_segments=1))
+                                     (step, t, top), lime))
             leaf_t = rng.uniform(0.22, 0.36)
-            leaf_h = min(rng.uniform(0.14, 0.55), CHAPEL_CROWN_HIGH - top)
+            leaf_h = min(rng.uniform(0.14, 0.55), (CHAPEL_CROWN_HIGH - top) * 0.8)
             face = rng.choice((-1.0, 1.0))
             if rng.random() < 0.4 and leaf_h > 0.08:
                 objs.append(geo.make_box(
@@ -639,6 +654,16 @@ def build_chapel(mats):
     bpy.context.view_layer.objects.active = east_head
     bpy.ops.object.modifier_apply(modifier=mod.name)
     bpy.data.objects.remove(oculus_bore, do_unlink=True)
+    # Shuttered at the back of the reveal. An open bore looks straight at the
+    # vault soffit, which the missing roof lights from above, so the aperture
+    # rendered brighter than the facade around it and read as a disc painted
+    # on the wall rather than a hole in it. Boarding it puts dark at the
+    # bottom of a 0.57 m socket, and the ring's own intrados is what catches
+    # the light. Set 0.03 m in so the shutter is never coplanar with the
+    # ring's inner end, and 0.02 m oversize so no gap rings it.
+    objs.append(geo.make_cylinder(f"{name}_oculus_shutter",
+                                  (east_cx - t / 2.0 + 0.06, 0.0, OCULUS_Z), 0.52, 0.06, oak,
+                                  segments=24, rotation=Matrix.Rotation(math.pi / 2.0, 3, "Y")))
 
     liner_h = springline
     liner_t = 0.06
@@ -707,19 +732,28 @@ def build_chapel(mats):
     rng = random.Random(11)
     bx0, bx1 = CHAPEL_COLLAPSE_X
     i = 0
-    for kind, count in (("voussoir", 6), ("spall", 11)):
+    for kind, count in (("voussoir", 9), ("spall", 14)):
         for _ in range(count):
             if kind == "voussoir":
                 size = (rng.uniform(0.85, 1.30), rng.uniform(0.40, 0.62), rng.uniform(0.34, 0.52))
             else:
                 size = (rng.uniform(0.22, 0.55), rng.uniform(0.18, 0.42), rng.uniform(0.14, 0.30))
-            rx = rng.uniform(bx0 + 0.3, bx1 - 0.3)
+            # Weighted to mid-bay: that is where the crown profile dips
+            # lowest, so it is where the vault came down hardest. A flat
+            # spread put as much mass against the fracture lip as under the
+            # breach, and from above the bay read as swept.
+            rx = rng.triangular(bx0 + 0.3, bx1 - 0.3, (bx0 + bx1) / 2.0)
             ry = rng.uniform(-half_w + 0.6, half_w - 0.6)
             rot = (Matrix.Rotation(rng.uniform(0.0, 2.0 * math.pi), 3, "Z")
                    @ Matrix.Rotation(rng.uniform(-0.32, 0.32), 3, "Y")
                    @ Matrix.Rotation(rng.uniform(-0.22, 0.22), 3, "X"))
-            bed = rng.uniform(0.25, 0.5) * size[2]
-            objs.append(geo.make_box(f"{name}_rubble{i}", (rx, ry, CHAPEL_FLOOR_TOP + size[2] / 2.0 - bed),
+            # Bed the piece's own lowest corner, not half its unrotated
+            # height: a tilted metre-long voussoir reaches far below its
+            # centre, so the flat measure buried most of the size family the
+            # scatter exists to show and left the floor reading swept.
+            half_z = sum(abs(rot[2][k]) * size[k] for k in range(3)) / 2.0
+            bed = rng.uniform(0.06, 0.18)
+            objs.append(geo.make_box(f"{name}_rubble{i}", (rx, ry, CHAPEL_FLOOR_TOP + half_z - bed),
                                       size, lime, bevel=0.02, bevel_segments=1, rotation=rot))
             i += 1
 

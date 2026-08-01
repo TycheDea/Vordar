@@ -504,3 +504,110 @@ pick a height.
   `close_casa_two_story.png` now sits in the same suspect family.
 - **Saetera splay.** Reads as a slot at 2 m, as nothing at mid range. Decide
   whether it carries any of the church read.
+
+---
+
+# FOLLOW-UP ADJUDICATION — the four re-gate fixes
+
+Date: 2026-08-01
+Frames: `target/zone-review/p30-chapel/` (28 PNG, re-rendered), `target/stripe-probe/`.
+Scope: the four non-blocking fixes only. The re-gate PASS is not reopened.
+Every number below is re-derived from the shipped `content/models/props/chapel/chapel.gltf`
+accessors and from `client/vordar-client/src/bin/zone_review.rs`'s own camera
+constants, not from the fix round's report.
+
+## Verdict: **ACCEPTED WITH RESIDUALS** — PASS stands
+
+All four fixes land in the pixels. One residual, non-blocking, carried to G4.
+
+**1. Striping — accepted, and the overturned attribution is correct.**
+`shipped_grazing45_detail_off.png` carries ~10 hard, perfectly straight,
+full-height lines across the wall; `final_grazing45_detail_off.png` and
+`final_grazing45_detail_on.png` carry none, and the on/off pair is
+indistinguishable, so the detail overlay never owned it. `parent_grazing45_*`
+has none either. Head-on: `shipped_headonB_detail_on.png` shows six such lines
+over two courses, `final_headonB_detail_on.png` shows zero — better than the
+claimed 8 → 4. `close_chapel.png` is clean at 2 m. `final_headon90_*` being
+byte-identical to `shipped_headon90_*` is a valid negative control (that camera
+is on span A, which did not move), not a dead probe. Round one's code-read
+attribution to the triplanar overlay is refuted by these frames; the fix-round
+record is the one to believe.
+
+**2. Oculus — divergence accepted; it reads as a round window.**
+At 8× on `mid_chapel_skyline.png` and `mid_chapel_facade.png` the bore is a dark
+disc well below the wall's value, the dressed ring stands proud, and the reveal
+throws a lit crescent on the lower-left inner face. That is a void with a
+surround, not a filled disc: round two's "light disc crossed by two bright bars"
+is gone, and round one's "brighter than the wall" blob doubly so. The record
+left the means open ("occluding what shows through, deepening the reveal, or
+both"), so the `oak_dark` shutter is inside its latitude, not a divergence
+needing merit. The reverted 1.15 m tube is correctly abandoned — the skyline
+camera's ~8° off-bore angle is a real constraint, not an excuse. Only residue:
+at 8× the shutter is a uniform plane with one faint plank seam. Invisible past
+~15 m; not carried.
+
+**3. Rubble — divergence accepted, and the original diagnosis WAS a camera
+artifact.** Stated explicitly, as asked, and confirmed independently:
+- The vault occupies local x ∈ [−8.000, 0.000] (`chapel_vault_wedge0..17`,
+  every wedge). All 23 pieces lie in x ∈ [1.176, 6.981]. Not one is under the
+  roof, before or after. "Clusters where the roof survives" cannot be true of
+  this model.
+- The `graveyard` shot is `radius 30, pitch 0.8 rad, aim_y 1.6` — eye 23.1 m up,
+  20.9 m out. The east wall's inner face (local x 7.60, top y 7.50) shadows the
+  bay floor from local x 2.2 to 7.6 at that geometry, so the frame shows only a
+  2 m sliver of bay; the rest of the floor in it is the nave and apse seen down
+  the vault tunnel. The two candelabra in that floor crop are the same pair
+  `interior_apse.png` places at the apse — decisive that the surface round two
+  graded was the roofed half.
+- The real defect reproduces. Bedding now measures the rotated low point: pieces
+  sink 0.057–0.173 m below the paving top (y = 0.050) and stand 0.075–0.617 m
+  proud, nine of them ≥ 0.40 m. Mean piece centre x = 4.19 against a bay midpoint
+  of 4.18 — the triangular weighting is on the bay, not on an edge.
+- `interior_door.png` is the frame that judges it, and it carries: tilted slabs
+  in the voussoir size family bedded into the paving, chips between them, mass
+  where the vault came down. `crown_A.png` and `mid_chapel.png`'s bay-floor
+  sliver agree from above.
+
+**4. Crown rhythm — accepted; no stair survives the read.**
+Measured tops, west→east. Side +1: 7.101, 7.169, 5.148, 4.630, 4.585, 5.024,
+5.525, 6.158, 6.226 — a −2.021 m shear, then a five-block rise of 0.439 / 0.501
+/ 0.633 / 0.068 over runs 0.49–1.17 m. Side −1: 5.979, 5.630, 6.606, 6.503,
+6.219, 4.714, 5.956, 5.958, 6.179 — a +0.976 counter-rise and a −1.505 m notch.
+The record's figures reproduce exactly. In `mid_chapel.png` at gameplay framing
+and `crown_A.png` close, the run reads as a wall torn open: one dominant collapse
+notch, cantilevered leaves over shadow, unequal block heights. The residual
+monotone run is not perceptible as a stair at any framing in the set, because
+its rises span 9× and the shear next to it is 3× the largest of them.
+
+## Residuals — non-blocking, carried to G4
+
+**1. The same striping signature still ships on `wall_segment`.**
+`close_wall_segment.png`, corner pier: a 3-px band at image x 260–262 that is
++30 luma over the wall face right of it (101) and +34 over the 9-px band left of
+it (96), while matching the return face's own value (130) — present on 92 % of
+the wall's height, crossing every course and the coping. Four bands where a
+chamfered arris has three; this is the coplanar-sliver read fix 1 convicted on
+the chapel, not a bevel highlight. It is **not** this campaign's regression:
+`wall_segment`'s POSITION accessors are byte-identical across `3feb4a7`
+(measured), so the geometry predates the commit and only its UVs moved. But the
+re-gate's fix 1 named `close_wall_segment.png` as one of its two frames, and the
+artifact is still in that frame, so the striping item is not fully closed. Owner
+is the kit's box builder, not the chapel.
+
+## The two confirmations
+
+**Nothing regressed elsewhere.** `git status` shows only `chapel.bin`,
+`chapel.gltf`, `chapel.textures/manifest.json` and `townkit/buildings.py`
+modified — no other model's bytes moved. The chapel's shipped global AABB is
+x [−11.6287, 8.6000], z [±4.1000] → spans 20.2287 × 8.2000, matching
+`content/chapters/chapter03/footprints.ron`'s `size: (20.23, 8.2)`. Measured
+from the accessors, not carried from the record.
+
+**The skipped close-ups.** The reasoning is sound *for regression*: with the
+renderer, lighting and every other model unchanged, a close-up that does not
+contain the chapel cannot differ. Spot-checked `close_casa_two_story.png`
+(quoin chain still bonded, no course voids) and `interior_apse.png` — both as
+the re-gate left them. The caveat is that byte-identity licenses skipping a
+regression check, not a fresh look: the one non-chapel frame fix 1's own brief
+named, `close_wall_segment.png`, still carries the artifact it was named for
+(residual 1), and that was reachable only by opening it.
