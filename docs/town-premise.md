@@ -70,6 +70,14 @@ Consequences for asset work:
   Near-achromatic surfaces — whitewash, dressed limestone — are bound in
   saturation only: whitewash is the brightest thing in Rocalba that is not on
   fire, and a value ceiling on it would outlaw the material §3 mandates.
+- **How both ceilings are measured.** The subject is one whole bound surface —
+  a single material across a single authored face group — averaged under ship
+  lighting at the 2.3 m walk-up range, which is where a player stands when a
+  wall fills the frame. Not a crop, not a pane, not a per-pixel clamp, and not
+  an albedo map: albedo-space saturation runs well above render-space and is
+  not what these numbers mean. Saturation falls with distance, so the walk-up
+  range is the binding one and a surface that passes there passes down the
+  street.
 - The texture stage drifts warm when colors are only implied — prompts must
   name the explicit colors given in §3, especially "pale grey", "off-white",
   and "cool grey".
