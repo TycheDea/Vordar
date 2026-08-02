@@ -291,6 +291,11 @@ fn dispatch_cast(
     skill_id: String,
     target: Vec2,
 ) {
+    if skill_id.len() > 64 {
+        log::warn!("conn {conn}: cast rejected (invalid skill id)");
+        state.server.metrics().record_reject();
+        return;
+    }
     let rtt = state.server.rtt_micros(conn).unwrap_or(0);
     let Some(pc) = state.conns.get_mut(&conn) else { return };
     if let Err(reason) = validate_intent(pc.cast_seq, pc.cast_t, seq, t, recv_micros, rtt) {

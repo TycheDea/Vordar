@@ -247,3 +247,47 @@ fn move_intents_redundancy_survives_upstream_loss() {
         100.0 * impaired_disp / control_disp
     );
 }
+
+// skill_id in CastIntent has an explicit upper bound: a 65-character id is
+// rejected before the cast lane's seq is consumed (`dispatch_cast` returns
+// before `pc.cast_seq = seq`). Prove that by seq reuse: the oversized cast
+// at seq N must leave the lane at N-1, so a following legitimate "rend" cast
+// that reuses seq N is still accepted and schedules its mechanic. Without
+// the length bound, the oversized cast would advance the lane to N and the
+// legitimate cast at N would be rejected as a stale seq.
+#[test]
+fn oversized_skill_id_is_rejected() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25193".parse().unwrap();
+    spawn_server(addr, ":memory:", 1200);
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    bot.wait_for("first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+
+    let start = bot.own_pos().unwrap();
+    let target = glam::Vec2::new(start.x, start.z);
+
+    // Send a cast with a 65-character skill_id (over the 64-char limit) at
+    // the next cast seq, without bumping `bot.cast_seq` — mirrors
+    // `Bot::send_cast`'s seq bump so the following legitimate cast reuses
+    // this exact seq.
+    let oversized_skill = "a".repeat(65);
+    bot.client.send(vordar_protocol::encode(&vordar_protocol::ClientMsg::CastIntent {
+        seq: bot.cast_seq + 1,
+        t_server_micros: bot.client.server_now_micros().unwrap(),
+        skill: oversized_skill,
+        target,
+    }));
+    settle(&mut bot, Duration::from_millis(500));
+    assert!(
+        bot.mechanics.is_empty(),
+        "oversized skill_id should be rejected, no mechanic should appear"
+    );
+
+    // A legitimate "rend" cast (the fast Scheduled strike, per
+    // e2e_combat.rs) reusing the same seq must still be accepted.
+    bot.send_cast("rend", target);
+    bot.wait_for("the legitimate cast reusing the seq is scheduled", Duration::from_secs(3), |b| !b.mechanics.is_empty());
+}
