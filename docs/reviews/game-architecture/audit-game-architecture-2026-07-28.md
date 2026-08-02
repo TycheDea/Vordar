@@ -41,19 +41,24 @@ full-QUIC e2e exercises.
 
 Cross-type queue:
 
-> **~~finding 1~~ → finding 2 → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
-> ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~.**
+> **QUEUE CLEARED — ~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ →
+> ~~finding 4~~ → ~~finding 5~~ → ~~finding 6~~ → ~~finding 7~~ →
+> ~~finding 8~~ → ~~finding 9~~.**
 >
-> All struck entries done 2026-08-02: finding 1 `fd5a82e` (side rule + two
-> pass-through tests), finding 3 `48bdbd1` + `.claude` `96b9d98` (`TickRate`
-> and `set_phase_rate` deleted outright for one `set_fixed_hz`), finding 4
-> `e42e73f`, finding 6 `54a28c4`, finding 7 `0a44d52`, finding 8 `e0b699b`,
-> finding 9 `00f5321`. Loop-final gate: clippy clean, `cargo nextest run
-> --workspace` 440 passed / 5 skipped.
+> All entries done 2026-08-02: finding 1 `fd5a82e` (side rule + two
+> pass-through tests), finding 2 `7f9ca61`, finding 3 `48bdbd1` + `.claude`
+> `96b9d98` (`TickRate` and `set_phase_rate` deleted outright for one
+> `set_fixed_hz`), finding 4 `e42e73f`, finding 6 `54a28c4`, finding 7
+> `0a44d52`, finding 8 `e0b699b`, finding 9 `00f5321`. Loop-final gate:
+> clippy clean, `cargo nextest run --workspace` 440 passed / 5 skipped.
 >
-> finding 2's step (2) was pre-empted by `32c4394`, which removed the
-> blood_moon event outright; steps (1) and (3), the install-time resolution
-> check and its test, are still open, so the entry stands.
+> finding 2 landed as steps (1)(3)(4) only: `check_world_events` panics at
+> zone boot on any `spawns`/`waves` prefab name absent from that zone's
+> `PrefabLibrary`, with three boot tests. Step (2) and the park-vs-panic
+> question were pre-empted by `32c4394`, which removed the blood_moon event
+> outright — `events.ron` ships with no spawn references at all, so the
+> `load_chapter` fail-loud policy applies with no chapterless-config
+> conflict left to arbitrate.
 >
 > finding 5 done 2026-08-02 (`06a3b77`) in the direction OPPOSITE to its own
 > Ideal. Bounding `Resources::insert` to `Send + Sync` does not compile:
