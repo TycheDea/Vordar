@@ -4,7 +4,7 @@
 //
 //   App::new()
 //       .configure("content/config/engine.ron")
-//       .set_phase_rate(Phase::Update, TickRate::Fixed(30.0))
+//       .set_fixed_hz(30.0)
 //       .add_plugin(RenderPlugin)
 //       .add_plugin(PhysicsPlugin)
 //       .add_system(EnemyAI,        Phase::Update,           SystemOrder::Default)
@@ -24,7 +24,6 @@ use crate::flush::{ClearEventsSystem, DespawnFlushSystem, SpawnFlushSystem};
 use crate::input::{KeyboardState, MouseState};
 use crate::plugin::Plugin;
 use crate::scheduler::{InterpolationAlpha, Phase, Scheduler, System, SystemOrder};
-use crate::tick_rate::TickRate;
 use crate::time::Time;
 use engine_core::prefab::{ComponentRegistry, PrefabLibrary};
 use engine_core::traits::{DespawnQueue, Resources, SpawnQueue};
@@ -152,10 +151,10 @@ impl App {
         self
     }
 
-    /// Override the tick rate for a phase.
-    /// Default rates: Fixed(60.0) for all logic phases, Render for RenderSync and Render.
-    pub fn set_phase_rate(&mut self, phase: Phase, rate: TickRate) -> &mut Self {
-        self.scheduler.set_phase_rate(phase, rate);
+    /// Set the app-wide fixed rate (steps per second). Default is 60.0.
+    /// RenderSync and Render always fire once per display frame regardless.
+    pub fn set_fixed_hz(&mut self, hz: f32) -> &mut Self {
+        self.scheduler.set_fixed_hz(hz);
         self
     }
 

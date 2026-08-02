@@ -15,6 +15,10 @@
 // Frame execution order:
 //   Input → PreUpdate → Update → SpawnFlush → Collision → CollisionResolve
 //   → DespawnFlush → PostUpdate → RenderSync → Render
+//
+// Thread affinity: a built App cannot move between threads — systems are not
+// Send, so App::run/run_headless/run_ticks must be called on the thread that
+// built it (each server zone gets its own thread for exactly this reason).
 
 pub mod app;             // App struct + builder API
 pub mod plugin;          // Plugin trait — the extension point for subsystems, game modules, chapters
@@ -31,5 +35,4 @@ mod app_loop;       // ApplicationHandler impl (winit event loop)
 pub mod scheduler;  // Phase enum, SystemOrder, DAG builder, topological sort
 pub mod events;     // EventBus — emit and read typed events
 pub mod time;       // Time resource — frame_dt for render systems
-pub mod tick_rate;  // TickRate enum — Fixed(hz) or Render
 pub(crate) mod flush;   // SpawnFlushSystem, DespawnFlushSystem

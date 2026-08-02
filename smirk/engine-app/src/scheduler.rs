@@ -12,7 +12,6 @@
 // run after all steps. If a cycle is detected during startup sort, the app
 // panics with a clear message.
 
-use crate::tick_rate::TickRate;
 use engine_core::traits::Resources;
 use engine_core::World;
 use std::any::TypeId;
@@ -29,7 +28,8 @@ pub struct InterpolationAlpha(pub f32);
 // ── Phase ─────────────────────────────────────────────────────────────────────
 
 /// Fixed frame execution order. Systems are assigned to exactly one phase.
-/// Each phase has a default TickRate; override it with App::set_phase_rate().
+/// RenderSync and Render fire once per display frame; every other phase runs
+/// at the app-wide fixed rate (see Scheduler::set_fixed_hz).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Phase {
     Input,              // read hardware, update input state
@@ -45,13 +45,10 @@ pub enum Phase {
 }
 
 impl Phase {
-    /// Default tick rate for this phase.
-    /// Override per-phase with App::set_phase_rate() or Scheduler::set_phase_rate().
-    pub fn default_tick_rate(self) -> TickRate {
-        match self {
-            Phase::RenderSync | Phase::Render => TickRate::Render,
-            _                                 => TickRate::Fixed(60.0),
-        }
+    /// Whether this phase fires once per display frame (true) or at the
+    /// app-wide fixed rate (false).
+    pub fn is_render(self) -> bool {
+        matches!(self, Phase::RenderSync | Phase::Render)
     }
 }
 
@@ -100,9 +97,8 @@ type PendingSystem = (Box<dyn System>, TypeId, &'static str, SystemOrder);
 
 pub struct Scheduler {
     pending:        BTreeMap<Phase, Vec<PendingSystem>>,
-    rate_overrides: BTreeMap<Phase, TickRate>,
     phases:         BTreeMap<Phase, PhaseEntry>,
-    // One fixed clock for the whole app: every Fixed phase steps off this
+    // One fixed clock for the whole app: every fixed phase steps off this
     // accumulator so all fixed phases interleave per step on a multi-step frame.
     fixed_dt:       f32,
     accumulator:    f32,
@@ -118,7 +114,6 @@ impl Scheduler {
     pub fn new() -> Self {
         Self {
             pending:        BTreeMap::new(),
-            rate_overrides: BTreeMap::new(),
             phases:         BTreeMap::new(),
             fixed_dt:       1.0 / 60.0,
             accumulator:    0.0,
@@ -141,10 +136,10 @@ impl Scheduler {
             .map_or(Vec::new(), |v| v.iter().map(|&(_, _, name, _)| name).collect())
     }
 
-    /// Override the tick rate for a phase.
-    /// Must be called before build(). Defaults come from Phase::default_tick_rate().
-    pub fn set_phase_rate(&mut self, phase: Phase, rate: TickRate) {
-        self.rate_overrides.insert(phase, rate);
+    /// Set the app-wide fixed rate (steps per second). Must be called before
+    /// build(). Default is 60.0.
+    pub fn set_fixed_hz(&mut self, hz: f32) {
+        self.fixed_dt = 1.0 / hz;
     }
 
     /// Topological sort of each phase. Called once after all systems are registered.
@@ -245,18 +240,7 @@ impl Scheduler {
                 panic!("Cycle detected in phase {:?} — check After/Before constraints", phase);
             }
 
-            let rate = self.rate_overrides
-                .get(&phase)
-                .copied()
-                .unwrap_or_else(|| phase.default_tick_rate());
-
-            let is_render = match rate {
-                TickRate::Render    => true,
-                // Fixed cadence is app-wide; every fixed phase steps at this rate.
-                TickRate::Fixed(hz) => { self.fixed_dt = 1.0 / hz; false }
-            };
-
-            self.phases.insert(phase, PhaseEntry { systems: sorted, is_render });
+            self.phases.insert(phase, PhaseEntry { systems: sorted, is_render: phase.is_render() });
         }
     }
 
@@ -452,7 +436,6 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let mut sched = Scheduler::new();
-        sched.set_phase_rate(Phase::Update, TickRate::Fixed(60.0));
         sched.add(make_system("step", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::Default);
         sched.build();
@@ -471,7 +454,6 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::new()));
 
         let mut sched = Scheduler::new();
-        sched.set_phase_rate(Phase::Update, TickRate::Fixed(60.0));
         sched.add(make_system("s", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::Default);
         sched.build();
@@ -493,7 +475,6 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::new()));
 
         let mut sched = Scheduler::new();
-        sched.set_phase_rate(Phase::Render, TickRate::Render);
         sched.add(make_system("r", log.clone(), delta.clone()),
                   Phase::Render, SystemOrder::Default);
         sched.build();
@@ -538,7 +519,6 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let mut sched = Scheduler::new();
-        sched.set_phase_rate(Phase::Update, TickRate::Fixed(60.0));
         sched.add(make_system("s", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::Default);
         sched.build();
@@ -548,5 +528,29 @@ mod tests {
         // 1 second lag spike — without cap this would fire 60 steps
         sched.run_tick(&mut world, &mut resources, 1.0);
         assert_eq!(log.lock().unwrap().len(), 8);
+    }
+
+    #[test]
+    fn set_fixed_hz_changes_app_wide_step_count() {
+        let log   = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
+
+        let mut sched = Scheduler::new();
+        sched.set_fixed_hz(30.0);
+        sched.add(make_system("s", log.clone(), delta.clone()),
+                  Phase::Update, SystemOrder::Default);
+        sched.build();
+
+        let mut world     = World::new();
+        let mut resources = Resources::new();
+        // 2.5 steps worth of time at 30 Hz → fires exactly 2 steps
+        sched.run_tick(&mut world, &mut resources, 2.5 / 30.0);
+        assert_eq!(log.lock().unwrap().len(), 2);
+
+        let deltas = delta.lock().unwrap();
+        let expected = 1.0_f32 / 30.0;
+        for &d in deltas.iter() {
+            assert!((d - expected).abs() < 1e-6, "expected {expected}, got {d}");
+        }
     }
 }

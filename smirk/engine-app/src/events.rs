@@ -1,6 +1,6 @@
-// EventBus — typed single-frame events
+// EventBus — typed single-fixed-step events
 //
-// Events live for exactly one frame. Cleared at Phase::Input.
+// Events live for exactly one fixed step. Cleared at Phase::Input.
 // Any system can emit; any system in a later phase can read.
 //
 // Usage:
@@ -70,8 +70,8 @@ impl EventBus {
             .flatten()
     }
 
-    /// Called at the start of Phase::Input each frame. Clears events but keeps
-    /// Vec capacity — no allocation on subsequent frames.
+    /// Called at the start of Phase::Input each fixed step. Clears events but
+    /// keeps Vec capacity — no allocation on subsequent steps.
     pub fn clear(&mut self) {
         for queue in self.queues.values_mut() {
             queue.clear();
