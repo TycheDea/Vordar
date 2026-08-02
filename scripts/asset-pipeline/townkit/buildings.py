@@ -399,7 +399,12 @@ def build_gate_arch(mats):
     name = "gate_arch"
     wall_length, thickness, springline = 6.4, 0.9, 3.6
     opening_width = 3.2
-    half_span = opening_width / 2.0
+    ring_band = thickness * 0.7
+    # barrel_shell's half_span/rise describe the EXTRADOS; the intrados is one
+    # band inboard, and the intrados is what has to span the opening. Sizing
+    # the extrados to the opening instead would spring the arch 0.63 m inboard
+    # of each jamb face and leave a 1.94 m clear head over a 3.2 m gap.
+    half_span = opening_width / 2.0 + ring_band
     rise = half_span  # semicircular arch
     lime = mats["limestone_dressed"]
     jamb_width = (wall_length - opening_width) / 2.0
@@ -409,9 +414,12 @@ def build_gate_arch(mats):
         objs.append(geo.make_box(f"{name}_jamb_{side}", (cx, 0.0, springline / 2.0),
                                   (jamb_width, thickness, springline), lime, bevel=0.02))
     wedges, r, center_z, theta0 = geo.barrel_shell(f"{name}_arch", 0.0, (-thickness / 2.0, thickness / 2.0),
-                                                    springline, half_span, rise, thickness * 0.7,
+                                                    springline, half_span, rise, ring_band,
                                                     lime, n_wedges=12, sweep_axis="x")
     objs.extend(wedges)
+    clear_span = 2.0 * (r - ring_band)
+    assert abs(clear_span - opening_width) < 1e-6, \
+        f"gate arch intrados spans {clear_span:.3f} over a {opening_width} opening"
     peak_z = center_z + r
     wall_top = peak_z + 0.4
 
@@ -435,7 +443,8 @@ def build_gate_arch(mats):
     objs.append(geo.make_box(f"{name}_coping", (0.0, 0.0, wall_top + 0.075),
                               (wall_length + 0.1, thickness + 0.2, 0.15), lime, bevel=0.02))
     return objs, {"wall_length": wall_length, "opening_width": opening_width,
-                  "opening_height": springline, "wall_top": wall_top}
+                  "opening_height": springline, "wall_top": wall_top,
+                  "arch_clear_span": clear_span, "arch_peak": peak_z}
 
 
 def build_well_basin(mats):

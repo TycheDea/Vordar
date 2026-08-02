@@ -35,7 +35,7 @@
         (prefab: "chapel_lintel",    positions: [(-21.7, 5.35, -29.0)]),
         (prefab: "chapel_roof",      positions: [(-34.0, 10.2, -29.0)]),
         (prefab: "gate_jamb",        positions: [(15.0, 0.0, -2.4), (15.0, 0.0, 2.4)]),
-        (prefab: "gate_head",        positions: [(15.0, 4.6, 0.0)]),
+        (prefab: "gate_head",        positions: [(15.0, 4.915, 0.0)]),
         (prefab: "well_basin",       positions: [(0.0, 0.0, -4.6)]),
         (prefab: "wall_segment",     positions: [(15.0, 0.0, 9.0), (15.0, 0.0, 13.5), (15.0, 0.0, -5.5), (15.0, 0.0, -10.0)]),
     ],
