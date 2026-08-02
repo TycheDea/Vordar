@@ -37,8 +37,23 @@ of adversaries.
 
 Cross-type queue:
 
-> **finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
-> finding 7 → finding 8 → finding 9.**
+> **~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ →
+> ~~finding 5~~ → ~~finding 6~~ → finding 7 → finding 8 → finding 9.**
+>
+> Struck entries done 2026-08-02, one commit each: 1 `3794018` (cast lane gets
+> its own `cast_seq`/`cast_t`; `PROTOCOL_VERSION` 15→16; e2e holds the move
+> datagram across a cast round trip), 2 `3373566`, 3 `4c69d44`, 4 `b0f789b`,
+> 5 `a652467` (`subtle` 2.6, BSD-3-Clause, now a direct workspace dep),
+> 6 `4da2655`.
+>
+> Two collateral corrections worth carrying: finding 2's tightened deadline
+> made finding 1's e2e guard (`held_age < 250_000`, sized for the dead 300 ms
+> window) looser than the rule it stands on — retightened to the real ~100 ms
+> warmed margin rather than widening the production window. Finding 6's first
+> test asserted `mechanics.is_empty()`, which an unknown-skill lookup already
+> satisfied pre-fix — it could not fail. Rewritten to the one thing the bound
+> changes (an oversized id must not consume its cast seq) and red-proved by
+> reverting the bound.
 >
 > 1–2 are the intent-validation cluster (2's boundary tests run on top of 1's
 > split seq spaces). 3–6 are cheap server hardening, independent. 7–8 are the
