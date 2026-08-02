@@ -202,8 +202,16 @@ def main():
             if p.is_file() and p.name not in referenced:
                 p.unlink()
     summary_path = out_dir / "build_report.json"
+    # A partial --types run rebuilds some .gltf files and leaves the rest on
+    # disk untouched, so their entries stay true and must survive: overwriting
+    # the report wholesale would report the kit as smaller than it is.
+    merged = {}
+    if summary_path.is_file():
+        merged = {e["type"]: e for e in json.loads(summary_path.read_text())}
+    merged.update({e["type"]: e for e in results})
+    report = [merged[t] for t in ALL_TYPES if t in merged]
     with open(summary_path, "w") as f:
-        json.dump(results, f, indent=2, default=_json_default)
+        json.dump(report, f, indent=2, default=_json_default)
     shared_bytes = sum((out_dir / u).stat().st_size for u in shared_hashes)
     print(json.dumps({"summary": str(summary_path), "texel_scale_m": matlib.TEXEL_SCALE_M,
                       "shared_texture_files": len(shared_hashes),
