@@ -123,6 +123,8 @@ impl System for BuffDecaySystem {
 mod tests {
     use super::*;
     use crate::combat::contact_damage::{ContactDamage, ContactDamageSystem};
+    use crate::enemies::Enemy;
+    use crate::player::Player;
     use engine_app::events::CollisionStarted;
 
     const DT: f32 = 1.0 / 60.0;
@@ -206,9 +208,13 @@ mod tests {
         resources.insert(EventBus::new());
         let atk = world.spawn((
             ClassId { id: "ravager".into() },
+            Player { speed: 6.0 },
             ContactDamage { amount: 10, damage_type: Default::default() },
         ));
-        let victim = world.spawn((Health { current: 200, max: 200 },));
+        let victim = world.spawn((
+            Enemy { speed: 2.0, aggro_range: 0.0, attack: Default::default(), cooldown_left: 0.0 },
+            Health { current: 200, max: 200 },
+        ));
 
         // First contact: no stacks yet → base 10.
         resources.get_mut::<EventBus>().unwrap().emit(CollisionStarted { a: atk, b: victim });
