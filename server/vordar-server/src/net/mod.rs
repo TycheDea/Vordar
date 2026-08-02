@@ -53,6 +53,11 @@ const AOI_RADIUS: f32 = 40.0;
 /// Applied-intent history kept per connection for mechanic-resolve rewind
 /// (~530 ms at 60 Hz — covers MAX_REWIND plus resolve-tick slack).
 const HISTORY_CAP: usize = 32;
+/// Standard-deviation multiplier past a connection's EWMA RTT baseline
+/// (DESIGN.md §3) that marks a sample a spike worth a structured log line —
+/// oscillating delay that only widens forgiveness during a telegraph shows
+/// up here as a baseline-relative jump, not a raw RTT threshold.
+const RTT_SPIKE_K_SIGMA: f64 = 3.0;
 /// PostUpdate runs at the sim rate; the 10 Hz systems below self-gate on it.
 /// Defined from `vordar_protocol::TICK_HZ`: the client's playback cursor
 /// treats that constant as the rate ticks advance at, so the two must never
@@ -330,6 +335,20 @@ fn aoi_conns(conns: &HashMap<ConnId, PlayerConn>, world: &World, center: Vec3) -
         })
         .map(|(&conn, _)| conn)
         .collect()
+}
+
+/// Metrics-only detection point: logs a structured sample when `conn`'s
+/// current RTT sits more than `RTT_SPIKE_K_SIGMA` standard deviations above
+/// its own EWMA baseline. No gameplay policy reads this — connections with
+/// wild RTT variance are still served exactly as before.
+fn log_rtt_spike_if_any(server: &NetServer, conn: ConnId, current_rtt_micros: u64, context: &str) {
+    let Some((mean, std_dev)) = server.rtt_baseline(conn) else { return };
+    let current = current_rtt_micros as f64;
+    if current > mean + RTT_SPIKE_K_SIGMA * std_dev {
+        log::info!(
+            "conn {conn}: rtt spike at {context} (rtt={current_rtt_micros}us mean={mean:.0}us std={std_dev:.0}us)"
+        );
+    }
 }
 
 #[cfg(test)]

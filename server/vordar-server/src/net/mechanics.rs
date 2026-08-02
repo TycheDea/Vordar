@@ -17,7 +17,7 @@ use vordar_game::events::DamageDealt;
 use vordar_game::motion::{step, PlayRadius};
 use vordar_game::{CombatStats, Enemy, Mechanic, Provoked};
 use vordar_protocol::{encode, ServerMsg};
-use super::{aoi_conns, NetServerState, MAX_REWIND_MICROS, STAGGER};
+use super::{aoi_conns, log_rtt_spike_if_any, NetServerState, MAX_REWIND_MICROS, STAGGER};
 
 /// Fixed server tick duration — each applied intent integrates exactly this.
 const TICK_DT: f32 = 1.0 / 60.0;
@@ -80,6 +80,10 @@ impl System for MechanicResolveSystem {
             let mut hit_entities: Vec<Entity> = Vec::new();
             {
                 let state = resources.expect::<NetServerState>();
+                if let Some((&caster_conn, _)) = state.conns.iter().find(|(_, pc)| pc.entity == mech.caster)
+                    && let Some(current_rtt) = state.server.rtt_micros(caster_conn) {
+                    log_rtt_spike_if_any(&state.server, caster_conn, current_rtt, "mechanic resolve");
+                }
                 for (entity, pos) in targets {
                     let pos_at_t = match state.conns.values().find(|pc| pc.entity == entity) {
                         Some(pc) => rewound_position(pos, &pc.history, t_eff, bound),

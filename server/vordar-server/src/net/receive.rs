@@ -29,7 +29,7 @@ use vordar_game::world::WorldTime;
 use vordar_game::{Mechanic, Player};
 use vordar_protocol::{decode, encode, AccountToken, ClientMsg, LoginDenyReason, MoveIntentEntry, ServerMsg};
 
-use super::{aoi_conns, save_character, NetServerState, PlayerConn, HISTORY_CAP, MAX_REWIND_MICROS};
+use super::{aoi_conns, log_rtt_spike_if_any, save_character, NetServerState, PlayerConn, HISTORY_CAP, MAX_REWIND_MICROS};
 
 /// Slack on the arrival deadline for clock-sync error and jitter.
 const ARRIVAL_MARGIN_MICROS: u64 = 100_000;
@@ -297,6 +297,7 @@ fn dispatch_cast(
         return;
     }
     let rtt = state.server.rtt_micros(conn).unwrap_or(0);
+    log_rtt_spike_if_any(&state.server, conn, rtt, "cast arrival");
     let Some(pc) = state.conns.get_mut(&conn) else { return };
     if let Err(reason) = validate_intent(pc.cast_seq, pc.cast_t, seq, t, recv_micros, rtt) {
         log::warn!("conn {conn}: cast rejected ({reason})");

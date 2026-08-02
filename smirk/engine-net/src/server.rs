@@ -43,12 +43,64 @@ enum Outgoing {
 type ConnMap = Arc<
     Mutex<HashMap<ConnId, (UnboundedSender<(u8, Arc<Vec<u8>>)>, quinn::Connection, Arc<AtomicU64>)>>,
 >;
-/// Per-connection smoothed RTT, as an atomic handle owned directly by that
+/// Per-connection RTT: the latest smoothed sample plus an EWMA mean/variance
+/// baseline folded from the same samples, owned directly by that
 /// connection's reader task — writes never take the map lock. The map
 /// itself is only touched at connect (insert) and disconnect (remove), so
 /// the sim thread's reads essentially never contend with the network
 /// thread.
-type RttMap = Arc<Mutex<HashMap<ConnId, Arc<AtomicU64>>>>;
+type RttMap = Arc<Mutex<HashMap<ConnId, Arc<RttHandle>>>>;
+
+/// Exponentially-weighted mean/variance of a connection's RTT samples — the
+/// baseline a mechanic-window spike is measured against (DESIGN.md §3).
+#[derive(Clone, Copy)]
+struct RttEstimator {
+    mean: f64,
+    var: f64,
+    warmed: bool,
+}
+
+impl RttEstimator {
+    /// EWMA smoothing factor: recent samples dominate the baseline within a
+    /// few seconds of RTT updates, without one outlier resetting it outright.
+    const ALPHA: f64 = 0.1;
+
+    fn new() -> Self {
+        Self { mean: 0.0, var: 0.0, warmed: false }
+    }
+
+    /// Folds one RTT sample (micros) into the running mean/variance. The
+    /// first sample seeds the mean with zero variance rather than averaging
+    /// against an arbitrary starting point.
+    fn update(&mut self, sample_micros: f64) {
+        if !self.warmed {
+            self.mean = sample_micros;
+            self.warmed = true;
+            return;
+        }
+        let delta = sample_micros - self.mean;
+        self.mean += Self::ALPHA * delta;
+        self.var = (1.0 - Self::ALPHA) * (self.var + Self::ALPHA * delta * delta);
+    }
+}
+
+/// Owns one connection's live RTT reading and its EWMA baseline together, so
+/// every sample updates both under a single call.
+struct RttHandle {
+    current: AtomicU64,
+    stats: Mutex<RttEstimator>,
+}
+
+impl RttHandle {
+    fn new() -> Self {
+        Self { current: AtomicU64::new(0), stats: Mutex::new(RttEstimator::new()) }
+    }
+
+    fn record(&self, sample_micros: u64) {
+        self.current.store(sample_micros, Ordering::Relaxed);
+        self.stats.lock().unwrap().update(sample_micros as f64);
+    }
+}
 /// Source IP per live connection: populated once at connect, removed once
 /// at disconnect — the exact same lifecycle as `RttMap` above, so
 /// `NetServer::peer_ip` can attribute a failed login to an address without
@@ -251,7 +303,16 @@ impl NetServer {
 
     /// Smoothed path RTT to a client (from QUIC), if connected.
     pub fn rtt_micros(&self, conn: ConnId) -> Option<u64> {
-        self.rtts.lock().unwrap().get(&conn).map(|a| a.load(Ordering::Relaxed))
+        self.rtts.lock().unwrap().get(&conn).map(|h| h.current.load(Ordering::Relaxed))
+    }
+
+    /// EWMA (mean, standard deviation) of `conn`'s RTT samples in
+    /// microseconds, or `None` if the connection has no sample yet — the
+    /// baseline a caller flags a current reading against.
+    pub fn rtt_baseline(&self, conn: ConnId) -> Option<(f64, f64)> {
+        let map = self.rtts.lock().unwrap();
+        let stats = map.get(&conn)?.stats.lock().unwrap();
+        stats.warmed.then(|| (stats.mean, stats.var.sqrt()))
     }
 
     /// Source IP of a connection, if still connected — the accessor the
@@ -514,9 +575,9 @@ async fn handle_connection(
     let (write_tx, mut write_rx) = unbounded_channel::<(u8, Arc<Vec<u8>>)>();
     let depth = Arc::new(AtomicU64::new(0));
     conns.lock().unwrap().insert(id, (write_tx.clone(), connection.clone(), depth.clone()));
-    // Own RTT atomic, registered once at connect: the reader loop below
+    // Own RTT handle, registered once at connect: the reader loop below
     // writes through this handle directly, with no map lock per frame.
-    let rtt = Arc::new(AtomicU64::new(0));
+    let rtt = Arc::new(RttHandle::new());
     rtts.lock().unwrap().insert(id, rtt.clone());
     // Source IP, registered once at connect: same lifecycle as `rtts`
     // above, removed by the same cleanup in `server_main`.
@@ -577,7 +638,7 @@ async fn handle_connection(
                         datagram_metrics.record_reject();
                     } else {
                         dgram_tokens -= 1.0;
-                        datagram_rtt.store(datagram_conn.rtt().as_micros() as u64, Ordering::Relaxed);
+                        datagram_rtt.record(datagram_conn.rtt().as_micros() as u64);
                         let recv_micros = epoch.elapsed().as_micros() as u64;
                         let payload = payload.to_vec();
                         let _ = datagram_events.send(ServerEvent::Message { conn: id, data: payload, recv_micros });
@@ -621,7 +682,7 @@ async fn handle_connection(
                             metrics.record_reject();
                         } else {
                             msg_tokens -= 1.0;
-                            rtt.store(connection.rtt().as_micros() as u64, Ordering::Relaxed);
+                            rtt.record(connection.rtt().as_micros() as u64);
                             let recv_micros = epoch.elapsed().as_micros() as u64;
                             let _ = events.send(ServerEvent::Message { conn: id, data: payload, recv_micros });
                         }
@@ -643,6 +704,51 @@ mod tests {
     use super::*;
     use crate::common::{client_crypto, decode_ctrl, encode_ctrl, read_frame_out, write_frame, Ctrl, TAG_CTRL};
     use std::time::Duration;
+
+    /// A steady stream of samples settles the EWMA mean near the sample
+    /// value with variance collapsing toward zero — the quiet-connection
+    /// baseline a later spike is measured against.
+    #[test]
+    fn estimator_converges_to_a_steady_rtt_with_near_zero_variance() {
+        let mut est = RttEstimator::new();
+        for _ in 0..200 {
+            est.update(40_000.0);
+        }
+        assert!((est.mean - 40_000.0).abs() < 1.0, "mean should settle at the steady sample: {}", est.mean);
+        assert!(est.var.sqrt() < 1.0, "variance should collapse on a constant input: {}", est.var);
+    }
+
+    /// Sigma tracks dispersion, not just the mean: the same absolute sample
+    /// must clear a k*sigma check against a quiet connection's baseline but
+    /// stay inside a jittery connection's baseline, because the jittery
+    /// connection's own variance already accounts for swings of that size.
+    #[test]
+    fn estimator_flags_a_jump_on_a_quiet_connection_but_not_on_a_jittery_one() {
+        let mut steady = RttEstimator::new();
+        for _ in 0..200 {
+            steady.update(40_000.0);
+        }
+        let (steady_mean, steady_std) = (steady.mean, steady.var.sqrt());
+        assert!(steady_std < 1.0, "a constant input should collapse variance: {}", steady_std);
+
+        let mut jittery = RttEstimator::new();
+        for i in 0..400 {
+            jittery.update(if i % 2 == 0 { 20_000.0 } else { 60_000.0 });
+        }
+        let (jittery_mean, jittery_std) = (jittery.mean, jittery.var.sqrt());
+        assert!(jittery_std > 1_000.0, "an alternating input should carry real variance: {}", jittery_std);
+
+        let k = 3.0;
+        let spike_sample = 70_000.0;
+        assert!(
+            spike_sample > steady_mean + k * steady_std,
+            "70_000 must clear the quiet connection's 3-sigma baseline (mean {steady_mean}, std {steady_std})"
+        );
+        assert!(
+            spike_sample < jittery_mean + k * jittery_std,
+            "70_000 must stay inside the jittery connection's 3-sigma baseline (mean {jittery_mean}, std {jittery_std})"
+        );
+    }
 
     /// Pins that a stalled reader gets kicked instead of the writer queue
     /// buffering forever: `WRITER_QUEUE_CAP` must actually be enforced, not
