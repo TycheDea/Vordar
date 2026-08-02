@@ -35,7 +35,7 @@ to 461 µs even before accounting for the fact it's now O(E) not O(E×P).
 snapshots/s but the AOI-gather cost spreads across six ticks instead of landing
 as one lump. `MechanicResolveSystem`/`ZoneTransferSystem` self-gate to their
 original 10 Hz cadence via an internal counter — cadence unchanged, only the
-driving phase is faster. Combined with the cheap-gather fix (`query_radius_into`
+driving phase is faster. Combined with the cheap-gather fix (`query_cells_overlapping_into`
 + reused scratch buffers + one `(&Transform, &PrefabId)` view + `mem::swap` on
 the known-set): **soak 400-bot input p99 went from 51.25 ms to 18.73 ms**
 (budget 25 ms) — the gate that defined this item is now passed.

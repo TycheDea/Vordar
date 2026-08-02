@@ -226,10 +226,10 @@ Cross-type queue:
   (3) test: a corrupt prefab file fails server boot but not `load_dir`
   itself; suites green.
 
-### 7. `query_radius` returns a cell superset, and the spatial header describes a deleted pattern
+### 7. `query_cells_overlapping` returns a cell superset, and the spatial header describes a deleted pattern
 
 - **Evidence:** `smirk/engine-core/src/spatial.rs:60-79` —
-  `query_radius`/`query_radius_into` return every entity in overlapped
+  `query_cells_overlapping`/`query_cells_overlapping_into` return every entity in overlapped
   cells, no Euclidean filter; all current callers compensate (enemy AI
   distance-filters, broadphase wants candidates). The module header
   (`spatial.rs:7-12`) still shows the per-frame `clear()` + reinsert usage

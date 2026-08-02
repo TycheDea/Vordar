@@ -125,7 +125,7 @@ impl System for SnapshotBroadcastSystem {
             for &(conn, player) in &conn_players {
                 let Ok(center) = world.get::<&Transform>(player).map(|t| t.position) else { continue };
                 self.aoi_scratch.clear();
-                grid.query_radius_into(center, AOI_RADIUS, &mut self.aoi_scratch);
+                grid.query_cells_overlapping_into(center, AOI_RADIUS, &mut self.aoi_scratch);
                 self.seen.clear();
                 let mut current: Vec<AoiCandidate> = Vec::with_capacity(self.aoi_scratch.len());
                 for &entity in &self.aoi_scratch {

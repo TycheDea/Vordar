@@ -1,15 +1,12 @@
 // SpatialGrid — O(1) average proximity queries
 //
-// Divides the world into a grid of cells. Each entity registers in the cell
-// that contains its position. A radius query only checks the cells that
-// could overlap the search circle — never all entities.
+// Divides the world into a grid of cells. Each entity registers in the cells
+// that overlap its position. Queries check only the overlapped cells, returning
+// entities in those cells (unfiltered by Euclidean distance — callers distance-filter).
 //
-// Usage per frame:
-//   grid.clear();
-//   for (entity, transform) in world.query::<(&Transform,)>().iter() {
-//       grid.insert(entity, transform.position);
-//   }
-//   let nearby = grid.query_radius(player_pos, 10.0);
+// Updated incrementally: entities insert/remove via CellUpdateSystem on spawn/despawn/move.
+// No per-frame clearing — the grid maintains state across frames as entities change.
+// Query results are a superset of the geometric search radius; use for broadphase only.
 
 use crate::components::GridCell;
 use glam::Vec3;
@@ -55,9 +52,10 @@ impl SpatialGrid {
         self.cells.get(&cell).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    /// Append nearby entities into a caller-owned buffer. Preferred over `query_radius`
-    /// in hot paths — the caller reuses the buffer across frames to avoid per-call allocation.
-    pub fn query_radius_into(&self, center: Vec3, radius: f32, out: &mut Vec<Entity>) {
+    /// Append entities in overlapping cells into a caller-owned buffer. Preferred over
+    /// `query_cells_overlapping` in hot paths — the caller reuses the buffer across frames
+    /// to avoid per-call allocation. Returns a superset of the radius — callers distance-filter.
+    pub fn query_cells_overlapping_into(&self, center: Vec3, radius: f32, out: &mut Vec<Entity>) {
         let min_col = ((center.x - radius) / self.cell_size).floor() as i32;
         let max_col = ((center.x + radius) / self.cell_size).ceil()  as i32;
         let min_row = ((center.z - radius) / self.cell_size).floor() as i32;
@@ -72,9 +70,9 @@ impl SpatialGrid {
         }
     }
 
-    pub fn query_radius(&self, center: Vec3, radius: f32) -> Vec<Entity> {
+    pub fn query_cells_overlapping(&self, center: Vec3, radius: f32) -> Vec<Entity> {
         let mut entities = Vec::new();
-        self.query_radius_into(center, radius, &mut entities);
+        self.query_cells_overlapping_into(center, radius, &mut entities);
         entities
     }
 
@@ -105,7 +103,7 @@ mod tests {
         grid.insert(entity3, Vec3::new(10.0, 0.0, 10.0));
         grid.insert(entity4, Vec3::new(0.0, 0.0, 20.0));
         grid.insert(entity5, Vec3::new(20.0, 0.0, 0.0));
-        let mut entities_found = grid.query_radius(Vec3::new(5.0, 0.0, 5.0), 5.0);
+        let mut entities_found = grid.query_cells_overlapping(Vec3::new(5.0, 0.0, 5.0), 5.0);
         entities_found.sort();
         let mut expected = vec![entity1, entity2, entity3];
         expected.sort();
@@ -129,6 +127,6 @@ mod tests {
         grid.insert(e, pos);
         let cell = grid.cell_of(pos);
         grid.remove(cell, e);
-        assert!(grid.query_radius(Vec3::new(3.0, 0.0, 3.0), 1.0).is_empty());
+        assert!(grid.query_cells_overlapping(Vec3::new(3.0, 0.0, 3.0), 1.0).is_empty());
     }
 }

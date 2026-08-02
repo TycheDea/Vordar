@@ -130,7 +130,7 @@ impl System for EnemyAISystem {
                     })
                 } else if enemy.aggro_range > 0.0 {
                     self.candidates.clear();
-                    grid.query_radius_into(transform.position, enemy.aggro_range, &mut self.candidates);
+                    grid.query_cells_overlapping_into(transform.position, enemy.aggro_range, &mut self.candidates);
                     let aggro_sq = enemy.aggro_range * enemy.aggro_range;
                     let mut best: Option<(f32, hecs::Entity, Vec3)> = None;
                     for &cand in &self.candidates {

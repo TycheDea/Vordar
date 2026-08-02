@@ -38,13 +38,13 @@ fn bench_query(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("spatial_grid/query_aoi/{n}"));
         // What SnapshotBroadcastSystem pays per client per snapshot.
         group.bench_function("query_radius_alloc", |b| {
-            b.iter(|| grid.query_radius(Vec3::ZERO, AOI_RADIUS));
+            b.iter(|| grid.query_cells_overlapping(Vec3::ZERO, AOI_RADIUS));
         });
         group.bench_function("query_radius_into_reused", |b| {
             let mut buf: Vec<hecs::Entity> = Vec::new();
             b.iter(|| {
                 buf.clear();
-                grid.query_radius_into(Vec3::ZERO, AOI_RADIUS, &mut buf);
+                grid.query_cells_overlapping_into(Vec3::ZERO, AOI_RADIUS, &mut buf);
                 buf.len()
             });
         });

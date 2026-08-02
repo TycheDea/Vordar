@@ -187,7 +187,7 @@ small in practice.
 |---|---|
 | rebuild 200 / 1000 / 5000 | 6.15 µs / 31.5 µs / 171 µs |
 | query r=40 (AOI), allocating | 1.10–1.15 µs |
-| query r=40 (AOI), reused buffer (`query_radius_into`) | 0.87–0.94 µs |
+| query r=40 (AOI), reused buffer (`query_cells_overlapping_into`) | 0.87–0.94 µs |
 
 ### Prefab spawn — `prefab_spawn` (compiled spawn plans, gap A)
 
