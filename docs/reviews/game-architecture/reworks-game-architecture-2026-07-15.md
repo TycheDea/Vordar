@@ -109,6 +109,56 @@ Cross-type queue (mirrored verbatim from
   the resulting API, deleting their `was_pressed`/`was_escape`/`was_up`/
   `was_down`/`was_enter` fields.
 
+### 3. Mechanic-caused kills never grant XP — killer attribution reads an EventBus already cleared for that death
+
+- **Evidence:** measured directly while implementing finding 9 of
+  `audit-game-architecture-2026-07-28.md` (headless full-pipeline test):
+  built the real server App (`CoreGamePlugin` + `NetServerPlugin`), spawned a
+  caster and an enemy with `XpReward`, and a `Mechanic` due at t=0 with
+  lethal damage. After `run_ticks` the enemy's health went lethal and both
+  the enemy and the mechanic despawned correctly, but the caster never
+  gained an `Xp` component — reproduced identically at 2 ticks and at 8
+  ticks, so it is not a timing/tick-count artifact. Root cause: `Phase`
+  order is `..., CollisionResolve, DespawnFlush, PostUpdate, ...`;
+  `MechanicResolveSystem` (`server/vordar-server/src/net/mechanics.rs:47-125`)
+  runs in `Phase::PostUpdate`, strictly after `DeathSystem`
+  (`game/vordar-game/src/combat/death.rs:34-72`, `Phase::CollisionResolve`)
+  in the same tick. `DeathSystem` attributes the kill by reading
+  `DamageDealt` events still in the current `EventBus`
+  (`game/vordar-game/src/combat/death.rs:47-53`). `ClearEventsSystem`
+  (`smirk/engine-app/src/flush.rs:9-15`) wipes the bus completely at
+  `Phase::Input`, first thing every tick. A mechanic's `DamageDealt` is
+  emitted in tick T's `PostUpdate`, survives to tick T's end, then is wiped
+  at tick T+1's `Input` — before tick T+1's `CollisionResolve` where
+  `DeathSystem` first gets a chance to see the resulting `Health <= 0`. So
+  every mechanic-caused death loses killer attribution structurally,
+  regardless of how many ticks pass.
+- **Ideal:** an entity killed by scheduled-mechanic damage grants XP to the
+  caster exactly like a `ContactDamage`/projectile kill does — killer
+  attribution must not depend on which phase emitted the triggering
+  `DamageDealt`.
+- **Gap:** `DamageDealt`'s one-tick EventBus lifetime silently assumes its
+  consumer phase runs later in the SAME tick as the emitting phase; that
+  holds for `ContactDamageSystem`/`ProjectileHitSystem` (both
+  `CollisionResolve`, before `DeathSystem`) but not for
+  `MechanicResolveSystem` (`PostUpdate`, after `DeathSystem`).
+- **Suggestion:** design (don't guess) where death detection for
+  PostUpdate-phase damage sources should live — candidates worth weighing:
+  give `DamageDealt` a two-tick lifetime (survive one extra `ClearEvents`
+  pass) so next-tick `CollisionResolve` can still see it; or add a
+  second, PostUpdate-scoped death/XP pass for damage sources that land after
+  `CollisionResolve`; or move `MechanicResolveSystem`'s health mutation
+  earlier (before `CollisionResolve`) at the cost of its `SnapshotBroadcastSystem`
+  ordering guarantee. Validate against `RavagerRageSystem`'s existing
+  same-tick `DamageDealt` read (`server/vordar-server/src/net/mod.rs:119-121`)
+  so the chosen fix doesn't break rage-stack attribution for mechanic hits.
+- **Path:** design pass on `DamageDealt`/killer-attribution lifetime across
+  the CollisionResolve/PostUpdate phase boundary → plan document →
+  /implement-finding steps, extending
+  `server/vordar-server/tests/mechanic_pipeline.rs`'s
+  `mechanic_damage_flows_through_death_and_xp_grant` test to assert the
+  caster IS granted XP once fixed.
+
 ## Carried forward from previous report
 
 None — first run of this audit.
