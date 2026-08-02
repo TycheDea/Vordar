@@ -132,7 +132,7 @@ pub struct PropDef {
 }
 
 fn default_fog_color() -> Vec3 {
-    Vec3::new(0.32728323340415955, 0.3519519865512848, 0.4090961813926697) // overcast key
+    Vec3::new(0.327_283_23, 0.351_952, 0.409_096_18) // overcast key
 }
 fn default_fog_density() -> f32 {
     0.0
@@ -164,7 +164,7 @@ fn default_ambient() -> f32 {
     1.0
 }
 fn default_exposure() -> f32 {
-    0.5763153092807317
+    0.576_315_3
 }
 
 /// Direction pointing toward a light source at `azimuth_deg`/`elevation_deg`
