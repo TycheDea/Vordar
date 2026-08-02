@@ -41,10 +41,13 @@ full-QUIC e2e exercises.
 
 Cross-type queue:
 
-> **~~finding 1~~ → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
-> finding 7 → finding 8 → finding 9.**
+> **~~finding 1~~ → finding 2 → ~~finding 3~~ → ~~finding 4~~ → finding 5 →
+> finding 6 → finding 7 → finding 8 → finding 9.**
 >
 > finding 1 done 2026-08-02 (`fd5a82e`, side rule + two pass-through tests).
+> finding 3 done 2026-08-02 (`48bdbd1` + `.claude` `96b9d98`; `TickRate` and
+> `set_phase_rate` deleted outright for one `set_fixed_hz`).
+> finding 4 done 2026-08-02 (`e42e73f`, panic + `should_panic` test).
 > finding 2's step (2) was pre-empted by `32c4394`, which removed the
 > blood_moon event outright; steps (1) and (3), the install-time resolution
 > check and its test, are still open, so the entry stands.
