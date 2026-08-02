@@ -126,7 +126,9 @@ fn login_routes_to_saved_zone() {
     );
 }
 
-// The town chapters (shipped zones.ron: start = chapter03, east = chapter02):
+// The town chapters, installed on the synthetic two-zone fixture so both a
+// chapter03 and a chapter02 zone run at once (shipped zones.ron gives start
+// chapter03 and east none):
 // buildings and villagers replicate as ordinary prefab entities, a villager
 // can't be hit by an AOE centered on it (no Health = immune by construction,
 // the pin for that design), and the monster camps prowl outside town.

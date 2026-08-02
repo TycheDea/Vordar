@@ -142,8 +142,9 @@
         ),
         (
             name: "east",
-            // No chapter (zero NPC spawns): same deferral as start — the
-            // Emberwood town/camp content is not dressing.
+            // No chapter: the props below are dressing only, so east spawns
+            // no NPCs and no collision until Emberwood's town/camp content
+            // exists as a chapter of its own.
             chapter: None,
             portals: [
                 (pos: (-22.0, 0.0, 0.0), radius: 2.0, target_zone: "start", target_pos: (16.0, 0.0, 0.0)),
