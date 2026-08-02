@@ -41,7 +41,7 @@ full-QUIC e2e exercises.
 
 Cross-type queue:
 
-> **~~finding 1~~ → finding 2 → ~~finding 3~~ → ~~finding 4~~ → finding 5 →
+> **~~finding 1~~ → finding 2 → ~~finding 3~~ → ~~finding 4~~ → ~~finding 5~~ →
 > ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~.**
 >
 > All struck entries done 2026-08-02: finding 1 `fd5a82e` (side rule + two
@@ -55,12 +55,13 @@ Cross-type queue:
 > blood_moon event outright; steps (1) and (3), the install-time resolution
 > check and its test, are still open, so the entry stands.
 >
-> finding 5 is PARKED on a user decision: bounding `Resources::insert` to
-> `Send + Sync` does not compile, because `SpawnQueue`/`DespawnQueue` hold
-> `Box<dyn FnOnce(&mut SpawnContext) + Send>`, which is not `Sync`. The
-> finding's own escalation clause forbids weakening the bound, so the fork
-> (tighten the hook vs. relax `App::insert_resource` to match the documented
-> thread-affine invariant) goes to the user.
+> finding 5 done 2026-08-02 (`06a3b77`) in the direction OPPOSITE to its own
+> Ideal. Bounding `Resources::insert` to `Send + Sync` does not compile:
+> `SpawnQueue`/`DespawnQueue` hold `Box<dyn FnOnce(&mut SpawnContext) + Send>`,
+> which is not `Sync`. The user ruled the doors unify downward instead — the
+> App is thread-affine and its systems are `!Send`, so a `Sync` bound buys a
+> guarantee the architecture does not use. `App::insert_resource` lost its
+> bound; the dialect sweep landed as specified.
 >
 > finding 9 measured a defect its own Suggestion assumed away: mechanic-caused
 > kills never grant XP, because `DeathSystem` (CollisionResolve) reads
