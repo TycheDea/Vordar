@@ -21,6 +21,7 @@ pub use supervisor::{supervise_zone, join_zone_threads};
 use db::DbHandle;
 use engine_app::app::App;
 use engine_app::prefab_plugin::PrefabPlugin;
+use engine_core::prefab::PrefabLibrary;
 use engine_net::{NetLimits, NetServer};
 use engine_physics::PhysicsPlugin;
 use net::NetServerPlugin;
@@ -73,6 +74,23 @@ pub fn build_zone_app(
     app.add_plugin(PhysicsPlugin)
         .add_plugin(PrefabPlugin)
         .add_plugin(CoreGamePlugin);
+    check_prefab_library(&mut app, &zone.name);
     net::install(&mut app, server, db, None, zone, directory, world_origin);
     app
+}
+
+/// Panics if any prefab dir failed to load, or the library ended up empty —
+/// a zone must not come up "healthy" serving no prefabs (wrong cwd, corrupt
+/// file). Callers that add more prefab dirs after this App is built (chapter
+/// plugins, installed post-`build_zone_app`) must call this again once those
+/// dirs have loaded.
+pub fn check_prefab_library(app: &mut App, zone_name: &str) {
+    let lib = app.resource_or_default::<PrefabLibrary>();
+    if lib.error_count() > 0 || lib.is_empty() {
+        panic!(
+            "zone '{zone_name}': prefab library unhealthy ({} load errors, {} prefabs loaded)",
+            lib.error_count(),
+            lib.len()
+        );
+    }
 }

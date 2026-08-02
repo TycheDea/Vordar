@@ -129,6 +129,9 @@ struct PrefabEntry {
 
 pub struct PrefabLibrary {
     prefabs: HashMap<String, PrefabEntry>,
+    /// Count of dir-read/file-read/parse failures across every `load_dir`
+    /// call — callers that must not boot on a degraded library check this.
+    errors: usize,
 }
 
 impl Default for PrefabLibrary {
@@ -139,7 +142,7 @@ impl Default for PrefabLibrary {
 
 impl PrefabLibrary {
     pub fn new() -> Self {
-        Self { prefabs: HashMap::new() }
+        Self { prefabs: HashMap::new(), errors: 0 }
     }
 
     pub fn insert(&mut self, id: impl Into<String>, def: PrefabDef) {
@@ -158,6 +161,7 @@ impl PrefabLibrary {
             Ok(e) => e,
             Err(e) => {
                 log::error!("prefab dir '{dir}' unreadable: {e}");
+                self.errors += 1;
                 return;
             }
         };
@@ -171,12 +175,22 @@ impl PrefabLibrary {
                         log::info!("prefab loaded: '{stem}' ({} components)", def.components.len());
                         self.insert(stem, def);
                     }
-                    Err(e) => log::error!("prefab '{}' parse error: {e}", path.display()),
+                    Err(e) => {
+                        log::error!("prefab '{}' parse error: {e}", path.display());
+                        self.errors += 1;
+                    }
                 },
-                Err(e) => log::error!("prefab '{}' read error: {e}", path.display()),
+                Err(e) => {
+                    log::error!("prefab '{}' read error: {e}", path.display());
+                    self.errors += 1;
+                }
             }
         }
     }
+
+    /// Count of dir-read/file-read/parse failures accumulated across every
+    /// `load_dir` call on this library.
+    pub fn error_count(&self) -> usize { self.errors }
 
     pub fn get(&self, id: &str) -> Option<&PrefabDef> {
         self.prefabs.get(id).map(|entry| &entry.def)
