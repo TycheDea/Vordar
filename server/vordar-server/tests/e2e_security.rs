@@ -3,11 +3,12 @@
 
 use test_support::{name_token, raw_login_probe, spawn_server, spawn_server_with, workspace_root, Bot, MetricMirror};
 use engine_app::scheduler::{Phase, SystemOrder};
+use engine_net::{ClientEvent, NetClient};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use vordar_protocol::{encode, ClientMsg, LoginDenyReason, MoveIntentEntry};
+use vordar_protocol::{encode, ClientMsg, LoginDenyReason, MoveIntentEntry, PROTOCOL_VERSION};
 
 // Every validate_intent rejection must be recorded into `NetMetrics::rejects`
 // — logging alone (`log::debug!`/`log::warn!`) would leave a client sending
@@ -134,4 +135,42 @@ fn login_failures_are_rate_limited() {
 
     assert!(!keeper.disconnected, "rate-limited probing of another name must never touch the connected victim");
     assert!(keeper.own_pos().is_some(), "the victim must keep receiving snapshots throughout");
+}
+
+// A connection that completes the QUIC handshake but never sends `Login`
+// must not be able to hold its slot forever: the transport idle timeout
+// alone doesn't bound it, since any traffic (including keepalives) resets
+// that clock. A logged-in connection, past the same deadline, must survive —
+// the reaper targets pre-login slot-holding only.
+#[test]
+fn unauthenticated_connection_is_reaped_after_login_deadline() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25180".parse().unwrap();
+    spawn_server(addr, ":memory:", 3600); // 60 s of headless run budget — comfortably past the reap window
+
+    let mut silent = NetClient::connect(addr, PROTOCOL_VERSION).expect("silent connect failed");
+    let mut got_connected = false;
+    let mut closed = false;
+    let deadline = Instant::now() + Duration::from_secs(13);
+    while Instant::now() < deadline && !closed {
+        for event in silent.poll() {
+            match event {
+                ClientEvent::Connected => got_connected = true,
+                ClientEvent::Disconnected => closed = true,
+                _ => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(got_connected, "handshake must complete for the reap deadline to be meaningful");
+    assert!(closed, "a connection that never logs in must be closed by the pending-login reaper");
+
+    let mut logged_in = Bot::connect_as(addr, "authenticated");
+    logged_in.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(12) {
+        logged_in.pump();
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(!logged_in.disconnected, "a logged-in connection must never be reaped by the pending-login deadline");
 }

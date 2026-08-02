@@ -197,6 +197,13 @@ pub struct NetServerState {
     /// agree on world time up to one clock-read of sampling error (µs).
     world_offset_micros: i64,
     conns: HashMap<ConnId, PlayerConn>,
+    /// Connections past the handshake that have not yet logged in: conn →
+    /// server time of `Connected`. The only budget on pre-login slot-holding
+    /// — the transport idle timeout resets on any traffic (including
+    /// keepalives), so without this a connection that never sends `Login`
+    /// would hold its slot indefinitely. Cleared on a successful login
+    /// (entry moves to `loading`) or on disconnect.
+    pending: HashMap<ConnId, u64>,
     /// Logins whose character load is in flight: conn → (name, presented
     /// token). The token rides along so a later same-name login (takeover or
     /// stale-loading eviction) can be gated on a match before the in-flight
@@ -240,6 +247,7 @@ impl NetServerState {
             directory,
             world_offset_micros,
             conns: HashMap::new(),
+            pending: HashMap::new(),
             loading: HashMap::new(),
             login_failures: LoginFailures::new(),
             tick: 0,

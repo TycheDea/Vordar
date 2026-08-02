@@ -39,6 +39,12 @@ const FUTURE_SLACK_MICROS: u64 = 50_000;
 /// via reconciliation). Flooding buys queue latency, never extra speed.
 const INTENT_QUEUE_CAP: usize = 16;
 
+/// A connection that hasn't reached a logged-in or loading state within this
+/// long of `Connected` is closed by the reaper — the transport idle timeout
+/// alone doesn't bound pre-login slot-holding, since any traffic (including
+/// keepalives) resets it.
+const PENDING_LOGIN_DEADLINE_MICROS: u64 = 10_000_000;
+
 /// What a character spawns as. The Ravager is the playable class while there
 /// is no character-creation/class-picker; the "human" prefab and its kit
 /// stay shipped and tested.
@@ -73,6 +79,9 @@ impl System for NetReceiveSystem {
                     // The connection isn't in the game until Login arrives:
                     // identity picks the character, the character picks the
                     // spawn (loaded position + health).
+                    let state = resources.expect_mut::<NetServerState>();
+                    let now = state.server.now_micros();
+                    state.pending.insert(conn, now);
                     log::info!("conn {conn}: connected, awaiting login");
                 }
                 ServerEvent::Disconnected(conn) => {
@@ -100,6 +109,8 @@ impl System for NetReceiveSystem {
             }
         }
 
+        reap_stale_pending_logins(resources);
+
         // Spawn the projectiles accepted above (player-fired: damages enemies).
         for b in pending_bolts {
             spawn_projectile(world, resources, &b.prefab, b.origin, b.dir, b.speed, b.damage, b.damage_type, b.ttl_secs, b.caster, false);
@@ -115,8 +126,33 @@ impl System for NetReceiveSystem {
     }
 }
 
+/// Close connections that have sat past the pre-login deadline without
+/// reaching either `loading` (Login sent, character load in flight) or
+/// `conns` (fully logged in) — the one budget on unauthenticated slot-
+/// holding, since the transport idle timeout is reset by any traffic.
+fn reap_stale_pending_logins(resources: &mut Resources) {
+    let state = resources.expect_mut::<NetServerState>();
+    let now = state.server.now_micros();
+    let stale: Vec<ConnId> = state
+        .pending
+        .iter()
+        .filter(|&(&conn, &connected_at)| {
+            now.saturating_sub(connected_at) > PENDING_LOGIN_DEADLINE_MICROS
+                && !state.conns.contains_key(&conn)
+                && !state.loading.contains_key(&conn)
+        })
+        .map(|(&conn, _)| conn)
+        .collect();
+    for conn in stale {
+        state.pending.remove(&conn);
+        log::info!("conn {conn}: never logged in, closing");
+        state.server.disconnect(conn);
+    }
+}
+
 fn handle_disconnect(world: &mut World, resources: &mut Resources, conn: ConnId) {
     let state = resources.expect_mut::<NetServerState>();
+    state.pending.remove(&conn);
     state.loading.remove(&conn);
     if let Some(pc) = state.conns.remove(&conn) {
         // Persist before queuing the despawn — DespawnFlush
@@ -204,6 +240,7 @@ fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name
         state.server.disconnect(stale_conn);
     }
     log::info!("conn {conn}: login as '{name}', loading character");
+    state.pending.remove(&conn);
     state.loading.insert(conn, (name.clone(), token));
     // Defaults seed a NEW character only: ring spawn +
     // the player prefab's full health (human.ron is
