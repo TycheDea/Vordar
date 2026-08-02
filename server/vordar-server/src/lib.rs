@@ -94,3 +94,30 @@ pub fn check_prefab_library(app: &mut App, zone_name: &str) {
         );
     }
 }
+
+/// Panics if any `spawns`/`waves` prefab name in `def` is absent from the
+/// zone's `PrefabLibrary` — a dangling prefab reference in an events def is
+/// an authoring bug the author must see at boot, not a runtime spawn error
+/// repeated every wave pulse. Call after the zone's prefab dirs (base +
+/// chapter, if any) have loaded.
+pub fn check_world_events(app: &mut App, zone_name: &str, def: &vordar_game::world::WorldEventsDef) {
+    let lib = app.resource_or_default::<PrefabLibrary>();
+    for event in &def.events {
+        for spawn in &event.spawns {
+            if lib.get(&spawn.prefab).is_none() {
+                panic!(
+                    "zone '{zone_name}': event '{}' spawns unknown prefab '{}'",
+                    event.name, spawn.prefab
+                );
+            }
+        }
+        for wave in &event.waves {
+            if lib.get(&wave.prefab).is_none() {
+                panic!(
+                    "zone '{zone_name}': event '{}' wave spawns unknown prefab '{}'",
+                    event.name, wave.prefab
+                );
+            }
+        }
+    }
+}

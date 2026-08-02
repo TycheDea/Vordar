@@ -21,7 +21,9 @@ use std::time::Instant;
 use vordar_game::chapter::ChapterRegistry;
 use vordar_server::db::DbWorker;
 use vordar_server::net::ShutdownFlag;
-use vordar_server::{build_zone_app, check_prefab_library, join_zone_threads, supervise_zone, TICK_HZ};
+use vordar_server::{
+    build_zone_app, check_prefab_library, check_world_events, join_zone_threads, supervise_zone, TICK_HZ,
+};
 
 /// Every chapter this binary can host. Linking a new chapter crate +
 /// one line here is the entire integration.
@@ -101,7 +103,10 @@ fn main() {
                                 .unwrap_or_else(|e| panic!("zones.ron: {e}"));
                             check_prefab_library(&mut app, &zone.name);
                         }
-                        app.insert_resource(vordar_game::world::load_world_events("content/zones/events.ron"));
+                        let events =
+                            vordar_game::world::load_world_events("content/zones/events.ron");
+                        check_world_events(&mut app, &zone.name, &events);
+                        app.insert_resource(events);
                         app.insert_resource(ShutdownFlag(app_shutdown.clone()));
                         log::info!("zone listening on {addr}");
                         app.run_headless(TICK_HZ, None);
