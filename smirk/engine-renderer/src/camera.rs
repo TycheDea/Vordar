@@ -402,8 +402,7 @@ impl System for CycleCameraSystem {
             .unwrap_or(false);
 
         if pressed {
-            let state = resources.get_mut::<crate::RendererState>()
-                .expect("RendererState not in resources");
+            let state = resources.expect_mut::<crate::RendererState>();
             state.camera.cycle_projection();
             let uniform = CameraUniform::from_camera(&state.camera, (state.config.width, state.config.height));
             state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));

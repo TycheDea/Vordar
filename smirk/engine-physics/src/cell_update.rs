@@ -40,9 +40,7 @@ impl CellUpdateSystem {
 
 impl System for CellUpdateSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
-        let grid = resources
-            .get_mut::<SpatialGrid>()
-            .expect("SpatialGrid not in resources");
+        let grid = resources.expect_mut::<SpatialGrid>();
 
         let cell_size = grid.cell_size();
 

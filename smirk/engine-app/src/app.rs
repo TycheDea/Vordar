@@ -172,7 +172,9 @@ impl App {
     }
 
     /// Insert a custom resource accessible to all systems via resources.get_mut::<T>().
-    pub fn insert_resource<T: std::any::Any + Send + Sync>(&mut self, resource: T) -> &mut Self {
+    // The App and its systems are thread-affine (see crate-root docs), so resources
+    // never cross threads and need no Send/Sync bound.
+    pub fn insert_resource<T: std::any::Any>(&mut self, resource: T) -> &mut Self {
         self.resources.insert(resource);
         self
     }
@@ -180,7 +182,7 @@ impl App {
     /// Get-or-insert-default a shared registry resource at build time — lets
     /// multiple plugins contribute to the same registry regardless of plugin
     /// order (same pattern as register_component's ComponentRegistry).
-    pub fn resource_or_default<T: std::any::Any + Send + Sync + Default>(&mut self) -> &mut T {
+    pub fn resource_or_default<T: std::any::Any + Default>(&mut self) -> &mut T {
         if !self.resources.contains::<T>() {
             self.resources.insert(T::default());
         }

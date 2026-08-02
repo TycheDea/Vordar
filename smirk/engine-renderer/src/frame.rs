@@ -97,8 +97,7 @@ impl RenderSystem {
             .map(|mhz| (mhz / 1000).max(30));
 
         let (egui_ctx, egui_winit) = {
-            let s = resources.get::<RendererState>()
-                .expect("RendererState not in resources");
+            let s = resources.expect::<RendererState>();
             (s.egui_ctx.clone(), s.egui_winit.clone())
         };
         let raw_input = egui_winit.lock().unwrap().take_egui_input(&window);
@@ -213,8 +212,7 @@ impl System for RenderSystem {
         }
 
         // ── All GPU work inside one mutable borrow of RendererState ───────────
-        let state = resources.get_mut::<RendererState>()
-            .expect("RendererState not in resources");
+        let state = resources.expect_mut::<RendererState>();
 
         let particle_count = upload_gpu_buffers(
             state, &self.dirty_ranges, &self.gpu_buf,

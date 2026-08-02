@@ -30,8 +30,7 @@ pub struct RenderSyncSystem;
 impl System for RenderSyncSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         let alpha = resources.get::<InterpolationAlpha>().map(|a| a.0).unwrap_or(1.0);
-        let pool = resources.get_mut::<InstancePool>()
-            .expect("InstancePool not in resources");
+        let pool = resources.expect_mut::<InstancePool>();
 
         for (transform, prev, render_shape, slot) in
             world.query::<(&Transform, Option<&PreviousTransform>, &RenderShape, &InstanceSlot)>().iter()
@@ -104,8 +103,7 @@ impl System for RenderSlotDespawnSystem {
             .map(|q| q.0.iter().map(|(e, _)| *e).collect())
             .unwrap_or_default();
 
-        let pool = resources.get_mut::<InstancePool>()
-            .expect("InstancePool not in resources");
+        let pool = resources.expect_mut::<InstancePool>();
 
         for entity in entities {
             if let Ok(slot) = world.get::<&InstanceSlot>(entity) {

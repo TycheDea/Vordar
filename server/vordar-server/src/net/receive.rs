@@ -57,9 +57,7 @@ impl System for NetReceiveSystem {
         // Cloned once up front: ClassLibrary is read-only content, and this
         // sidesteps holding an immutable Resources borrow across the event
         // loop's many `resources.get_mut::<NetServerState>()` calls below.
-        let class_library = resources.get::<ClassLibrary>()
-            .expect("ClassLibrary not in resources")
-            .clone();
+        let class_library = resources.expect::<ClassLibrary>().clone();
 
         // Publish the world clock for world systems (events, future schedules).
         let world_now = resources.expect::<NetServerState>().world_micros();

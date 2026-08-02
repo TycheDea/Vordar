@@ -627,7 +627,5 @@ pub(crate) fn init(window: &Arc<Window>, resources: &mut Resources) {
 }
 
 pub(crate) fn on_resize(w: u32, h: u32, resources: &mut Resources) {
-    resources.get_mut::<RendererState>()
-        .expect("RendererState not in resources")
-        .resize(w, h);
+    resources.expect_mut::<RendererState>().resize(w, h);
 }

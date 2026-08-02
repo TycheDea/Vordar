@@ -51,9 +51,7 @@ pub fn free_render_slot(slot: InstanceSlot, resources: &mut Resources) {
 /// Update camera target and/or orbit angle/pitch, then upload the uniform once.
 /// Pass `target = None` to skip moving the target (orbit only).
 pub fn update_camera(target: Option<GlamVec3>, yaw_delta: f32, pitch_delta: f32, resources: &mut Resources) {
-    let state = resources
-        .get_mut::<RendererState>()
-        .expect("RendererState not in resources");
+    let state = resources.expect_mut::<RendererState>();
     if let Some(t) = target { state.camera.target = t; }
     state.camera.orbit(yaw_delta, pitch_delta);
     let uniform = CameraUniform::from_camera(&state.camera, (state.config.width, state.config.height));
@@ -75,9 +73,7 @@ pub fn zoom_camera(delta: f32, resources: &mut Resources) {
             let d = CameraConfig::default();
             (d.min_radius, d.max_radius)
         });
-    let state = resources
-        .get_mut::<RendererState>()
-        .expect("RendererState not in resources");
+    let state = resources.expect_mut::<RendererState>();
     state.camera.zoom(delta, min_radius, max_radius);
     let uniform = CameraUniform::from_camera(&state.camera, (state.config.width, state.config.height));
     state.queue.write_buffer(&state.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
@@ -149,8 +145,7 @@ pub fn set_exposure(exposure: f32, resources: &mut Resources) {
 /// (will be normalised here). color is RGB intensity. ambient scales the IBL
 /// ambient term (1.0 = the environment as authored — the day/night seam).
 pub fn set_light(dir: GlamVec3, color: GlamVec3, ambient: f32, resources: &mut Resources) {
-    let state = resources.get_mut::<RendererState>()
-        .expect("RendererState not in resources");
+    let state = resources.expect_mut::<RendererState>();
     let dir = dir.normalize();
     state.light_dir = dir; // shadow fitting reads the CPU copy
     state.light_state.direction = dir.to_array();

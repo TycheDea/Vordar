@@ -49,9 +49,7 @@ impl System for BroadphaseSystem {
         self.pairs.clear();
 
         {
-            let grid = resources
-                .get::<SpatialGrid>()
-                .expect("SpatialGrid not in resources");
+            let grid = resources.expect::<SpatialGrid>();
 
             for (entity, occupant, _) in world.query::<(Entity, &CellOccupant, &Hitbox)>().iter() {
                 for &cell in &occupant.cells {
@@ -66,10 +64,7 @@ impl System for BroadphaseSystem {
 
         // Swap into CandidatePairs — narrowphase swaps back an empty vec for us to reuse.
         std::mem::swap(
-            &mut resources
-                .get_mut::<CandidatePairs>()
-                .expect("CandidatePairs not in resources")
-                .0,
+            &mut resources.expect_mut::<CandidatePairs>().0,
             &mut self.pairs,
         );
     }

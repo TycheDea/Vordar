@@ -311,7 +311,7 @@ impl System for MeshRenderSyncSystem {
         let mut total_statics: u32 = 0;
 
         {
-            let state = resources.get::<RendererState>().expect("checked above");
+            let state = resources.expect::<RendererState>();
             store.integrate(&state.device, &state.queue, &state.material_bgl, &state.mipgen, MESH_UPLOADS_PER_FRAME);
             let cam = Frustum::from_view_proj(state.camera.build_view_projection_matrix());
             let sun = Frustum::from_view_proj(crate::shadow::fit_light_vp(state.camera.target, state.light_dir));

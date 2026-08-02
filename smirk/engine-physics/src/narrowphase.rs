@@ -52,11 +52,7 @@ impl NarrowphaseSystem {
 impl System for NarrowphaseSystem {
     fn run(&mut self, world: &mut World, resources: &mut Resources, _delta: f32) {
         // Take the vec to avoid cloning; restore it at the end so broadphase reuses capacity.
-        let candidates = std::mem::take(
-            &mut resources.get_mut::<CandidatePairs>()
-                .expect("CandidatePairs not in resources")
-                .0
-        );
+        let candidates = std::mem::take(&mut resources.expect_mut::<CandidatePairs>().0);
 
         // Reuse scratch set — clear preserves heap allocation.
         self.overlapping_buf.clear();
@@ -76,17 +72,13 @@ impl System for NarrowphaseSystem {
         }
 
         // Restore candidates vec (capacity intact) for broadphase to refill next frame.
-        resources.get_mut::<CandidatePairs>()
-            .expect("CandidatePairs not in resources")
-            .0 = candidates;
+        resources.expect_mut::<CandidatePairs>().0 = candidates;
 
         // Diff against previous frame — compute started/ended while active is borrowed.
         let mut started: Vec<(Entity, Entity)>;
         let mut ended:   Vec<(Entity, Entity)>;
         {
-            let active = resources
-                .get_mut::<ActivePairs>()
-                .expect("ActivePairs not in resources");
+            let active = resources.expect_mut::<ActivePairs>();
 
             started = self.overlapping_buf.iter().filter(|p| !active.0.contains(p)).copied().collect();
             ended   = active.0.iter().filter(|p| !self.overlapping_buf.contains(p)).copied().collect();
@@ -102,9 +94,7 @@ impl System for NarrowphaseSystem {
         ended.sort_unstable();
 
         // Emit events.
-        let bus = resources
-            .get_mut::<EventBus>()
-            .expect("EventBus not in resources");
+        let bus = resources.expect_mut::<EventBus>();
 
         for (a, b) in started { bus.emit(CollisionStarted { a, b }); }
         for (a, b) in ended   { bus.emit(CollisionEnded   { a, b }); }
@@ -215,7 +205,7 @@ mod tests {
             let mut system = NarrowphaseSystem::new();
             system.run(&mut world, &mut resources, 1.0 / 60.0);
 
-            let bus = resources.get::<EventBus>().expect("EventBus not in resources");
+            let bus = resources.expect::<EventBus>();
             let started: Vec<(Entity, Entity)> =
                 bus.read::<CollisionStarted>().map(|e| (e.a, e.b)).collect();
             assert_eq!(started, expected.to_vec());
