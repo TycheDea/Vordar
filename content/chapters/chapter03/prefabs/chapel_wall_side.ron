@@ -1,7 +1,8 @@
 // Invisible collision shell for one chapel nave side wall (kit model, full
-// 16.6 m built length, rising to the 7.5 m springline — the vault above is
-// chapel_roof's job). The visual is the always-rendered chapel zone prop,
-// so no ShapeGroup; the hitbox keeps the spawn-centred convention.
+// 16.6 m built length). The hitbox keeps the spawn-centred convention, so
+// spawning at y=0 puts its top at 3.75 m — well above the player band the
+// narrowphase cares about, and far short of the visual's 7.5 m springline.
+// The visual is the always-rendered chapel zone prop, so no ShapeGroup.
 (
     components: {
         "Transform": (),
