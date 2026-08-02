@@ -254,13 +254,13 @@ fn dispatch_cast(
 ) {
     let rtt = state.server.rtt_micros(conn).unwrap_or(0);
     let Some(pc) = state.conns.get_mut(&conn) else { return };
-    if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
+    if let Err(reason) = validate_intent(pc.cast_seq, pc.cast_t, seq, t, recv_micros, rtt) {
         log::warn!("conn {conn}: cast rejected ({reason})");
         state.server.metrics().record_reject();
         return;
     }
-    pc.last_seq = seq;
-    pc.last_t = t;
+    pc.cast_seq = seq;
+    pc.cast_t = t;
     let caster = pc.entity;
     let class_id = world.get::<&ClassId>(caster)
         .map(|c| c.id.clone())
@@ -488,6 +488,8 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
                 applied_seq: 0,
                 last_seq: 0,
                 last_t: 0,
+                cast_seq: 0,
+                cast_t: 0,
                 known: HashSet::new(),
                 history: VecDeque::new(),
                 cooldown_ready,
@@ -612,20 +614,22 @@ fn applied_velocity(world: &World, entity: Entity, dir: Vec2) -> Vec3 {
     movement_velocity(dir, speed)
 }
 
-/// Anti-cheat caps from DESIGN.md §3, in the protocol from v1.
-fn validate_intent(pc: &PlayerConn, seq: u32, t: u64, recv_micros: u64, rtt: u64) -> Result<(), &'static str> {
-    // seq=0 is PlayerConn::last_seq's "nothing received yet" sentinel, never a
-    // value a genuine client sends (the client's own seq counter starts at 1)
-    // — reject it outright first, so a spoofed/replayed seq=0 intent can't
-    // hide behind the sentinel and pass monotonicity forever.
+/// Anti-cheat caps from DESIGN.md §3, in the protocol from v1. `last_seq`/
+/// `last_t` are the caller's lane pair — moves and casts each carry their own,
+/// so neither lane can invalidate the other's in-flight intents.
+fn validate_intent(last_seq: u32, last_t: u64, seq: u32, t: u64, recv_micros: u64, rtt: u64) -> Result<(), &'static str> {
+    // seq=0 is a lane pair's "nothing received yet" sentinel, never a value a
+    // genuine client sends (the client's own seq counters start at 1) —
+    // reject it outright first, so a spoofed/replayed seq=0 intent can't hide
+    // behind the sentinel and pass monotonicity forever.
     if seq == 0 {
         return Err("stale seq");
     }
     // Monotonic, stream-consistent: replays and backdated contradictions are free rejects.
-    if seq <= pc.last_seq {
+    if seq <= last_seq {
         return Err("stale seq");
     }
-    if t < pc.last_t {
+    if t < last_t {
         return Err("timestamp not monotonic");
     }
     // No future stamps beyond plausible clock-sync error.
@@ -660,7 +664,7 @@ fn queue_move_intents(pc: &mut PlayerConn, entries: &[MoveIntentEntry], recv_mic
         if seq <= pc.last_seq {
             continue;
         }
-        if let Err(reason) = validate_intent(pc, seq, t, recv_micros, rtt) {
+        if let Err(reason) = validate_intent(pc.last_seq, pc.last_t, seq, t, recv_micros, rtt) {
             log::debug!("move intent rejected ({reason})");
             metrics.record_reject();
             continue;
@@ -705,6 +709,8 @@ mod tests {
             applied_seq: 0,
             last_seq: 0,
             last_t: 0,
+            cast_seq: 0,
+            cast_t: 0,
             known: HashSet::new(),
             history: VecDeque::new(),
             cooldown_ready: HashMap::new(),
@@ -713,7 +719,7 @@ mod tests {
         };
         // Otherwise-well-formed intent (monotonic t, arrives on time) —
         // the only thing wrong with it is seq == 0.
-        let result = validate_intent(&pc, 0, 1_000, 1_000, 0);
+        let result = validate_intent(pc.last_seq, pc.last_t, 0, 1_000, 1_000, 0);
         assert_eq!(result, Err("stale seq"), "seq=0 must never pass validation");
     }
 
@@ -751,6 +757,8 @@ mod tests {
             applied_seq: 0,
             last_seq: 0,
             last_t: 0,
+            cast_seq: 0,
+            cast_t: 0,
             known: HashSet::new(),
             history: VecDeque::new(),
             cooldown_ready: HashMap::new(),

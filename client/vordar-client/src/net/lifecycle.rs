@@ -165,8 +165,10 @@ fn teardown_replicated_world(world: &mut World, resources: &mut Resources) {
     // connection's Welcome instead of resolving enters against the old
     // zone's indices.
     state.prefab_names.clear();
-    // Fresh connection, fresh validation stream (per-connection on the server).
+    // Fresh connection, fresh validation streams — both lanes' monotonicity
+    // pairs are per-connection on the server.
     state.seq = 0;
+    state.cast_seq = 0;
     // The new connection starts its own last-3 redundancy window — resending
     // the old connection's seqs would just be silently skipped server-side,
     // but there is no reason to carry them over.

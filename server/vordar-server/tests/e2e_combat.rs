@@ -4,7 +4,7 @@
 use test_support::{settle, spawn_server, spawn_server_with, workspace_root, Bot, SimDeadline};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use vordar_protocol::{encode, ClientMsg, TICK_HZ};
+use vordar_protocol::{encode, ClientMsg, MoveIntentEntry, TICK_HZ};
 
 // Scheduled-snapshot combat under 150 ms latency. One identical
 // MechanicScheduled reaches every client; standing in the area at T is a hit;
@@ -131,9 +131,9 @@ fn scheduled_aoe() {
     // ── Backdated cast: rejected server-side, nothing gets scheduled. ──
     let count_before = b.mechanics.len();
     let now = b.client.server_now_micros().unwrap();
-    b.seq += 1;
+    b.cast_seq += 1;
     b.client.send(encode(&ClientMsg::CastIntent {
-        seq: b.seq,
+        seq: b.cast_seq,
         t_server_micros: now.saturating_sub(10_000_000),
         skill: "cleave".into(),
         target: glam::Vec2::ZERO,
@@ -221,6 +221,57 @@ fn rend_kills_camped_enemy() {
         "replicated hp only decreases during the fight: {hp_seen:?}"
     );
     assert!(hp_seen.len() >= 2, "at least one damage tick replicated: {hp_seen:?}");
+}
+
+// Casts ride the reliable stream, moves ride unreliable datagrams: the stream
+// routinely wins the race against a datagram sent at the same moment. A cast
+// delivered while a move is still in flight must not consume, or invalidate,
+// that move's place in the movement sequence — the held-back move still has to
+// apply when it lands, or the server silently loses a tick of authoritative
+// movement inside the client's trust band.
+#[test]
+fn a_cast_never_consumes_an_in_flight_move() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25194".parse().unwrap();
+    spawn_server(addr, ":memory:", 2400);
+
+    let mut bot = Bot::connect(addr);
+    bot.wait_for("welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("clock sync", Duration::from_secs(5), |b| b.client.server_offset_micros().is_some());
+    bot.wait_for("first snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+    let start = bot.own_pos().unwrap();
+
+    // Built now, sent later: this is the datagram that loses the race.
+    let move_seq = bot.seq + 1;
+    bot.seq = move_seq;
+    let stamped_at = bot.client.server_now_micros().unwrap();
+    let held = MoveIntentEntry { seq: move_seq, t_server_micros: stamped_at, dir: glam::Vec2::new(1.0, 0.0) };
+
+    // "rend" is the fast Scheduled strike — it schedules an area at the target
+    // and never moves the caster, so the only thing that can shift the bot's
+    // replicated position afterwards is the held-back move.
+    let target = glam::Vec2::new(start.x, start.z);
+    bot.send_cast("rend", target);
+    bot.wait_for("the cast to be scheduled server-side", Duration::from_secs(3), |b| !b.mechanics.is_empty());
+
+    // An intent must reach the server within ~one RTT of its stamp; past that
+    // the hold-back is a deadline reject, not the lane race under test.
+    let held_age = bot.client.server_now_micros().unwrap() - stamped_at;
+    assert!(
+        held_age < 250_000,
+        "the cast round trip took {held_age} us — too slow to hold a move inside its arrival deadline"
+    );
+
+    bot.client.send_datagram(encode(&ClientMsg::MoveIntents { intents: vec![held] }));
+    bot.wait_for("the held-back move to be applied", Duration::from_secs(3), move |b| b.last_ack >= move_seq);
+
+    settle(&mut bot, Duration::from_millis(300));
+    let end = bot.own_pos().unwrap();
+    assert!(
+        end.x - start.x > 0.05,
+        "the held-back move must integrate one tick of eastward movement: {:.3} → {:.3}",
+        start.x, end.x
+    );
 }
 
 // The Ravager's gap-closer, end to end: one Onslaught cast must both dash the

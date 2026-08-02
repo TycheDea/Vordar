@@ -37,6 +37,8 @@ pub fn state_with_fake_conns(server: NetServer, db: DbHandle, players: &[Entity]
                 applied_seq: 0,
                 last_seq: 0,
                 last_t: 0,
+                cast_seq: 0,
+                cast_t: 0,
                 known: HashSet::new(),
                 history: VecDeque::new(),
                 cooldown_ready: HashMap::new(),

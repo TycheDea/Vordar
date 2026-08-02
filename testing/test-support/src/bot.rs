@@ -148,7 +148,12 @@ pub struct Bot {
     /// This zone's prefab name table (`ServerMsg::PrefabTable`), received
     /// once per connection right after `Welcome`.
     pub prefab_names: Vec<String>,
+    /// Movement-lane sequence counter — casts never draw from it, mirroring
+    /// the real client: the server validates each lane against its own
+    /// monotonicity pair.
     pub seq: u32,
+    /// Cast-lane sequence counter, independent of `seq`.
+    pub cast_seq: u32,
     /// Last 3 sent `MoveIntentEntry`s, oldest first — resent every tick as
     /// the `ClientMsg::MoveIntents` batch (last-3 redundancy). Cleared
     /// implicitly on reconnect: `follow_redirect` and the `connect_*`
@@ -206,6 +211,7 @@ impl Bot {
             prefabs: HashMap::new(),
             prefab_names: Vec::new(),
             seq: 0,
+            cast_seq: 0,
             move_ring: VecDeque::new(),
             last_ack: 0,
             bytes: 0,
@@ -480,9 +486,9 @@ impl Bot {
 
     pub fn send_cast(&mut self, skill: &str, target: glam::Vec2) {
         if let Some(t_server_micros) = self.client.server_now_micros() {
-            self.seq += 1;
+            self.cast_seq += 1;
             self.client.send(encode(&ClientMsg::CastIntent {
-                seq: self.seq,
+                seq: self.cast_seq,
                 t_server_micros,
                 skill: skill.into(),
                 target,

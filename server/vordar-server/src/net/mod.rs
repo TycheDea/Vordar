@@ -142,9 +142,17 @@ struct PlayerConn {
     queue: VecDeque<(u32, u64, Vec2)>,
     /// Seq of the last intent APPLIED to the simulation — the snapshot ack.
     applied_seq: u32,
-    /// Seq/stamp of the last intent RECEIVED — validation monotonicity.
+    /// Seq/stamp of the last MOVE intent RECEIVED — validation monotonicity
+    /// for the movement lane only. Casts ride their own pair below: the two
+    /// lanes take separate routes (ordered stream vs. unreliable datagram),
+    /// so a shared counter lets a cast that overtakes an in-flight move
+    /// invalidate that move permanently.
     last_seq: u32,
     last_t: u64,
+    /// Seq/stamp of the last CAST intent RECEIVED — the cast lane's own
+    /// monotonicity pair, which is what keeps a replayed cast a free reject.
+    cast_seq: u32,
+    cast_t: u64,
     /// Entity ids currently inside this client's AOI — diffed each snapshot
     /// to produce enter/leave messages.
     known: HashSet<u32>,

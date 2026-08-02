@@ -132,7 +132,14 @@ pub struct NetClientState {
     /// before the first `Snapshot`); cleared on teardown so a redirect or
     /// reconnect adopts the new zone's table instead of the old one's.
     prefab_names: Vec<String>,
+    /// Movement-lane sequence counter. Moves and casts take separate routes
+    /// (unreliable datagram vs. ordered stream) and the server validates each
+    /// lane against its own monotonicity pair, so a cast must never draw from
+    /// this counter — doing so lets a cast that overtakes an in-flight move
+    /// invalidate that move server-side.
     seq: u32,
+    /// Cast-lane sequence counter, independent of `seq`.
+    cast_seq: u32,
     predict: bool,
     pending: VecDeque<PendingIntent>,
     /// Last `MOVE_RING_LEN` sent `MoveIntentEntry`s, oldest first — resent
@@ -187,6 +194,7 @@ impl NetClientState {
             entities: HashMap::new(),
             prefab_names: Vec::new(),
             seq: 0,
+            cast_seq: 0,
             predict,
             pending: VecDeque::new(),
             move_ring: VecDeque::new(),
@@ -218,9 +226,9 @@ impl NetClientState {
     /// synced yet — same gate `NetSendInputSystem` uses for movement intents.
     pub(crate) fn send_cast_intent(&mut self, skill: String, target: Vec2) -> bool {
         let Some(t_server_micros) = self.server_now_micros() else { return false };
-        self.seq += 1;
+        self.cast_seq += 1;
         if let Some(client) = &self.client {
-            client.send(encode(&ClientMsg::CastIntent { seq: self.seq, t_server_micros, skill, target }));
+            client.send(encode(&ClientMsg::CastIntent { seq: self.cast_seq, t_server_micros, skill, target }));
         }
         true
     }

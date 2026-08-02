@@ -13,7 +13,7 @@
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 15;
+pub const PROTOCOL_VERSION: u8 = 16;
 
 /// A client's account credential: a random 32-byte token, presented on every
 /// `Login` and verified server-side against `sha256(token)` stored in the
@@ -40,8 +40,11 @@ pub enum ClientMsg {
     /// redundancy, not a violation) and running full validation only on
     /// entries that advance `PlayerConn::last_seq`.
     MoveIntents { intents: Vec<MoveIntentEntry> },
-    /// Cast skill `skill` at world-XZ `target`. Shares the seq/timestamp
-    /// validation with `MoveIntents`' entries; bypasses the movement
+    /// Cast skill `skill` at world-XZ `target`. `seq` counts casts only: it
+    /// runs the same seq/timestamp validation rules as `MoveIntents`' entries
+    /// but against a separate per-connection monotonicity pair, so a cast
+    /// arriving on the ordered stream ahead of a move still in flight on the
+    /// datagram lane cannot invalidate it. Bypasses the movement
     /// queue — the cast time is the delay. Stays on the reliable stream: a
     /// lost cast eats the input, and a duplicate is a griefing vector, so
     /// unlike movement it cannot tolerate loss/replay.
@@ -98,10 +101,12 @@ pub enum ServerMsg {
     /// Per-client state update: current position (+hp) of every entity in
     /// your AOI, plus the intent ack. Rides an unreliable QUIC datagram every
     /// snapshot interval — a lost datagram is simply skipped, because the
-    /// next cadence supersedes it. `last_processed_seq` is the highest intent seq the server had
-    /// applied when the snapshot was taken: the client drops acknowledged
-    /// pending intents and replays the rest on top of its own position
-    /// (prediction reconciliation). Datagrams can arrive out of order, so a
+    /// next cadence supersedes it. `last_processed_seq` is the highest
+    /// `MoveIntentEntry::seq` the server had applied when the snapshot was
+    /// taken — the movement lane only, never a `CastIntent` seq: the client
+    /// drops acknowledged pending intents and replays the rest on top of its
+    /// own position (prediction reconciliation), and casts record no pending
+    /// intent to drop. Datagrams can arrive out of order, so a
     /// `Snapshot` whose `tick` is not strictly newer than the last one
     /// applied must be dropped before any field is read (ack included) —
     /// per-connection ticks are strictly increasing, so this never drops a
