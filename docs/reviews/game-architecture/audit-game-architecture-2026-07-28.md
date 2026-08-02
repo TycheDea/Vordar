@@ -41,8 +41,13 @@ full-QUIC e2e exercises.
 
 Cross-type queue:
 
-> **finding 1 → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
+> **~~finding 1~~ → finding 2 → finding 3 → finding 4 → finding 5 → finding 6 →
 > finding 7 → finding 8 → finding 9.**
+>
+> finding 1 done 2026-08-02 (`fd5a82e`, side rule + two pass-through tests).
+> finding 2's step (2) was pre-empted by `32c4394`, which removed the
+> blood_moon event outright; steps (1) and (3), the install-time resolution
+> check and its test, are still open, so the entry stands.
 >
 > 1–2 are live defects (one silent, one actively logging errors). 3–7 are
 > the truth-and-fences cluster: 3 makes the docs/API match the landed
