@@ -37,8 +37,23 @@ of adversaries.
 
 Cross-type queue:
 
-> **~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ → ~~finding 4~~ →
-> ~~finding 5~~ → ~~finding 6~~ → finding 7 → finding 8 → finding 9.**
+> **QUEUE CLEARED — ~~finding 1~~ → ~~finding 2~~ → ~~finding 3~~ →
+> ~~finding 4~~ → ~~finding 5~~ → ~~finding 6~~ → ~~finding 7~~ →
+> ~~finding 8~~ → ~~finding 9~~.**
+>
+> Loop-final gate: clippy `-D warnings` clean, `cargo nextest run --workspace`
+> **455 passed / 5 skipped** (443 before this queue). 7 `e9ff97e` (per-conn
+> EWMA RTT baseline in `engine-net`, k·σ=3 structured samples at cast arrival
+> and mechanic resolve — metrics only, no gameplay policy), 8 `8df21f6` (three
+> datagram counters on the periodic line; snapshot gauge + `debug_assert` at
+> 1200 B, crowded 64-state snapshot measured at **580 B**, 48% of budget),
+> 9 `59be85c` (`HitResult` drives the existing `ParticleSim::burst` seam;
+> HP/death authority stays on snapshot replication).
+>
+> Finding 9's Path step (3), the sandbox visual check, was NOT run and is not
+> owed: this project verifies headless only. The handler is unit-tested
+> (known id flashes at its transform, unknown id skipped); the flash's
+> on-screen appearance is unverified, which is the stage-appropriate state.
 >
 > Struck entries done 2026-08-02, one commit each: 1 `3794018` (cast lane gets
 > its own `cast_seq`/`cast_t`; `PROTOCOL_VERSION` 15→16; e2e holds the move
@@ -46,7 +61,14 @@ Cross-type queue:
 > 5 `a652467` (`subtle` 2.6, BSD-3-Clause, now a direct workspace dep),
 > 6 `4da2655`.
 >
-> Two collateral corrections worth carrying: finding 2's tightened deadline
+> Three collateral corrections worth carrying. Finding 7's first estimator
+> test could not fail either: 200 identical samples drive σ to ~0, so
+> `400_000 > mean + 3·0` holds even against a no-op `update`, and the variance
+> recurrence was wholly unpinned. Replaced by the property a k·σ consumer
+> actually rests on — the same absolute sample must flag on a quiet
+> connection and not on a jittery one — and red-proved by zeroing `self.var`.
+>
+> Finding 2's tightened deadline
 > made finding 1's e2e guard (`held_age < 250_000`, sized for the dead 300 ms
 > window) looser than the rule it stands on — retightened to the real ~100 ms
 > warmed margin rather than widening the production window. Finding 6's first
