@@ -296,7 +296,7 @@ fn save_character(world: &World, state: &NetServerState, pc: &PlayerConn) {
         let xp = world.get::<&vordar_game::progression::Xp>(pc.entity).map(|x| x.0).unwrap_or(pc.carried_xp);
         state.db.save(
             pc.name.clone(),
-            CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns, xp },
+            CharacterRecord { zone: state.zone.name.clone(), pos: tr.position, health: hp.current, cooldowns, xp, cooldowns_corrupt: false },
         );
     }
 }

@@ -66,7 +66,7 @@ impl System for ZoneTransferSystem {
             let xp = world.get::<&vordar_game::progression::Xp>(pc.entity).map(|x| x.0).unwrap_or(pc.carried_xp);
             state.db.save(
                 pc.name.clone(),
-                CharacterRecord { zone: portal.target_zone.clone(), pos: portal.target_pos, health, cooldowns, xp },
+                CharacterRecord { zone: portal.target_zone.clone(), pos: portal.target_pos, health, cooldowns, xp, cooldowns_corrupt: false },
             );
             state.server.send(conn, encode(&ServerMsg::Redirect { zone: portal.target_zone.clone(), addr }));
             resources.expect_mut::<DespawnQueue>().push(pc.entity, None);

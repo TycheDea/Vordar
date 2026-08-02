@@ -217,6 +217,7 @@ fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name
         health: 100,
         cooldowns: HashMap::new(),
         xp: 0,
+        cooldowns_corrupt: false,
     };
     state.db.login(conn, name, token, defaults);
 }
@@ -457,6 +458,7 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
         }
     };
 
+    let class_library = resources.expect::<ClassLibrary>().clone();
     let result = spawn_prefab(PLAYER_PREFAB, record.pos, &mut SpawnContext { world, resources });
     let state = resources.expect_mut::<NetServerState>();
     if let Some(names) = new_prefab_table {
@@ -467,19 +469,38 @@ fn complete_db_load(world: &mut World, resources: &mut Resources, loaded: DbLoad
     match result {
         Ok(entity) => {
             // The prefab is the source of truth for everything but
-            // the persisted fields; the DB overrides Health.current.
+            // the persisted fields; the DB overrides Health.current. A
+            // hostile or corrupt row must never grant free overheal or a
+            // health value that instantly triggers death — clamp into the
+            // live prefab's own bounds, floor at 1 so a <=0 row doesn't spawn
+            // a corpse that respawns before the player can act.
             if let Ok(mut hp) = world.get::<&mut Health>(entity) {
-                hp.current = record.health;
+                hp.current = record.health.clamp(1, hp.max);
             }
             let _ = world.insert_one(entity, Xp(record.xp));
-            // Cooldowns are persisted as remainders (`record.cooldowns`),
-            // so a relog or zone transfer restores the exact remaining
-            // cooldown instead of resetting every ability to full.
             let spawn_now = state.server.now_micros();
-            let cooldown_ready: HashMap<String, u64> = record.cooldowns
-                .into_iter()
-                .map(|(id, remaining)| (id, spawn_now + remaining))
-                .collect();
+            let cooldown_ready: HashMap<String, u64> = if record.cooldowns_corrupt {
+                // The persisted cooldown blob failed to parse — its true
+                // remainders are unrecoverable, so fail toward the attacker's
+                // disadvantage: lock every one of the class's abilities out
+                // for its full cooldown instead of trusting the empty map
+                // the parse error left behind.
+                let class_id = world.get::<&ClassId>(entity)
+                    .map(|c| c.id.clone())
+                    .unwrap_or_else(|_| DEFAULT_CLASS.to_owned());
+                class_library.abilities_of(&class_id)
+                    .iter()
+                    .map(|a| (a.id.clone(), spawn_now + a.cooldown_micros))
+                    .collect()
+            } else {
+                // Cooldowns are persisted as remainders (`record.cooldowns`),
+                // so a relog or zone transfer restores the exact remaining
+                // cooldown instead of resetting every ability to full.
+                record.cooldowns
+                    .into_iter()
+                    .map(|(id, remaining)| (id, spawn_now + remaining))
+                    .collect()
+            };
             state.conns.insert(conn, PlayerConn {
                 entity,
                 name: name.clone(),

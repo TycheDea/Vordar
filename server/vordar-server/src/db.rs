@@ -89,6 +89,11 @@ pub struct CharacterRecord {
     pub cooldowns: HashMap<String, u64>,
     /// Per-player XP total as of the moment this record was saved.
     pub xp: u32,
+    /// Set when the stored `cooldowns` blob failed to parse (corrupt or
+    /// hand-edited row) — `cooldowns` above is then an empty, not trusted,
+    /// map, and the spawn path must lock every ability out rather than treat
+    /// the empty map as "nothing was on cooldown".
+    pub cooldowns_corrupt: bool,
 }
 
 enum DbRequest {
@@ -154,7 +159,8 @@ impl DbWorker {
         db.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
-             PRAGMA busy_timeout = 5000;",
+             PRAGMA busy_timeout = 5000;
+             PRAGMA foreign_keys = ON;",
         )?;
         migrate(&mut db)?;
         let (req_tx, req_rx) = mpsc::channel::<DbRequest>();
@@ -315,8 +321,10 @@ fn load_or_create(
         [name],
         |row| {
             let cooldowns_text: String = row.get(5)?;
+            let mut cooldowns_corrupt = false;
             let cooldowns = ron::from_str(&cooldowns_text).unwrap_or_else(|e| {
                 log::error!("db: failed to parse cooldowns for '{name}': {e}");
+                cooldowns_corrupt = true;
                 HashMap::new()
             });
             Ok(CharacterRecord {
@@ -324,6 +332,7 @@ fn load_or_create(
                 pos: Vec3::new(row.get::<_, f64>(1)? as f32, row.get::<_, f64>(2)? as f32, row.get::<_, f64>(3)? as f32),
                 health: row.get(4)?,
                 cooldowns,
+                cooldowns_corrupt,
                 xp: row.get(6)?,
             })
         },
@@ -389,7 +398,7 @@ mod tests {
     }
 
     fn defaults() -> CharacterRecord {
-        CharacterRecord { zone: "start".into(), pos: Vec3::ZERO, health: 100, cooldowns: HashMap::new(), xp: 0 }
+        CharacterRecord { zone: "start".into(), pos: Vec3::ZERO, health: 100, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false }
     }
 
     /// The old always-a-record shape, for the many pre-existing tests that
@@ -429,7 +438,7 @@ mod tests {
         let path = temp_db("fresh");
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        let defaults = CharacterRecord { zone: "start".into(), pos: Vec3::new(3.0, 0.0, -2.0), health: 100, cooldowns: HashMap::new(), xp: 0 };
+        let defaults = CharacterRecord { zone: "start".into(), pos: Vec3::new(3.0, 0.0, -2.0), health: 100, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false };
         handle.login(1, "alice".into(), [0u8; 32], defaults.clone());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.conn, 1);
@@ -446,7 +455,7 @@ mod tests {
             let handle = worker.handle();
             handle.login(1, "bob".into(), [0u8; 32], defaults());
             wait_loaded(&handle);
-            handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: saved_pos, health: 40, cooldowns: HashMap::new(), xp: 40 });
+            handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: saved_pos, health: 40, cooldowns: HashMap::new(), xp: 40, cooldowns_corrupt: false });
             // Drop (handle first, then worker) flushes the queued save.
         }
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
@@ -464,7 +473,7 @@ mod tests {
         let path = temp_db("unknown");
         let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
         let handle = worker.handle();
-        handle.save("ghost".into(), CharacterRecord { zone: "east".into(), pos: Vec3::ONE, health: 1, cooldowns: HashMap::new(), xp: 0 });
+        handle.save("ghost".into(), CharacterRecord { zone: "east".into(), pos: Vec3::ONE, health: 1, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false });
         handle.login(1, "ghost".into(), [0u8; 32], defaults());
         // The save hit no row; the later create uses defaults.
         assert_eq!(wait_loaded(&handle).record, defaults());
@@ -494,7 +503,7 @@ mod tests {
         a.login(1, "carl".into(), [0u8; 32], defaults());
         wait_loaded(&a);
         let moved = Vec3::new(-16.0, 0.0, 0.0);
-        a.save("carl".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 80, cooldowns: HashMap::new(), xp: 0 });
+        a.save("carl".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 80, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false });
         b.login(7, "carl".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&b);
         assert_eq!(loaded.record.zone, "east");
@@ -619,7 +628,7 @@ mod tests {
         assert!(h1.poll().is_empty(), "fork's reply leaked into the original handle after completion");
 
         let moved = Vec3::new(5.0, 0.0, -1.0);
-        h2.save("forked".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 77, cooldowns: HashMap::new(), xp: 0 });
+        h2.save("forked".into(), CharacterRecord { zone: "east".into(), pos: moved, health: 77, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false });
         drop(h1);
         drop(h2);
         drop(worker);
@@ -658,9 +667,9 @@ mod tests {
         }
 
         // Fire the burst without waiting between sends.
-        handle.save("ann".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(1.0, 0.0, 0.0), health: 10, cooldowns: HashMap::new(), xp: 0 });
-        handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(2.0, 0.0, 0.0), health: 20, cooldowns: HashMap::new(), xp: 0 });
-        handle.save("cleo".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(3.0, 0.0, 0.0), health: 30, cooldowns: HashMap::new(), xp: 0 });
+        handle.save("ann".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(1.0, 0.0, 0.0), health: 10, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false });
+        handle.save("bob".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(2.0, 0.0, 0.0), health: 20, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false });
+        handle.save("cleo".into(), CharacterRecord { zone: "east".into(), pos: Vec3::new(3.0, 0.0, 0.0), health: 30, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false });
         handle.login(9, "dana".into(), [0u8; 32], defaults());
         let dana = wait_loaded(&handle);
         assert_eq!(dana.name, "dana");
@@ -707,6 +716,7 @@ mod tests {
                     health: 80,
                     cooldowns: cooldowns.clone(),
                     xp: 0,
+                    cooldowns_corrupt: false,
                 },
             );
             // Drop (handle first, then worker) flushes the queued save.
@@ -716,6 +726,28 @@ mod tests {
         handle.login(2, "dara".into(), [0u8; 32], defaults());
         let loaded = wait_loaded(&handle);
         assert_eq!(loaded.record.cooldowns, cooldowns, "cooldown remainders must survive a reopen");
+    }
+
+    /// A hand-edited or corrupted `cooldowns` blob must not be read as "no
+    /// abilities on cooldown" — `load_or_create` flags it so the caller can
+    /// fail toward a lockout instead of trusting the parse error's empty map.
+    #[test]
+    fn corrupt_cooldown_blob_is_flagged_and_yields_empty_map() {
+        let path = temp_db("corrupt-cooldown-blob");
+        let worker = DbWorker::spawn(path.to_str().unwrap()).unwrap();
+        let handle = worker.handle();
+        handle.login(1, "edna".into(), [0u8; 32], defaults());
+        wait_loaded(&handle);
+
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.execute("UPDATE characters SET cooldowns = 'not valid ron' WHERE name = 'edna'", []).unwrap();
+        }
+
+        handle.login(2, "edna".into(), [0u8; 32], defaults());
+        let loaded = wait_loaded(&handle);
+        assert!(loaded.record.cooldowns.is_empty(), "a corrupt blob must not fabricate cooldown entries");
+        assert!(loaded.record.cooldowns_corrupt, "a corrupt blob must set the corrupt flag");
     }
 
     /// A fresh name's first `login` has nothing to compare against, so it
@@ -767,7 +799,7 @@ mod tests {
         wait_login(&handle);
         handle.save(
             "gwen".into(),
-            CharacterRecord { zone: "east".into(), pos: Vec3::new(5.0, 0.0, 0.0), health: 42, cooldowns: HashMap::new(), xp: 0 },
+            CharacterRecord { zone: "east".into(), pos: Vec3::new(5.0, 0.0, 0.0), health: 42, cooldowns: HashMap::new(), xp: 0, cooldowns_corrupt: false },
         );
         handle.login(2, "gwen".into(), [2u8; 32], defaults());
         let loaded = wait_login(&handle);

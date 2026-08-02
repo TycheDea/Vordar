@@ -97,6 +97,97 @@ fn health_persists_in_db() {
     }
 }
 
+// A hostile or corrupt `characters.health` row must never grant a state
+// better than a legitimate one, nor spawn the character already dead — the
+// stored value clamps into the live prefab's own `[1, max]` bounds.
+#[test]
+fn tampered_health_clamps_into_prefab_bounds() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25185".parse().unwrap();
+    let db = temp_db("tampered-health");
+    let server_db = db.clone();
+    spawn_server(addr, &server_db, 2400);
+
+    // The row must exist (and pass the accounts FK) before it can be
+    // tampered with directly, so log in once and disconnect first.
+    let mut setup = Bot::connect_as(addr, "clampme");
+    setup.wait_for("clampme welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    drop(setup);
+    std::thread::sleep(Duration::from_millis(500));
+
+    {
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute("UPDATE characters SET health = -50 WHERE name = 'clampme'", []).unwrap();
+    }
+    let mut low = Bot::connect_as(addr, "clampme");
+    low.wait_for("clampme re-welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    let low_id = low.player_id.unwrap();
+    low.wait_for("clampme hp replicates", Duration::from_secs(5), |b| b.last_hp.contains_key(&low_id));
+    assert_eq!(
+        low.last_hp.get(&low_id),
+        Some(&1),
+        "a negative stored health must clamp to the floor (1), not spawn already dead"
+    );
+    drop(low);
+    std::thread::sleep(Duration::from_millis(500));
+
+    {
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute("UPDATE characters SET health = 999999 WHERE name = 'clampme'", []).unwrap();
+    }
+    let mut high = Bot::connect_as(addr, "clampme");
+    high.wait_for("clampme re-re-welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    let high_id = high.player_id.unwrap();
+    high.wait_for("clampme hp replicates again", Duration::from_secs(5), |b| b.last_hp.contains_key(&high_id));
+    assert_eq!(
+        high.last_hp.get(&high_id),
+        Some(&100),
+        "a stored health above the prefab's max must clamp down to it, not overheal"
+    );
+}
+
+// A corrupt `characters.cooldowns` blob loses its true remainders, so the
+// spawn path must fail toward the attacker's disadvantage: every one of the
+// class's abilities locks out for its full cooldown, rather than the parse
+// error's empty map being read as "nothing on cooldown".
+#[test]
+fn corrupt_cooldown_blob_locks_out_every_ability_at_spawn() {
+    workspace_root();
+    let addr: SocketAddr = "127.0.0.1:25186".parse().unwrap();
+    let db = temp_db("corrupt-cooldown");
+    let server_db = db.clone();
+    spawn_server(addr, &server_db, 2400);
+
+    let mut setup = Bot::connect_as(addr, "corruptcd");
+    setup.wait_for("corruptcd welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    drop(setup);
+    std::thread::sleep(Duration::from_millis(500));
+
+    {
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute("UPDATE characters SET cooldowns = 'not valid ron' WHERE name = 'corruptcd'", []).unwrap();
+    }
+
+    let mut bot = Bot::connect_as(addr, "corruptcd");
+    bot.wait_for("corruptcd re-welcome", Duration::from_secs(5), |b| b.player_id.is_some());
+    bot.wait_for("corruptcd re-snapshot", Duration::from_secs(5), |b| b.own_pos().is_some());
+    let pos = bot.own_pos().unwrap();
+    bot.send_cast("onslaught", glam::Vec2::new(pos.x, pos.z));
+
+    // A fresh (non-corrupt) character can cast "onslaught" immediately after
+    // spawn — see `relog_restores_exact_cooldown_remainder` — so an empty
+    // window here is only explained by every ability starting locked out.
+    let settle_until = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < settle_until {
+        bot.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        bot.mechanics.is_empty(),
+        "a corrupt cooldown blob must lock every ability out at spawn, not reset it to castable"
+    );
+}
+
 // Relogin while the old session still looks alive (crashed client,
 // close frame lost, quick relaunch) must TAKE OVER, not hang: the new
 // connection gets Welcome + the freshest saved state, the old body despawns,
