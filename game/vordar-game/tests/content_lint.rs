@@ -1053,6 +1053,80 @@ fn town_prop_collision_matches_footprints() {
     );
 }
 
+/// A player's vertical extent above the ground plane (zone_review's
+/// EYE_HEIGHT is 1.6; this leaves headroom without reaching the 3.6 m
+/// gate/lintel springline any collision piece is spawned aloft above). Shared
+/// by the two D5 checks that must agree on what "ground level" means.
+const PLAYER_HEIGHT: f32 = 2.0;
+
+/// D5 (b') — the independent witness under check (b). `footprints.ron`'s
+/// `size` is hand-authored, and check (b) grades the collision union against
+/// it; for a single-piece type that union IS the one hitbox the size was
+/// authored from, so the pair can agree while both drift from the model. This
+/// re-measures `size` against the installed glTF, which no one authored: the
+/// visual mesh may only exceed the footprint (quoins, plinths, the apse fan)
+/// and only by the entry's stated `tolerance`, and may never fall short of it
+/// — a collision box wider than its building is a wall you bump into in the
+/// open. Measured over the same [0, 2.0] m player band `town_prop_clearances`
+/// uses, since `size` is a ground-level footprint: roof eaves overhang the
+/// walls by design and a player never reaches them.
+#[test]
+fn town_footprint_sizes_match_installed_gltf() {
+    let root = repo_root();
+    let assets: std::collections::HashMap<String, AssetEntry> =
+        load_registry(&root.join("content/models/assets.json"));
+    let footprints = load_footprints(&root);
+    let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
+    let start = def.zones.iter().find(|z| z.name == "start").expect("zones.ron has a 'start' zone");
+
+    let mut seen = std::collections::HashSet::new();
+    let mut faults = Vec::new();
+    for prop in &start.visuals.props {
+        let type_name = prop_dir_name(&prop.model);
+        if assets.get(type_name).map(|a| a.kind.as_str()) != Some("kit") {
+            continue;
+        }
+        if !seen.insert(type_name.to_string()) {
+            continue;
+        }
+        let footprint = &footprints.types[type_name];
+        let data = load_gltf_data(root.join(&prop.model).to_str().unwrap())
+            .unwrap_or_else(|e| panic!("kit type '{type_name}': failed to parse: {e}"));
+        let base = data
+            .primitives
+            .iter()
+            .flat_map(|p| p.vertices.iter())
+            .fold(f32::INFINITY, |m, v| m.min(v.position[1]));
+        let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+        for prim in &data.primitives {
+            for v in prim.vertices.iter().filter(|v| v.position[1] <= base + PLAYER_HEIGHT) {
+                for (axis, i) in [(0usize, 0usize), (1, 2)] {
+                    lo[axis] = lo[axis].min(v.position[i]);
+                    hi[axis] = hi[axis].max(v.position[i]);
+                }
+            }
+        }
+        let mesh = (hi[0] - lo[0], hi[1] - lo[1]);
+        // The manifest carries centimetre values, so a centimetre of apparent
+        // shortfall is its own quantization rather than drift.
+        const QUANTIZATION: f32 = 0.01;
+        let over = (mesh.0 - footprint.size.0, mesh.1 - footprint.size.1);
+        let bad = |o: f32| o < -QUANTIZATION || o > footprint.tolerance;
+        if bad(over.0) || bad(over.1) {
+            faults.push(format!(
+                "{type_name}: mesh {:.3}x{:.3} vs footprint {:.3}x{:.3} — overhang {:+.3}/{:+.3} (tol {})",
+                mesh.0, mesh.1, footprint.size.0, footprint.size.1, over.0, over.1, footprint.tolerance
+            ));
+        }
+    }
+    assert!(!seen.is_empty(), "D5: no kit props found in the start zone");
+    assert!(
+        faults.is_empty(),
+        "D5: footprints.ron size does not bound the installed glTF:\n  {}",
+        faults.join("\n  ")
+    );
+}
+
 /// D5 (c): every kit-type start-zone prop's yaw is one of the four facings a
 /// Hitbox Aabb (never rotated) can actually match.
 #[test]
@@ -1092,10 +1166,6 @@ fn town_layout_clearances() {
     const RING_RADIUS: f32 = 3.0;
     const CORRIDOR_X: (f32, f32) = (0.0, 22.0);
     const CORRIDOR_HALF_Z: f32 = 1.5;
-    // A player's vertical extent above the ground plane (zone_review's
-    // EYE_HEIGHT is 1.6; this leaves headroom without reaching the 3.6 m
-    // gate/lintel springline any collision piece is spawned aloft above).
-    const PLAYER_HEIGHT: f32 = 2.0;
 
     let root = repo_root();
     let chapter = vordar_game::chapter::load_chapter(

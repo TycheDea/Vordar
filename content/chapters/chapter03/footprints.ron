@@ -4,10 +4,11 @@
 // door end faces +X (nave runs along X). P2.5's layout lint asserts the
 // chapter03 collision spawns against this data (tasks/town/p24-layout.md §5).
 //
-// size: full outer wall/body XZ extent at ground level — what a collision
-//   Aabb mirrors. NOTE: the plan §1 table lists wall-centerline footprints;
-//   walls extend a further 0.6 m (one wall thickness) in each axis, so e.g.
-//   casa_small_a is 6.6 x 8.6 outer, not 6.0 x 8.0.
+// size: outer wall/body XZ extent within the 2 m player band — what a
+//   collision Aabb mirrors, and re-measured off the glTF by content_lint, so
+//   it is a reading and never an arithmetic. NOTE: the plan §1 table lists
+//   wall-centerline footprints and adding one wall thickness to those gives
+//   numbers ~5 cm wide of the built mesh; the mesh wins.
 // tolerance: how far the visual solid may exceed the collision box per axis
 //   (decorative or approximated volume: quoins/eaves on casas, wall coping,
 //   gate imposts, the round well basin vs its square box, the chapel apse
@@ -24,13 +25,13 @@
 //   single piece already is.
 (
     types: {
-        "casa_small_a": ( size: (6.6, 8.6), tolerance: 0.1 ),
-        "casa_small_b": ( size: (6.2, 8.0), tolerance: 0.1 ),
-        "casa_two_story": ( size: (7.6, 10.6), tolerance: 0.1 ),
+        "casa_small_a": ( size: (6.55, 8.55), tolerance: 0.1 ),
+        "casa_small_b": ( size: (6.2, 7.95), tolerance: 0.1 ),
+        "casa_two_story": ( size: (7.55, 10.55), tolerance: 0.1 ),
         // Composite AABB spans x in [-3.3, 7.35] — centered on the main
         // block, wing to +X. Wing is rotated 90°: ridge along Z.
         "casa_corner": (
-            size: (10.65, 6.6),
+            size: (10.6, 6.55),
             tolerance: 0.1,
             members: [
                 ( prefab: "casa_corner_main", offsets: [(0.0, 0.0)] ),
@@ -58,7 +59,7 @@
         // offsets — chapel is placed at yaw 0, so these equal chapter.ron's
         // world offsets directly).
         "chapel": (
-            size: (20.23, 8.2),
+            size: (20.03, 8.2),
             tolerance: 3.05,
             members: [
                 ( prefab: "chapel_wall_side", offsets: [(0.0, 3.8), (0.0, -3.8)] ),
