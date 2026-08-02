@@ -42,15 +42,31 @@ full-QUIC e2e exercises.
 Cross-type queue:
 
 > **~~finding 1~~ → finding 2 → ~~finding 3~~ → ~~finding 4~~ → finding 5 →
-> finding 6 → finding 7 → finding 8 → finding 9.**
+> ~~finding 6~~ → ~~finding 7~~ → ~~finding 8~~ → ~~finding 9~~.**
 >
-> finding 1 done 2026-08-02 (`fd5a82e`, side rule + two pass-through tests).
-> finding 3 done 2026-08-02 (`48bdbd1` + `.claude` `96b9d98`; `TickRate` and
-> `set_phase_rate` deleted outright for one `set_fixed_hz`).
-> finding 4 done 2026-08-02 (`e42e73f`, panic + `should_panic` test).
+> All struck entries done 2026-08-02: finding 1 `fd5a82e` (side rule + two
+> pass-through tests), finding 3 `48bdbd1` + `.claude` `96b9d98` (`TickRate`
+> and `set_phase_rate` deleted outright for one `set_fixed_hz`), finding 4
+> `e42e73f`, finding 6 `54a28c4`, finding 7 `0a44d52`, finding 8 `e0b699b`,
+> finding 9 `00f5321`. Loop-final gate: clippy clean, `cargo nextest run
+> --workspace` 440 passed / 5 skipped.
+>
 > finding 2's step (2) was pre-empted by `32c4394`, which removed the
 > blood_moon event outright; steps (1) and (3), the install-time resolution
 > check and its test, are still open, so the entry stands.
+>
+> finding 5 is PARKED on a user decision: bounding `Resources::insert` to
+> `Send + Sync` does not compile, because `SpawnQueue`/`DespawnQueue` hold
+> `Box<dyn FnOnce(&mut SpawnContext) + Send>`, which is not `Sync`. The
+> finding's own escalation clause forbids weakening the bound, so the fork
+> (tighten the hook vs. relax `App::insert_resource` to match the documented
+> thread-affine invariant) goes to the user.
+>
+> finding 9 measured a defect its own Suggestion assumed away: mechanic-caused
+> kills never grant XP, because `DeathSystem` (CollisionResolve) reads
+> `DamageDealt` from the current tick while `MechanicResolveSystem` emits it in
+> PostUpdate. Filed as reworks finding 3; the pipeline test pins today's
+> behavior and will flip when that rework lands.
 >
 > 1–2 are live defects (one silent, one actively logging errors). 3–7 are
 > the truth-and-fences cluster: 3 makes the docs/API match the landed
