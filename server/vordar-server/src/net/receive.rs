@@ -16,6 +16,7 @@ use glam::{Vec2, Vec3};
 use hecs::Entity;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use vordar_game::combat::leap::{leap_velocity, LeapImpulse};
 use vordar_game::combat::projectile::spawn_projectile;
 use vordar_game::combat::stats::DamageType;
@@ -205,7 +206,7 @@ fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name
         .find(|(_, pc)| pc.name == name)
         .map(|(&c, pc)| (c, pc.token));
     if let Some((old_conn, old_token)) = old {
-        if old_token != token {
+        if old_token.ct_eq(&token).unwrap_u8() == 0 {
             log::warn!("conn {conn}: login as '{name}' denied — active session token mismatch");
             if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
             state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));
@@ -230,7 +231,7 @@ fn handle_login(world: &mut World, resources: &mut Resources, conn: ConnId, name
         .find(|(_, (n, _))| n == &name)
         .map(|(&c, &(_, t))| (c, t));
     if let Some((stale_conn, stale_token)) = stale {
-        if stale_token != token {
+        if stale_token.ct_eq(&token).unwrap_u8() == 0 {
             log::warn!("conn {conn}: login as '{name}' denied — in-flight login token mismatch");
             if let Some(ip) = peer_ip { state.login_failures.record(ip, now); }
             state.server.send(conn, encode(&ServerMsg::LoginDenied { reason: LoginDenyReason::BadCredentials }));

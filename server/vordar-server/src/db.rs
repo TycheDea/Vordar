@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
 use std::thread::JoinHandle;
+use subtle::ConstantTimeEq;
 use vordar_protocol::AccountToken;
 
 // Append-only schema history: entry i brings a database from user_version i
@@ -372,7 +373,9 @@ fn login(db: &Connection, name: &str, token: &AccountToken, defaults: CharacterR
             id
         }
         Some((id, Some(claimed))) => {
-            if claimed != hash {
+            // Digest compare, so timing can never leak byte-position
+            // information even though the preimage isn't attacker-steerable.
+            if claimed.ct_eq(&hash).unwrap_u8() == 0 {
                 return Ok(DbLoginOutcome::BadToken);
             }
             id

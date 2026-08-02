@@ -4007,6 +4007,7 @@ dependencies = [
  "ron",
  "rusqlite",
  "sha2",
+ "subtle",
  "test-support",
  "vordar-game",
  "vordar-protocol",

@@ -55,6 +55,10 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # are hashed at rest, never stored raw.
 sha2 = "0.10"
 
+# Constant-time comparison for auth material (server only): timing must
+# never leak byte-position information from a token or digest compare.
+subtle = "2.6"
+
 # Account token minting (client only, networking rework 1 finding 3): the
 # real client mints its 32-byte token once via the OS CSPRNG.
 getrandom = "0.3"
