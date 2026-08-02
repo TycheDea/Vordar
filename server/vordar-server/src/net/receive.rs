@@ -637,9 +637,10 @@ fn validate_intent(last_seq: u32, last_t: u64, seq: u32, t: u64, recv_micros: u6
         return Err("timestamp in the future");
     }
     // Arrival deadline: an input claiming time T must arrive within ~one RTT
-    // of T. MAX_REWIND acts as a floor while RTT estimates settle; the actual
-    // lag-compensation rewind is capped separately.
-    let max_age = rtt.max(MAX_REWIND_MICROS) + ARRIVAL_MARGIN_MICROS;
+    // of T. MAX_REWIND is only a bootstrap floor before the RTT estimate
+    // warms up (rtt == 0) — once warmed, the measured RTT alone bounds the
+    // window, so a low-RTT client can't backdate stamps for extra favor.
+    let max_age = if rtt == 0 { MAX_REWIND_MICROS } else { rtt } + ARRIVAL_MARGIN_MICROS;
     if recv_micros.saturating_sub(t) > max_age {
         return Err("arrived past deadline");
     }
@@ -745,6 +746,37 @@ mod tests {
             applied_velocity(&world, dashing, dir),
             dash,
             "a LeapImpulse overrides the intent — history must store the dash"
+        );
+    }
+
+    /// At a warmed, low RTT (20 ms), the accept window is `rtt + margin` —
+    /// not the 200 ms bootstrap floor — so a stamp arriving just past that
+    /// boundary is rejected even though it would pass under the old floor.
+    #[test]
+    fn arrival_deadline_at_low_rtt_uses_measured_rtt_not_the_bootstrap_floor() {
+        let rtt = 20_000;
+        let t = 0;
+        let recv_at_boundary = t + rtt + ARRIVAL_MARGIN_MICROS;
+        assert_eq!(validate_intent(0, 0, 1, t, recv_at_boundary, rtt), Ok(()));
+        assert_eq!(
+            validate_intent(0, 0, 1, t, recv_at_boundary + 1, rtt),
+            Err("arrived past deadline")
+        );
+    }
+
+    /// At a warmed, high RTT (180 ms) — still under the old 200 ms floor —
+    /// the window tracks the measured RTT, both accepting a stamp that the
+    /// floor would have permitted and rejecting one just past the new,
+    /// tighter boundary.
+    #[test]
+    fn arrival_deadline_at_high_rtt_still_tracks_measured_rtt() {
+        let rtt = 180_000;
+        let t = 0;
+        let recv_at_boundary = t + rtt + ARRIVAL_MARGIN_MICROS;
+        assert_eq!(validate_intent(0, 0, 1, t, recv_at_boundary, rtt), Ok(()));
+        assert_eq!(
+            validate_intent(0, 0, 1, t, recv_at_boundary + 1, rtt),
+            Err("arrived past deadline")
         );
     }
 

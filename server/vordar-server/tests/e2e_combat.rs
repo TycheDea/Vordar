@@ -258,8 +258,8 @@ fn a_cast_never_consumes_an_in_flight_move() {
     // the hold-back is a deadline reject, not the lane race under test.
     let held_age = bot.client.server_now_micros().unwrap() - stamped_at;
     assert!(
-        held_age < 250_000,
-        "the cast round trip took {held_age} us — too slow to hold a move inside its arrival deadline"
+        held_age < 100_000,
+        "the held-back move must land within the server's warmed arrival margin (~100 ms on loopback), but took {held_age} us"
     );
 
     bot.client.send_datagram(encode(&ClientMsg::MoveIntents { intents: vec![held] }));
