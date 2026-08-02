@@ -49,7 +49,7 @@ fn asset_load_benches(c: &mut Criterion) {
             };
             // Ground defaults: size = 400.0 (from vordar_game::zones::default_ground_size)
             // tile = 7.0 (from content/zones/zones.ron:21)
-            let data = ground::generate_ground(black_box(400.0), black_box(7.0), black_box(material));
+            let data = ground::generate_ground(black_box(400.0), black_box(7.0), black_box(material), Vec::new());
             black_box(data)
         })
     });

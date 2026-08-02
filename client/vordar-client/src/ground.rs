@@ -57,13 +57,100 @@ pub fn height(x: f32, z: f32) -> f32 {
     GROUND_TOP_Y + (n / 1.4 - 0.5) * 2.0 * HILL_AMPLITUDE * ramp
 }
 
+/// A material swap over an axis-aligned rectangle of the grid, `min`/`max`
+/// in world XZ. Must land on grid lines (`generate_ground`'s `step`) — the
+/// assignment below tests quad centres, so an off-grid bound would silently
+/// exclude the boundary quad's near half instead of raising an error.
+pub struct GroundRegion {
+    pub min:      (f32, f32),
+    pub max:      (f32, f32),
+    pub tile:     f32,
+    pub material: MaterialData,
+}
+
 /// Build the ground mesh: `size`×`size` centred on the origin, UVs tiled
-/// every `tile` world units, normals from the height field.
-pub fn generate_ground(size: f32, tile: f32, material: MaterialData) -> MeshData {
+/// every `tile` world units, normals from the height field. `regions` layers
+/// material overrides on top of `material`/`tile`; empty `regions` is the
+/// single-primitive base case.
+pub fn generate_ground(size: f32, tile: f32, material: MaterialData, regions: Vec<GroundRegion>) -> MeshData {
     let n = RESOLUTION;
     let step = size / (n - 1) as f32;
     let half = size / 2.0;
 
+    if regions.is_empty() {
+        return generate_uniform_ground(n, step, half, tile, material);
+    }
+
+    // Quad (ix, iz) belongs to the last region whose rectangle contains its
+    // centre, else the base material. Centres sit half a step off any
+    // snapped bound, so a boundary quad is never ambiguous.
+    let region_of = |ix: usize, iz: usize| -> usize {
+        let xc = -half + (ix as f32 + 0.5) * step;
+        let zc = -half + (iz as f32 + 0.5) * step;
+        regions
+            .iter()
+            .rposition(|r| xc >= r.min.0 && xc < r.max.0 && zc >= r.min.1 && zc < r.max.1)
+            .map_or(0, |i| i + 1)
+    };
+
+    let group_count = regions.len() + 1;
+    let mut positions: Vec<Vec<[f32; 3]>> = vec![Vec::new(); group_count];
+    let mut normals: Vec<Vec<[f32; 3]>> = vec![Vec::new(); group_count];
+    let mut uvs: Vec<Vec<[f32; 2]>> = vec![Vec::new(); group_count];
+    let mut indices: Vec<Vec<u32>> = vec![Vec::new(); group_count];
+
+    for iz in 0..n - 1 {
+        for ix in 0..n - 1 {
+            let g = region_of(ix, iz);
+            let tile_g = if g == 0 { tile } else { regions[g - 1].tile };
+            let base = positions[g].len() as u32;
+            for &(cx, cz) in &[(ix, iz), (ix + 1, iz), (ix, iz + 1), (ix + 1, iz + 1)] {
+                let x = -half + cx as f32 * step;
+                let z = -half + cz as f32 * step;
+                positions[g].push([x, height(x, z), z]);
+                normals[g].push(vertex_normal(x, z, step));
+                uvs[g].push([x / tile_g, z / tile_g]);
+            }
+            let (a, b, c, d) = (base, base + 1, base + 2, base + 3);
+            indices[g].extend_from_slice(&[a, d, b, a, c, d]);
+        }
+    }
+
+    // One material per group, base first, in the same order as `regions` —
+    // moved out here (not cloned) since MaterialData holds Arc'd images with
+    // no Clone impl.
+    let materials: Vec<MaterialData> =
+        std::iter::once(material).chain(regions.into_iter().map(|r| r.material)).collect();
+
+    let mut primitives = Vec::with_capacity(group_count);
+    for (g, mat) in materials.into_iter().enumerate() {
+        if positions[g].is_empty() {
+            continue;
+        }
+        let tangents = generate_tangents(&positions[g], &normals[g], &uvs[g], &indices[g]);
+        let vertices = positions[g]
+            .iter()
+            .zip(normals[g].iter())
+            .zip(uvs[g].iter())
+            .zip(tangents.iter())
+            .map(|(((p, nrm), uv), t)| MeshVertex { position: *p, normal: *nrm, uv: *uv, tangent: *t })
+            .collect();
+        primitives.push(PrimitiveData { vertices, indices: std::mem::take(&mut indices[g]), material: mat, skin: None });
+    }
+
+    MeshData { primitives, skeleton: None, clips: Vec::new() }
+}
+
+/// Central-difference normal at world (x, z), sampled `step` (clamped) apart.
+fn vertex_normal(x: f32, z: f32, step: f32) -> [f32; 3] {
+    let e = step.max(0.5);
+    let dx = (height(x + e, z) - height(x - e, z)) / (2.0 * e);
+    let dz = (height(x, z + e) - height(x, z - e)) / (2.0 * e);
+    glam::Vec3::new(-dx, 1.0, -dz).normalize().to_array()
+}
+
+/// The no-region case: one primitive sharing a single `n`×`n` vertex grid.
+fn generate_uniform_ground(n: usize, step: f32, half: f32, tile: f32, material: MaterialData) -> MeshData {
     let mut positions = Vec::with_capacity(n * n);
     let mut normals = Vec::with_capacity(n * n);
     let mut uvs = Vec::with_capacity(n * n);
@@ -72,12 +159,7 @@ pub fn generate_ground(size: f32, tile: f32, material: MaterialData) -> MeshData
             let x = -half + ix as f32 * step;
             let z = -half + iz as f32 * step;
             positions.push([x, height(x, z), z]);
-            // Central differences on the height field.
-            let e = step.max(0.5);
-            let dx = (height(x + e, z) - height(x - e, z)) / (2.0 * e);
-            let dz = (height(x, z + e) - height(x, z - e)) / (2.0 * e);
-            let nrm = glam::Vec3::new(-dx, 1.0, -dz).normalize();
-            normals.push(nrm.to_array());
+            normals.push(vertex_normal(x, z, step));
             uvs.push([x / tile, z / tile]);
         }
     }
@@ -200,7 +282,7 @@ mod tests {
 
     #[test]
     fn mesh_uvs_tile_by_world_units() {
-        let data = generate_ground(100.0, 5.0, MaterialData::default());
+        let data = generate_ground(100.0, 5.0, MaterialData::default(), Vec::new());
         let prim = &data.primitives[0];
         assert_eq!(prim.vertices.len(), RESOLUTION * RESOLUTION);
         for v in &prim.vertices {
@@ -211,7 +293,7 @@ mod tests {
 
     #[test]
     fn normals_are_unit_and_upward() {
-        let data = generate_ground(400.0, 6.0, MaterialData::default());
+        let data = generate_ground(400.0, 6.0, MaterialData::default(), Vec::new());
         for v in &data.primitives[0].vertices {
             let nrm = glam::Vec3::from(v.normal);
             assert!((nrm.length() - 1.0).abs() < 1e-3);
@@ -221,12 +303,40 @@ mod tests {
 
     #[test]
     fn triangles_wind_ccw_from_above() {
-        let data = generate_ground(100.0, 5.0, MaterialData::default());
+        let data = generate_ground(100.0, 5.0, MaterialData::default(), Vec::new());
         let prim = &data.primitives[0];
         for tri in prim.indices.chunks_exact(3).take(50) {
             let p = |i: u32| glam::Vec3::from(prim.vertices[i as usize].position);
             let n = (p(tri[1]) - p(tri[0])).cross(p(tri[2]) - p(tri[0]));
             assert!(n.y > 0.0, "CCW from above");
+        }
+    }
+
+    #[test]
+    fn region_quads_get_the_regions_material_and_tile() {
+        let step = 100.0 / (RESOLUTION - 1) as f32;
+        let region = GroundRegion {
+            min:      (-step, -step),
+            max:      (step, step),
+            tile:     2.0,
+            material: MaterialData { roughness_factor: 0.5, ..Default::default() },
+        };
+        let data = generate_ground(100.0, 5.0, MaterialData::default(), vec![region]);
+        assert_eq!(data.primitives.len(), 2, "base + one region");
+
+        let region_prim = data
+            .primitives
+            .iter()
+            .find(|p| p.material.roughness_factor == 0.5)
+            .expect("region primitive present");
+        assert!(!region_prim.vertices.is_empty());
+        for v in &region_prim.vertices {
+            assert!((v.uv[0] - v.position[0] / 2.0).abs() < 1e-4, "region tile applied");
+        }
+
+        let base_prim = data.primitives.iter().find(|p| p.material.roughness_factor != 0.5).unwrap();
+        for v in &base_prim.vertices {
+            assert!((v.uv[0] - v.position[0] / 5.0).abs() < 1e-4, "base tile applied outside region");
         }
     }
 }

@@ -116,9 +116,20 @@ impl System for ZoneDressingSystem {
         if let Some(g) = &visuals.ground {
             let dir = g.texture_dir.clone();
             let (size, tile) = (g.size, g.tile);
+            let region_defs = g.regions.clone();
             let key = format!("zone-ground:{zone}");
             let job = move || {
-                Ok(crate::ground::generate_ground(size, tile, crate::ground::load_ground_material(&dir)?))
+                let material = crate::ground::load_ground_material(&dir)?;
+                let mut regions = Vec::with_capacity(region_defs.len());
+                for r in &region_defs {
+                    regions.push(crate::ground::GroundRegion {
+                        min:      r.min,
+                        max:      r.max,
+                        tile:     r.tile,
+                        material: crate::ground::load_ground_material(&r.texture_dir)?,
+                    });
+                }
+                Ok(crate::ground::generate_ground(size, tile, material, regions))
             };
             if engine_renderer::request_procedural_mesh(&key, job, resources) {
                 world.spawn((

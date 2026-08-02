@@ -100,6 +100,23 @@ pub struct GroundDef {
     /// Ground mesh side length, centred on the origin.
     #[serde(default = "default_ground_size")]
     pub size: f32,
+    /// Ordered material overrides; a grid quad takes the last region that
+    /// contains it, else `texture_dir`/`tile` above.
+    #[serde(default)]
+    pub regions: Vec<GroundRegion>,
+}
+
+/// A material swap over an axis-aligned rectangle of the ground grid.
+/// `min`/`max` must land on grid lines (`generate_ground`'s `step`) — an
+/// off-grid bound would split a quad across two materials with no seam to
+/// hide it, unlike a snapped bound which only ever falls under dressing.
+#[derive(Clone, serde::Deserialize)]
+pub struct GroundRegion {
+    pub texture_dir: String,
+    #[serde(default = "default_ground_tile")]
+    pub tile: f32,
+    pub min: (f32, f32),
+    pub max: (f32, f32),
 }
 
 #[derive(Clone, serde::Deserialize)]

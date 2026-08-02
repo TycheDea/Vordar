@@ -115,7 +115,7 @@ fn main() {
             eprintln!("render_material: {e}");
             exit(1);
         });
-        let ground = generate_ground(GROUND_SIZE, GROUND_TILE, material);
+        let ground = generate_ground(GROUND_SIZE, GROUND_TILE, material, Vec::new());
         match args.distance {
             Some(d) => {
                 let look_target = Vec3::new(0.0, GROUND_TOP_Y, 0.0);

@@ -230,15 +230,22 @@ fn zone_visual_refs_load() {
             assert!(root.join(env).exists(), "zone '{}': env '{}' missing", zone.name, env);
         }
         if let Some(g) = &v.ground {
-            let dir = root.join(&g.texture_dir);
-            for tag in ["diff", "nor_gl", "rough"] {
-                let found = std::fs::read_dir(&dir)
-                    .unwrap_or_else(|e| panic!("zone '{}': ground dir {dir:?}: {e}", zone.name))
-                    .flatten()
-                    .any(|f| f.file_name().to_string_lossy().contains(tag));
-                assert!(found, "zone '{}': ground set lacks a *{tag}* map", zone.name);
+            let ground_dirs = std::iter::once(&g.texture_dir).chain(g.regions.iter().map(|r| &r.texture_dir));
+            for dir in ground_dirs {
+                let dir = root.join(dir);
+                for tag in ["diff", "nor_gl", "rough"] {
+                    let found = std::fs::read_dir(&dir)
+                        .unwrap_or_else(|e| panic!("zone '{}': ground dir {dir:?}: {e}", zone.name))
+                        .flatten()
+                        .any(|f| f.file_name().to_string_lossy().contains(tag));
+                    assert!(found, "zone '{}': ground set lacks a *{tag}* map", zone.name);
+                }
             }
             assert!(g.tile > 0.0 && g.size > 0.0, "zone '{}': degenerate ground", zone.name);
+            for r in &g.regions {
+                assert!(r.tile > 0.0, "zone '{}': degenerate ground region tile", zone.name);
+                assert!(r.min.0 < r.max.0 && r.min.1 < r.max.1, "zone '{}': degenerate ground region bounds", zone.name);
+            }
         }
         for prop in &v.props {
             let path = root.join(&prop.model);
@@ -346,24 +353,26 @@ fn ground_sets_within_dimension_cap() {
 
     for zone in &def.zones {
         if let Some(g) = &zone.visuals.ground {
-            let dir = root.join(&g.texture_dir);
+            let ground_dirs = std::iter::once(&g.texture_dir).chain(g.regions.iter().map(|r| &r.texture_dir));
+            for dir in ground_dirs {
+                let dir = root.join(dir);
+                for tag in ["diff", "nor_gl", "rough"] {
+                    let path = std::fs::read_dir(&dir)
+                        .unwrap_or_else(|e| panic!("zone '{}': ground dir {dir:?}: {e}", zone.name))
+                        .flatten()
+                        .find(|f| f.file_name().to_string_lossy().contains(tag) && !f.file_name().to_string_lossy().ends_with(".dds"))
+                        .unwrap_or_else(|| panic!("zone '{}': ground set lacks a *{tag}* map", zone.name))
+                        .path();
 
-            for tag in ["diff", "nor_gl", "rough"] {
-                let path = std::fs::read_dir(&dir)
-                    .unwrap_or_else(|e| panic!("zone '{}': ground dir {dir:?}: {e}", zone.name))
-                    .flatten()
-                    .find(|f| f.file_name().to_string_lossy().contains(tag) && !f.file_name().to_string_lossy().ends_with(".dds"))
-                    .unwrap_or_else(|| panic!("zone '{}': ground set lacks a *{tag}* map", zone.name))
-                    .path();
+                    let img = load_image_rgba(path.to_str().unwrap())
+                        .unwrap_or_else(|e| panic!("zone '{}': failed to load {tag} map: {e}", zone.name));
 
-                let img = load_image_rgba(path.to_str().unwrap())
-                    .unwrap_or_else(|e| panic!("zone '{}': failed to load {tag} map: {e}", zone.name));
-
-                assert!(
-                    img.width <= MAX_DIM && img.height <= MAX_DIM,
-                    "VQ-C5: zone '{}' ground {tag} map exceeds 4096² ({}×{})",
-                    zone.name, img.width, img.height
-                );
+                    assert!(
+                        img.width <= MAX_DIM && img.height <= MAX_DIM,
+                        "VQ-C5: zone '{}' ground {tag} map exceeds 4096² ({}×{})",
+                        zone.name, img.width, img.height
+                    );
+                }
             }
         }
     }
@@ -421,28 +430,37 @@ fn total_texture_memory_within_budget() {
     let def = vordar_game::zones::load_zones(root.join("content/zones/zones.ron").to_str().unwrap());
 
     let mut loaded_models = std::collections::HashSet::new();
+    let mut counted_ground_dirs = std::collections::HashSet::new();
     for zone in &def.zones {
         // (c) Ground sets: diff/nor_gl/mr maps — same sidecar-then-source
-        // preference as `client::ground::load_ground_material`.
+        // preference as `client::ground::load_ground_material`. Each unique
+        // dir once — the same GPU texture residents regardless of how many
+        // zones or regions reference it.
         if let Some(g) = &zone.visuals.ground {
-            let dir = root.join(&g.texture_dir);
-            let find = |tag: &str, dds_only: bool| -> Option<PathBuf> {
-                std::fs::read_dir(&dir).ok()?.flatten().find_map(|f| {
-                    let name = f.file_name().to_string_lossy().into_owned();
-                    (name.contains(tag) && name.ends_with(".dds") == dds_only).then(|| f.path())
-                })
-            };
-
-            for (dds_tag, src_tag) in [("diff", "diff"), ("nor_gl", "nor_gl"), ("mr", "rough")] {
-                let bytes = match find(dds_tag, true) {
-                    Some(path) => {
-                        load_dds_image(path.to_str().unwrap()).ok().map(|img| img.data.len() as u64)
-                    }
-                    None => find(src_tag, false)
-                        .and_then(|path| load_image_rgba(path.to_str().unwrap()).ok())
-                        .map(|img| (img.width as u64) * (img.height as u64) * 4 * 4 / 3),
+            let ground_dirs = std::iter::once(&g.texture_dir).chain(g.regions.iter().map(|r| &r.texture_dir));
+            for dir in ground_dirs {
+                if !counted_ground_dirs.insert(dir.clone()) {
+                    continue;
+                }
+                let dir = root.join(dir);
+                let find = |tag: &str, dds_only: bool| -> Option<PathBuf> {
+                    std::fs::read_dir(&dir).ok()?.flatten().find_map(|f| {
+                        let name = f.file_name().to_string_lossy().into_owned();
+                        (name.contains(tag) && name.ends_with(".dds") == dds_only).then(|| f.path())
+                    })
                 };
-                total_bytes += bytes.unwrap_or(0);
+
+                for (dds_tag, src_tag) in [("diff", "diff"), ("nor_gl", "nor_gl"), ("mr", "rough")] {
+                    let bytes = match find(dds_tag, true) {
+                        Some(path) => {
+                            load_dds_image(path.to_str().unwrap()).ok().map(|img| img.data.len() as u64)
+                        }
+                        None => find(src_tag, false)
+                            .and_then(|path| load_image_rgba(path.to_str().unwrap()).ok())
+                            .map(|img| (img.width as u64) * (img.height as u64) * 4 * 4 / 3),
+                    };
+                    total_bytes += bytes.unwrap_or(0);
+                }
             }
         }
 
@@ -530,10 +548,14 @@ fn material_textures_have_fresh_sidecars() {
                 check_gltf_sidecars(&root.join(&prop.model));
             }
         }
-        if let Some(g) = &zone.visuals.ground
-            && checked_ground.insert(g.texture_dir.clone()) {
-                check_ground_sidecars(&root.join(&g.texture_dir));
+        if let Some(g) = &zone.visuals.ground {
+            let ground_dirs = std::iter::once(&g.texture_dir).chain(g.regions.iter().map(|r| &r.texture_dir));
+            for dir in ground_dirs {
+                if checked_ground.insert(dir.clone()) {
+                    check_ground_sidecars(&root.join(dir));
+                }
             }
+        }
     }
 }
 

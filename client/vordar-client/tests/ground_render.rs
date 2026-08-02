@@ -34,7 +34,7 @@ fn zone_ground_renders_with_texture_variation() {
         return;
     }
 
-    let data = generate_ground(400.0, 7.0, material);
+    let data = generate_ground(400.0, 7.0, material, Vec::new());
     let target = r.target(256, 256);
     r.render_mesh(&target, data, wgpu::Color::BLACK);
     let pixels = r.read(&target);

@@ -133,7 +133,7 @@ fn print_containment(boxes: &[(Vec3, Vec3)]) {
 
 fn ground_prims() -> Vec<PrimitiveData> {
     let material = load_ground_material(GROUND_DIR).unwrap_or_else(|e| panic!("ground: {e}"));
-    generate_ground(GROUND_SIZE, GROUND_TILE, material).primitives
+    generate_ground(GROUND_SIZE, GROUND_TILE, material, Vec::new()).primitives
 }
 
 fn render_frame(r: &mut OffscreenRenderer, prims: Vec<PrimitiveData>, eye: Vec3, target: Vec3, w: u32, h: u32) -> (RgbaImage, Vec<u8>) {

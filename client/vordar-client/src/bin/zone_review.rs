@@ -23,7 +23,7 @@ use image::RgbaImage;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::process::exit;
-use vordar_client::ground::{generate_ground, height as ground_height, load_ground_material, GROUND_TOP_Y};
+use vordar_client::ground::{generate_ground, height as ground_height, load_ground_material, GroundRegion, GROUND_TOP_Y};
 use vordar_client::presentation::DETAIL_TEXTURE_DIR;
 use vordar_game::zones::{load_zones, resolve_sun_color, resolve_sun_dir, ZoneVisuals};
 
@@ -284,7 +284,17 @@ fn build_ground(visuals: &ZoneVisuals) -> Vec<PrimitiveData> {
     match &visuals.ground {
         Some(g) => {
             let material = load_ground_material(&g.texture_dir).unwrap_or_else(|e| die(format!("ground: {e}")));
-            generate_ground(g.size, g.tile, material).primitives
+            let regions: Vec<GroundRegion> = g
+                .regions
+                .iter()
+                .map(|r| GroundRegion {
+                    min:      r.min,
+                    max:      r.max,
+                    tile:     r.tile,
+                    material: load_ground_material(&r.texture_dir).unwrap_or_else(|e| die(format!("ground region: {e}"))),
+                })
+                .collect();
+            generate_ground(g.size, g.tile, material, regions).primitives
         }
         None => vec![review::ground_quad(GROUND_TOP_Y, GROUND_EXTENT)],
     }
@@ -380,6 +390,13 @@ struct NamedShot {
 }
 
 const ROCALBA_SHOTS: &[NamedShot] = &[
+    // Plaza mayor (r≈12 grid-snapped cobble rectangle) from above the well,
+    // steep enough pitch to read the ground material out to the row fronts.
+    NamedShot { name: "plaza", target: (0.0, 0.0), select_radius: 14.0, camera_radius: 26.0, azimuth_deg: 30.0, pitch: 1.1, aim_y: 1.0 },
+    // The street corridor between the casa rows (cobble strip z∈[-9.375,
+    // 9.375]), framed along its X run so the cobble/cracked-earth seam at
+    // both ends is visible against the row fronts.
+    NamedShot { name: "street", target: (-3.0, 0.0), select_radius: 26.0, camera_radius: 42.0, azimuth_deg: 0.0, pitch: 0.9, aim_y: 1.5 },
     // East gate astride the road (x=15, z=0), with the unfinished breach
     // (z∈[3.2,7.0]) and its crucero north of it.
     NamedShot { name: "gate", target: (15.0, 2.0), select_radius: 9.0, camera_radius: 16.0, azimuth_deg: 200.0, pitch: GAMEPLAY_PITCH, aim_y: EYE_HEIGHT },

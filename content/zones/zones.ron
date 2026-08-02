@@ -39,7 +39,27 @@
                 // thinning above so prop tops read clearer than the ground haze.
                 fog_height: 0.0,
                 fog_height_falloff: 0.12,
-                ground: Some((texture_dir: "content/textures/ground/cracked_earth", tile: 7.0)),
+                ground: Some((
+                    texture_dir: "content/textures/ground/cracked_earth",
+                    tile: 7.0,
+                    // Worn cobble (§3) over the paved corridor between the casa
+                    // rows, everywhere else stays cracked earth. Rectangle
+                    // snapped outward to the 3.125 m ground grid
+                    // (400/(RESOLUTION-1)) so the material seam falls exactly
+                    // on a grid line — no staircase, since quantization only
+                    // bites diagonal or curved bounds.
+                    regions: [
+                        // Casa-row facades sit at z=+-9.2 (measured from
+                        // footprints.ron door-facing edges), snapped outward to
+                        // z=+-9.375; the rows bound the premise §4 plaza, so
+                        // paving stops at the facade line rather than at the
+                        // plaza's nominal r≈12. X spans the built row extent
+                        // (casa_small_b/a/two_story/corner placements above,
+                        // corner wings included via footprints.ron's composite
+                        // AABB), snapped outward from [-19.35, 13.95].
+                        (texture_dir: "content/textures/ground/worn_cobble", tile: 7.0, min: (-21.875, -9.375), max: (15.625, 9.375)),
+                    ],
+                )),
                 props: [
                     // Rocalba town (tasks/town/p24-layout.md §4). Every kit
                     // placement here has a same-XZ collision spawn in
