@@ -28,6 +28,10 @@ pub struct NetMetrics {
     /// large) and was dropped instead of falling back to the stream —
     /// datagrams are best-effort by contract; the next cadence supersedes.
     pub datagram_send_failures: AtomicU64,
+    /// Encoded byte length of the most recently sent `Snapshot` datagram —
+    /// a gauge, not a cumulative counter, so it reflects current fan-out
+    /// size against the WAN budget rather than an ever-growing sum.
+    pub snapshot_bytes: AtomicU64,
 }
 
 impl NetMetrics {
@@ -65,5 +69,10 @@ impl NetMetrics {
     #[inline]
     pub fn record_datagram_send_failure(&self) {
         self.datagram_send_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_snapshot_bytes(&self, len: usize) {
+        self.snapshot_bytes.store(len as u64, Ordering::Relaxed);
     }
 }

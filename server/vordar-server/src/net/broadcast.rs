@@ -21,6 +21,9 @@ use super::{NetServerState, AOI_RADIUS, STAGGER};
 
 pub const MAX_SNAPSHOT_STATES: usize = 64;
 pub const NEAREST_GUARANTEED: usize = 32;
+/// WAN budget for one encoded `Snapshot` datagram — steady-state crowds run
+/// well under this; it pins headroom against the 64-state worst case.
+const MAX_SNAPSHOT_BYTES: usize = 1200;
 
 /// One AOI-gathered candidate before wire ids are assigned: entity, position,
 /// health bucket (for wire encoding), and its AOI-test radius.
@@ -89,7 +92,7 @@ impl System for SnapshotBroadcastSystem {
                 // Periodic net metrics dump for operational visibility.
                 let m = state.server.metrics();
                 log::info!(
-                    "net metrics: frames_in={} frames_out={} bytes_in={} bytes_out={} rejects={} writer_queue_depth={} busy_micros={}",
+                    "net metrics: frames_in={} frames_out={} bytes_in={} bytes_out={} rejects={} writer_queue_depth={} busy_micros={} datagrams_in={} datagrams_out={} datagram_send_failures={} snapshot_bytes={}",
                     m.frames_in.load(Ordering::Relaxed),
                     m.frames_out.load(Ordering::Relaxed),
                     m.bytes_in.load(Ordering::Relaxed),
@@ -97,6 +100,10 @@ impl System for SnapshotBroadcastSystem {
                     m.rejects.load(Ordering::Relaxed),
                     m.writer_queue_depth.load(Ordering::Relaxed),
                     m.busy_micros.load(Ordering::Relaxed),
+                    m.datagrams_in.load(Ordering::Relaxed),
+                    m.datagrams_out.load(Ordering::Relaxed),
+                    m.datagram_send_failures.load(Ordering::Relaxed),
+                    m.snapshot_bytes.load(Ordering::Relaxed),
                 );
             }
             // Stagger: only this tick's slice of connections is served — each
@@ -211,11 +218,18 @@ impl System for SnapshotBroadcastSystem {
             // supersedes it — this avoids head-of-line blocking a reliable
             // stream would otherwise impose.
             let last_processed_seq = pc.applied_seq;
-            state.server.send_datagram(conn, encode(&ServerMsg::Snapshot {
+            let snapshot_bytes = encode(&ServerMsg::Snapshot {
                 tick,
                 last_processed_seq,
                 states,
-            }));
+            });
+            debug_assert!(
+                snapshot_bytes.len() <= MAX_SNAPSHOT_BYTES,
+                "encoded snapshot exceeds WAN budget: {} > {MAX_SNAPSHOT_BYTES} bytes",
+                snapshot_bytes.len(),
+            );
+            state.server.metrics().record_snapshot_bytes(snapshot_bytes.len());
+            state.server.send_datagram(conn, snapshot_bytes);
         }
     }
 }
@@ -312,5 +326,82 @@ mod tests {
         let (sel, _) = select_states(&e, 31, MAX_SNAPSHOT_STATES, NEAREST_GUARANTEED);
         let unique: HashSet<usize> = sel.iter().copied().collect();
         assert_eq!(unique.len(), sel.len());
+    }
+
+    #[test]
+    fn crowd_snapshot_gauge_reflects_a_full_budget_of_states() {
+        use crate::db::DbWorker;
+        use crate::net::PlayerConn;
+        use engine_core::components::{CellOccupant, CollisionShape, Hitbox, Solid};
+        use engine_net::NetServer;
+        use engine_physics::cell_update::CellUpdateSystem;
+        use std::collections::{HashMap, VecDeque};
+        use std::time::Instant;
+        use vordar_game::zones::ZoneDef;
+        use vordar_protocol::PROTOCOL_VERSION;
+
+        let worker = DbWorker::spawn(":memory:").unwrap();
+        let server = NetServer::bind("127.0.0.1:0".parse().unwrap(), PROTOCOL_VERSION).unwrap();
+        let directory = HashMap::from([("test".to_owned(), server.local_addr())]);
+        let zone = ZoneDef { name: "test".into(), chapter: None, portals: Vec::new(), visuals: Default::default() };
+        let mut state = NetServerState::new(server, worker.handle(), None, zone, directory, Instant::now());
+        state.prefab_table = Some((std::sync::Arc::new(vec!["human".to_string()]), HashMap::from([("human".to_string(), 0u16)])));
+
+        let mut world = World::new();
+        let player = world.spawn((Transform::new(Vec3::ZERO),));
+        state.conns.insert(1, PlayerConn {
+            entity: player,
+            name: "crowd-test".into(),
+            token: [0u8; 32],
+            queue: VecDeque::new(),
+            applied_seq: 0,
+            last_seq: 0,
+            last_t: 0,
+            cast_seq: 0,
+            cast_t: 0,
+            known: HashSet::new(),
+            history: VecDeque::new(),
+            cooldown_ready: HashMap::new(),
+            rr_cursor: 0,
+            carried_xp: 0,
+        });
+
+        // 100 entities packed inside AOI_RADIUS (40) — well over
+        // MAX_SNAPSHOT_STATES, so the send site must throttle to 64.
+        for i in 0..10 {
+            for j in 0..10 {
+                let pos = Vec3::new((i as f32 - 4.5) * 3.0, 0.0, (j as f32 - 4.5) * 3.0);
+                world.spawn((
+                    Transform::new(pos),
+                    Hitbox { shape: CollisionShape::Sphere { radius: 0.5 } },
+                    CellOccupant { cells: Default::default() },
+                    Solid,
+                    PrefabId("human".into()),
+                    Health::new(100),
+                ));
+            }
+        }
+
+        let mut resources = Resources::new();
+        resources.insert(SpatialGrid::new(10.0));
+        CellUpdateSystem::new().run(&mut world, &mut resources, 1.0 / 60.0);
+        resources.insert(state);
+
+        let mut sys = SnapshotBroadcastSystem::new();
+        // Sweep a full stagger round so conn 1 is served regardless of STAGGER.
+        for _ in 0..STAGGER {
+            sys.run(&mut world, &mut resources, 1.0 / 60.0);
+        }
+
+        let gauge = resources.expect::<NetServerState>().server.metrics().snapshot_bytes.load(Ordering::Relaxed);
+        assert!(gauge > 0, "snapshot gauge never recorded a send");
+        assert!(
+            gauge as usize >= MAX_SNAPSHOT_STATES * 8,
+            "crowded snapshot only encoded to {gauge} bytes, expected a meaningful fraction of the {MAX_SNAPSHOT_BYTES} B budget"
+        );
+        assert!(
+            (gauge as usize) <= MAX_SNAPSHOT_BYTES,
+            "crowded snapshot {gauge} bytes exceeds the {MAX_SNAPSHOT_BYTES} B WAN budget"
+        );
     }
 }
