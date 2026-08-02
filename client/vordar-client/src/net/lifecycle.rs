@@ -106,6 +106,7 @@ impl System for NetReceiveSystem {
                     }
                     Some(ServerMsg::HitResult { mechanic, hits }) => {
                         log::info!("mechanic {mechanic} hit {} entities", hits.len());
+                        apply::handle_hit_result(world, resources, hits);
                     }
                     Some(ServerMsg::WorldClock { world_micros, at_server_micros }) => {
                         let wt = resources.expect_mut::<crate::world_time::WorldTime>();

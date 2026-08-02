@@ -54,6 +54,29 @@ pub(super) fn handle_entity_died(world: &mut World, resources: &mut Resources, i
     }
 }
 
+/// The server's instant hit-confirm signal: a brief white flash for every
+/// `hits` id that's in our known entity set, fired the moment the server
+/// resolves the mechanic — well ahead of the HP delta the next 10 Hz
+/// `Snapshot` carries. An id outside the known set (already left AOI before
+/// this reliable-stream frame arrived) is silently skipped; HP and death
+/// authority stay entirely on snapshot replication.
+pub(super) fn handle_hit_result(world: &mut World, resources: &mut Resources, hits: Vec<u32>) {
+    let positions: Vec<Vec3> = {
+        let state = resources.expect::<NetClientState>();
+        hits.iter()
+            .filter_map(|id| state.entities.get(id).copied())
+            .filter_map(|entity| world.get::<&Transform>(entity).ok().map(|t| t.position + Vec3::Y))
+            .collect()
+    };
+    if positions.is_empty() {
+        return;
+    }
+    let Some(sim) = resources.get_mut::<crate::vfx::ParticleSim>() else { return };
+    for pos in positions {
+        sim.burst(pos, Vec3::ONE, crate::vfx::HIT_CONFIRM_COUNT, crate::vfx::IMPACT_SPEED, crate::vfx::IMPACT_SIZE);
+    }
+}
+
 /// Reliable-stream half of a snapshot (`ServerMsg::AoiDelta`): entities
 /// entering or leaving the AOI. Identity (prefab) is sent once here;
 /// `apply_states` keeps positions current afterward. Stream ordering means
@@ -284,6 +307,44 @@ mod tests {
             pending_seqs,
             vec![53],
             "the stale snapshot's ack must never be applied — pending must not be re-derived from it"
+        );
+    }
+
+    /// `HitResult` drives the VFX seam directly (no HP touched): a known id
+    /// flashes at its entity's position, an id that already left the AOI
+    /// (stale relative to this reliable-stream frame) is silently skipped.
+    #[test]
+    fn hit_result_flashes_known_entities_and_skips_unknown_ids() {
+        let mut world = World::new();
+        let mut resources = Resources::new();
+        resources.insert(crate::vfx::ParticleSim::new());
+
+        let hit_pos = Vec3::new(3.0, 0.0, 4.0);
+        let entity = world.spawn((Transform::new(hit_pos),));
+
+        let mut state = NetClientState::new(
+            None,
+            "127.0.0.1:9".parse().unwrap(),
+            "unit-test".into(),
+            [0u8; 32],
+            true,
+            Duration::ZERO,
+        );
+        state.entities.insert(1u32, entity);
+        resources.insert(state);
+
+        handle_hit_result(&mut world, &mut resources, vec![1, 99]);
+
+        let sim = resources.get::<crate::vfx::ParticleSim>().unwrap();
+        assert_eq!(
+            sim.particles.len(),
+            crate::vfx::HIT_CONFIRM_COUNT,
+            "exactly one flash burst, for the known id only"
+        );
+        let p = &sim.particles[0];
+        assert!(
+            (p.pos - (hit_pos + Vec3::Y)).length() < 1e-6,
+            "flash lands at the hit entity's position"
         );
     }
 }

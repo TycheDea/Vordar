@@ -28,6 +28,9 @@ pub const CAST_SIZE: f32 = 0.12;
 /// Impact burst per point of damage (clamped) — see hit_react.rs.
 pub const IMPACT_SIZE: f32 = 0.10;
 pub const IMPACT_SPEED: f32 = 3.2;
+/// Hit-confirm flash sparks — fixed count since `HitResult` carries no
+/// damage amount, only which entities were hit.
+pub const HIT_CONFIRM_COUNT: usize = 6;
 /// Death burst.
 pub const DEATH_COUNT: usize = 32;
 pub const DEATH_SPEED: f32 = 5.0;
