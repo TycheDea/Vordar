@@ -1245,3 +1245,36 @@ fn town_solids_within_play_radius() {
     let (name, r) = worst.expect("chapter03 has no solids");
     println!("D5: farthest town solid corner is '{name}' at r={r:.2} (cap {MAX_RADIUS})");
 }
+
+/// Every Scheduled/Leap ability's cast time is at least 2 resolve slices
+/// (`server/vordar-server/src/net/mechanics.rs`: `MechanicResolveSystem`
+/// self-gates to the SNAPSHOT_HZ cadence), bounding the resolve-time
+/// quantization error at 50%.
+#[test]
+fn scheduled_cast_times_clear_resolve_slice() {
+    use vordar_game::player::skills::AbilityEffect;
+
+    let slice_micros = (1_000_000.0 / vordar_protocol::SNAPSHOT_HZ) as u64;
+    let min_cast_micros = 2 * slice_micros;
+
+    let root = repo_root();
+    let mut classes = vordar_game::class::ClassLibrary::new();
+    classes.load_dir(root.join("content/classes").to_str().unwrap());
+
+    for class_id in ["human", "ravager"] {
+        for ability in classes.abilities_of(class_id) {
+            let cast_micros = match &ability.effect {
+                AbilityEffect::Scheduled { cast_micros, .. } => *cast_micros,
+                AbilityEffect::Leap { cast_micros, .. } => *cast_micros,
+                AbilityEffect::Projectile { .. } => continue,
+            };
+            assert!(
+                cast_micros >= min_cast_micros,
+                "ability '{}': cast_micros={cast_micros} is below the resolve-slice floor \
+                 of {min_cast_micros} (2x the {slice_micros}us SNAPSHOT_HZ slice) — quantization \
+                 error would exceed 50%",
+                ability.id
+            );
+        }
+    }
+}

@@ -3977,6 +3977,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "smallvec",
+ "vordar-protocol",
 ]
 
 [[package]]
