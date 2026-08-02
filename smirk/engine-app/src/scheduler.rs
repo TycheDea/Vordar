@@ -161,7 +161,11 @@ impl Scheduler {
                 systems.push(Some(system));
                 names.push(name);
                 orders.push(order);
-                index_of.insert(type_id, i);
+                if index_of.insert(type_id, i).is_some() {
+                    panic!(
+                        "duplicate system type `{name}` in phase {phase:?}"
+                    );
+                }
             }
 
             let first_idx: HashSet<usize> = orders
@@ -287,36 +291,37 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     // Helper: a system that appends its name to a shared log on each run.
-    struct LogSystem {
+    // Each const ID creates a distinct type, enabling multiple instances in the same phase.
+    struct LogSystem<const ID: usize> {
         name:  &'static str,
         log:   Arc<Mutex<Vec<&'static str>>>,
         delta: Arc<Mutex<Vec<f32>>>,
     }
 
-    impl System for LogSystem {
+    impl<const ID: usize> System for LogSystem<ID> {
         fn run(&mut self, _world: &mut World, _resources: &mut Resources, delta: f32) {
             self.log.lock().unwrap().push(self.name);
             self.delta.lock().unwrap().push(delta);
         }
     }
 
-    fn make_system(
+    fn make_system<const ID: usize>(
         name:  &'static str,
         log:   Arc<Mutex<Vec<&'static str>>>,
         delta: Arc<Mutex<Vec<f32>>>,
-    ) -> LogSystem {
+    ) -> LogSystem<ID> {
         LogSystem { name, log, delta }
     }
 
     #[test]
     fn first_default_last_ordering_respected() {
-        let log   = Arc::new(Mutex::new(Vec::new()));
-        let delta = Arc::new(Mutex::new(Vec::new()));
+        let log   = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let mut sched = Scheduler::new();
-        sched.add(make_system("last",    log.clone(), delta.clone()), Phase::Update, SystemOrder::Last);
-        sched.add(make_system("first",   log.clone(), delta.clone()), Phase::Update, SystemOrder::First);
-        sched.add(make_system("default", log.clone(), delta.clone()), Phase::Update, SystemOrder::Default);
+        sched.add(make_system::<0>("last", log.clone(), delta.clone()), Phase::Update, SystemOrder::Last);
+        sched.add(make_system::<1>("first", log.clone(), delta.clone()), Phase::Update, SystemOrder::First);
+        sched.add(make_system::<2>("default", log.clone(), delta.clone()), Phase::Update, SystemOrder::Default);
         sched.build();
 
         let mut world     = World::new();
@@ -329,8 +334,8 @@ mod tests {
 
     #[test]
     fn after_before_constraints_respected() {
-        let log   = Arc::new(Mutex::new(Vec::new()));
-        let delta = Arc::new(Mutex::new(Vec::new()));
+        let log   = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         struct A;
         impl System for A {
@@ -339,11 +344,9 @@ mod tests {
 
         let mut sched = Scheduler::new();
         // "after_a" must run after A; registered first to stress the sort
-        sched.add(make_system("after_a", log.clone(), delta.clone()),
-                  Phase::Update, SystemOrder::after::<A>());
+        sched.add(make_system::<0>("after_a", log.clone(), delta.clone()), Phase::Update, SystemOrder::after::<A>());
         sched.add(A, Phase::Update, SystemOrder::Default);
-        sched.add(make_system("before_a", log.clone(), delta.clone()),
-                  Phase::Update, SystemOrder::before::<A>());
+        sched.add(make_system::<1>("before_a", log.clone(), delta.clone()), Phase::Update, SystemOrder::before::<A>());
         sched.build();
 
         let mut world     = World::new();
@@ -369,7 +372,7 @@ mod tests {
         let mut sched = Scheduler::new();
         // Registered before FirstSys to stress that the target resolves
         // regardless of declaration order.
-        sched.add(make_system("after_first", log.clone(), delta.clone()),
+        sched.add(make_system::<0>("after_first", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::after::<FirstSys>());
         sched.add(FirstSys, Phase::Update, SystemOrder::First);
         sched.build();
@@ -436,7 +439,7 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let mut sched = Scheduler::new();
-        sched.add(make_system("step", log.clone(), delta.clone()),
+        sched.add(make_system::<0>("step", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::Default);
         sched.build();
 
@@ -454,7 +457,7 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::new()));
 
         let mut sched = Scheduler::new();
-        sched.add(make_system("s", log.clone(), delta.clone()),
+        sched.add(make_system::<0>("s", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::Default);
         sched.build();
 
@@ -475,7 +478,7 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::new()));
 
         let mut sched = Scheduler::new();
-        sched.add(make_system("r", log.clone(), delta.clone()),
+        sched.add(make_system::<0>("r", log.clone(), delta.clone()),
                   Phase::Render, SystemOrder::Default);
         sched.build();
 
@@ -496,9 +499,9 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let mut sched = Scheduler::new();
-        sched.add(make_system("update",    log.clone(), delta.clone()),
+        sched.add(make_system::<0>("update",    log.clone(), delta.clone()),
                   Phase::Update,    SystemOrder::Default);
-        sched.add(make_system("collision", log.clone(), delta.clone()),
+        sched.add(make_system::<1>("collision", log.clone(), delta.clone()),
                   Phase::Collision, SystemOrder::Default);
         sched.build();
 
@@ -519,7 +522,7 @@ mod tests {
         let delta = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let mut sched = Scheduler::new();
-        sched.add(make_system("s", log.clone(), delta.clone()),
+        sched.add(make_system::<0>("s", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::Default);
         sched.build();
 
@@ -537,7 +540,7 @@ mod tests {
 
         let mut sched = Scheduler::new();
         sched.set_fixed_hz(30.0);
-        sched.add(make_system("s", log.clone(), delta.clone()),
+        sched.add(make_system::<0>("s", log.clone(), delta.clone()),
                   Phase::Update, SystemOrder::Default);
         sched.build();
 
@@ -552,5 +555,19 @@ mod tests {
         for &d in deltas.iter() {
             assert!((d - expected).abs() < 1e-6, "expected {expected}, got {d}");
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate system type")]
+    fn duplicate_system_type_panics() {
+        struct DuplicateSys;
+        impl System for DuplicateSys {
+            fn run(&mut self, _: &mut World, _: &mut Resources, _: f32) {}
+        }
+
+        let mut sched = Scheduler::new();
+        sched.add(DuplicateSys, Phase::Update, SystemOrder::Default);
+        sched.add(DuplicateSys, Phase::Update, SystemOrder::Default);
+        sched.build();
     }
 }
