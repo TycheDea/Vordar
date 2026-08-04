@@ -26,6 +26,10 @@ pub(crate) struct GpuPrimitive {
     pub(crate) _material_buffer:   Buffer,
     pub(crate) material_bind_group: BindGroup,
     pub(crate) blend:   bool,
+    /// glTF alphaMode MASK: shadow/prepass passes must route this primitive
+    /// onto the masked pipeline (frame.rs) instead of the opaque one, or its
+    /// cutout region casts a solid-quad shadow / writes full-quad depth.
+    pub(crate) masked:  bool,
     pub(crate) aabb: Aabb,
 }
 
@@ -153,6 +157,7 @@ pub(crate) fn upload_mesh(
             super::gltf_import::AlphaMode::Blend => (0.0, 1.0),
         };
         let blend = m.alpha_mode == super::gltf_import::AlphaMode::Blend;
+        let masked = matches!(m.alpha_mode, super::gltf_import::AlphaMode::Mask(_));
 
         let aabb = if p.vertices.is_empty() {
             Aabb { min: glam::Vec3::ZERO, max: glam::Vec3::ZERO }
@@ -205,6 +210,7 @@ pub(crate) fn upload_mesh(
             _material_buffer: material_buffer,
             material_bind_group,
             blend,
+            masked,
             aabb,
         }
     }).collect();

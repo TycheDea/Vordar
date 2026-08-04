@@ -428,7 +428,9 @@ fn record_shadow_pass(
             pass.draw_indexed(0..INDICES.len() as u32, 0, first..first + count);
         }
 
-        // Static meshes.
+        // Static meshes: opaque first (one pipeline for the whole pass), then
+        // MASK primitives on the fragment-discard pipeline (material group 1)
+        // so a cutout region doesn't cast a solid-quad shadow.
         if let (Some(list), Some(store)) = (mesh_list, mesh_store)
             && !list.instances.is_empty() {
                 pass.set_pipeline(&state.shadow_pipelines.mesh);
@@ -438,7 +440,20 @@ fn record_shadow_pass(
                     let count = count.min(MAX_MESH_INSTANCES as u32 - first);
                     let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                     for prim in &gpu_mesh.primitives {
-                        if prim.blend { continue; }
+                        if prim.blend || prim.masked { continue; }
+                        pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                        pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                    }
+                }
+                pass.set_pipeline(&state.shadow_pipelines.mesh_masked);
+                for &(mesh_idx, first, count) in &list.shadow_ranges {
+                    if first as usize >= MAX_MESH_INSTANCES { break; }
+                    let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                    let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                    for prim in &gpu_mesh.primitives {
+                        if !prim.masked { continue; }
+                        pass.set_bind_group(1, &prim.material_bind_group, &[]);
                         pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                         pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..prim.index_count, 0, first..first + count);
@@ -446,7 +461,9 @@ fn record_shadow_pass(
                 }
             }
 
-        // Skinned meshes (re-binds the shared joint palette).
+        // Skinned meshes (re-binds the shared joint palette); opaque then
+        // MASK, same reasoning as the static loop above (material group 2 —
+        // group 1 is the joint palette here).
         if let (Some(list), Some(store)) = (skinned_list, mesh_store)
             && !list.instances.is_empty() {
                 pass.set_pipeline(&state.shadow_pipelines.skinned);
@@ -455,7 +472,18 @@ fn record_shadow_pass(
                 for &(mesh_idx, first, count) in &list.shadow_ranges {
                     let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                     for prim in &gpu_mesh.primitives {
-                        if prim.blend { continue; }
+                        if prim.blend || prim.masked { continue; }
+                        pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                        pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                    }
+                }
+                pass.set_pipeline(&state.shadow_pipelines.skinned_masked);
+                for &(mesh_idx, first, count) in &list.shadow_ranges {
+                    let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                    for prim in &gpu_mesh.primitives {
+                        if !prim.masked { continue; }
+                        pass.set_bind_group(2, &prim.material_bind_group, &[]);
                         pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                         pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..prim.index_count, 0, first..first + count);
@@ -510,7 +538,22 @@ fn record_depth_prepass(
                 let count = count.min(MAX_MESH_INSTANCES as u32 - first);
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                 for prim in &gpu_mesh.primitives {
-                    if prim.blend { continue; }
+                    if prim.blend || prim.masked { continue; }
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+            // MASK primitives: fragment-discard pipeline (material group 1) so
+            // a cutout region isn't written into the SSAO prepass depth.
+            pass.set_pipeline(&state.depth_prepass_pipelines.mesh_masked);
+            for &(mesh_idx, first, count) in &list.ranges {
+                if first as usize >= MAX_MESH_INSTANCES { break; }
+                let count = count.min(MAX_MESH_INSTANCES as u32 - first);
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    if !prim.masked { continue; }
+                    pass.set_bind_group(1, &prim.material_bind_group, &[]);
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..prim.index_count, 0, first..first + count);
@@ -526,7 +569,18 @@ fn record_depth_prepass(
             for &(mesh_idx, first, count) in &list.ranges {
                 let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
                 for prim in &gpu_mesh.primitives {
-                    if prim.blend { continue; }
+                    if prim.blend || prim.masked { continue; }
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, first..first + count);
+                }
+            }
+            pass.set_pipeline(&state.depth_prepass_pipelines.skinned_masked);
+            for &(mesh_idx, first, count) in &list.ranges {
+                let Some(gpu_mesh) = store.meshes.get(mesh_idx) else { continue };
+                for prim in &gpu_mesh.primitives {
+                    if !prim.masked { continue; }
+                    pass.set_bind_group(2, &prim.material_bind_group, &[]);
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..prim.index_count, 0, first..first + count);

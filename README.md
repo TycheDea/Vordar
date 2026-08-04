@@ -63,4 +63,4 @@ cargo test --workspace
 ## Design & roadmap
 
 The design rationale (`DESIGN.md`) and the build roadmap (`tasks/`) live under
-`.claude/` and are kept local (gitignored), not part of the committed tree.
+`.claude/`, outside this tree — versioned as its own repo. See `.claude/AI-SETUP.md`.

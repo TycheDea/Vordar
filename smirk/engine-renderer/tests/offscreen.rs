@@ -973,6 +973,86 @@ fn floating_cube_casts_shadow_band_on_ground() {
     );
 }
 
+/// Left half (u<0.5) fully transparent, right half fully opaque — a hard
+/// MASK edge at the texture's u==0.5 line matching the material's 0.5 cutoff.
+fn half_alpha_texture(size: u32) -> ImageData {
+    let mut pixels = Vec::with_capacity((size * size * 4) as usize);
+    for _y in 0..size {
+        for x in 0..size {
+            let u = (x as f32 + 0.5) / size as f32;
+            let a = if u < 0.5 { 0u8 } else { 255u8 };
+            pixels.extend_from_slice(&[255, 255, 255, a]);
+        }
+    }
+    ImageData { width: size, height: size, pixels }
+}
+
+/// A ground slab (extent 20, y=0) plus a horizontal MASK occluder (extent 8,
+/// y=5) centered above it: the occluder's -x half is a cutout (alpha 0) and
+/// its +x half opaque (alpha 255), so a correct shadow pass must let light
+/// through the cutout half while the opaque half still casts one.
+fn masked_occluder_scene() -> MeshData {
+    let mut data = ground_quad(20.0, 1.0, 0.0);
+    let e = 8.0;
+    let v = |x: f32, z: f32, u: f32, w: f32| MeshVertex {
+        position: [x, 5.0, z],
+        normal:   [0.0, 1.0, 0.0],
+        uv:       [u, w],
+        tangent:  [1.0, 0.0, 0.0, 1.0],
+    };
+    data.primitives.push(PrimitiveData {
+        vertices: vec![v(-e, -e, 0.0, 0.0), v(e, -e, 1.0, 0.0), v(e, e, 1.0, 1.0), v(-e, e, 0.0, 1.0)],
+        indices:  vec![0, 2, 1, 0, 3, 2],
+        material: MaterialData {
+            alpha_mode:        AlphaMode::Mask(0.5),
+            base_color_image:  Some(SharedImage::new(TextureSource::Rgba8(half_alpha_texture(64)))),
+            roughness_factor:  1.0,
+            metallic_factor:   0.0,
+            ..Default::default()
+        },
+        skin: None,
+    });
+    data
+}
+
+/// A MASK primitive's cutout region must not cast a shadow: with a 45° sun
+/// (`direction = (-1,1,0)`, so a caster at height h shadows the ground at
+/// `x + h`) and a top-down orthographic camera (world x/z maps linearly to
+/// pixel columns/rows via the ±20 ortho half-extent — no projection math
+/// needed), `masked_occluder_scene`'s cutout half (x0 ∈ [-8,0)) shadows
+/// ground x ∈ [-3,5), of which only x ∈ [-3,0) is camera-visible (outside
+/// that the opaque half of the occluder itself blocks the view). That
+/// visible slice must read as bright as untouched ground, not as dark as the
+/// opaque half's real shadow (x ∈ (8,13], also camera-visible, beyond the
+/// occluder's own footprint).
+#[test]
+fn masked_shadow_cutout_lets_light_through() {
+    let Some(mut r) = renderer_or_skip() else { return };
+    r.set_camera_top_down();
+    r.set_light(TestLight { direction: Vec3::new(-1.0, 1.0, 0.0), color: Vec3::ONE, ambient: 0.0 });
+
+    let target = r.target(W, H);
+    r.render_mesh(&target, masked_occluder_scene(), wgpu::Color::BLACK);
+    let pixels = r.read(&target);
+
+    // World x -> pixel column: x=-20 -> col 0, x=20 -> col W (ortho half-extent 20).
+    let col = |x: f32| ((x + 20.0) / 40.0 * W as f32).round() as u32;
+    let rows = H * 3 / 8..H * 5 / 8; // world z in roughly [-5,5], well inside the occluder's footprint
+
+    let lit_ref      = luminance_tile_mean(&pixels, W, col(-18.0)..col(-15.0), rows.clone());
+    let cutout_zone   = luminance_tile_mean(&pixels, W, col(-2.6)..col(-0.8), rows.clone());
+    let shadowed_ref  = luminance_tile_mean(&pixels, W, col(9.0)..col(12.0), rows);
+
+    assert!(
+        shadowed_ref < lit_ref * 0.5,
+        "sanity: the opaque half's real shadow must read clearly darker than lit ground: lit={lit_ref:.1} shadowed={shadowed_ref:.1}"
+    );
+    assert!(
+        cutout_zone > lit_ref * 0.7,
+        "sun must pass through the MASK cutout: lit={lit_ref:.1} cutout={cutout_zone:.1} (shadowed_ref={shadowed_ref:.1})"
+    );
+}
+
 /// With the sky pass on, background pixels show the environment
 /// rather than the black clear.
 #[test]

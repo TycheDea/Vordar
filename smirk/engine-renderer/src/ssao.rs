@@ -11,19 +11,24 @@ use wgpu::{BindGroupLayout, Device, TextureFormat};
 /// into `SsaoTargets`' full-res depth from the main camera (group 0 is the
 /// same scene bind group the main pipelines use) instead of a light's view.
 pub(crate) struct DepthPrepassPipelines {
-    pub(crate) sdf:     wgpu::RenderPipeline,
-    pub(crate) mesh:    wgpu::RenderPipeline,
-    pub(crate) skinned: wgpu::RenderPipeline,
+    pub(crate) sdf:            wgpu::RenderPipeline,
+    pub(crate) mesh:           wgpu::RenderPipeline,
+    pub(crate) skinned:        wgpu::RenderPipeline,
+    /// glTF MASK primitives: discards cutout texels in the fragment stage so
+    /// the SSAO prepass depth isn't written full-quad (shadow.rs's mesh_masked/
+    /// skinned_masked, mirrored here for the depth-only prepass target).
+    pub(crate) mesh_masked:    wgpu::RenderPipeline,
+    pub(crate) skinned_masked: wgpu::RenderPipeline,
 }
 
 impl DepthPrepassPipelines {
-    pub(crate) fn new(device: &Device, camera_bgl: &BindGroupLayout, joint_bgl: &BindGroupLayout) -> Self {
+    pub(crate) fn new(device: &Device, camera_bgl: &BindGroupLayout, joint_bgl: &BindGroupLayout, material_bgl: &BindGroupLayout) -> Self {
         use crate::instance::SdfInstance;
         use crate::mesh_pipeline::{MeshVertex, MESH_INSTANCE_SIZE};
         use crate::sdf_pipeline::Vertex;
         use crate::skinned_pipeline::{SKINNED_INSTANCE_SIZE, SKINNED_VERTEX_SIZE};
         use std::mem::size_of;
-        use wgpu::VertexFormat::{Float32x3, Float32x4, Uint16x4, Uint32};
+        use wgpu::VertexFormat::{Float32x2, Float32x3, Float32x4, Uint16x4, Uint32};
         use wgpu::{VertexAttribute, VertexBufferLayout, VertexStepMode};
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -39,6 +44,16 @@ impl DepthPrepassPipelines {
         let layout_skinned = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label:              Some("Depth Prepass Skinned Layout"),
             bind_group_layouts: &[Some(camera_bgl), Some(joint_bgl)],
+            immediate_size:     0,
+        });
+        let layout_static_masked = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label:              Some("Depth Prepass Static Masked Layout"),
+            bind_group_layouts: &[Some(camera_bgl), Some(material_bgl)],
+            immediate_size:     0,
+        });
+        let layout_skinned_masked = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label:              Some("Depth Prepass Skinned Masked Layout"),
+            bind_group_layouts: &[Some(camera_bgl), Some(joint_bgl), Some(material_bgl)],
             immediate_size:     0,
         });
 
@@ -65,6 +80,40 @@ impl DepthPrepassPipelines {
                 }),
                 multisample:    Default::default(),
                 fragment:       None, // depth-only
+                multiview_mask: None,
+                cache:          None,
+            })
+        };
+
+        let make_masked = |label: &str,
+                            layout: &wgpu::PipelineLayout,
+                            vs_entry: &str,
+                            fs_entry: &str,
+                            buffers: &[VertexBufferLayout]| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label:  Some(label),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module:      &shader,
+                    entry_point: Some(vs_entry),
+                    buffers,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format:              TextureFormat::Depth32Float,
+                    depth_write_enabled: Some(true),
+                    depth_compare:       Some(wgpu::CompareFunction::Less),
+                    stencil:             Default::default(),
+                    bias:                wgpu::DepthBiasState::default(),
+                }),
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module:      &shader,
+                    entry_point: Some(fs_entry),
+                    targets:     &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
                 multiview_mask: None,
                 cache:          None,
             })
@@ -101,6 +150,18 @@ impl DepthPrepassPipelines {
             VertexAttribute { offset: 32, shader_location: 8, format: Float32x4 },
             VertexAttribute { offset: 48, shader_location: 9, format: Float32x4 },
             VertexAttribute { offset: 80, shader_location: 11, format: Uint32 },
+        ];
+        // Masked variants add the UV attribute (location 1) the mask fragment
+        // stage samples; joints/weights/model/tint locations are unchanged.
+        let mesh_vertex_masked = [
+            VertexAttribute { offset: 0,  shader_location: 0, format: Float32x3 },
+            VertexAttribute { offset: 24, shader_location: 1, format: Float32x2 },
+        ];
+        let skinned_vertex_masked = [
+            VertexAttribute { offset:  0, shader_location: 0, format: Float32x3 },
+            VertexAttribute { offset: 24, shader_location: 1, format: Float32x2 },
+            VertexAttribute { offset: 48, shader_location: 4, format: Uint16x4 },
+            VertexAttribute { offset: 56, shader_location: 5, format: Float32x4 },
         ];
 
         let sdf = make(
@@ -155,7 +216,44 @@ impl DepthPrepassPipelines {
             ],
         );
 
-        Self { sdf, mesh, skinned }
+        let mesh_masked = make_masked(
+            "Depth Prepass Mesh Masked Pipeline",
+            &layout_static_masked,
+            "mesh_vtx_masked",
+            "mesh_frag_masked",
+            &[
+                VertexBufferLayout {
+                    array_stride: size_of::<MeshVertex>() as u64,
+                    step_mode:    VertexStepMode::Vertex,
+                    attributes:   &mesh_vertex_masked,
+                },
+                VertexBufferLayout {
+                    array_stride: MESH_INSTANCE_SIZE as u64,
+                    step_mode:    VertexStepMode::Instance,
+                    attributes:   &mesh_instance,
+                },
+            ],
+        );
+        let skinned_masked = make_masked(
+            "Depth Prepass Skinned Masked Pipeline",
+            &layout_skinned_masked,
+            "skinned_vtx_masked",
+            "skinned_frag_masked",
+            &[
+                VertexBufferLayout {
+                    array_stride: SKINNED_VERTEX_SIZE as u64,
+                    step_mode:    VertexStepMode::Vertex,
+                    attributes:   &skinned_vertex_masked,
+                },
+                VertexBufferLayout {
+                    array_stride: SKINNED_INSTANCE_SIZE as u64,
+                    step_mode:    VertexStepMode::Instance,
+                    attributes:   &skinned_instance,
+                },
+            ],
+        );
+
+        Self { sdf, mesh, skinned, mesh_masked, skinned_masked }
     }
 }
 

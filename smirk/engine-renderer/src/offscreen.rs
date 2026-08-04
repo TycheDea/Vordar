@@ -242,8 +242,9 @@ impl OffscreenRenderer {
         let (camera_buffer, light_buffer, light_vp_buffer, camera_bgl) =
             camera::create_scene_buffers_and_layout(device, &camera, (0, 0));
 
-        let joint_bgl = skinned_pipeline::create_joint_bind_group_layout(device);
-        let shadow_pipelines = ShadowPipelines::new(device, &joint_bgl);
+        let joint_bgl    = skinned_pipeline::create_joint_bind_group_layout(device);
+        let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
+        let shadow_pipelines = ShadowPipelines::new(device, &joint_bgl, &material_bgl);
         let shadow_cast_buffer = shadow::create_cast_buffer(device);
         let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label:   Some("Offscreen Shadow BG"),
@@ -259,7 +260,6 @@ impl OffscreenRenderer {
         });
 
         let texture_bgl  = sdf_pipeline::create_texture_bind_group_layout(device);
-        let material_bgl = mesh_pipeline::create_material_bind_group_layout(device);
         let env_bgl      = crate::ibl::create_env_bind_group_layout(device);
         let sky_bgl      = sky::create_sky_bind_group_layout(device);
         let baker        = Baker::new(device);
@@ -290,7 +290,7 @@ impl OffscreenRenderer {
         let vertex_buffer = sdf_pipeline::create_vertex_buffer(device);
         let index_buffer  = sdf_pipeline::create_index_buffer(device);
 
-        let depth_prepass_pipelines = DepthPrepassPipelines::new(device, &camera_bgl, &joint_bgl);
+        let depth_prepass_pipelines = DepthPrepassPipelines::new(device, &camera_bgl, &joint_bgl, &material_bgl);
         let gtao = GtaoPasses::new(device, &gpu.queue, &camera_bgl);
 
         // SSAO starts disabled, so the initial bind group points at the
@@ -660,6 +660,16 @@ impl OffscreenRenderer {
             .filter(|(_, p)| !p.blend)
             .map(|(i, _)| i)
             .collect();
+        // MASK primitives cast shadows/write prepass depth through the
+        // fragment-discard pipeline (their cutout region must stay unwritten
+        // there) — the shadow/prepass closures below split them out of
+        // `opaque`, which the main pass still draws unsplit.
+        let shadow_opaque: Vec<usize> = opaque.iter().copied()
+            .filter(|&i| !gpu_mesh.primitives[i].masked)
+            .collect();
+        let masked: Vec<usize> = opaque.iter().copied()
+            .filter(|&i| gpu_mesh.primitives[i].masked)
+            .collect();
         let mut blend: Vec<usize> = gpu_mesh.primitives.iter().enumerate()
             .filter(|(_, p)| p.blend)
             .map(|(i, _)| i)
@@ -678,8 +688,16 @@ impl OffscreenRenderer {
                 pass.set_pipeline(&this.shadow_pipelines.mesh);
                 pass.set_bind_group(0, &this.shadow_bind_group, &[offset]);
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
-                for &i in &opaque {
+                for &i in &shadow_opaque {
                     let prim = &gpu_mesh.primitives[i];
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                }
+                pass.set_pipeline(&this.shadow_pipelines.mesh_masked);
+                for &i in &masked {
+                    let prim = &gpu_mesh.primitives[i];
+                    pass.set_bind_group(1, &prim.material_bind_group, &[]);
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..prim.index_count, 0, 0..1);
@@ -689,8 +707,16 @@ impl OffscreenRenderer {
                 pass.set_pipeline(&this.depth_prepass_pipelines.mesh);
                 pass.set_bind_group(0, &this.camera_bind_group, &[]);
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
-                for &i in &opaque {
+                for &i in &shadow_opaque {
                     let prim = &gpu_mesh.primitives[i];
+                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                    pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                }
+                pass.set_pipeline(&this.depth_prepass_pipelines.mesh_masked);
+                for &i in &masked {
+                    let prim = &gpu_mesh.primitives[i];
+                    pass.set_bind_group(1, &prim.material_bind_group, &[]);
                     pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                     pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..prim.index_count, 0, 0..1);

@@ -149,7 +149,7 @@ impl RendererState {
         // Depth-only shadow variants of the three geometry pipelines.
         let shadow_cast_buffer = shadow::create_cast_buffer(&device);
         let (shadow_pipelines, shadow_bind_group) =
-            create_shadow_pass_resources(&device, &joint_bgl, &shadow_cast_buffer);
+            create_shadow_pass_resources(&device, &joint_bgl, &material_bgl, &shadow_cast_buffer);
 
         let (instance_buffer, mesh_instance_buffer, skinned_instance_buffer, particle_instance_buffer, joint_buffer, joint_bind_group) =
             create_instance_buffers(&device, &joint_bgl);
@@ -157,7 +157,7 @@ impl RendererState {
         // Depth prepass + SSAO: full-res single-sample depth from the main
         // camera, then the three GTAO compute passes.
         let (depth_prepass_pipelines, ssao_targets, gtao) =
-            create_ssao_resources(&device, &queue, &camera_bgl, &joint_bgl, size);
+            create_ssao_resources(&device, &queue, &camera_bgl, &joint_bgl, &material_bgl, size);
 
         // The scene bind group binds SSAO's AO view, so it can only be built
         // once the target above exists — production always binds the real
@@ -466,9 +466,10 @@ fn create_particle_resources(
 fn create_shadow_pass_resources(
     device:             &wgpu::Device,
     joint_bgl:          &wgpu::BindGroupLayout,
+    material_bgl:       &wgpu::BindGroupLayout,
     shadow_cast_buffer: &wgpu::Buffer,
 ) -> (shadow::ShadowPipelines, wgpu::BindGroup) {
-    let shadow_pipelines = shadow::ShadowPipelines::new(device, joint_bgl);
+    let shadow_pipelines = shadow::ShadowPipelines::new(device, joint_bgl, material_bgl);
     let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label:   Some("Shadow Cast Bind Group"),
         layout:  &shadow_pipelines.bgl,
@@ -485,13 +486,14 @@ fn create_shadow_pass_resources(
 }
 
 fn create_ssao_resources(
-    device:     &wgpu::Device,
-    queue:      &wgpu::Queue,
-    camera_bgl: &wgpu::BindGroupLayout,
-    joint_bgl:  &wgpu::BindGroupLayout,
-    size:       winit::dpi::PhysicalSize<u32>,
+    device:       &wgpu::Device,
+    queue:        &wgpu::Queue,
+    camera_bgl:   &wgpu::BindGroupLayout,
+    joint_bgl:    &wgpu::BindGroupLayout,
+    material_bgl: &wgpu::BindGroupLayout,
+    size:         winit::dpi::PhysicalSize<u32>,
 ) -> (DepthPrepassPipelines, SsaoTargets, GtaoPasses) {
-    let depth_prepass_pipelines = DepthPrepassPipelines::new(device, camera_bgl, joint_bgl);
+    let depth_prepass_pipelines = DepthPrepassPipelines::new(device, camera_bgl, joint_bgl, material_bgl);
     let ssao_targets = SsaoTargets::new(device, size.width, size.height);
     let mut gtao = GtaoPasses::new(device, queue, camera_bgl);
     gtao.set_target(device, &ssao_targets);
